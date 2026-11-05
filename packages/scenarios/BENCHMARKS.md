@@ -8,6 +8,7 @@ the command enters the same Nix environment as the integration tests.
 pnpm bench                                      # 20 measured pairs after 3 warmup pairs per case
 pnpm bench --check                              # fail if any Strider median is > 1.10 × Playwright
 pnpm bench --check --max-ratio 1                 # require parity or better for every selected case
+pnpm bench --only lifecycle                      # launch, first page, shutdown and persistent lifecycle cases
 pnpm bench --only click --runs 50 --check         # investigate one operation
 pnpm bench --runs 2 --warmup 1                    # smoke check, not a performance gate
 pnpm bench --output .data/benchmarks/before.json  # preserve a report before changing code
@@ -22,21 +23,24 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case                 | Timed work                                                                              |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded        |
-| `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration         |
-| `navigate`           | Navigate to a local document through `load`, then read its title                        |
-| `resources`          | Load a local document with 100 uncached images through `load`, then count loaded images |
-| `evaluate`           | 20 sequential main-world evaluations returning small objects; time per batch            |
-| `locator-read`       | 20 sequential role locator text reads; time per batch                                   |
-| `locator-values`     | 20 sequential input value reads across distinct elements; time per batch                |
-| `read-snapshot-100`  | One synchronous main-world query returning 100 inputs × four properties                 |
-| `read-snapshot-1000` | The same query returning 1,000 inputs × four properties                                 |
-| `click`              | Click with default actionability, then read the updated counter                         |
-| `fill`               | Fill a labeled input with default actionability, then read its value                    |
-| `visible`            | Wait for an already visible heading                                                     |
-| `screenshot`         | Capture the viewport as PNG                                                             |
+| Case                 | Timed work                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded                         |
+| `first-page`         | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
+| `shutdown`           | Release each library’s freshly launched browser after availability; launch excluded                      |
+| `repeated-lifecycle` | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
+| `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration                          |
+| `navigate`           | Navigate to a local document through `load`, then read its title                                         |
+| `resources`          | Load a local document with 100 uncached images through `load`, then count loaded images                  |
+| `evaluate`           | 20 sequential main-world evaluations returning small objects; time per batch                             |
+| `locator-read`       | 20 sequential role locator text reads; time per batch                                                    |
+| `locator-values`     | 20 sequential input value reads across distinct elements; time per batch                                 |
+| `read-snapshot-100`  | One synchronous main-world query returning 100 inputs × four properties                                  |
+| `read-snapshot-1000` | The same query returning 1,000 inputs × four properties                                                  |
+| `click`              | Click with default actionability, then read the updated counter                                          |
+| `fill`               | Fill a labeled input with default actionability, then read its value                                     |
+| `visible`            | Wait for an already visible heading                                                                      |
+| `screenshot`         | Capture the viewport as PNG                                                                              |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
@@ -60,8 +64,25 @@ passing timing samples. No browser work is shared across independent reads by th
 
 The runner awaits one sample at a time and alternates which library goes first in each pair. Both use a
 1280 × 720 viewport at device scale 1, the same server, and the same browser binary, whose reported version is
-checked against the integration pin. Persistent browsers are used for all cases except launch. Every launch
+checked against the integration pin. Persistent browsers are used except for `launch`, `first-page` and `shutdown`. Every launch
 gets a fresh profile; warmup reduces library and OS cache effects, so this is not a cold-machine startup test.
+`first-page` checks that the acquired page evaluates `document.URL` as `about:blank`. It includes context
+creation and the same viewport configuration as `page-lifecycle`. Both `first-page` and `shutdown` start
+immediately after Browser availability. Strider has an initial observed `about:blank` page whose setup gate
+can still be running; Playwright's nonpersistent launch has no initial targets or owned contexts. First-page
+acquisition can overlap Strider's initial-page setup, and shutdown can interrupt it. The shutdown case creates
+no additional context or page. Strider disposes its scope, signals the process and removes its temporary profile;
+Playwright uses its supported `browser.close()` path. Shutdown costs and first-page comparisons describe these
+supported defaults with different initial resources, readiness and release paths, rather than equal work.
+`repeated-lifecycle` reports the sum of acquisition and release times for five sequential isolated context/page
+cycles, not a per-cycle average. Between timers, it checks `about:blank`, one additional live page and return
+to the initial page count after every release. Strider also awaits each context's acknowledged terminal state;
+Playwright checks context/page counts return to their initial values. Strider's public browser has no context
+registry, so this checks page counts and context termination rather than an independent wire-level context census.
+Checks, including the page evaluation, are excluded; their browser work can affect subsequent cycles. These
+checks establish ordinary successful release, not interruption or partial-initialization correctness. No case
+here characterizes simultaneous scale, page reuse within one context, remote attach, or memory/OS resource leaks.
+
 Module imports are outside timing. Both libraries retain their default launch flags, instrumentation and
 actionability behavior: the comparison measures the cost of each library's supported public behavior.
 
@@ -70,6 +91,32 @@ configuration, browser/library/Node versions, machine details, and a SHA-256 of 
 plus lockfile. The hash includes uncommitted source edits. A Markdown summary is written beside it. Reports
 default to `.data/benchmarks/latest.{json,md}` (gitignored); use `--output` to preserve multiple runs. An interrupted
 report may still say `running`; only a completed report can establish a result.
+
+## Launch diagnostics
+
+Use the diagnostic loader and runner to timestamp fresh launch through browser availability without changing
+launch flags or resource ownership. Run it under the browser lock in the pinned integration environment:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/launch-profile-hooks.mjs \
+  packages/scenarios/benchmark/launch-profile.ts /absolute/path/launch-profile.json 20
+```
+
+The numeric argument selects measured pairs after three warmup pairs. Append `persistent` to compare with
+Playwright’s persistent launch with its initial page and native viewport; this is a distinct resource/readiness
+contract, not an equivalent replacement for the nonpersistent launch benchmark. The JSON retains phase marks, protocol
+traffic, actual process arguments, initial resource counts and source/instrumentation hashes. Samples alternate
+library order. Events after `launch.available` are verification, observation of the initial target gate finishing, and cleanup,
+outside launch timing. Browser availability can precede completion of that gate; the diagnostic wait sends no
+extra protocol command. Loader
+transforms assert their source sites and add timestamps; they do not change command arguments or ordering.
+The loader depends on the pinned Playwright bundle and must be updated if those source sites change.
+Spawn marks end when the process handle returns; they do not isolate shell execution or browser startup,
+which can continue during the first-reply wait.
+These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
+Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
+that overlap other suites, checks or builds even when those commands did not acquire the browser lock.
 
 ## Interpreting a result
 

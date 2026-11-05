@@ -11,6 +11,7 @@ import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
+import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
 
 const timeout = 60_000
@@ -148,6 +149,144 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        for (const shape of wrappedLinks) {
+          for (const partial of shape.id === "three" ? [false, true] : [false]) {
+            it.effect(
+              `selects first visible fragment for wrapped link ${shape.id}${
+                partial ? " partially above viewport" : ""
+              }`,
+              () =>
+                Effect.gen(function*() {
+                  const { call, send } = yield* open(backend, wrappedLinkHtml(shape, partial))
+                  const measured = yield* call(linkGeometry, [])
+                  assert(measured._tag === "Value" && measured.value.type === "string")
+                  const geometry = JSON.parse(measured.value.value) as LinkGeometry
+                  assert.strictEqual(geometry.rects.length, shape.fragments)
+                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  const response = yield* send(point(0))
+                  assert(response._tag === "Ready", JSON.stringify(response))
+                  assert(response.point !== null, JSON.stringify(response))
+                  assert.closeTo(
+                    response.point.x,
+                    (Math.max(0, first.left) + Math.min(geometry.width, first.right)) / 2,
+                    1
+                  )
+                  assert.closeTo(
+                    response.point.y,
+                    (Math.max(0, first.top) + Math.min(geometry.height, first.bottom)) / 2,
+                    1
+                  )
+                }),
+              timeout
+            )
+          }
+        }
+
+        for (
+          const mode of [
+            "later line",
+            "disabled coverage",
+            "explicit covered",
+            "wholly covered",
+            "partial ancestor"
+          ] as const
+        ) {
+          it.effect(`selects a fragment with ${mode}`, () =>
+            Effect.gen(function*() {
+              const { send, call } = yield* open(
+                backend,
+                `<style>body{margin:0;font:16px/24px monospace}#box{position:absolute;left:20px;top:20px;width:240px}${
+                  mode === "partial ancestor"
+                    ? "#box{width:75px;height:40px;overflow:hidden}#go{display:inline-block;width:100px;height:20px}"
+                    : ""
+                }</style><div id="box"><a id="go">${Array(6).fill("abcdefghij").join(" ")}</a></div>${
+                  mode === "partial ancestor"
+                    ? ""
+                    : `<div id="cover" style="position:absolute;left:0;top:0;width:400px;height:${
+                      mode === "wholly covered" ? 120 : 44
+                    }px"></div>`
+                }`,
+                `() => { globalThis.engineTestHits = 0; const original = document.elementFromPoint.bind(document); document.elementFromPoint = (...args) => { globalThis.engineTestHits++; return original(...args) } }`
+              )
+              const geometry = yield* call(
+                `() => JSON.stringify(Array.from(document.querySelector('#go').getClientRects(), r => ({x:(r.left+r.right)/2,y:(r.top+r.bottom)/2})))`,
+                []
+              )
+              assert(geometry._tag === "Value" && geometry.value.type === "string")
+              const centers = JSON.parse(geometry.value.value) as Array<{ x: number; y: number }>
+              if (mode !== "partial ancestor") assert.strictEqual(centers.length, 3)
+              const response = yield* send({
+                ...point(0),
+                cap: 150,
+                checks: { ...all, stable: 0, receivesPointer: mode !== "disabled coverage" },
+                action: { _tag: "Point", position: mode === "explicit covered" ? { x: 2, y: 2 } : null, guard: false }
+              })
+              if (mode === "explicit covered" || mode === "wholly covered") {
+                assert(response._tag === "NotReady", JSON.stringify(response))
+                assert.strictEqual(response.reason._tag, "Covered")
+                assert.strictEqual(response.scrolled, false)
+              } else {
+                assert(response._tag === "Ready", JSON.stringify(response))
+                assert.deepStrictEqual(response.point, centers[mode === "later line" ? 1 : 0])
+              }
+              if (mode === "disabled coverage") {
+                const hits = yield* call("() => globalThis.engineTestHits", [])
+                assert(hits._tag === "Value" && hits.value.type === "number")
+                assert.strictEqual(hits.value.value, 0)
+              }
+            }), timeout)
+        }
+
+        it.effect("refuses a default point without a visible fragment even with checks disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`
+            )
+            const response = yield* send({
+              ...point(0),
+              cap: 100,
+              checks: {
+                visible: false,
+                enabled: false,
+                editable: false,
+                notInert: false,
+                inViewport: false,
+                stable: 0,
+                receivesPointer: false
+              }
+            })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "OutsideViewport")
+          }), timeout)
+
+        it.effect("keeps the rounded default point inside a one-pixel fragment", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<a id="go" style="position:fixed;left:0;top:20px;width:1px;height:10px"></a>`
+            )
+            const response = yield* send(point(0))
+            assert(response._tag === "Ready" && response.point !== null, JSON.stringify(response))
+            assert.isAtLeast(Math.round(response.point.x), 0)
+            assert.isBelow(Math.round(response.point.x), 1)
+          }), timeout)
+
+        it.effect("selects explicit position from the padding-box origin", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<style>#go{position:absolute;left:40px;top:60px;border-style:solid;border-width:7px 11px 13px 5px;padding:19px;width:100px;height:80px}</style><a id="go">Go</a>`
+            )
+            const response = yield* send({
+              ...point(0),
+              action: { _tag: "Point", position: { x: 13, y: 9 }, guard: false }
+            })
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.deepStrictEqual(response.point, { x: 58, y: 76 })
+          }), timeout)
+
         it.effect("revalidates fresh stability without another rendering wait", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
