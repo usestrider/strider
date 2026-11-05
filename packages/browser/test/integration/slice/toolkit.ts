@@ -4,7 +4,7 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, type Locator } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
@@ -95,6 +95,55 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           })),
         timeout
       )
+
+      it.effect(
+        "keeps a password input's value out of names when it has an explicit role",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.origin}/fixture?html=${
+              encodeURIComponent(
+                "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
+                  "<button aria-labelledby=\"code\">Show</button>"
+              )
+            }`)
+            const snapshot = yield* page.snapshot()
+            assert.notInclude(snapshot.text, "private-explicit")
+            assert.notInclude(JSON.stringify(snapshot.root), "private-explicit")
+          })),
+        timeout
+      )
+
+      for (
+        const [source, attributes] of [
+          ["placeholder", "placeholder=\"Secret hint\""],
+          ["title", "title=\"Secret hint\""],
+          ["aria-label", "aria-label=\"Secret hint\""]
+        ] as const
+      ) {
+        it.effect(
+          `exports a query that finds a password input named by ${source}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const served = yield* site
+              const page = yield* Browser.newPage()
+              yield* page.goto(
+                `${served.origin}/fixture?html=${encodeURIComponent(`<input type="password" ${attributes}>`)}`
+              )
+              const snapshot = yield* page.snapshot()
+              const [field] = [...snapshot.refs.values()].filter((node) =>
+                node.role._tag === "Inferred" && node.role.evidence.includes("password")
+              )
+              assert.deepEqual(field!.name, { _tag: "Accessible", value: "Secret hint" })
+              const query = ExportTest.queryOf(Option.getOrThrow(field!.ref), snapshot)
+              // The exported test puts the page's variable before the query
+              const locator = new Function("page", `return page.${query}`)(page) as Locator.Locator
+              assert.strictEqual(yield* locator.count, 1, query)
+            })),
+          timeout
+        )
+      }
 
       it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
