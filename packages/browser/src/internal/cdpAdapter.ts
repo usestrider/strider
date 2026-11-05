@@ -219,6 +219,7 @@ export const connect: (
       }
     })
     root = client.root
+    ;(globalThis as typeof globalThis & { __inputProbeSession?: ProtocolClient.Session }).__inputProbeSession = root
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
     const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect))
