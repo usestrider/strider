@@ -6,7 +6,11 @@ import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Accessibility from "../../cdp/Accessibility.ts"
 import * as DOM from "../../cdp/DOM.ts"
@@ -18,6 +22,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { type CaptureGuard, pageOf, type State, type TargetEntry } from "./state.ts"
@@ -260,29 +265,193 @@ const frameTree = (
     return root === undefined ? [] : convert(root)
   })
 
+interface ScreencastOwner {
+  status: "reserved" | "pending" | "success" | "failure" | "sessionEnded"
+  released: boolean
+  stopAtDispatch: number
+}
+interface ScreencastOwners {
+  readonly active: Set<ScreencastOwner>
+  /** Starts awaiting an outcome; abandoned entries leave this set after their bounded grace interval. */
+  readonly pending: Set<ScreencastOwner>
+  readonly run: (effect: Effect.Effect<void>) => unknown
+  stopping: Deferred.Deferred<void> | undefined
+  /** Fresh confirmed or uncertain start evidence not yet covered by a cleanup attempt. */
+  needsStop: boolean
+  /** A successful start/join with no stop dispatched since, safe for another consumer to reuse. */
+  confirmed: boolean
+  stops: number
+  ended: boolean
+}
+const screencastOwners = new WeakMap<Protocol.ProtocolSession, Deferred.Deferred<ScreencastOwners>>()
+
+const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.ProtocolSession) {
+  return yield* Effect.uninterruptible(Effect.suspend(() => {
+    const existing = screencastOwners.get(session)
+    if (existing !== undefined) return Deferred.await(existing)
+    const ready = Deferred.makeUnsafe<ScreencastOwners>()
+    screencastOwners.set(session, ready)
+    return Effect.gen(function*() {
+      const run = yield* FiberSet.makeRuntime().pipe(
+        Effect.provideService(Scope.Scope, state.cleanupScope),
+        Operation.detached,
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+      )
+      const owners: ScreencastOwners = {
+        active: new Set(),
+        pending: new Set(),
+        run,
+        stopping: undefined,
+        needsStop: false,
+        confirmed: false,
+        stops: 0,
+        ended: false
+      }
+      yield* session.ended.pipe(
+        Effect.andThen(Effect.sync(() => {
+          owners.ended = true
+          owners.active.clear()
+          owners.pending.clear()
+          owners.needsStop = false
+          owners.confirmed = false
+        })),
+        Operation.detached,
+        Effect.forkIn(state.cleanupScope)
+      )
+      yield* Deferred.succeed(ready, owners)
+      return owners
+    })
+  }))
+})
+
 /** Frames as Chromium paints them; the next comes once this one is acknowledged. */
 export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
   const page = yield* pageOf(state, id)
   const session = page.target.session
   const on = Protocol.on(session)
   const frames = yield* session.subscribe(Page.screencastFrame)
-  yield* layoutMetrics(session)
-  const stop = Page.stopScreencast().pipe(
-    on,
-    Operation.detached,
-    Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
-    Effect.provideService(Protocol.CommandTimeout, Duration.seconds(1)),
-    Effect.ignore
-  )
-  // Keep the wait interruptible, but transfer a consumed reply to the scope atomically.
-  // Replies abandoned before consumption belong to the protocol late-reply handler instead.
-  yield* Effect.uninterruptibleMask((restore) =>
-    restore(Kit.protocol(
-      Page.startScreencast({ format: "jpeg" }).pipe(
-        on,
-        Protocol.withLateReplyHandler(() => stop)
+  const owners = yield* ownersOf(state, session)
+  const acquiring = yield* Effect.withFiberSucceed((fiber) => fiber)
+  let waiting = true
+  const stop: Effect.Effect<void> = Effect.suspend(() => {
+    if (owners.ended || owners.active.size > 0 || !owners.needsStop || owners.stopping !== undefined) return Effect.void
+    const done = Deferred.makeUnsafe<void>()
+    owners.stopping = done
+    owners.needsStop = false
+    owners.confirmed = false
+    owners.stops++
+    // Bound transport writing as well as reply confirmation. A new start waits for this exchange to finish
+    // (or be interrupted at its budget) before it can dispatch, so this stop cannot overtake that start.
+    return Page.stopScreencast().pipe(
+      on,
+      Effect.interruptible,
+      BrowserClock.timeoutOption(1000),
+      Effect.asVoid,
+      Effect.ignore,
+      Operation.detached,
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+      Effect.provideService(Protocol.CommandTimeout, Duration.seconds(1)),
+      Effect.ensuring(Effect.sync(() => {
+        owners.stopping = undefined
+        Deferred.doneUnsafe(done, Effect.void)
+        // A late start success during the exchange is new evidence of a stream. If no consumer took it,
+        // clean that evidence after this stop settles; a failed stop alone never schedules another attempt.
+        if (owners.needsStop && owners.active.size === 0 && !owners.ended) owners.run(stop)
+      }))
+    )
+  })
+  const owner: ScreencastOwner = { status: "reserved", released: false, stopAtDispatch: owners.stops }
+  const release = Effect.suspend(() => {
+    if (owner.released) return Effect.void
+    owner.released = true
+    owners.active.delete(owner)
+    if (owner.status === "pending") {
+      // A missing reply must neither pin an ownership count nor block the caller. Allow a bounded interval
+      // for a late rejection/success, then attempt cleanup of a start whose outcome remains unknown.
+      owners.run(
+        BrowserClock.sleep(1000).pipe(
+          Effect.andThen(Effect.suspend(() => {
+            owners.pending.delete(owner)
+            if (owner.status !== "pending" || owners.ended || owner.stopAtDispatch !== owners.stops) return Effect.void
+            if (owners.stopping === undefined) owners.needsStop = true
+            return stop
+          })),
+          Operation.detached
+        )
       )
-    )).pipe(Effect.andThen(Effect.addFinalizer(() => stop)))
+    }
+    return stop
+  })
+  const reserve: Effect.Effect<void> = Effect.suspend(() => {
+    if (owner.released) return Effect.interrupt
+    if (owners.stopping !== undefined) return Deferred.await(owners.stopping).pipe(Effect.andThen(reserve))
+    return Effect.void
+  })
+  yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      // Ownership is registered before start can be dispatched or its reply consumed. Both the scope and
+      // acquisition's failure path release the same idempotent token, so no post-consumption handoff is needed.
+      yield* Effect.addFinalizer(() =>
+        Effect.suspend(() => {
+          if (waiting) owners.run(Fiber.interrupt(acquiring))
+          return release
+        })
+      )
+      if (!owner.released) owners.active.add(owner)
+      yield* restore(
+        layoutMetrics(session).pipe(
+          Effect.andThen(reserve),
+          Effect.andThen(Effect.suspend(() => {
+            if (owner.released) return Effect.interrupt
+            if (owners.confirmed) {
+              owner.status = "success"
+              return Effect.void
+            }
+            const joining = owners.pending.size > 0 || owners.needsStop
+            owner.status = "pending"
+            owner.stopAtDispatch = owners.stops
+            owners.pending.add(owner)
+            return Kit.protocol(
+              Page.startScreencast({ format: "jpeg" }).pipe(
+                on,
+                Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+                  owners.pending.delete(owner)
+                  owner.status = outcome
+                  if (outcome === "success") {
+                    owners.needsStop = true
+                    if (owners.stopping === undefined) owners.confirmed = true
+                    if (owner.released) owners.run(stop)
+                  }
+                }),
+                Protocol.withLateReplyHandler(() => Effect.void),
+                Effect.catch((error) => {
+                  const reason = error.reason
+                  // Chromium refuses another start while an earlier owned start is already active, even if
+                  // that earlier reply is outstanding. Join that stream, without retrying the command.
+                  if (
+                    joining && reason._tag === "Rejected" && reason.code === -32000 &&
+                    reason.description === "Screencast is already active"
+                  ) {
+                    owner.status = "success"
+                    owners.needsStop = true
+                    owners.confirmed = true
+                    return Effect.void
+                  }
+                  return Effect.fail(error)
+                })
+              )
+            )
+          }))
+        )
+      ).pipe(Effect.onExit((exit) =>
+        Effect.suspend(() => {
+          waiting = false
+          return Exit.isFailure(exit)
+            ? release.pipe(Operation.detached, Effect.forkIn(state.cleanupScope), Effect.asVoid)
+            : Effect.void
+        })
+      ))
+    })
   )
   return frames.pipe(
     Stream.mapError(Kit.protocolError),
