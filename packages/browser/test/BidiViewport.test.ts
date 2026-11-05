@@ -23,6 +23,7 @@ import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
 import * as Bounded from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as DeclarationCleanup from "../src/internal/declarationCleanup.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
@@ -310,5 +311,62 @@ describe("BidiAdapter viewports", () => {
         declare(state, { _tag: "UserContext", context: state.defaultContext }, 1000, yield* Scope.make())
       )
       assert.isTrue(Exit.isFailure(result))
+    }))
+
+  it.effect("bounds each release target and continues after a command never replies", () =>
+    Effect.gen(function*() {
+      const { page, sent, session, state } = yield* make()
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const stuck = yield* Deferred.make<void>()
+      let unconfirmed = 0
+      yield* Effect.gen(function*() {
+        const first = page("P1")
+        const second = page("P2")
+        yield* declare(state, { _tag: "Page", page: first.id }, 640, yield* Scope.make())
+        yield* declare(state, { _tag: "Page", page: second.id }, 700, yield* Scope.make())
+        const lifetime = yield* Scope.make()
+        yield* declare(state, { _tag: "UserContext", context: state.defaultContext }, 1000, lifetime)
+        sent.length = 0
+        session.around = (entry, next) =>
+          entry.method === "browsingContext.setViewport" && entry.params.context === "P1"
+            ? Deferred.succeed(stuck, undefined).pipe(Effect.andThen(Effect.never))
+            : next
+        const closing = yield* Scope.close(lifetime, Exit.void).pipe(
+          Effect.provideService(DeclarationCleanup.Unconfirmed, () => {
+            unconfirmed++
+          }),
+          Effect.forkChild
+        )
+        yield* Deferred.await(stuck)
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        assert.deepStrictEqual(widthsFor(sent, (params) => params.context === "P2"), [700])
+        assert.strictEqual(unconfirmed, 1)
+      }).pipe(
+        Effect.provideService(BrowserClock.CurrentClock, clock),
+        Effect.provideService(DeclarationCleanup.Unconfirmed, () => {
+          unconfirmed++
+        })
+      )
+    }))
+
+  it.effect("keeps an ended-session rollback quiet and preserves the install error", () =>
+    Effect.gen(function*() {
+      const { session, state } = yield* make()
+      let unconfirmed = 0
+      session.rejects = (entry) => entry.method === "browsingContext.setViewport"
+      session.around = (entry, next) =>
+        entry.method === "browser.removeUserContext"
+          ? Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "connectionLost" }) }))
+          : next
+      const result = yield* Effect.exit(Contexts.createUserContext(state, options)).pipe(
+        Effect.provideService(DeclarationCleanup.Unconfirmed, () => {
+          unconfirmed++
+        })
+      )
+      const error = Option.getOrThrow(Exit.findErrorOption(result))
+      assert.strictEqual(error.reason._tag, "Protocol")
+      if (error.reason._tag === "Protocol") assert.strictEqual(error.reason.error.reason._tag, "Rejected")
+      assert.strictEqual(unconfirmed, 0)
     }))
 })
