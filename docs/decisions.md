@@ -752,3 +752,35 @@ Rejected: treating every addition as a minor release regardless of stability, wh
 unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
+
+## Checked actions on ordinary label descendants
+
+Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
+or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
+remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
+checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+
+Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
+ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.
+
+For descendants, check both DOM ancestors and the path through assigned slots and shadow hosts, up to, excluding,
+that associated DOM label. Interactive ancestors above the label remain outside this guard. The slot-aware walk
+adds refusals without introducing associations or replacing the DOM guard: a shadow label encountered along that
+path must neither choose another control nor hide a DOM interactive ancestor. Refuse
+buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href (including
+SVG links with namespaced xlink:href), images with
+usemap, audio/video with controls, ARIA widget roles (button, checkbox, combobox, grid, gridcell, link,
+listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup, scrollbar,
+searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem) and
+editable content. This conservative boundary keeps separate controls from receiving
+input meant for the associated checkbox, including when that checkbox already matches. Association uses the
+browser's label.control; missing or non-checkable controls are refused.
+
+Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
+receive input before the action fails with `StateUnchanged`.
+
+Rejected: clicking the associated input directly, which loses the selected target and its relative coordinates;
+following labels for public state reads, which expands an unrelated contract; using a slot-aware path to
+choose the label, which would create associations across shadow roots; replacing
+DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
+of links before reporting unchanged state, which sends input to a separate control unnecessarily.
