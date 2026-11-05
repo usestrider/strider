@@ -40,11 +40,126 @@ const TypeId = "~@usestrider/browser/Locator"
 /**
  * Settings for `getByRole`.
  *
+ * **Details**
+ *
+ * Unlike Playwright, unsupported role/filter combinations do not reject the query. Unsupported
+ * checked or expanded states match neither boolean; unsupported pressed or selected states match
+ * false. Elements without a supported level have level 0.
+ *
+ * On stock WebKit, use `includeHidden: true` for native options, which the current visibility
+ * rules exclude because they have no rendered box.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface RoleOptions {
+  /**
+   * Match a native heading level (1–6), or a positive integer from aria-level on heading, listitem, row
+   * or treeitem. Native headings take precedence over aria-level.
+   *
+   * **Example** (Filter by level)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("heading", { level: 2 })
+   * ```
+   *
+   * @default any level
+   */
+  readonly level?: number | undefined
+  /**
+   * Match a native checkbox or radio, or aria-checked on checkbox, radio, switch, menuitemcheckbox,
+   * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
+   * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
+   * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
+   * roles they match false, as do all other values except "mixed". Non-checkable elements match neither.
+   *
+   * **Example** (Filter by checked)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("checkbox", { checked: true })
+   * ```
+   *
+   * @default any checked state
+   */
+  readonly checked?: boolean | undefined
+  /**
+   * Match aria-pressed on buttons. Mixed matches neither boolean; absent or invalid values match false.
+   *
+   * **Example** (Filter by pressed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { pressed: true })
+   * ```
+   *
+   * @default any pressed state
+   */
+  readonly pressed?: boolean | undefined
+  /**
+   * Match aria-expanded on roles that support expansion, or the open state of details. Absent or invalid
+   * ARIA values match neither boolean.
+   *
+   * **Example** (Filter by expanded)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { expanded: false })
+   * ```
+   *
+   * @default any expanded state
+   */
+  readonly expanded?: boolean | undefined
+  /**
+   * Match a native option’s selected property or aria-selected on gridcell, option, row, tab, rowheader,
+   * columnheader or treeitem. Absent or invalid ARIA values match false.
+   *
+   * **Example** (Filter by selected)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("tab", { selected: true })
+   * ```
+   *
+   * @default any selected state
+   */
+  readonly selected?: boolean | undefined
+  /**
+   * Match native disabled controls (including disabled fieldsets and optgroups) or inherited
+   * aria-disabled. Unlike Playwright, native disabled fieldsets also match; aria-disabled is
+   * case-sensitive, applies on any role, and false on a descendant does not cancel a disabled ancestor.
+   *
+   * **Example** (Filter by disabled)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { disabled: false })
+   * ```
+   *
+   * @default any disabled state
+   */
+  readonly disabled?: boolean | undefined
+
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
    * is used as given.

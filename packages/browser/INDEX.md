@@ -889,6 +889,12 @@ Locators: how to find elements on a page, and the actions and reads that use the
 *models*
 
 - `interface RoleOptions`
+  - `readonly level?: number | undefined`
+  - `readonly checked?: boolean | undefined`
+  - `readonly pressed?: boolean | undefined`
+  - `readonly expanded?: boolean | undefined`
+  - `readonly selected?: boolean | undefined`
+  - `readonly disabled?: boolean | undefined`
   - `readonly name?: string | RegExp | undefined`
   - `readonly exact?: boolean | undefined`
   - `readonly includeHidden?: boolean | undefined`

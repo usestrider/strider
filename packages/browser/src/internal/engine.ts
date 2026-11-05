@@ -37,6 +37,12 @@ export type Step =
     readonly role: string
     readonly name: TextMatcher | null
     readonly includeHidden: boolean
+    readonly level?: number | undefined
+    readonly checked?: boolean | undefined
+    readonly pressed?: boolean | undefined
+    readonly expanded?: boolean | undefined
+    readonly selected?: boolean | undefined
+    readonly disabled?: boolean | undefined
   }
   | { readonly _tag: "Text"; readonly matcher: TextMatcher }
   | { readonly _tag: "Label"; readonly matcher: TextMatcher }
@@ -1087,7 +1093,13 @@ export function engine(render: (root: SnapNode) => string) {
       case "Role":
         return under.filter((element) =>
           roleOf(element) === step.role && (step.includeHidden || !hiddenFromAccessibility(element)) &&
-          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden)))
+          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden))) &&
+          (step.level === undefined || levelOf(element) === step.level) &&
+          (step.checked === undefined || checkedState(element).state === step.checked) &&
+          (step.pressed === undefined || pressedOf(element) === step.pressed) &&
+          (step.expanded === undefined || expandedOf(element) === step.expanded) &&
+          (step.selected === undefined || selectedOf(element) === step.selected) &&
+          (step.disabled === undefined || disabledOf(element) === step.disabled)
         )
       case "Label":
         return under.filter((element) =>
@@ -1190,6 +1202,11 @@ export function engine(render: (root: SnapNode) => string) {
     return true
   }
 
+  const disabledOf = (element: Element): boolean =>
+    !enabled(element) ||
+    (element instanceof HTMLOptionElement && element.parentElement instanceof HTMLOptGroupElement &&
+      element.parentElement.disabled)
+
   /** Text inputs whose value is typed; the other input types have it set. */
   const TYPED = new Set(["text", "search", "email", "password", "tel", "url", "number"])
 
@@ -1243,18 +1260,70 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
-  /** Whether it is checked, or `null` when it isn't a checkbox, a radio or an ARIA checkable. */
-  const checkedOf = (element: Element): boolean | null => {
+  /** One read for queries and actions; actions retain their boolean view of mixed state. */
+  const checkedState = (element: Element): {
+    readonly state: boolean | "mixed" | null
+    readonly checked: boolean | null
+  } => {
     if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
-      return element.checked
+      return { state: element.indeterminate ? "mixed" : element.checked, checked: element.checked }
     }
     const role = roleOf(element)
-    if (role === null || !CHECKABLE_ROLES.has(role)) return null
+    if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
     const state = element.getAttribute("aria-checked")
     if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
-      return null
+      return { state: null, checked: null }
     }
-    return state === "true"
+    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+  }
+
+  const checkedOf = (element: Element): boolean | null => checkedState(element).checked
+
+  const LEVEL_ROLES = new Set(["heading", "listitem", "row", "treeitem"])
+  const SELECTED_ROLES = new Set(["gridcell", "option", "row", "tab", "rowheader", "columnheader", "treeitem"])
+  const EXPANDED_ROLES = new Set([
+    "application",
+    "button",
+    "checkbox",
+    "combobox",
+    "gridcell",
+    "link",
+    "listbox",
+    "menuitem",
+    "row",
+    "rowheader",
+    "tab",
+    "treeitem",
+    "columnheader",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "switch"
+  ])
+
+  const levelOf = (element: Element): number => {
+    if (/^h[1-6]$/.test(element.localName)) return Number(element.localName.slice(1))
+    if (!LEVEL_ROLES.has(roleOf(element) ?? "")) return 0
+    const value = Number(element.getAttribute("aria-level"))
+    return Number.isInteger(value) && value >= 1 ? value : 0
+  }
+
+  const pressedOf = (element: Element): boolean | "mixed" => {
+    if (roleOf(element) !== "button") return false
+    const value = element.getAttribute("aria-pressed")?.toLowerCase()
+    return value === "mixed" ? "mixed" : value === "true"
+  }
+
+  const expandedOf = (element: Element): boolean | undefined => {
+    if (element instanceof HTMLDetailsElement) return element.open
+    if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
+    const value = element.getAttribute("aria-expanded")?.toLowerCase()
+    return value === "true" ? true : value === "false" ? false : undefined
+  }
+
+  const selectedOf = (element: Element): boolean => {
+    if (element instanceof HTMLOptionElement) return element.selected
+    return SELECTED_ROLES.has(roleOf(element) ?? "") &&
+      element.getAttribute("aria-selected")?.toLowerCase() === "true"
   }
 
   const LABEL_WIDGET_ROLES = new Set([
