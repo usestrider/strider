@@ -17,8 +17,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Random from "effect/Random"
-import * as Scope from "effect/Scope"
-import { createServer, type Server } from "node:net"
+import { createServer, type Server, type Socket } from "node:net"
 import * as Launch from "../../src/internal/launch.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
@@ -67,55 +66,66 @@ const listen = Effect.fnUntraced(function*(server: Server, port: number) {
   })
 })
 
-/**
- * Other sockets on ports the launcher can choose, as a full run's own connections can be, and a generator whose
- * choices land on them: for each entry of `taken`, one of those ports if true, otherwise the generator's own.
- */
-const choosingTakenPorts = Effect.fnUntraced(function*(taken: ReadonlyArray<boolean>) {
-  const random = yield* Random.Random
-  const ports: Array<number | undefined> = []
-  for (const isTaken of taken) {
-    if (!isTaken) {
-      ports.push(undefined)
-      continue
-    }
-    const server = createServer()
-    ports.push(
-      yield* Effect.suspend(() => Random.nextIntBetween(49152, 65535)).pipe(
-        Effect.tap((port) => listen(server, port)),
-        // A port that is taken already is as good, but then this server has no port to name.
-        Effect.retry({ times: 8 })
+/** Acquire a fixture port before launch; only an occupied candidate permits another allocation. */
+const silentListener = Effect.fnUntraced(function*(
+  onConnection: (socket: Socket) => void,
+  firstCandidate?: number
+) {
+  let first = firstCandidate
+  return yield* Effect.suspend(() =>
+    Effect.gen(function*() {
+      const port = first ?? (yield* Random.nextIntBetween(49152, 65535))
+      first = undefined
+      const sockets = new Set<Socket>()
+      const server = createServer((socket) => {
+        sockets.add(socket)
+        socket.on("close", () => sockets.delete(socket))
+        socket.on("error", () => {})
+        onConnection(socket)
+      })
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const socket of sockets) socket.destroy()
+        })
       )
-    )
-  }
-  let choice = 0
-  return {
-    nextIntUnsafe: () => random.nextIntUnsafe(),
-    nextDoubleUnsafe: () => {
-      const port = ports[choice++]
-      return port === undefined ? random.nextDoubleUnsafe() : (port - 49152 + 0.5) / (65536 - 49152)
-    }
-  }
+      yield* listen(server, port)
+      return port
+    })
+  ).pipe(Effect.retry({
+    while: (error) => "code" in error && error.code === "EADDRINUSE",
+    times: 8
+  }))
 })
 
-const silentListenerCases: ReadonlyArray<
-  { readonly name: string; readonly collisions: number; readonly taken: ReadonlyArray<boolean> }
-> = [
-  { name: "sends 1 real silent listeners nothing", collisions: 1, taken: [] },
-  { name: "sends 2 real silent listeners nothing", collisions: 2, taken: [] },
-  // The launcher moves on from a port another socket has, so the test must too when it chooses one first.
-  { name: "sends 1 real silent listeners nothing, its first choice already taken", collisions: 1, taken: [true] },
-  // Two listeners and two other sockets are four collisions, which the launcher's five attempts survive.
+const silentListenerCases = [
+  { name: "sends 1 real silent listener nothing", collisions: 1, before: 0, after: 0, repeat: false },
+  { name: "sends 2 real silent listeners nothing", collisions: 2, before: 0, after: 0, repeat: false },
+  {
+    name: "sends 1 real silent listener nothing, its first fixture candidate and launch choice already taken",
+    collisions: 1,
+    before: 1,
+    after: 0,
+    repeat: false
+  },
   {
     name: "sends 2 real silent listeners nothing, with two other ports taken after them",
     collisions: 2,
-    taken: [false, false, true, true]
+    before: 0,
+    after: 2,
+    repeat: false
+  },
+  {
+    name: "sends 1 real silent listener nothing when its occupied port is chosen twice",
+    collisions: 1,
+    before: 0,
+    after: 0,
+    repeat: true
   }
 ]
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
-    for (const { collisions, name, taken } of silentListenerCases) {
+    for (const { after, before, collisions, name, repeat } of silentListenerCases) {
       it.effect(
         `${name}, and starts the real MiniBrowser owned on another port`,
         () =>
@@ -125,58 +135,48 @@ describe("Stock WebKit, launched in automation mode", () => {
             const received: Array<number> = []
             let accepted = 0
             const ports: Array<number> = []
-            const held = new Set<number>()
-            const listenersScope = yield* Scope.Scope
-            const random = yield* choosingTakenPorts(taken)
-            let first: number | undefined
-            let choices = 0
+            const random = yield* Random.Random
+            const contact = (socket: Socket) => {
+              accepted++
+              socket.on("data", (data) => received.push(data.length))
+            }
+            const earlier: Array<number> = []
+            const listeners: Array<number> = []
+            const later: Array<number> = []
+            for (let i = 0; i < before; i++) earlier.push(yield* silentListener(contact))
+            for (let i = 0; i < collisions; i++) {
+              // The regression deliberately makes fixture allocation encounter an occupied candidate too.
+              listeners.push(yield* silentListener(contact, i === 0 ? earlier[0] : undefined))
+            }
+            for (let i = 0; i < after; i++) later.push(yield* silentListener(contact))
+            const held = new Set([...earlier, ...listeners, ...later])
+            assert.strictEqual(held.size, before + collisions + after, "all held ports are distinct")
+            const occupiedChoices = [...earlier, ...listeners, ...(repeat ? [listeners[0]!] : []), ...later]
+            let choice = 0
             const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
               if (command._tag === "StandardCommand") {
                 const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
                 if (endpoint !== undefined) {
                   const port = Number(endpoint.split(":")[1])
                   ports.push(port)
-                  // Repeated choices hit the existing listener; they are not new collisions.
-                  if (held.size < collisions && !held.has(port)) {
-                    const sockets = new Set<import("node:net").Socket>()
-                    const server = createServer((socket) => {
-                      accepted++
-                      sockets.add(socket)
-                      socket.on("close", () => sockets.delete(socket))
-                      socket.on("data", (data) => received.push(data.length))
-                      socket.on("error", () => {})
-                    })
-                    yield* Effect.addFinalizer(() =>
-                      Effect.sync(() => {
-                        for (const socket of sockets) socket.destroy()
-                      })
-                    ).pipe(Scope.provide(listenersScope))
-                    yield* listen(server, port).pipe(Scope.provide(listenersScope), Effect.orDie)
-                    held.add(port)
-                  }
                 }
               }
               return yield* spawner.spawn(command)
             }))
             yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
               Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
-              // Exercise a repeated random choice within the launcher's existing five attempts.
               Effect.provideService(Random.Random, {
                 nextIntUnsafe: () => random.nextIntUnsafe(),
                 nextDoubleUnsafe: () => {
-                  choices++
-                  if (choices === 2) return first!
-                  const value = random.nextDoubleUnsafe()
-                  first ??= value
-                  return value
+                  const port = occupiedChoices[choice++]
+                  // nextIntBetween includes both ends of 49152–65535.
+                  return port === undefined ? random.nextDoubleUnsafe() : (port - 49152 + 0.5) / 16384
                 }
               }),
               Effect.provide(socketConnector)
             )
-            assert.strictEqual(held.size, collisions, "all deliberate listeners were bound")
-            assert.strictEqual(ports[0], ports[1], "the repeated choice hits the same held listener")
-            assert.isAtLeast(ports.length, collisions + 2)
-            assert.isAtMost(ports.length, 5, "incidental collisions share the launcher's attempt budget")
+            assert.deepStrictEqual(ports.slice(0, occupiedChoices.length), occupiedChoices)
+            assert.isAtLeast(ports.length, occupiedChoices.length + 1)
             assert.isFalse(held.has(ports[ports.length - 1]!), "the successful child uses no held port")
             assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
             assert.strictEqual(accepted, 0, "nor is it connected to")
