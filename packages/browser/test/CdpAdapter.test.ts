@@ -347,6 +347,85 @@ describe("CDP viewport restoration", () => {
         assert.isTrue(sentWhileRestoring)
       })
     ))
+  it.effect("leaves other overrides free to apply while target configuration waits for viewport measurement", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        const measurement = yield* Deferred.make<Sent>()
+        let holdMeasurement = true
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Page.createIsolatedWorld" && holdMeasurement) {
+              holdMeasurement = false
+              yield* Deferred.succeed(measurement, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "about:blank",
+                    securityOrigin: "://",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.createIsolatedWorld"
+              ? { executionContextId: 7 }
+              : command.method === "Runtime.evaluate"
+              ? { result: { type: "object", value: [800, 600] } }
+              : {}
+            yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        // Installation before attachment means the blocked viewport operation belongs to configuration.
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        const held = yield* Deferred.await(measurement)
+        const locale = yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        const sentWhileConfiguring = commands.some((command) => command.method === "Emulation.setLocaleOverride")
+        yield* browser.receive({ id: held.id, sessionId: held.sessionId, result: { executionContextId: 7 } })
+        yield* Deferred.await(ready)
+        yield* Fiber.join(locale)
+        assert.isTrue(sentWhileConfiguring)
+      })
+    ))
 })
 
 describe("CDP adapter redirect headers", () => {
