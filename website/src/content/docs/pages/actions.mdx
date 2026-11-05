@@ -193,8 +193,8 @@ typed the characters before it.
 
 ## Files
 
-`setInputFiles` takes `FileInput`s. `FileInput.local` names a file on this machine; `FileInput.bytes` makes the
-file in the page, so it also works with a browser on another machine:
+`setInputFiles` chooses files without opening the operating system’s picker. `FileInput.local` names a file on
+this machine; `FileInput.bytes` supplies generated contents:
 
 ```ts
 import { FileInput, Page } from "@usestrider/browser"
@@ -213,6 +213,15 @@ const importReport = Effect.fn("importReport")(function*(page: Page.Page, csv: s
   yield* page.getByLabel("Report").setInputFiles(report)
 })
 ```
+
+A launched browser receives local paths directly. Absolute paths need no caller services; relative paths need the
+path [platform service](/docs/installation#platform-services). A launch through a container or wrapper with a
+different file system needs `FileInput.bytes` instead.
+
+Attached connections copy local contents using captured file-system and path
+[platform services](/docs/installation#platform-services), including for absolute paths. Local files can combine
+with bytes on attached connections, or with [remote paths](/docs/api/browser/FileInput#remote) on launched ones.
+A selection cannot combine native paths and transferred contents; it fails before replacing the previous files.
 
 An upload through a file chooser, not an input, is answered with
 [`FileChooser.handle`](/docs/events/kinds#dialogs-and-file-choosers).
