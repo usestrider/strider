@@ -7,6 +7,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Deadline, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as NodeHttp from "node:http"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -578,6 +579,60 @@ for (const mode of ["open", "closed"]) {
           }),
         timeout
       )
+
+      it.effect("PROBE143 timings", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const server = NodeHttp.createServer((request, response) => {
+            const send = () => { response.setHeader("content-type", "text/html"); response.end("<title>there</title><p>there</p>") }
+            if (request.url === "/slow") setTimeout(send, 6000)
+            else send()
+          })
+          yield* Effect.promise(() => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve())))
+          const port = (server.address() as { port: number }).port
+          const timed = <A, E, R>(label: string, self: Effect.Effect<A, E, R>) =>
+            Effect.gen(function*() {
+              const started = Date.now()
+              const exit = yield* Effect.exit(self)
+              console.log(`PROBE143 ${name} ${label} ${Date.now() - started}ms ${exit._tag}`)
+            })
+          const open = (html: string) =>
+            Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture: CapturePolicy.local })
+              return { page, tools }
+            })
+          const go = { page: "p1", target: "role=link[name=\"Go\"]" }
+          for (const [label, path] of [["slowNav", "slow"], ["fastNav", "fast"]]) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              const { tools } = yield* open(`<a href="http://127.0.0.1:${port}/${path}">Go</a>`)
+              yield* timed(label, call(tools, "click", go))
+            }))
+          }
+          yield* Effect.scoped(Effect.gen(function*() {
+            const { tools } = yield* open(`<script>addEventListener("beforeunload",(e)=>{e.preventDefault();e.returnValue="x"})</script><input autofocus><a href="http://127.0.0.1:${port}/fast">Go</a>`)
+            yield* call(tools, "fill", { page: "p1", target: "css=input", value: "x" })
+            yield* timed("beforeunload", call(tools, "click", go).pipe(Deadline.within("10 seconds")))
+          }))
+          yield* Effect.scoped(Effect.gen(function*() {
+            const { tools } = yield* open(`<button onclick="setTimeout(() => { const end = Date.now() + 6000; while (Date.now() < end); })">Busy</button>`)
+            yield* timed("busyNoDeadline", call(tools, "click", { page: "p1", target: "role=button[name=\"Busy\"]" }))
+          }))
+          // toolkit scope closes with a cleanup pending behind an undecided dialog
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(`<button onclick="alert('Stop')">Ask</button>`)}`)
+            let started = 0
+            yield* Effect.scoped(Effect.gen(function*() {
+              const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture: CapturePolicy.local })
+              yield* timed("alert", call(tools, "click", { page: "p1", target: "role=button[name=\"Ask\"]" }).pipe(Deadline.within("3 seconds")))
+              started = Date.now()
+            }))
+            console.log(`PROBE143 ${name} scopeCloseUnderDialog ${Date.now() - started}ms`)
+          }))
+          server.close()
+        }), 90_000)
 
       it.effect(
         "redacts custom validation messages through the snapshot tool and keeps full capture",
