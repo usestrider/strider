@@ -1356,6 +1356,7 @@ An entry with no marker is open.
 - *Seen:* the comparison scripts: `check()` on TodoMVC's first todo timed out `waitingForCondition`, its last observation `NotVisible`; Playwright's passed.
 - *We:* the rule stands; the scenario turned the check off at its call site, `check({ checks: { visible: false } })`, and its note said why, until it was replaced by The Internet's dynamic controls (2026-10-27), TodoMVC's demo being hosted by Playwright.
 - *Reconsider:* whether an action's `visible` should ignore opacity, as `receivesPointer` already says whether the pointer reaches the element; `Expect.toBeVisible` could keep it, which reads as a person would see it. A design change.
+- **Resolved** in `8d10bf79`: actions accept zero opacity on the element or its ancestors and require their other checks; visibility assertions and filters count these transparent elements as hidden.
 
 **Q242. A scenario takes Strider longer than Playwright, on the same Chromium** (Ours). Over 10 runs each, 8 of the comparison's 10 scenarios took 1.4 to 2.4 times as long with Strider, contexts and pages made and closed in each: the README's program 173 ms to Playwright's 98, a popup with a dialog 311 to 145, TodoMVC 424 to 176; a route blocking analytics took the same, and a HAR recorded and replayed 139 to 152. A launch with a first page took 201 ms to 130. Where the time goes isn't known.
 - *Seen:* the comparison scripts (`packages/scenarios/RESULTS.md`), on the maintainer's desktop at `nice 19`.
