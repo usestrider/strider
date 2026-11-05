@@ -242,3 +242,15 @@ describe("route phase variance", () => {
     >()
   })
 })
+
+
+describe("omitted route phase diagnostics", () => {
+  it("names the phase required by response decisions", () => {
+    expect(page.route("**", response)).type.toRaiseError('Response decisions need { phase: "response" }')
+    expect(context.route("**", response)).type.toRaiseError('Response decisions need { phase: "response" }')
+  })
+  it("names the phase required by auth decisions", () => {
+    expect(page.route("**", auth)).type.toRaiseError('Auth decisions need { phase: "auth" }')
+    expect(context.route("**", auth)).type.toRaiseError('Auth decisions need { phase: "auth" }')
+  })
+})
