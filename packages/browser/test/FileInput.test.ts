@@ -171,6 +171,7 @@ describe("file preparation", () => {
         assert.strictEqual(prepared._tag, "Made")
         if (prepared._tag !== "Made") return
         assert.strictEqual(prepared.files[0]!.name, "FileInput.test.ts")
+        assert.propertyVal(prepared.files[0], "lastModified", fs.statSync(import.meta.filename).mtime.getTime())
         assert.deepStrictEqual(prepared.files[0]!.data, new Uint8Array(fs.readFileSync(import.meta.filename)))
         assert.strictEqual(prepared.files[1]!.mimeType, "x/test")
       })

@@ -197,21 +197,67 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
-      it.effect("refuses several local files for an input that takes one", () =>
+      for (const source of ["local", "bytes"] as const) {
+        it.effect(`refuses several ${source} files for an input that takes one`, () =>
+          Effect.gen(function*() {
+            const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+              let changes = 0
+              document.querySelector("input").addEventListener("change", (event) => {
+                document.getElementById("out").textContent = event.target.files.length + ":" + ++changes
+              })
+            </script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const input = page.getByLabel("File")
+              yield* input.setInputFiles(made[0]!)
+              yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
+              const both = source === "local"
+                ? [FileInput.local(import.meta.filename), FileInput.local(import.meta.filename)]
+                : made
+              const failure = yield* input.setInputFiles(both).pipe(Effect.flip)
+              assert(Locator.isLocatorError(failure), String(failure))
+              assert.strictEqual(failure.reason._tag, "InvalidInput")
+              yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
+            }))
+          }), timeout)
+      }
+
+      it.effect("uses creation time for files supplied as bytes", () =>
         Effect.gen(function*() {
           const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            const before = Date.now()
             document.querySelector("input").addEventListener("change", (event) => {
-              document.getElementById("out").textContent = String(event.target.files.length)
+              const modified = event.target.files[0].lastModified
+              document.getElementById("out").textContent = String(modified >= before && modified <= Date.now())
             })
           </script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const both = [FileInput.local(import.meta.filename), FileInput.local(import.meta.filename)]
-            const exit = yield* page.getByLabel("File").setInputFiles(both).pipe(Effect.exit)
-            const count = yield* page.locator("#out").readText
-            assert.isTrue(exit._tag === "Failure", `set ${count} files on a single-file input`)
-            assert.strictEqual(count, "none")
+            yield* page.getByLabel("File").setInputFiles(made[0]!)
+            yield* page.locator("#out").pipe(Expect.toHaveText("true"))
+          }))
+        }), timeout)
+
+      it.effect("compares native path uploads with transferred local files", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(files)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-upload-compare-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const file = path.join(directory, "host.txt")
+            fs.writeFileSync(file, "on host")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            // This unchanged adapter path was also used by absolute Local inputs before caller transfer.
+            yield* page.getByLabel("Files").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
+            yield* page.locator("#out").pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
+            const native = yield* page.locator("#out").readText
+            yield* page.getByLabel("Files").setInputFiles(FileInput.local(file))
+            yield* page.locator("#out").pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            const transferred = yield* page.locator("#out").readText
+            yield* Effect.logInfo({ native, transferred })
           }))
         }), timeout)
 
