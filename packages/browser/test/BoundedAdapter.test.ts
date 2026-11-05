@@ -236,6 +236,30 @@ describe("BoundedAdapter", () => {
     }
   }
 
+  it.effect("does not turn a handled unanswered reply into confirmation when its step succeeds", () =>
+    Effect.gen(function*() {
+      const adapter = stub({
+        setCookies: () =>
+          Effect.fail(
+            new Adapter.AdapterError({
+              reason: {
+                _tag: "Protocol",
+                error: new Protocol.ProtocolError({
+                  reason: new Protocol.NoReply({
+                    method: "setCookies",
+                    timeout: Duration.zero
+                  })
+                })
+              }
+            })
+          )
+      })
+      yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Effect.exit, Operation.named("handled no reply"))
+        assert.deepStrictEqual((yield* Operation.record).diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+      }).pipe(Operation.named("outer"))
+    }))
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
