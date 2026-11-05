@@ -207,6 +207,24 @@ describe("BoundedAdapter", () => {
       assert.deepStrictEqual(timeout.diagnostics.cleanup, { _tag: "Pending" })
     }))
 
+  it.effect("does not let an abandoned creation confirm later input", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Target.NavigableId>()
+      const closed = yield* Deferred.make<void>()
+      const adapter = stub({
+        createPage: () => Deferred.await(made),
+        closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+      })
+      yield* Effect.gen(function*() {
+        yield* adapter.createPage(context).pipe(Effect.exit)
+        const record = yield* Operation.record
+        record.markSent()
+        yield* Deferred.succeed(made, page)
+        yield* Deferred.await(closed)
+        assert.deepStrictEqual(record.timeout(Option.none()).diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+      }).pipe(Operation.named("creation then input"), Deadline.within("50 millis"))
+    }))
+
   it.effect("never cuts a release short", () =>
     Effect.gen(function*() {
       const adapter = stub({ closePage: () => real(300) })
