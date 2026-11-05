@@ -1,5 +1,24 @@
 # @usestrider/vitest
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [b3a5611]
+- Updated dependencies [2cf324b]
+- Updated dependencies [8ec884f]
+- Updated dependencies [fe41db7]
+- Updated dependencies [f57de19]
+- Updated dependencies [3b7dad7]
+- Updated dependencies [b65bc7b]
+- Updated dependencies [9728fec]
+- Updated dependencies [b0c0931]
+- Updated dependencies [dabf930]
+- Updated dependencies [8d1ea51]
+- Updated dependencies [ddf9e32]
+- Updated dependencies [8d10bf7]
+  - @usestrider/browser@0.3.0
+
 ## 0.1.2
 
 ### Patch Changes
