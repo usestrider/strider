@@ -328,6 +328,43 @@ describe("BidiAdapter viewports", () => {
       assert.deepStrictEqual(widthsFor(sent, (params) => params.userContexts?.includes("U1") === true), [null])
     }))
 
+  it.effect("restores a page skipped during a close the browser then rejects", () =>
+    Effect.gen(function*() {
+      const { page, sent, session, state } = yield* make()
+      const target = page("P1")
+      const lifetime = yield* Scope.make()
+      yield* declare(state, { _tag: "Page", page: target.id }, 640, lifetime)
+      let command = Effect.void as Effect.Effect<unknown, unknown>
+      Object.assign(state.buffer, { start: (effect: Effect.Effect<unknown, unknown>) => { command = effect } })
+      session.rejects = (entry) => entry.method === "browsingContext.close"
+      yield* Contexts.closePage(state, target.id, { runBeforeUnload: false })
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      const result = yield* Effect.exit(command)
+      assert.isTrue(Exit.isFailure(result))
+      assert.strictEqual(target.closing, undefined)
+      assert.deepStrictEqual(widthsFor(sent, (params) => params.context === "P1"), [null])
+    }))
+
+  it.effect("restores a context after interrupted removal without replacing the interruption", () =>
+    Effect.gen(function*() {
+      const { sent, session, state } = yield* make()
+      const context = yield* Contexts.createUserContext(state, options)
+      const lifetime = yield* Scope.make()
+      yield* declare(state, { _tag: "UserContext", context }, 1100, lifetime)
+      const removing = yield* Deferred.make<void>()
+      session.around = (entry, next) => entry.method === "browser.removeUserContext"
+        ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Effect.never)) : next
+      const removal = yield* Contexts.removeUserContext(state, context).pipe(Effect.forkChild)
+      yield* Deferred.await(removing)
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      const result = yield* Fiber.interrupt(removal)
+      assert.isTrue(Exit.hasInterrupts(result))
+      assert.isFalse(state.contexts.get(context)!.removing)
+      assert.deepStrictEqual(widthsFor(sent, (params) => params.userContexts?.includes("U1") === true), [null])
+    }))
+
   it.effect("preserves install errors on active contexts", () =>
     Effect.gen(function*() {
       const { session, state } = yield* make()
