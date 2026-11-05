@@ -901,3 +901,10 @@ files. Preparation rejects mixtures before selection changes. Empty lists clear 
 Missing caller services fail explicitly, locator read failures remain `FileUnreadable`, and chooser preparation
 failures use the existing reported handler failure and cancellation path. No implicit service or shared storage
 is assumed.
+
+A chooser's user handler, file preparation and staged application run in the registration's scope-owned fiber,
+under one absolute deadline. File reads consume the time left after the user handler. Keeping preparation outside
+that fiber would leave stalled reads beyond both timeout and scope interruption; giving it a fresh budget would
+extend the promised deadline. The existing cancellation policy handles expiration, and preparation cannot apply
+files after its deadline. Decision failures retain their existing reporting, and staged decisions are still counted
+before application.

@@ -329,7 +329,10 @@ describe("a local read under the deadline", () => {
           yield* Deferred.succeed(release, new Uint8Array([1]))
           assert.deepStrictEqual(evaluations, [], "canceled reads must never apply files")
           assert.strictEqual(yield* handler.handled, 0)
-        }).pipe(Deadline.withDefaultBudget("200 millis"), Effect.provide(connection))
+        }).pipe(
+          Deadline.withDefaultBudget(scenario === "scope interruption" ? "30 seconds" : "200 millis"),
+          Effect.provide(connection)
+        )
       })).pipe(Effect.provide(NodeServices.layer))
     })
   }

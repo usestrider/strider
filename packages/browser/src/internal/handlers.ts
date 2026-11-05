@@ -19,6 +19,7 @@ import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -99,43 +100,74 @@ export const register = <S, P, D, E, R>(
     const budget = yield* Effect.service(Deadline.DefaultBudget)
     const clock = yield* Effect.service(BrowserClock.CurrentClock)
     // The handler's fibers end with its scope, which leaves an undecided obligation to the policy
-    const fibers = yield* FiberSet.make<D, E>()
+    const fibers = yield* FiberSet.make<Option.Option<Adapter.Decision>>()
     const handled = yield* SubscriptionRef.make(0)
     const id = options.page.id
     const registration: Model.Handler<S> = {
       decide: Effect.fnUntraced(function*(subject: S) {
-        // Each decision has the handler's budget from when it starts, not the deadline in force at registration
+        // The user handler, preparation and application share one deadline and one scope-owned fiber.
+        const at = (clock.now() + Duration.toMillis(budget) * 1e6) as MonotonicInstant.MonotonicInstant
+        const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`
+        const expired = () => BrowserClock.millisLeft(clock, at) === 0
+        const timedOut = report(
+          `${described} within ${Duration.format(budget)}, so ${options.fallback} decides`,
+          Cause.empty
+        )
         const fiber = yield* FiberSet.run(
           fibers,
           Effect.provideContext(
-            options.handler(options.pending(subject)).pipe(Operation.apart(options.name, budget)),
+            Effect.gen(function*() {
+              const chosen = yield* options.handler(options.pending(subject)).pipe(Effect.exit)
+              if (Exit.isFailure(chosen)) {
+                yield* report(`${described}: it failed, so ${options.fallback} decides`, chosen.cause)
+                return Option.none<Adapter.Decision>()
+              }
+              if (expired()) {
+                yield* timedOut
+                return Option.none<Adapter.Decision>()
+              }
+              const decision = yield* options.decision(chosen.value, subject).pipe(Effect.exit)
+              if (Exit.isFailure(decision)) {
+                yield* report(
+                  `${described}: its decision couldn't be made, so ${options.fallback} decides`,
+                  decision.cause
+                )
+                return Option.none<Adapter.Decision>()
+              }
+              // A read may finish after its deadline even if its service masks interruption.
+              if (expired()) {
+                yield* timedOut
+                return Option.none<Adapter.Decision>()
+              }
+              yield* SubscriptionRef.update(handled, (count) => count + 1)
+              if (decision.value._tag !== "Staged") return Option.some(decision.value)
+              const applied = yield* decision.value.apply.pipe(Effect.exit)
+              if (Exit.isFailure(applied)) {
+                yield* report(
+                  `${described}: its decision couldn't be made, so ${options.fallback} decides`,
+                  applied.cause
+                )
+                return Option.none<Adapter.Decision>()
+              }
+              return Option.some(applied.value)
+            }).pipe(
+              (self) => Operation.under(self, at),
+              Operation.apart(options.name, budget)
+            ),
             context
           )
         )
-        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
-        const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`
+        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, BrowserClock.millisLeft(clock, at)))
         if (Option.isNone(exit)) {
           yield* Fiber.interrupt(fiber)
-          yield* report(`${described} within ${Duration.format(budget)}, so ${options.fallback} decides`, Cause.empty)
+          yield* timedOut
           return Option.none()
         }
         if (Exit.isFailure(exit.value)) {
           yield* report(`${described}: it failed, so ${options.fallback} decides`, exit.value.cause)
           return Option.none()
         }
-        const decision = yield* options.decision(exit.value.value, subject).pipe(Effect.exit)
-        if (Exit.isFailure(decision)) {
-          yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, decision.cause)
-          return Option.none()
-        }
-        yield* SubscriptionRef.update(handled, (count) => count + 1)
-        if (decision.value._tag !== "Staged") return Option.some(decision.value)
-        const applied = yield* decision.value.apply.pipe(Effect.exit)
-        if (Exit.isFailure(applied)) {
-          yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, applied.cause)
-          return Option.none()
-        }
-        return Option.some(applied.value)
+        return exit.value.value
       })
     }
     // In force once this returns: an obligation folded after it is this handler's to decide
