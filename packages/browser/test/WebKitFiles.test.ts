@@ -3,6 +3,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
+import * as Operation from "../src/internal/operation.ts"
 import * as vm from "node:vm"
 import * as Input from "../src/internal/webkitAdapter/input.ts"
 import type * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
@@ -18,7 +20,7 @@ const rejected = new Protocol.ProtocolError({
   })
 })
 
-const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset" | "partial") => {
+const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset" | "partial", primary?: Protocol.ProtocolError) => {
   const events: Array<string> = []
   class InputElement {
     type = "file"
@@ -62,7 +64,7 @@ const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "
           if (mode === "refuse" || mode === "rollback-failure") {
             if (mode === "rollback-failure") target.type = "text"
             nodes.get(params.nodeHandle)!.files = ["partially loaded"]
-            return Effect.fail(rejected)
+            return Effect.fail(primary ?? rejected)
           }
           if (mode === "populate" || mode === "populate-reset" || mode === "partial") {
             const input = nodes.get(params.nodeHandle)!
@@ -114,6 +116,32 @@ describe("WebKit native file replacement", () => {
         assert.isFalse(hasSaved())
       }))
   }
+
+  it.effect("refuses multiple native paths on a single input before mutation", () =>
+    Effect.gen(function*() {
+      const { target, events, replace, hasSaved } = fixture("populate")
+      target.multiple = false
+      const result = yield* replace(["one", "two"]).pipe(Effect.exit)
+      assert(Exit.isFailure(result))
+      assert.deepStrictEqual(target.files, ["previous"])
+      assert.deepStrictEqual(events, [])
+      assert.strictEqual(target.listeners.size, 0)
+      assert.isFalse(hasSaved())
+    }))
+
+  it.effect("retains a primary Timeout when restoration also fails", () =>
+    Effect.gen(function*() {
+      const timeout = yield* Effect.map(Operation.record, (record) => record.timeout(Option.none())).pipe(
+        Operation.named("Test.upload")
+      )
+      // The fake session models a command whose enclosing deadline expires during native loading.
+      const { replace } = fixture("rollback-failure", timeout as unknown as Protocol.ProtocolError)
+      const result = yield* replace(["new"]).pipe(Effect.exit)
+      assert(Exit.isFailure(result))
+      assert.isTrue(result.cause.reasons.some((reason) => reason._tag === "Fail" && reason.error === timeout))
+      assert.isTrue(Cause.hasDies(result.cause))
+      assert.include(Cause.pretty(result.cause), "Could not restore the previous file selection")
+    }))
 
   it.effect("keeps the native rejection alongside a rollback failure", () =>
     Effect.gen(function*() {
