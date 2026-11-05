@@ -93,6 +93,66 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "reports an unsupported role filter in a nested branch beyond a missing frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const outer = page.frame(page.locator("#absent-frame"))
+            const nested = outer.frame(outer.locator("#deeper")).locator("a")
+              .filter({ has: Locator.relative.getByRole("link", { pressed: false }) })
+            const error = yield* nested.count.pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "InvalidInput")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "reports unsupported role filters as typed selector errors on use",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            // Construction remains lazy, including under a scope that matches nothing.
+            const invalid = page.getByRole("link", { pressed: false })
+            const empty = page.locator("#missing").getByRole("link", { pressed: false })
+            const missingFrame = page.frame(page.locator("#absent-frame")).getByRole("link", { pressed: false })
+            for (
+              const operation of [
+                invalid.count,
+                empty.count,
+                invalid.readText,
+                invalid.click(),
+                invalid.evaluate(() => true),
+                missingFrame.count,
+                missingFrame.readText,
+                missingFrame.click(),
+                missingFrame.evaluate(() => true)
+              ]
+            ) {
+              const error = yield* operation.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error), String(error))
+              assert.strictEqual(error.reason._tag, "InvalidInput")
+              if (error.reason._tag === "InvalidInput") {
+                assert.strictEqual(error.reason.input, "selector")
+                assert.strictEqual(error.reason.expected, "a role query with supported state filters")
+                assert.include(error.reason.hint ?? "", "pressed")
+              }
+            }
+            for (const candidate of [invalid, missingFrame]) {
+              const assertion = yield* candidate.pipe(Expect.toHaveCount(0), Effect.flip)
+              assert.strictEqual(assertion._tag, "ExpectationFailed")
+            }
+            assert.strictEqual(yield* page.frame(page.locator("#absent-frame")).getByRole("link").count, 0)
+            assert.strictEqual(yield* page.getByRole("link").count, 1)
+          })),
+        timeout
+      )
+
       for (const ancestor of [false, true]) {
         for (const action of ["click", "check", "fill"] as const) {
           it.effect(
