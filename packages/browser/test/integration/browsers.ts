@@ -3,11 +3,13 @@ import * as fs from "node:fs"
 import { pins as linuxPins } from "./pins.ts"
 import { assertVersion } from "./platform.ts"
 
-const pins = process.env["STRIDER_ENVIRONMENT"] === "macos-integration"
-  ? {
-    ...linuxPins,
-    ...JSON.parse(fs.readFileSync(`${import.meta.dirname}/browsers.macos.json`, "utf8"))
-  } as typeof linuxPins
+interface BrowserPins {
+  readonly chromium: { readonly version: string }
+  readonly firefox: { readonly version: string }
+}
+
+const pins: BrowserPins = process.env["STRIDER_ENVIRONMENT"] === "macos-integration"
+  ? JSON.parse(fs.readFileSync(`${import.meta.dirname}/browsers.macos.json`, "utf8")) as BrowserPins
   : linuxPins
 
 const named = (variable: string): string => {
@@ -37,8 +39,9 @@ export const webkitgtk = {
   get xvfb() {
     return named("STRIDER_XVFB")
   },
-  ...pins.webkitgtk
+  ...linuxPins.webkitgtk
 }
 
 /** Fails unless a browser is the version the tests are pinned to. */
-export const assertPinned = assertVersion
+export const assertPinned = (browser: string, found: string, pinned: string): void =>
+  assertVersion(browser, found, pinned, process.env["STRIDER_ENVIRONMENT"] === "macos-integration" ? "macos" : "linux")

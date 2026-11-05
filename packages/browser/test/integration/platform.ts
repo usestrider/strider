@@ -12,6 +12,15 @@ export const integrationEnvironment = (
 }
 
 /** Fails on every difference, including patch versions. */
-export const assertVersion = (browser: string, found: string, pinned: string): void => {
-  if (found !== pinned) throw new Error(`${browser} ${found} isn't the pinned ${pinned}`)
+export const assertVersion = (
+  browser: string,
+  found: string,
+  pinned: string,
+  platform: "linux" | "macos" = "linux"
+): void => {
+  if (found === pinned) return
+  const guidance = platform === "linux"
+    ? "(test/integration/browsers.json); the Nix environment provides it: run pnpm test:integration"
+    : "(test/integration/browsers.macos.json); run pnpm test:integration:macos to download the pinned browsers"
+  throw new Error(`${browser} ${found} isn't the pinned ${pinned} ${guidance}`)
 }

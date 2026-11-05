@@ -18,6 +18,12 @@ const pins = JSON.parse(
 const opensslPrefix = spawnSync("brew", ["--prefix", "openssl@3"], { encoding: "utf8" })
 if (opensslPrefix.status !== 0) throw new Error("Install the TLS fixture tool with brew install openssl@3")
 const openssl = path.join(opensslPrefix.stdout.trim(), "bin/openssl")
+const opensslCheck = spawnSync(openssl, ["version"], { encoding: "utf8" })
+if (opensslCheck.error || opensslCheck.status !== 0) {
+  throw new Error(`Cannot run ${openssl}: install the TLS fixture tool with brew install openssl@3`, {
+    cause: opensslCheck.error ?? new Error(opensslCheck.stderr)
+  })
+}
 const directory = await mkdtemp(path.join(tmpdir(), "strider-macos-"))
 const run = (command, args, env = process.env) => {
   const result = spawnSync(command, args, { cwd: root, env, stdio: "inherit" })

@@ -72,7 +72,11 @@ describe("integration environment", () => {
   })
   it("requires exact browser versions on both platforms", () => {
     assert.doesNotThrow(() => assertVersion("Firefox", "158.0", "158.0"))
-    assert.throws(() => assertVersion("Firefox", "158.0.1", "158.0"), /pinned/)
+    assert.throws(() => assertVersion("Firefox", "158.0.1", "158.0"), /browsers.json.*Nix.*pnpm test:integration/)
+    assert.throws(
+      () => assertVersion("Firefox", "158.0.1", "158.0", "macos"),
+      /browsers.macos.json.*pnpm test:integration:macos/
+    )
     assert.throws(() => assertVersion("Chromium", "155.0.8059.80", "155.0.8059.79"), /pinned/)
   })
 })

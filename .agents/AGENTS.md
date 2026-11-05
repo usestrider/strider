@@ -23,13 +23,19 @@ and stock WebKit, and every member the API declares is built. One declared befor
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
-    `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
-    machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
+    `test/integration/`: the browser integration tests. The full Linux suite runs in the Nix environment that fixes
+    the machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
-    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
-    say so; a browser of another version fails them too. Extra arguments go to Vitest
+    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). The Linux
+    entry point rejects other environments; a browser of another version fails the tests too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
+    On Apple Silicon macOS, `pnpm test:integration:macos --no-file-parallelism` downloads the separately pinned
+    Chrome for Testing and Firefox builds in `test/integration/browsers.macos.json`, verifies their SHA-256 hashes,
+    and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
+    WebKitGTK, Xvfb, Linux host settings and the other integration suites remain Linux-only. macOS traffic
+    recording is refused; its fonts and display come from the host, not Nix. Its first CI run is pending.
+    `scripts/integration-macos.md` describes the entry point and owner-applied workflow patch.
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
     the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
