@@ -820,3 +820,37 @@ following labels for public state reads, which expands an unrelated contract; us
 choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
+
+## Retain Chromium's startup window by default
+
+Keep the initial window in Chromium's automation profile and, by inheritance, concurrent. Skipping it saves
+measurable time, but changes default-context session behavior and the initial tabs exposed by the CLI and tools.
+A saving paid once per browser does not justify those changes. Stock, custom and attach behavior also stays
+unchanged. Callers who choose the trade can already opt in through launch options with
+`args: ["--no-startup-window"]`; no new option or persistence exception is introduced.
+
+On pinned Linux Chromium 155.0.8059.79, Playwright 1.64.1 and Node 24.21.0, two reversed-order sweeps each used
+three warmup and twenty measured alternating Strider/Playwright pairs per variant. Launch and first isolated,
+configured page were timed from the same browser, with validation and cleanup outside timing. Combined Strider
+medians fell from 205.916 to 147.624 ms and from 191.340 to 151.012 ms: savings of 58.292 and 40.328 ms.
+Playwright's combined control medians changed by −0.705 and +3.372 ms. First-page medians rose by 0.808 and
+5.437 ms, so skipping the window did not merely move the launch cost to that page. The control medians support
+the saving, but the reverse sweep's Playwright combined p95 rose from 124.144 to 178.997 ms. These measurements
+do not establish a stable tail improvement, parity, or a headed-launch benefit.
+
+On the same Chromium pin, closing the last page in a windowless default context dropped its session cookie;
+a later page retained a lasting cookie and localStorage. Leaving the ordinary startup page open preserved the
+session cookie, while closing that startup page first exposed the same loss. Isolated contexts retained their
+session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
+a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
+directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
+It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+
+Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
+would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
+the benchmark and explicit-argument windowless tests remain useful without changing the production default.
+
+Rejected: enabling the flag in automation and concurrent for a once-per-browser 40–58 ms median saving while
+silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
+which still changes temporary default contexts; and treating the saving as evidence that the startup page has
+no behavioral role. Caller opt-in keeps that trade explicit.
