@@ -1161,6 +1161,30 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
+  it.effect("cleans a late successful start observed during an earlier unconfirmed cleanup exchange", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      yield* TestClock.adjust("1 second")
+      const uncertainStop = yield* Queue.take(h.stops)
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* h.browser.receive({ id: uncertainStop.id, sessionId: uncertainStop.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const stops = h.commands.filter((c) => c.method === "Page.stopScreencast")
+      // Settle all held commands before asserting, including when this regresses to just one stop.
+      for (const stop of stops.slice(1)) {
+        yield* h.browser.receive({ id: stop.id, sessionId: stop.sessionId, result: {} })
+      }
+      yield* h.browser.delivered
+      assert.strictEqual(stops.length, 2, "new success evidence during cleanup needs release after that exchange")
+    }).pipe(onTestClock))
+
   it.effect("does not repeat cleanup of an unconfirmed start already covered by the last consumer's stop", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(false, true)
