@@ -595,7 +595,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - A program's own operations are the same, through `Operation.fn` and `Operation.named` (API.md).
   - Dispatch is marked `mayHaveBeenSent` before any boundary where delivery becomes uncertain.
   - Abandoned query ids are tombstoned.
-  - Late replies that create resources (pages, contexts, handles, scripts, intercepts) are adopted into their intended owner, or released.
+  - Late replies that create resources (pages, contexts, handles, scripts, intercepts) are released by the library. L0 callers can supply a custom late-reply handler.
 
 | Operation | Interrupted before dispatch | Interrupted after dispatch | Recovery |
 |---|---|---|---|
@@ -604,7 +604,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 | navigation | no remote work | may continue | no automatic re-navigation |
 | input gesture | no remote work | partial input possible | bounded release of held input |
 | obligation decision | fallback applies | resolver continues | no contradictory decision |
-| resource creation | nothing created | may exist | late-reply adoption or cleanup |
+| resource creation | nothing created | may exist | late-reply cleanup |
 
 - **Subscriptions.** A subscription is the internal resource behind an event module's `next` and `stream`.
   - **Before it returns:** it acquires collectors and remote enablement, so the caller's next line already runs subscribed. If that fails, the caller gets `SubscriptionError` before reaching its action.

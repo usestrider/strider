@@ -141,7 +141,20 @@ const checkReleases = (model: ProtocolModel): void => {
       }
       if (shape.result === null) throw new Error(`${id}: has no result to release from`)
       resolvePointer(model, shape.result, release.from, id)
+      const destinations: Array<ReadonlyArray<string>> = [[release.param]]
       for (const [param, from] of Object.entries(release.paramsFrom ?? {})) {
+        const keys = param.slice(1).split("/").map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"))
+        if (keys.includes("*") || from.slice(1).split("/").includes("*")) {
+          throw new Error(`${id}: paramsFrom does not support wildcards`)
+        }
+        if (
+          destinations.some((other) =>
+            keys.slice(0, Math.min(keys.length, other.length)).every((key, i) => key === other[i])
+          )
+        ) {
+          throw new Error(`${id}: paramsFrom destinations overlap or collide with the resource parameter`)
+        }
+        destinations.push(keys)
         if (releaseShape?._tag !== "Command" || releaseShape.params === null) {
           throw new Error(`${id}: release has no parameters`)
         }

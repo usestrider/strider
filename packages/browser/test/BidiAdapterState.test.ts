@@ -1459,6 +1459,27 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(page.pendingRealms.length, 0)
     }))
 
+  it.effect("skips late handle release when the reply omits its required realm", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+      const fiber = yield* client.root.send(Script.evaluate({
+        expression: "({})",
+        target: { realm: "REQUEST" as Script.Realm },
+        awaitPromise: false,
+        resultOwnership: "root"
+      })).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      yield* Fiber.interrupt(fiber)
+      yield* browser.receive({
+        type: "success",
+        id: sent.id,
+        result: { type: "success", result: { type: "object", handle: "H" } }
+      })
+      yield* browser.delivered
+      assert.isTrue(Option.isNone(yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 100))))
+    }))
+
   for (const mode of ["consumed", "custom"] as const) {
     it.effect(`keeps BiDi ${mode} results under their caller's control`, () =>
       Effect.gen(function*() {

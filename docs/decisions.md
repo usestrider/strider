@@ -215,8 +215,12 @@ operation, so cleanup happens after a deadline passed). A new method doesn't com
 
 **Late resources are released.** When a caller stops waiting for a resource-producing protocol command, the
 library uses the protocol client's default late handler to release any resource the reply returns. BiDi script
-success and exception handles are disowned in the realm named by the reply. Consumed results keep their normal
-owner; L0 callers may supply a custom late handler and choose when to run its release effect.
+success and exception handles are disowned in the realm named by the reply. Consumed successful handles keep their normal
+owner; the adapter releases consumed exception handles that it does not return. L0 callers may supply a custom late handler and choose when to run its release effect.
+Additional release bindings are singular and non-overlapping; unsupported wildcard bindings are rejected during
+code generation. A malformed reply missing a required release binding is skipped, since guessing a realm could
+release the wrong resource. Such a handle may remain until its realm ends. Union paths are validated independently
+against the alternatives, without proving that every binding coexists with each resource path.
 
 - **Why.** An interrupted or timed-out caller cannot receive the resource. Releasing it avoids retaining remote
   handles until realm teardown and follows the policy of closing late page and context creations.

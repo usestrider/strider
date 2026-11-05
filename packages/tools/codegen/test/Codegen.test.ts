@@ -192,7 +192,17 @@ describe("overlays", () => {
       ...model,
       shapes: {
         ...model.shapes,
-        "Card#connect.Params": { ...params, members: { ...params.members, other: params.members["id"]!, target: { ...params.members["id"]!, type: { _tag: "Ref" as const, shape: "Extra" } } } },
+        "Card#connect.Params": {
+          ...params,
+          members: {
+            ...params.members,
+            other: {
+              ...params.members["id"]!,
+              type: { _tag: "List" as const, items: { _tag: "Ref" as const, shape: "Net#Cookie" } }
+            },
+            target: { ...params.members["id"]!, type: { _tag: "Ref" as const, shape: "Extra" } }
+          }
+        },
         Extra: { ...params, members: { realm: params.members["id"]! } }
       }
     }
@@ -224,32 +234,53 @@ describe("overlays", () => {
         }),
       /paramsFrom|\*/
     )
-    for (const paramsFrom of [
-      { "/target": "/cookies", "/target/realm": "/cookies" },
-      { "/target/realm": "/cookies", "/target": "/cookies" }
-    ]) assert.throws(() => release({ ...valid, paramsFrom }), /paramsFrom|overlap/)
+    for (
+      const paramsFrom of [
+        { "/target": "/cookies", "/target/realm": "/cookies" },
+        { "/target/realm": "/cookies", "/target": "/cookies" }
+      ]
+    ) assert.throws(() => release({ ...valid, paramsFrom }), /paramsFrom|overlap/)
     release({ ...valid, paramsFrom: { "/other": "/cookies" } })
   })
 
   it("check that a release names a command, its parameter, and a path through the result", () => {
     const release = (target: string, traits: object) =>
-      applyOverlays(model, [["resources.json", {
+      applyOverlays({
+        ...model,
+        shapes: {
+          ...model.shapes,
+          "Card#connect.Params": (() => {
+            const params = model.shapes["Card#connect.Params"]
+            assert(params?._tag === "Struct")
+            return {
+              ...params,
+              members: {
+                ...params.members,
+                other: {
+                  ...params.members["id"]!,
+                  type: { _tag: "List" as const, items: { _tag: "Ref" as const, shape: "Net#Cookie" } }
+                }
+              }
+            }
+          })()
+        }
+      }, [["resources.json", {
         reason: "fixture",
         annotate: [{ target, traits: { createsResource: true, ...traits } }]
       }]])
     const valid = { method: "Card.connect", param: "id", from: "/cookies/*/name" }
     const annotated = release("Net#getCookies", { release: [valid] })
     assert.deepStrictEqual(annotated.shapes["Net#getCookies"]?.traits.release, [valid])
-    const extra = { ...valid, paramsFrom: { "/id": "/cookies/*/name" } }
+    const extra = { ...valid, paramsFrom: { "/other": "/cookies" } }
     assert.deepStrictEqual(release("Net#getCookies", { release: [extra] }).shapes["Net#getCookies"]?.traits.release, [
       extra
     ])
     assert.throws(
-      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/missing": "/cookies/*/name" } }] }),
+      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/missing": "/cookies" } }] }),
       /doesn't resolve/
     )
     assert.throws(
-      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/id": "/missing" } }] }),
+      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/other": "/missing" } }] }),
       /doesn't resolve/
     )
     assert.throws(

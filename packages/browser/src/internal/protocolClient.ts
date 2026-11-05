@@ -319,7 +319,8 @@ const decoder = <A>(
 /** The values at a JSON pointer, where `*` stands for every element of a list. */
 export const valuesAt = (value: unknown, pointer: string): ReadonlyArray<unknown> => {
   let current: ReadonlyArray<unknown> = [value]
-  for (const segment of pointer.slice(1).split("/")) {
+  for (const raw of pointer.slice(1).split("/")) {
+    const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~")
     const next: Array<unknown> = []
     for (const item of current) {
       if (segment === "*") {
@@ -479,23 +480,27 @@ export const make: (
 
   const runLate = (entry: Pending, handler: (reply: Protocol.LateReply) => Effect.Effect<void>): void => {
     const state = entry.session
-    const release = Effect.forEach(
-      entry.release.flatMap((release) =>
-        valuesAt(entry.raw, release.from).map((value) => {
-          const params: Record<string, unknown> = { [release.param]: release.list === true ? [value] : value }
-          for (const [pointer, from] of Object.entries(release.paramsFrom ?? {})) {
-            const keys = pointer.slice(1).split("/").map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"))
-            let target = params
-            for (const key of keys.slice(0, -1)) {
-              target = (target[key] ??= {}) as Record<string, unknown>
+    const release = Effect.suspend(() =>
+      Effect.forEach(
+        entry.release.flatMap((release) =>
+          valuesAt(entry.raw, release.from).map((value) => {
+            const params: Record<string, unknown> = { [release.param]: release.list === true ? [value] : value }
+            for (const [pointer, from] of Object.entries(release.paramsFrom ?? {})) {
+              const values = valuesAt(entry.raw, from)
+              if (values.length !== 1) return undefined
+              const keys = pointer.slice(1).split("/").map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"))
+              let target = params
+              for (const key of keys.slice(0, -1)) {
+                target = (target[key] ??= {}) as Record<string, unknown>
+              }
+              target[keys[keys.length - 1]!] = values[0]
             }
-            target[keys[keys.length - 1]!] = valuesAt(entry.raw, from)[0]
-          }
-          return [release.method, params] as const
-        })
-      ),
-      ([method, params]) => Effect.ignore(sendRaw(state, method, params)),
-      { discard: true }
+            return [release.method, params] as const
+          })
+        ),
+        (command) => command === undefined ? Effect.void : Effect.ignore(sendRaw(state, command[0], command[1])),
+        { discard: true }
+      )
     )
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
