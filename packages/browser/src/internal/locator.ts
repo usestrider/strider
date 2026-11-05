@@ -959,7 +959,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       operation,
       new Reason.InvalidInput({
         input: "selector",
-        expected: "a CSS selector",
+        expected: response.kind === "role" ? "a role query with supported state filters" : "a CSS selector",
         hint: `${JSON.stringify(response.selector)}: ${response.message}`
       }),
       id

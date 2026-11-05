@@ -754,6 +754,111 @@ inferring CLI stability from its implementation's location under `internal/`, wh
 contract.
 
 
+## BiDi viewport precedence belongs to the declaration registry
+
+BiDi viewport declarations use the shared registry's Page, Context, Browser precedence for both dimensions and
+device scale. A broader change first sets each affected user context's effective default for future pages, then
+reapplies the effective value only to existing pages with page overrides. Page release explicitly applies its
+remaining effective value, or null when none remains. Creating a user context initializes only that context.
+
+Firefox 158.0 applies a user-context viewport command to existing pages, overwriting page settings; clearing a
+page restores the implementation default rather than an outer declaration. Native layering therefore cannot
+implement the declaration contract. Rewriting all contexts during creation also overwrites unrelated declarations.
+
+Rejected: relying on native scope precedence; applying only page commands, which leaves future pages without
+defaults; and redundantly writing context defaults to every page, which adds commands without changing their
+effective value and can address startup contexts Firefox announces but rejects by ID. Broader writes and page
+reapplication are sequential protocol commands; successful installation has its effective state when it returns.
+
+Release skips closing pages and removing contexts. Every remaining native context or page write has an independent
+five-second budget on the browser clock, detached from the releasing operation and with a fresh protocol deadline.
+A typed failure warns and marks cleanup unconfirmed; only an ended session is quiet. One failure cannot stop another
+target's restoration. Installation keeps propagating failures on active resources instead of treating them as cleanup.
+
+A failed or interrupted context removal resets its in-progress flag and restores that surviving context's current
+viewport default and page overrides. A failed page close resets only its own closing marker and restores that
+surviving page's current effective viewport. This repairs declaration changes skipped while the resource was
+closing; retaining the skipped native value or replaying the old declaration would leave stale state. Recovery
+uses the same independent target budgets and connection ownership as release, preserving the original close or
+removal outcome even if restoration rejects or times out. An ended transport skips these recovery writes.
+
+Viewport release runs in a connection-owned fiber. Read the releasing caller's operation before supplying the
+registration's captured context: a finished installation's operation is not the releasing caller. An active caller
+waits only within its own deadline and marks cleanup unconfirmed if it stops waiting. Ordinary release outside
+an operation, or release requiring confirmation, joins the cleanup fiber. Registry removal happens synchronously
+before any caller returns. A closing connection performs cleanup inline if its scope can no longer own a fiber.
+Keeping the native cleanup budget separate from the caller's wait avoids extending an expired operation by five
+seconds while still retaining ownership of restoration work.
+
+A context create reply is owned until initialization has installed its rollback path. The context is announced
+before viewport initialization so pages observed during initialization have a known parent. Failure or interruption
+of initialization attempts removal under a separate five-second detached budget, preserving the primary error or
+interruption. Confirmed removal ends any remaining pages before removing the context's tables and emitting its
+removal fact. If removal fails or times out, retain its known state and addition fact, reset the removal-in-progress
+flag, warn, and mark cleanup unconfirmed. A native command may have taken effect without confirmation; neither a
+warning nor a missing reply establishes that the context ended.
+
+Rejected: aborting all release work on the first failure; swallowing install errors; reporting a context removed
+without a successful native removal reply; and borrowing the initialization deadline for rollback, since it may
+already have expired; and waiting for that independent cleanup budget inside an expired caller's finalizer.
+Cleanup does not retry, and unexpected defects remain defects.
+
+
+## Strict capture matches the redacted snapshot
+
+Use one structured redacted tree for toolkit snapshot output and find matching, including names and paths.
+Matching hidden content and masking only the response confirms guesses at field values, so strict find must
+search what it can show. Preserve label searches and role filters; keep local capture unchanged.
+
+Carry optional field editability separately from role in engine and public snapshot data. Semantic articles,
+paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
+when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
+can mean that metadata was not collected or that the node is not a field; older snapshot data remains valid. Accessible names derived from editable content carry
+optional text provenance without changing local text rendering. Track field contributions through the chosen
+accessible or inferred name, including ancestor content, embedded values, referenced controls, nearby fields
+and image-alt inference. Optional `fieldContent` on names lets shared redaction mask these copies outside the
+field subtree while retaining genuine public labels. Inspecting only the finished tree loses those origins.
+Labels, semantic roles, states and refs survive.
+
+For non-full console capture, exception digests and history retain a library-authored event marker and monotonic
+occurrence time, with no page-provided name, message, stack or origin text. Error names and origins are no safer
+than messages. Full local capture keeps its previous diagnostics.
+
+Rejected: matching original text while redacting output, which leaks guesses; masking by role alone, which misses
+semantic editables; replacing semantic roles with editable, which loses meaning; mandatory false flags on every
+node, which enlarge every snapshot and reject older data; and masking exception messages alone, which leaves
+other page-controlled exception details visible. Strict remains a bounded capture policy: ordinary page text,
+labels, URLs, dialogs and other metadata remain available, so it is not a secrecy or inference guarantee.
+
+Assertions such as `expect --text` and action selectors continue matching original page content and can confirm
+guesses at masked values. Restricting those operations is a separate contract decision; this change restricts
+snapshot/find capture and does not change assertion or action semantics. Name provenance is limited to field
+contributions during name construction, not general tracking of sensitive data across arbitrary page scripts.
+
+Field-content provenance follows the contributor's flat-tree ancestry through assigned slots and shadow hosts,
+including native/ARIA field ancestors whose descendants do not inherit DOM editability. Keep explicit public
+label precedence; do not infer privacy by checking only the named element or a role-limited descendant walk.
+Mixed names are masked whole, and native select/ARIA listbox options follow field-subtree masking. This
+conservative choice can hide public portions of a derived name or option labels; separate unmasked nodes
+remain searchable. It avoids treating a copied private contribution as a public label.
+
+Memoize field classification, field ancestry and inferred-text provenance only within each tree walk. Cache
+both positive and negative ancestor paths to avoid repeating a full walk per contributor. Clear these caches
+with names, roles and text before every engine request, expectation observation and action revalidation round;
+role changes, slot reassignment and reparenting must be observed by the next walk. Caching across walks would
+retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
+provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
+
+Field editability and name provenance are requested only by redacted snapshot capture, including custom policies with the same masking
+setting. Ordinary library and full/local snapshots omit that masking metadata, skipping field classification,
+field-contribution ancestry and subtree analysis. Ordinary rendering and queries do not consume the editability
+flag. The optional public codec can carry it and diff can compare it when supplied, but neither requires
+automatic collection. The masking request is internal operation context, forwarded to each frame; it is not inferred
+from a preset's identity. Clear naming caches between requests and scope cached toolkit snapshots to their
+policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
+material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
+when requested rather than introducing separate name strings or speculative optimizations.
+
 ## One-shot event waits keep their first terminal outcome
 
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
@@ -874,7 +979,6 @@ choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
 
-
 **Actions accept transparent controls; visible means a person can see it.** Action readiness ignores opacity on the
 element and its ancestors and requires the other action checks. Styled controls commonly put a transparent real input over
 their decoration. Pointer reception establishes whether pointer input can reach them. Non-pointer actions such as
@@ -938,3 +1042,86 @@ Launched stock WebKit supplies upload-time creation timestamps rather than disk 
 file path. This existing native limitation remains unchanged; transferred files preserve available open-file stat
 times. Native timestamp expectations are explicit in the integration capability table, including exact disk-time
 assertions for Chromium and Firefox and exact transferred-time assertions for attached Chromium.
+
+## Retain Chromium's startup window by default
+
+Keep the initial window in Chromium's automation profile and, by inheritance, concurrent. Skipping it saves
+measurable time, but changes default-context session behavior and the initial tabs exposed by the CLI and tools.
+A saving paid once per browser does not justify those changes. Stock, custom and attach behavior also stays
+unchanged. Callers who choose the trade can already opt in through launch options with
+`args: ["--no-startup-window"]`; no new option or persistence exception is introduced.
+
+On pinned Linux Chromium 155.0.8059.79, Playwright 1.64.1 and Node 24.21.0, two reversed-order sweeps each used
+three warmup and twenty measured alternating Strider/Playwright pairs per variant. Launch and first isolated,
+configured page were timed from the same browser, with validation and cleanup outside timing. Combined Strider
+medians fell from 205.916 to 147.624 ms and from 191.340 to 151.012 ms: savings of 58.292 and 40.328 ms.
+Playwright's combined control medians changed by −0.705 and +3.372 ms. First-page medians rose by 0.808 and
+5.437 ms, so skipping the window did not merely move the launch cost to that page. The control medians support
+the saving, but the reverse sweep's Playwright combined p95 rose from 124.144 to 178.997 ms. These measurements
+do not establish a stable tail improvement, parity, or a headed-launch benefit.
+
+On the same Chromium pin, closing the last page in a windowless default context dropped its session cookie;
+a later page retained a lasting cookie and localStorage. Leaving the ordinary startup page open preserved the
+session cookie, while closing that startup page first exposed the same loss. Isolated contexts retained their
+session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
+a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
+directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
+It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+
+Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
+would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
+the benchmark and explicit-argument windowless tests remain useful without changing the production default.
+
+Rejected: enabling the flag in automation and concurrent for a once-per-browser 40–58 ms median saving while
+silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
+which still changes temporary default contexts; and treating the saving as evidence that the startup page has
+no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Chromium screencast ownership belongs to the session
+
+CDP's parameterless Page.stopScreencast stops the session's stream, not one acquisition. Pinned Chromium
+155.0.8059.79 rejects another start with `Screencast is already active`, so consumer counting alone does not
+support overlapping acquisitions. Reuse a confirmed stream without another start, while keeping each acquisition's
+metrics read. If an earlier owned start is still unconfirmed, a newer acquisition sends its own start; only the
+specific already-active reply (-32000) can confirm joining the earlier stream. Other errors keep their mapping,
+and an already-active reply with no earlier owned attempt remains a failure. An unknown start is not silently
+assumed to be a working stream. Native overlapping-consumer coverage requires newly sized frames after the
+first scope closes, so frames buffered before closure cannot establish delivery. A consumer reserves
+ownership before the renderer metrics read and start, and registers its idempotent scope release before either
+can run. Acquisition failure releases the same reservation without waiting for cleanup. Scope closure requests interruption
+of a still-running acquisition before releasing ownership; it does not wait for a held metrics reply or transport
+write. The start claim checks that its reservation is still open immediately before marking the command pending,
+so scope closure cannot leave a later dispatch outside the abandoned-start cleanup path. The protocol client
+reports a command's wire outcome synchronously, before a waiting fiber can consume the reply, including when
+that waiter was abandoned. The adapter can therefore track a successful start without transferring ownership
+after reply consumption. Rejection and session end are distinct outcomes; neither creates a stream to release.
+This preserves the existing session-loss error mapping rather than introducing a new error contract.
+
+A session's live and acquiring consumers suppress stop. Confirmation for sharing is separate from uncertain
+start evidence requiring best-effort cleanup. The last release stops a known stream; an abandoned
+unconfirmed start releases its reservation and supplies uncertain-start cleanup evidence immediately, unless
+another stop was already attempted after it. Abandonment, last release, reply outcome and session end drive
+cleanup; no grace interval or reply wait precedes the cleanup claim. This retains no consumer count indefinitely
+and cleans even a start that never replies. A later rejection adds no cleanup, but cannot undo a stop already
+issued for uncertainty. A stop before a future consumer reserves ownership is valid; a stop while that consumer
+is acquiring or live is forbidden. A later success can establish another cleanup need; it still
+cannot stop a newer consumer. Sharing requires confirmation from a start with no stop dispatched since it;
+a late reply from before a cleanup exchange cannot prove the stream survived that stop. Command metadata retained for a late reply lasts until that reply or session end,
+as it does for other resource-creating commands. Session end clears the ownership state.
+
+Stop claims the session synchronously before its exchange begins. New consumers may reserve and read metrics,
+but cannot send start until that exchange finishes. The whole exchange, including writing to the transport and
+waiting for confirmation, runs interruptibly under a fresh one-second browser-clock budget; it clears the
+acquisition's protocol deadline. A canceled caller waiting behind stop needs no start cleanup. Cleanup is best
+effort and does not retry a failed stop. A transport that ignores interruption can outlive the budget; bytes already
+accepted by a transport can still reach the browser. Missing confirmation does not prove native release.
+The built-in pipe and WebSocket transports preserve command order on their connection. Consumer frame
+subscriptions and acknowledgments remain independent.
+
+Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
+counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
+interval for an unknown outcome, which adds a hidden delay without proving success or failure; serializing entire
+start/reply exchanges, which blocks a newer acquisition behind an abandoned start; registering cleanup after
+consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
+wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
+deadline remain in force, with no retries, activation lease or public options added.

@@ -9,6 +9,7 @@
  * - **The tree** is narrowed by `depth` in the engine, and by `interactiveOnly` here, once the frames are in.
  * - **`text`** is the tree as indented YAML (`Engine.renderText`).
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as Equivalence from "effect/Equivalence"
 import * as Inspectable from "effect/Inspectable"
@@ -24,6 +25,11 @@ import * as Engine from "./engine.ts"
 import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+
+/** Internal masking-metadata request; ordinary library snapshots omit field editability and name provenance. @default false */
+export const NameProvenance = Context.Reference<boolean>("@usestrider/browser/internal/snapshot/NameProvenance", {
+  defaultValue: () => false
+})
 
 const TypeId = "~@usestrider/browser/Snapshot"
 
@@ -72,10 +78,11 @@ export const take = (
   Effect.gen(function*() {
     const interactivity = (options?.sources ?? "aria+interactivity") === "aria+interactivity"
     const depth = options?.depth ?? null
+    const provenance = yield* NameProvenance
     const answer = yield* Runtime.sendRouted(
       owner.runtime,
       owner.page,
-      { op: "snapshot", steps, interactivity, depth },
+      { op: "snapshot", steps, interactivity, depth, provenance },
       id,
       at
     )
@@ -132,6 +139,7 @@ export const take = (
         op: "snapshot",
         steps: null,
         interactivity,
+        provenance,
         depth: depth === null ? null : depth - level
       }, id).pipe(Effect.orElseSucceed(() => Option.none<Engine.Response>()))
       if (Option.isNone(inner) || inner.value._tag !== "Snapshot") return []
@@ -184,12 +192,14 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
     ? {
       _tag: "Inferred",
       value: node.name.value,
-      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel"
+      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel",
+      ...(node.name.fieldContent === undefined ? {} : { fieldContent: node.name.fieldContent })
     }
     : node.name,
   states: new Set(
     node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
   ),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
   validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
 })
@@ -204,6 +214,20 @@ const refsOf = (root: Snapshot.Node): ReadonlyMap<Snapshot.RefId, Snapshot.Node>
   visit(root)
   return refs
 }
+
+/** Renders a structured tree with the same renderer as page snapshots. */
+export const render = (node: Snapshot.Node): string => Engine.renderText(toEngine(node))
+
+const toEngine = (node: Snapshot.Node): Engine.SnapNode => ({
+  ref: Option.getOrNull(node.ref),
+  role: node.role,
+  name: node.name,
+  states: [...node.states],
+  validationMessage: Option.getOrNull(node.validationMessage),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
+  children: node.children.map(toEngine),
+  frame: false
+})
 
 /** One node's line of the text, without its children. */
 const lineOf = (node: Snapshot.Node): string =>
@@ -222,6 +246,7 @@ const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Sc
   role: Snapshot.Role,
   name: Snapshot.Name,
   states: Schema.ReadonlySet(Snapshot.State),
+  editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.Option(Schema.String)
 }))
 

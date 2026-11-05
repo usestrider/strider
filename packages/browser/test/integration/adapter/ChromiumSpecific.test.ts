@@ -5,13 +5,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, Expect } from "@usestrider/browser"
+import { Browser, Deadline, Expect, Ledger } from "@usestrider/browser"
+import * as BrowserCdp from "@usestrider/browser/cdp/Browser"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -23,6 +25,7 @@ import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
+import { useXvfb } from "../stockWebKit.ts"
 import { makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
@@ -31,6 +34,232 @@ const timeout = 60_000
 describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
+      it.effect(
+        "connects Chromium with no startup page",
+        () =>
+          Effect.gen(function*() {
+            const { transport } = yield* ChromiumLauncher.launch({
+              executablePath: executable,
+              args: ["--no-startup-window"]
+            })
+            const cdp = yield* CdpConnection.make(transport)
+            const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(cdp.browser))
+            assert.deepStrictEqual(targetInfos.filter((target) => target.type === "page"), [])
+          }),
+        timeout
+      )
+
+      for (const debugging of ["pipe", "port"] as const) {
+        for (const headless of [true, false]) {
+          for (const createPage of [false, true]) {
+            it.effect(
+              `cleans up windowless ${debugging} Chromium ${headless ? "headless" : "headed"} ${
+                createPage ? "after the last page" : "before any page"
+              }`,
+              () =>
+                Effect.gen(function*() {
+                  if (!headless) yield* useXvfb()
+                  const fs = yield* FileSystem.FileSystem
+                  const items = new Set<string>()
+                  const result = yield* Effect.scoped(
+                    Effect.gen(function*() {
+                      const launched =
+                        yield* (debugging === "pipe" ? ChromiumLauncher.launch : ChromiumLauncher.launchWithPort)({
+                          executablePath: executable,
+                          headless,
+                          args: ["--no-startup-window"]
+                        })
+                      const cdp = yield* CdpConnection.make(launched.transport)
+                      const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(cdp.browser))
+                      assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
+                      const targets = () =>
+                        Target.getTargets({}).pipe(
+                          Protocol.on(cdp.browser),
+                          Effect.map((reply) => reply.targetInfos.filter((target) => target.type === "page"))
+                        )
+                      assert.deepStrictEqual(yield* targets(), [])
+                      if (createPage) {
+                        const { targetId } = yield* Target.createTarget({ url: "about:blank", newWindow: true }).pipe(
+                          Protocol.on(cdp.browser)
+                        )
+                        assert.lengthOf(yield* targets(), 1)
+                        yield* Target.setDiscoverTargets({ discover: true }).pipe(Protocol.on(cdp.browser))
+                        const destroyed = yield* cdp.browser.subscribe(Target.targetDestroyed)
+                        const ended = yield* destroyed.pipe(
+                          Stream.filter((event) => event.targetId === targetId),
+                          Stream.runHead,
+                          Effect.forkChild
+                        )
+                        yield* Target.closeTarget({ targetId }).pipe(Protocol.on(cdp.browser))
+                        yield* Fiber.join(ended)
+                        assert.deepStrictEqual(yield* targets(), [])
+                      }
+                      assert.isTrue(yield* launched.launched.handle.isRunning)
+                      assert.isTrue(yield* fs.exists(launched.launched.userDataDir))
+                      assert.include(launched.launched.args, "--no-startup-window")
+                      return launched
+                    }).pipe(Effect.provideService(Ledger.CurrentLedger, {
+                      add: (item) =>
+                        Effect.sync(() => {
+                          items.add(JSON.stringify(item))
+                        }),
+                      remove: (item) =>
+                        Effect.sync(() => {
+                          items.delete(JSON.stringify(item))
+                        })
+                    }))
+                  )
+                  assert.isFalse(yield* result.launched.handle.isRunning)
+                  assert.isFalse(yield* fs.exists(result.launched.userDataDir))
+                  yield* result.transport.closed
+                  assert.strictEqual(items.size, 0)
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      for (const debugging of ["pipe", "port"] as const) {
+        it.effect(
+          `configures the first isolated page with a windowless ${debugging} browser`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } =
+                  yield* (debugging === "pipe" ? ChromiumLauncher.launch : ChromiumLauncher.launchWithPort)({
+                    executablePath: executable,
+                    args: ["--no-startup-window"]
+                  })
+                return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+                assert.deepStrictEqual(yield* browser.pages, [])
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
+                  assert.deepStrictEqual(
+                    yield* page.evaluateInMainWorld(() => [document.URL, innerWidth, innerHeight, devicePixelRatio]),
+                    ["about:blank", 640, 480, 1]
+                  )
+                  assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+                }))
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const context = yield* browser.newContext()
+                  yield* context.addInitScript(() => {
+                    Object.defineProperty(globalThis, "fromInit", { value: "ready" })
+                  })
+                  const page = yield* context.newPage
+                  yield* page.goto(`${served.origin}/init`)
+                  assert.strictEqual(
+                    yield* page.evaluateInMainWorld(() => Reflect.get(globalThis, "seenByAuthor")),
+                    "string"
+                  )
+                }))
+                assert.deepStrictEqual(yield* browser.pages, [])
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
+      for (const candidate of [false, true]) {
+        it.effect(
+          `reads persisted storage and preserves a supplied profile on ${candidate ? "windowless" : "ordinary"} launch`,
+          () =>
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              const served = yield* site
+              const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-persistent-test-" })
+              yield* fs.writeFileString(`${directory}/caller-owned`, "keep")
+              for (const round of [0, 1]) {
+                let gracefulClose: Effect.Effect<unknown, unknown> = Effect.void
+                let child: import("../../../src/internal/launch.ts").Launched | undefined
+                const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                  const { launched, transport } =
+                    yield* (round === 0 ? ChromiumLauncher.launchWithPort : ChromiumLauncher.launch)({
+                      executablePath: executable,
+                      args: candidate ? ["--no-startup-window"] : [],
+                      userDataDir: directory
+                    })
+                  child = launched
+                  if (round === 0) {
+                    const [port, browserPath] = (yield* fs.readFileString(`${directory}/DevToolsActivePort`)).split(
+                      "\n"
+                    )
+                    const peer = yield* CdpConnection.make(
+                      yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`)
+                    )
+                    gracefulClose = BrowserCdp.close().pipe(Protocol.on(peer.browser), Effect.ignore)
+                  }
+                  return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+                }))
+                yield* Effect.scoped(
+                  Effect.gen(function*() {
+                    const browser = yield* Browser.Browser
+                    assert.lengthOf(yield* browser.defaultContext.pages, candidate ? 0 : 1)
+                    const context = yield* browser.defaultContext.control
+                    const page = yield* context.newPage
+                    yield* page.goto(`${served.origin}/hello`)
+                    if (round === 0) {
+                      yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
+                      // Seed durable browser data with Chromium's graceful close. Scope shutdown is a signal,
+                      // which does not guarantee flushing newly written localStorage on either launch mode.
+                      yield* gracefulClose
+                      yield* child!.handle.exitCode
+                    } else {
+                      assert.strictEqual(
+                        yield* page.evaluateInMainWorld(() => localStorage.getItem("windowless")),
+                        "kept"
+                      )
+                    }
+                  }).pipe(Effect.provide(backend))
+                )
+                assert.isDefined(child)
+                assert.isFalse(yield* child!.handle.isRunning)
+                assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
+              }
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "keeps a supplied profile's session cookie when the default context's last opened page closes",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-session-cookie-test-" })
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({
+                executablePath: executable,
+                userDataDir: directory
+              })
+              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+            }))
+            yield* Effect.scoped(
+              Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const context = yield* browser.defaultContext.control
+                yield* context.cookies.set({
+                  name: "session",
+                  value: "1",
+                  scope: { _tag: "Url", url: served.origin }
+                })
+                const opened = yield* context.newPage
+                yield* opened.close()
+                const page = yield* context.newPage
+                yield* page.goto(`${served.origin}/hello`)
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.cookie), "session=1")
+              }).pipe(Effect.provide(backend))
+            )
+          }),
+        timeout
+      )
+
       it.effect(
         "attributes a route-fulfilled redirect to the route and its final response to the network",
         () =>

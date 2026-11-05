@@ -199,6 +199,89 @@ describe("ProtocolClient", () => {
       Input.dispatchMouseEvent({ type: type as "mouseMoved" | "mousePressed" | "mouseReleased", x: 10, y: 20 })
     )
 
+  for (const terminal of ["success", "failure", "sessionEnded"] as const) {
+    it.effect(`reports an abandoned resource command's ${terminal} exactly once`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+        const session = yield* attach(browser, client, "S1")
+        const outcomes: Array<string> = []
+        const waiting = yield* Effect.forkScoped(
+          session.send(Page.startScreencast()).pipe(
+            Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+              outcomes.push(outcome)
+            }),
+            Protocol.withLateReplyHandler(() => Effect.void)
+          )
+        )
+        const command = yield* browser.next
+        yield* Fiber.interrupt(waiting)
+        assert.deepStrictEqual(outcomes, [])
+        if (terminal === "sessionEnded") {
+          yield* browser.receive({ method: "Target.detachedFromTarget", params: { sessionId: "S1", targetId: "T-S1" } })
+        } else {
+          yield* browser.receive(
+            terminal === "success"
+              ? { id: command.id, sessionId: "S1", result: {} }
+              : { id: command.id, sessionId: "S1", error: { code: -32000, message: "rejected" } }
+          )
+        }
+        yield* browser.delivered
+        assert.deepStrictEqual(outcomes, [terminal])
+        yield* browser.receive({ id: command.id, sessionId: "S1", result: {} })
+        yield* browser.receive({ method: "Target.detachedFromTarget", params: { sessionId: "S1", targetId: "T-S1" } })
+        yield* browser.delivered
+        assert.deepStrictEqual(outcomes, [terminal])
+      }))
+  }
+
+  it.effect("does not overwrite a reply outcome when its transport write fails afterward", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const written = yield* Deferred.make<void, Transport.TransportError>()
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: (message) => browser.transport.send(message).pipe(Effect.andThen(Deferred.await(written)))
+      }, CdpWire.wire)
+      const outcomes: Array<string> = []
+      const waiting = yield* Effect.forkScoped(Effect.exit(
+        client.root.send(Page.startScreencast()).pipe(
+          Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+            outcomes.push(outcome)
+          })
+        )
+      ))
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* browser.delivered
+      yield* Deferred.fail(
+        written,
+        new Transport.TransportError({
+          reason: new Transport.ConnectionLost({ initiator: "remote", description: "write failed after reply" })
+        })
+      )
+      assert(Exit.isFailure(yield* Fiber.join(waiting)))
+      assert.deepStrictEqual(outcomes, ["success"])
+    }))
+
+  it.effect("records a successful command outcome before its waiter consumes the result", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const outcomes: Array<string> = []
+      const waiting = yield* Effect.forkScoped(
+        client.root.send(Page.startScreencast()).pipe(
+          Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+            outcomes.push(outcome)
+          }),
+          Effect.tap(() => Effect.sync(() => assert.deepStrictEqual(outcomes, ["success"])))
+        )
+      )
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(waiting)
+    }))
+
   it.effect("reports success and error reply receipt sequences only to the requesting hook", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

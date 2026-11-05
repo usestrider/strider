@@ -54390,7 +54390,8 @@
       "result": null,
       "traits": {
         "status": "experimental",
-        "description": "Starts sending each frame using the `screencastFrame` event."
+        "description": "Starts sending each frame using the `screencastFrame` event.",
+        "createsResource": true
       }
     },
     "Page#startScreencast.Params": {
