@@ -585,7 +585,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      // On stock WebKit the page sees only the press
+      // On stock WebKit, a mousedown handler that opens a dialog loses mouseup and click,
+      // even though the click operation can succeed.
       if (name !== "WebKit") {
         it.effect("finishes a click whose mousedown opens a dialog", () =>
           Effect.gen(function*() {
