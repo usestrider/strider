@@ -15,7 +15,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import { bidiHeaders, coveringPattern } from "./mapping.ts"
-import { scopeParams, type State } from "./state.ts"
+import { placement, scopeParams, type State } from "./state.ts"
 
 /** Where a document's preload scripts keep which of them ran. */
 const ranKey = "@usestrider/browser/initScripts/ran"
@@ -70,7 +70,36 @@ const applyScripts = Effect.fnUntraced(function*(state: State) {
   )
 })
 
-/** Sets the value a scope declares for one kind of override, or clears it; BiDi layers scopes itself. */
+/**
+ * Updates viewport defaults for future pages, then resolves existing pages through the registry. BiDi's user
+ * context command overwrites existing page settings, and clearing a page restores the browser default rather
+ * than a surrounding declaration.
+ */
+const applyViewport = Effect.fnUntraced(function*(state: State, scope: Adapter.DeclarationScope) {
+  const set = (target: Parameters<typeof BrowsingContext.setViewport>[0], override: Adapter.Override | undefined) =>
+    state.send(BrowsingContext.setViewport({
+      ...target,
+      viewport: override?._tag === "Viewport" ? { width: override.width, height: override.height } : null,
+      devicePixelRatio: override?._tag === "Viewport" ? override.deviceScaleFactor : null
+    }))
+  if (scope._tag !== "Page") {
+    for (const context of state.contexts.values()) {
+      if (scope._tag === "UserContext" && scope.context !== context.id) continue
+      yield* set({ userContexts: [context.bidi] }, state.registry.overrides({ context: context.id }).get("Viewport"))
+    }
+  }
+  for (const page of state.navigables.values()) {
+    if (page.parent !== undefined || page.removed || !Declarations.covers(scope, placement(page))) continue
+    const effective = state.registry.overrides(placement(page)).get("Viewport")
+    // The user-context command already applied defaults. Only page overrides need restoring after it.
+    if (scope._tag !== "Page" && effective === state.registry.overrides({ context: page.context.id }).get("Viewport")) {
+      continue
+    }
+    yield* set({ context: page.bidi }, effective)
+  }
+})
+
+/** Sets or clears a kind at its scope; viewport precedence is resolved by the registry. */
 export const applyKind = (
   state: State,
   kind: Adapter.Override["_tag"],
@@ -85,20 +114,8 @@ export const applyKind = (
   const override = latest?.declaration._tag === "Override" ? latest.declaration.override : undefined
   const where = scopeParams(state, scope)
   switch (kind) {
-    case "Viewport": {
-      const viewport = override?._tag === "Viewport" ? { width: override.width, height: override.height } : null
-      const ratio = override?._tag === "Viewport" ? override.deviceScaleFactor : null
-      const targets = scope._tag === "Page"
-        ? [{ context: state.navigablesById.get(scope.page)?.bidi }]
-        : scope._tag === "UserContext"
-        ? [where]
-        : [{ userContexts: [...state.contexts.values()].map((context) => context.bidi) }]
-      return Effect.forEach(
-        targets,
-        (target) => state.send(BrowsingContext.setViewport({ ...target, viewport, devicePixelRatio: ratio })),
-        { discard: true }
-      )
-    }
+    case "Viewport":
+      return applyViewport(state, scope)
     case "UserAgent":
       return state.send(Emulation.setUserAgentOverride({
         userAgent: override?._tag === "UserAgent" ? override.userAgent : null,

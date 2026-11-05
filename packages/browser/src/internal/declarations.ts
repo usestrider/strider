@@ -25,9 +25,9 @@ export interface Registered {
   readonly sequence: number
 }
 
-/** Where a target sits: its page and its context. */
+/** Where a target sits; omit the page to resolve a context's defaults for future pages. */
 export interface Placement {
-  readonly page: Target.NavigableId
+  readonly page?: Target.NavigableId | undefined
   readonly context: UserContext.Id
 }
 

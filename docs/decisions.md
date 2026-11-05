@@ -752,3 +752,20 @@ Rejected: treating every addition as a minor release regardless of stability, wh
 unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
+
+
+## BiDi viewport precedence belongs to the declaration registry
+
+BiDi viewport declarations use the shared registry's Page, Context, Browser precedence for both dimensions and
+device scale. A broader change first sets each affected user context's effective default for future pages, then
+reapplies the effective value only to existing pages with page overrides. Page release explicitly applies its
+remaining effective value, or null when none remains. Creating a user context initializes only that context.
+
+Firefox 158.0 applies a user-context viewport command to existing pages, overwriting page settings; clearing a
+page restores the implementation default rather than an outer declaration. Native layering therefore cannot
+implement the declaration contract. Rewriting all contexts during creation also overwrites unrelated declarations.
+
+Rejected: relying on native scope precedence; applying only page commands, which leaves future pages without
+defaults; and redundantly writing context defaults to every page, which adds commands without changing their
+effective value and can address startup contexts Firefox announces but rejects by ID. Broader writes and page
+reapplication are sequential protocol commands; the declaration has its effective state when application returns.

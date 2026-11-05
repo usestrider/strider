@@ -1,7 +1,7 @@
 /**
- * User contexts, pages and downloads on BiDi. BiDi scopes declarations natively, by context or user context, so a
- * new context needs no pause: preload scripts and overrides registered for its user context apply before its
- * scripts run.
+ * User contexts, pages and downloads on BiDi. Preload scripts and native user-context settings cover future
+ * pages. A new user context receives its effective viewport default without rewriting existing contexts;
+ * viewport precedence for existing pages is resolved by the declaration registry.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -106,8 +106,8 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
   state.contexts.set(entry.id, entry)
   state.contextsByBidi.set(userContext, entry)
   yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
-  // Browser-wide viewports are set per user context, so a new one gets them too
-  yield* applyKind(state, "Viewport", { _tag: "Browser" }).pipe(Effect.ignore)
+  // Seed only the new context: rewriting every context would disturb existing page overrides.
+  yield* Kit.protocol(applyKind(state, "Viewport", { _tag: "UserContext", context: entry.id }))
   return entry.id
 })
 
