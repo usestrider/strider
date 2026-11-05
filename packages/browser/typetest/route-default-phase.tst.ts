@@ -292,3 +292,14 @@ describe("route diagnostics keep earlier accepted calls", () => {
     ).type.not.toRaiseError()
   })
 })
+
+describe("route diagnostics keep explicit-phase mismatches readable", () => {
+  it("names the handler a selected response phase needs", () => {
+    expect(page.route("**", request, { phase: "response" })).type.toRaiseError(
+      /parameter of type 'Handler<never, never, "response">'/
+    )
+    expect(context.route("**", request, { phase: "response" })).type.toRaiseError(
+      /parameter of type 'Handler<never, never, "response">'/
+    )
+  })
+})
