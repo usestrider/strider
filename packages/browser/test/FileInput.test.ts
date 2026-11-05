@@ -1,7 +1,7 @@
 /** Caller-local files must cross the connection; browser-host paths must stay paths. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, FileChooser, FileInput, FilePath, Target } from "@usestrider/browser"
+import { Browser, Deadline, FileChooser, FileInput, FilePath, Target } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -207,4 +207,89 @@ describe("file preparation", () => {
         assert.deepStrictEqual(empty, { _tag: "Made", files: [] })
       })
     ))
+})
+
+describe("a local read under the deadline", () => {
+  // A read that never ends, as a FIFO with no writer or a hung network mount gives
+  const stuck = (page: Browser.Page) =>
+    Effect.sync(() => {
+      const runtime = Handles.page(page).runtime
+      Object.assign(runtime, {
+        fileSystem: Option.map(runtime.fileSystem, (fs) => ({ ...fs, readFile: () => Effect.never }))
+      })
+    })
+
+  it.live("Locator.setInputFiles times out when the read doesn't end", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+        routed,
+        response: {
+          _tag: "Ready",
+          element: "upload-input",
+          scrolled: false,
+          point: null,
+          draggable: false,
+          checked: null,
+          fill: null
+        }
+      }))
+      yield* Effect.addFinalizer(() => Effect.sync(() => ready.mockRestore()))
+      const page = yield* Browser.newPage()
+      yield* stuck(page)
+      const ended = yield* page.locator("#file").setInputFiles(FileInput.local("/caller/stuck.txt")).pipe(
+        Deadline.withDefaultBudget("200 millis"),
+        Effect.exit,
+        Effect.timeoutOption("3 seconds")
+      )
+      assert.isTrue(Option.isSome(ended), "the operation outlived its 200ms deadline by more than 3s")
+    })).pipe(Effect.provide(Layer.provide(
+      BrowserImpl.layer(Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })),
+      NodeServices.layer
+    ))))
+
+  it.live("FileChooser.choose leaves the chooser to the policy when the read doesn't end", () => {
+    let send!: Adapter.Sink
+    const decisions: Array<Adapter.Decision> = []
+    return Effect.scoped(Effect.gen(function*() {
+      const decided = yield* Deferred.make<void>()
+      const connection = BrowserImpl.layer((sink) => {
+        send = sink
+        return Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({
+            entries: Fake.capabilities.map((entry) =>
+              entry.name === "fileChooser" ? { ...entry, status: "supported", limitations: [] } : entry
+            )
+          })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          resolve: Effect.fnUntraced(function*(_obligation, decision) {
+            decisions.push(decision)
+            yield* Deferred.succeed(decided, undefined)
+          })
+        })))
+      })
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* stuck(page)
+        yield* FileChooser.handle(page, FileChooser.choose(FileInput.local("/caller/stuck.txt")))
+        yield* send({
+          _tag: "ObligationOpened",
+          obligation: "stuck-chooser" as Adapter.ObligationId,
+          subject: {
+            _tag: "FileChooser",
+            navigable: Handles.page(page).entry.id,
+            multiple: true,
+            element: Option.some(node)
+          }
+        })
+        const ended = yield* Deferred.await(decided).pipe(Effect.timeoutOption("3 seconds"))
+        assert.isTrue(Option.isSome(ended), "the chooser stayed undecided 3s past the handler's 200ms budget")
+        assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
+      }).pipe(Deadline.withDefaultBudget("200 millis"), Effect.provide(connection))
+    })).pipe(Effect.provide(NodeServices.layer))
+  })
 })

@@ -151,6 +151,116 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         )
       }
 
+      it.effect("replaces and clears browser-host paths and made files in either order", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(files)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-remote-upload-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const file = path.join(directory, "host.txt")
+            fs.writeFileSync(file, "on host")
+            const remote = FileInput.remote(FilePath.Remote.make(file))
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const input = page.getByLabel("Files")
+            const out = page.locator("#out")
+            yield* input.setInputFiles(remote)
+            yield* out.pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            yield* input.setInputFiles([])
+            yield* out.pipe(Expect.toHaveText(""))
+            yield* input.setInputFiles(made[0]!)
+            yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
+            yield* input.setInputFiles(remote)
+            yield* out.pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            yield* input.setInputFiles(made[0]!)
+            yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
+          }))
+        }), timeout)
+
+      it.effect("keeps a local file's modification time", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            document.querySelector("input").addEventListener("change", (event) => {
+              document.getElementById("out").textContent = String(event.target.files[0].lastModified)
+            })
+          </script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-local-upload-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const file = path.join(directory, "dated.txt")
+            fs.writeFileSync(file, "dated")
+            fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
+            yield* page.locator("#out").pipe(Expect.toHaveText("978307200000"))
+          }))
+        }), timeout)
+
+      it.effect("refuses several local files for an input that takes one", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            document.querySelector("input").addEventListener("change", (event) => {
+              document.getElementById("out").textContent = String(event.target.files.length)
+            })
+          </script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const both = [FileInput.local(import.meta.filename), FileInput.local(import.meta.filename)]
+            const exit = yield* page.getByLabel("File").setInputFiles(both).pipe(Effect.exit)
+            const count = yield* page.locator("#out").textContent()
+            assert.isTrue(exit._tag === "Failure", `set ${count} files on a single-file input`)
+            assert.strictEqual(count, "none")
+          }))
+        }), timeout)
+
+      it.effect("gives local files to a chooser whose input isn't in the document", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("fileChooser"))) return
+          const url = yield* fixture(`<button>Choose</button><p id="out">none</p><script>
+            document.querySelector("button").onclick = () => {
+              const input = document.createElement("input")
+              input.type = "file"
+              input.onchange = () => {
+                document.getElementById("out").textContent = input.files[0].name + ":" + input.files.length
+              }
+              input.click()
+            }
+          </script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* FileChooser.handle(page, FileChooser.choose(FileInput.local(import.meta.filename)))
+            yield* page.getByRole("button", { name: "Choose" }).click()
+            yield* page.locator("#out").pipe(Expect.toHaveText("tooling.ts:1"))
+          }))
+        }), timeout)
+
+      for (const megabytes of [32, 256, 600]) {
+        it.effect(`transfers a local file of ${megabytes} MiB`, () =>
+          Effect.gen(function*() {
+            const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+              document.querySelector("input").addEventListener("change", (event) => {
+                document.getElementById("out").textContent = String(event.target.files[0].size)
+              })
+            </script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-local-upload-"))
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
+              )
+              const file = path.join(directory, "large.bin")
+              fs.writeFileSync(file, "")
+              fs.truncateSync(file, megabytes * 1024 * 1024)
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
+              yield* page.locator("#out").pipe(Expect.toHaveText(String(megabytes * 1024 * 1024)))
+            })).pipe(Deadline.withDefaultBudget("90 seconds"))
+          }), 200_000)
+      }
+
       it.effect("cancels failed chooser preparation and allows the next chooser", () =>
         Effect.gen(function*() {
           if (!(yield* supports("fileChooser"))) return
