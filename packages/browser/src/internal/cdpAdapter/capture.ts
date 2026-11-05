@@ -4,6 +4,7 @@
  */
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -17,6 +18,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { type CaptureGuard, pageOf, type State, type TargetEntry } from "./state.ts"
 
@@ -265,8 +267,23 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   const on = Protocol.on(session)
   const frames = yield* session.subscribe(Page.screencastFrame)
   yield* layoutMetrics(session)
-  yield* Kit.protocol(Page.startScreencast({ format: "jpeg" }).pipe(on))
-  yield* Effect.addFinalizer(() => Page.stopScreencast().pipe(on, Effect.ignore))
+  const stop = Page.stopScreencast().pipe(
+    on,
+    Operation.detached,
+    Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+    Effect.provideService(Protocol.CommandTimeout, Duration.seconds(1)),
+    Effect.ignore
+  )
+  // Keep the wait interruptible, but transfer a consumed reply to the scope atomically.
+  // Replies abandoned before consumption belong to the protocol late-reply handler instead.
+  yield* Effect.uninterruptibleMask((restore) =>
+    restore(Kit.protocol(
+      Page.startScreencast({ format: "jpeg" }).pipe(
+        on,
+        Protocol.withLateReplyHandler(() => stop)
+      )
+    )).pipe(Effect.andThen(Effect.addFinalizer(() => stop)))
+  )
   return frames.pipe(
     Stream.mapError(Kit.protocolError),
     Stream.mapEffect((frame) =>
