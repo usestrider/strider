@@ -406,6 +406,85 @@ for (const mode of ["open", "closed"]) {
       )
 
       it.effect(
+        "keeps a click within its deadline when the page turns busy after the click",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button onclick="setTimeout(() => { const end = Date.now() + 8000; while (Date.now() < end); })">Busy</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const started = Date.now()
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Busy\"]" }).pipe(
+                Deadline.within("1 second")
+              )
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 4000, "the page's busy loop must not hold the click past its 1 second deadline")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "removes click validation listeners after a click that opens a dialog nothing has decided",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<button onclick="alert('Stop')">Ask</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const evaluate = (functionDeclaration: string) =>
+                runtime.model.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Ask\"]" }).pipe(
+                Deadline.within("3 seconds")
+              )
+              yield* call(tools, "dialog", { page: "p1", decision: "dismiss" })
+              const result = yield* evaluate("() => globalThis.activeValidationListeners.size").pipe(
+                Deadline.within("5 seconds")
+              )
+              assert(result._tag === "Value" && result.value.type === "number")
+              assert.strictEqual(result.value.value, 0, "the observer's listeners outlive the click")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "redacts custom validation messages through the snapshot tool and keeps full capture",
         () =>
           Effect.gen(function*() {
