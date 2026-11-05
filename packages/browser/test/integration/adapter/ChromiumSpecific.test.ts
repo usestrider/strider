@@ -39,8 +39,7 @@ describe("Chromium adapter, CDP only", () => {
         () =>
           Effect.gen(function*() {
             const { transport } = yield* ChromiumLauncher.launch({
-              executablePath: executable,
-              args: ["--no-startup-window"]
+              executablePath: executable
             })
             const cdp = yield* CdpConnection.make(transport)
             const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(cdp.browser))
