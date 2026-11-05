@@ -26,9 +26,10 @@ import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
 describe("CDP locale declaration release", () => {
   for (const fifo of [false, true]) {
-    for (const remaining of [undefined, "de-DE"] as const) {
-      it.effect(`does not reapply a released locale from an in-flight target configuration (${remaining ?? "reset"}, ${fifo ? "FIFO" : "delayed reply"})`, () =>
+    for (const mode of ["reset", "remaining", "replacement"] as const) {
+      it.effect(`does not reapply a released locale from an in-flight target configuration (${mode}, ${fifo ? "FIFO" : "delayed reply"})`, () =>
         Effect.gen(function*() {
+          const remaining = mode === "reset" ? undefined : "de-DE"
           const browser = yield* makeBrowser
           const heldLocale = yield* Deferred.make<Sent>()
           const resumeReplies = yield* Deferred.make<void>()
@@ -40,8 +41,8 @@ describe("CDP locale declaration release", () => {
             while (true) {
               const command = yield* browser.next
               commands.push(command)
-              // Hold configuration's first locale reply, while later cleanup replies can complete.
-              // This forces the lifetime overlap using out-of-order replies, not a claimed Chromium reply order.
+              // Hold configuration at the first locale command. The FIFO case also holds
+              // subsequent replies; the other case permits cleanup replies to overtake it.
               if (command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR") {
                 yield* Deferred.succeed(heldLocale, command)
                 continue
@@ -83,10 +84,10 @@ describe("CDP locale declaration release", () => {
             sink: (fact) =>
               fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
           })
-          if (remaining !== undefined) {
+          if (mode === "remaining") {
             yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
               _tag: "Override",
-              override: { _tag: "Locale", locale: remaining }
+              override: { _tag: "Locale", locale: "de-DE" }
             })
           }
           const declarationScope = yield* Scope.make()
@@ -105,6 +106,12 @@ describe("CDP locale declaration release", () => {
             }
           })
           const held = yield* Deferred.await(heldLocale)
+          const replacement = mode === "replacement"
+            ? yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+              _tag: "Override",
+              override: { _tag: "Locale", locale: "de-DE" }
+            }).pipe(Effect.forkScoped)
+            : undefined
           // Start release while configuration is awaiting its locale reply. Let runnable fibers drain:
           // the unfixed adapter sends reset-UA here, matching the retained Chromium FIFO overlap.
           const closing = yield* Scope.close(declarationScope, Exit.void).pipe(
@@ -115,6 +122,7 @@ describe("CDP locale declaration release", () => {
           yield* reply(held)
           yield* Deferred.succeed(resumeReplies, undefined)
           yield* Fiber.join(closing)
+          if (replacement !== undefined) yield* Fiber.join(replacement)
           yield* Deferred.await(ready)
           const localeCommands = commands.filter((command) => command.method === "Emulation.setLocaleOverride")
           assert.deepStrictEqual(localeCommands.at(-1)?.params, remaining === undefined ? {} : { locale: remaining })
