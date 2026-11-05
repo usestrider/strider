@@ -181,3 +181,31 @@ describe("context.route phase boundaries", () => {
     >()
   })
 })
+
+describe("route handlers declared for more phases than selected", () => {
+  const everyPhase: Route.Handler<never, never, Route.Phase> = () => Route.continue
+  const requestOrAuth: Route.Handler<never, never, "request" | "auth"> = () => Route.continue
+
+  it("page.route accepts them at the default phase", () => {
+    expect(page.route("**", everyPhase)).type.not.toRaiseError()
+    expect(page.route("**", requestOrAuth)).type.not.toRaiseError()
+    expect(page.route("**", everyPhase, {})).type.not.toRaiseError()
+  })
+  it("page.route accepts them at an explicit phase", () => {
+    expect(page.route("**", everyPhase, { phase: "request" })).type.not.toRaiseError()
+    expect(page.route("**", everyPhase, { phase: "response" })).type.not.toRaiseError()
+    expect(page.route("**", everyPhase, { phase: "auth" })).type.not.toRaiseError()
+    expect(page.route("**", requestOrAuth, { phase: "auth" })).type.not.toRaiseError()
+  })
+  it("context.route accepts them at the default phase", () => {
+    expect(context.route("**", everyPhase)).type.not.toRaiseError()
+    expect(context.route("**", requestOrAuth)).type.not.toRaiseError()
+    expect(context.route("**", everyPhase, {})).type.not.toRaiseError()
+  })
+  it("context.route accepts them at an explicit phase", () => {
+    expect(context.route("**", everyPhase, { phase: "request" })).type.not.toRaiseError()
+    expect(context.route("**", everyPhase, { phase: "response" })).type.not.toRaiseError()
+    expect(context.route("**", everyPhase, { phase: "auth" })).type.not.toRaiseError()
+    expect(context.route("**", requestOrAuth, { phase: "auth" })).type.not.toRaiseError()
+  })
+})
