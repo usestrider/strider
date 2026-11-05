@@ -200,7 +200,10 @@ describe("FileInput across a connection", () => {
                     ? [file, file]
                     : [source === "unreadable" ? path.join(directory, "missing.txt") : file]
                 )
-                assert.deepStrictEqual(evaluations, [])
+                assert.strictEqual(
+                  evaluations.length,
+                  source === "mixed" && operation === "Locator.setInputFiles" ? 1 : 0
+                )
               } else {
                 assert.notInclude(paths, file, "the caller's path is not a file on the browser host")
                 const chunks = evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk"))
@@ -345,7 +348,14 @@ describe("a local read under the deadline", () => {
       NodeServices.layer
     ))))
 
-  for (const scenario of ["stalled read", "time spent in handler", "scope interruption"] as const) {
+  for (
+    const scenario of [
+      "stalled read",
+      "time spent in handler",
+      "scope interruption",
+      "stalled chunk acknowledgement"
+    ] as const
+  ) {
     it.live(`FileChooser.choose cancels after ${scenario} without applying late files`, () => {
       let send!: Adapter.Sink
       const decisions: Array<Adapter.Decision> = []
@@ -371,6 +381,14 @@ describe("a local read under the deadline", () => {
             realm: () => Effect.succeed("upload-realm" as Target.RealmId),
             evaluate: (_realm, call) => {
               evaluations.push(call)
+              if (
+                scenario === "stalled chunk acknowledgement" &&
+                call.functionDeclaration.includes("function appendChunk")
+              ) {
+                return Effect.andThen(Deferred.succeed(reading, undefined), Effect.never).pipe(
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+                )
+              }
               return Effect.succeed({
                 _tag: "Value",
                 value: call.result === "handle"
@@ -407,8 +425,12 @@ describe("a local read under the deadline", () => {
                     Object.assign(Object.create(file), {
                       readAlloc: () =>
                         Effect.andThen(
-                          Deferred.succeed(reading, undefined),
-                          scenario === "time spent in handler"
+                          scenario === "stalled chunk acknowledgement"
+                            ? Effect.void
+                            : Deferred.succeed(reading, undefined),
+                          scenario === "stalled chunk acknowledgement" ?
+                            Effect.succeed(Option.some(new Uint8Array([1]))) :
+                            scenario === "time spent in handler"
                             ? Effect.as(Effect.sleep("150 millis"), Option.some(new Uint8Array([1])))
                             : Deferred.await(release).pipe(Effect.map(Option.some))
                         ).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))

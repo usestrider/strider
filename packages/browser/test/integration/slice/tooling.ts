@@ -302,6 +302,27 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
+      it.effect("compares native and local modification times", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            document.querySelector("input").onchange = (event) => { document.getElementById("out").textContent = String(event.target.files[0].lastModified) }
+          </script>`)
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-native-time-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const file = path.join(directory, "dated.txt")
+          fs.writeFileSync(file, "dated")
+          fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
+          const page = yield* Browser.newPage()
+          yield* page.goto(url)
+          yield* page.getByLabel("File").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
+          const native = yield* page.locator("#out").readText
+          yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
+          const local = yield* page.locator("#out").readText
+          yield* Effect.logInfo({ name, attached, expectedMtime: 978307200000, native, local })
+          assert.match(native, /^[0-9]+$/)
+          assert.match(local, /^[0-9]+$/)
+        })), timeout)
+
       it.effect("gives local files to a chooser whose input isn't in the document", () =>
         Effect.gen(function*() {
           if (!(yield* supports("fileChooser"))) return
@@ -397,7 +418,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(sampling)))
               const started = performance.now()
               yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
-              yield* page.locator("#out").pipe(Expect.toHaveText(`large.bin:978307200000:${megabytes * 1024 * 1024}`))
+              yield* page.locator("#out").pipe(Expect.toHaveText(
+                attached
+                  ? `large.bin:978307200000:${megabytes * 1024 * 1024}`
+                  : new RegExp(`^large\\.bin:[0-9]+:${megabytes * 1024 * 1024}$`)
+              ))
               yield* Effect.logInfo({
                 upload: name,
                 attached,
