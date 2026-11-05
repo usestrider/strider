@@ -69,7 +69,8 @@ export interface FileInput {
  *
  * The caller reads and transfers the file on every connection, including launched browsers. Build the browser's
  * layer with Effect's `FileSystem` and `Path` services; relative paths resolve against the caller's working
- * directory. The file keeps its basename and gets its MIME type from its extension, falling back to
+ * directory. The file keeps its basename and the modification time reported by `FileSystem.stat`; if the
+ * file system omits that time, it uses the time the file is made in the page. Its MIME type comes from its extension, falling back to
  * `application/octet-stream`. Unreadable files fail with `FileUnreadable` in locator operations; chooser handlers
  * report preparation failures and cancel the chooser.
  *
@@ -99,7 +100,8 @@ export const local = (path: FilePath.Local | string): FileInput => FileInputImpl
  *
  * **Details**
  *
- * The browser is given the path as it is, and reads the file on its own machine.
+ * The browser is given the path as it is, and reads the file on its own machine. The browser supplies its
+ * metadata; the MIME type may be empty.
  *
  * **Example** (Uploading a file already on the grid)
  *
@@ -128,12 +130,13 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * The file is made in the page and set on the input through a `DataTransfer`, with `input` and `change`
  * dispatched as when a user chooses files. It keeps its MIME type and needs no file system shared with the
- * browser, so it works with a browser on another machine too.
+ * browser, so it works with a browser on another machine too. Its modification time is when it is made in the page.
  *
  * **Gotchas**
  *
  * One call may combine bytes and local files. Mixing either with remote paths fails with `InvalidInput`
- * before the selection changes.
+ * before the selection changes. Multiple files for an input without `multiple` fail with `InvalidInput`
+ * before changing the selection or dispatching events.
  *
  * **Example** (Uploading a generated report)
  *

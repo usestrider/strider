@@ -1182,7 +1182,9 @@ export interface Locator extends ReadonlyLocator {
    * Local files require Effect's `FileSystem` and `Path` services when building the browser layer and are
    * transferred from the caller. A local file that cannot be read fails with `FileUnreadable` before the
    * selection changes; an element other than a file input fails with `WrongElement`. Local files and bytes may
-   * be combined, but mixing either with remote paths fails with `InvalidInput`. An empty list clears the input.
+   * be combined, but mixing either with remote paths fails with `InvalidInput`. Multiple local files or bytes
+   * for an input without `multiple` also fail with `InvalidInput` before selection or events change. An empty
+   * list clears the input.
    *
    * **Example** (Uploading a receipt)
    *

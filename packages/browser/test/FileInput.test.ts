@@ -171,7 +171,8 @@ describe("file preparation", () => {
         assert.strictEqual(prepared._tag, "Made")
         if (prepared._tag !== "Made") return
         assert.strictEqual(prepared.files[0]!.name, "FileInput.test.ts")
-        assert.propertyVal(prepared.files[0], "lastModified", fs.statSync(import.meta.filename).mtime.getTime())
+        const info = yield* Option.getOrThrow(runtime.fileSystem).stat(import.meta.filename)
+        assert.propertyVal(prepared.files[0], "lastModified", Option.getOrThrow(info.mtime).getTime())
         assert.deepStrictEqual(prepared.files[0]!.data, new Uint8Array(fs.readFileSync(import.meta.filename)))
         assert.strictEqual(prepared.files[1]!.mimeType, "x/test")
       })
@@ -206,6 +207,23 @@ describe("file preparation", () => {
           ]).pipe(Effect.flip)
           assert.strictEqual(mixed._tag, "InvalidInput")
         }
+        const statFailure = yield* Preparation.prepare({
+          ...runtime,
+          fileSystem: Option.map(
+            runtime.fileSystem,
+            (fs) => ({ ...fs, stat: () => fs.stat("/nowhere/upload-metadata") })
+          )
+        }, [FileInput.local(import.meta.filename)]).pipe(Effect.flip)
+        assert.strictEqual(statFailure._tag, "FileUnreadable")
+        const withoutTime = yield* Preparation.prepare({
+          ...runtime,
+          fileSystem: Option.map(runtime.fileSystem, (fs) => ({
+            ...fs,
+            stat: (path) => fs.stat(path).pipe(Effect.map((info) => ({ ...info, mtime: Option.none() })))
+          }))
+        }, [FileInput.local(import.meta.filename)])
+        assert.strictEqual(withoutTime._tag, "Made")
+        if (withoutTime._tag === "Made") assert.isUndefined(withoutTime.files[0]!.lastModified)
         const empty = yield* Preparation.prepare({ ...runtime, fileSystem: Option.none(), path: Option.none() }, [])
         assert.deepStrictEqual(empty, { _tag: "Made", files: [] })
       })

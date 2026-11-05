@@ -7,3 +7,5 @@ Transfer `FileInput.local` contents from the caller on every connection, includi
 Local files and bytes may now be selected together. Remote paths must be selected separately: mixtures with local files or bytes fail before changing the selection. Empty selections clear through page-side construction so previously transferred files are cleared too. Local chooser uploads, bytes and empty selections require the backend to identify the chooser input; single choosers still require exactly one file.
 
 File chooser preparation and transfer share the handler’s original deadline, including time spent in the user handler. Stalled or interrupted reads cancel the chooser without applying files afterward.
+
+Preserve local stat modification times in transferred Files; missing stat times and bytes use page-side creation time. Reject multiple Local/Bytes files on an input without multiple as InvalidInput before selection or events change.

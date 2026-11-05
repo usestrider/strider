@@ -19,6 +19,7 @@ export interface Made {
   readonly name: string
   readonly mimeType: string
   readonly data: Uint8Array
+  readonly lastModified?: number | undefined
 }
 
 /** Where a file's bytes come from. */
@@ -70,14 +71,20 @@ export const prepare = Effect.fnUntraced(function*(
       }
       const path = runtime.path.value.resolve(from.path)
       const name = runtime.path.value.basename(path)
-      return runtime.fileSystem.value.readFile(path).pipe(
-        Effect.mapError((error) => new Locator.FileUnreadable({ path, hint: String(error) })),
-        Effect.map((data): Made => ({
-          _tag: "Bytes",
-          name,
-          data,
-          mimeType: Option.getOrElse(Mime.getType(name), () => "application/octet-stream")
-        }))
+      const fs = runtime.fileSystem.value
+      return fs.readFile(path).pipe(
+        Effect.flatMap((data) =>
+          fs.stat(path).pipe(
+            Effect.map((info): Made => ({
+              _tag: "Bytes",
+              name,
+              data,
+              lastModified: Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime())),
+              mimeType: Option.getOrElse(Mime.getType(name), () => "application/octet-stream")
+            }))
+          )
+        ),
+        Effect.mapError((error) => new Locator.FileUnreadable({ path, hint: String(error) }))
       )
     }
   )
@@ -87,18 +94,30 @@ export const prepare = Effect.fnUntraced(function*(
 /** Runs in the caller's isolated world: makes each file, sets them on the input, and dispatches as a choice does. */
 function setMadeFiles(
   element: HTMLInputElement,
-  files: ReadonlyArray<{ readonly name: string; readonly mimeType: string; readonly data: string }>
+  files: ReadonlyArray<{
+    readonly name: string
+    readonly mimeType: string
+    readonly data: string
+    readonly lastModified?: number | undefined
+  }>
 ) {
+  if (files.length > 1 && !element.multiple) return false
   const transfer = new DataTransfer()
   for (const file of files) {
     const binary = atob(file.data)
     const bytes = new Uint8Array(binary.length)
     for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
-    transfer.items.add(new File([bytes], file.name, { type: file.mimeType }))
+    transfer.items.add(
+      new File([bytes], file.name, {
+        type: file.mimeType,
+        ...(file.lastModified === undefined ? {} : { lastModified: file.lastModified })
+      })
+    )
   }
   element.files = transfer.files
   element.dispatchEvent(new Event("input", { bubbles: true, composed: true }))
   element.dispatchEvent(new Event("change", { bubbles: true }))
+  return true
 }
 
 /**
@@ -114,7 +133,7 @@ export const setMade = (
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
   }
-): Effect.Effect<void, Evaluation.Failure> =>
+): Effect.Effect<void, Evaluation.Failure | { readonly _tag: "Reason"; readonly reason: Reason.InvalidInput }> =>
   Effect.gen(function*() {
     // The library's own function: the page's world where the backend makes no other
     const realm = yield* Evaluation.documentRealm(
@@ -126,10 +145,11 @@ export const setMade = (
     const encoded = files.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
+      lastModified: file.lastModified,
       data: Encoding.encode(file.data)
     }))
     const rest = yield* Evaluation.toLocal([encoded], realm, 1)
-    yield* Evaluation.call(runtime, {
+    const result = yield* Evaluation.call(runtime, {
       realm,
       functionDeclaration: setMadeFiles.toString(),
       arguments: [{ _tag: "Node", node }, ...rest],
@@ -139,4 +159,14 @@ export const setMade = (
       at: options.at,
       id: options.id
     })
+    if (result.type === "boolean" && !result.value) {
+      return yield* Effect.fail({
+        _tag: "Reason" as const,
+        reason: new Reason.InvalidInput({
+          input: "files",
+          expected: "at most one file for an input without the multiple attribute",
+          hint: `${files.length} files were given; the existing selection is unchanged`
+        })
+      })
+    }
   })

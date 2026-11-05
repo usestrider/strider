@@ -908,3 +908,10 @@ that fiber would leave stalled reads beyond both timeout and scope interruption;
 extend the promised deadline. The existing cancellation policy handles expiration, and preparation cannot apply
 files after its deadline. Decision failures retain their existing reporting, and staged decisions are still counted
 before application.
+
+Local transfer preserves the modification time reported by the caller's file system, alongside the basename,
+contents and inferred MIME type. A failed stat is `FileUnreadable`; an absent timestamp falls back to page-side
+creation time, as bytes do. The made-file setter checks the live input's `multiple` attribute before constructing
+or assigning its `DataTransfer` and before dispatching events, returning a typed `InvalidInput` refusal. Native
+path upload enforces cardinality, but assigning a made `FileList` does not; relying on that assignment would
+allow two files on a single-file input. Local and Bytes share this validation.
