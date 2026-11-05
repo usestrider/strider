@@ -343,6 +343,13 @@ export const ReplyReceived = Context.Reference<((received: number) => void) | un
   }
 )
 
+/** Synchronous command outcome, including replies whose waiter was abandoned. Resource owners use this
+ * before the waiting fiber can consume a reply or be interrupted. It does not imply result decoding succeeded. */
+export const ReplyOutcome = Context.Reference<((outcome: "success" | "failure" | "sessionEnded") => void) | undefined>(
+  "strider/internal/ReplyOutcome",
+  { defaultValue: () => undefined }
+)
+
 interface Pending {
   readonly id: number
   readonly session: SessionState
@@ -353,10 +360,18 @@ interface Pending {
   /** The receive sequence number of the reply. */
   received: number
   onReceipt?: ((received: number) => void) | undefined
+  onOutcome?: ((outcome: "success" | "failure" | "sessionEnded") => void) | undefined
   replied: boolean
   raw: unknown
   /** Set once the caller stopped waiting on a command that creates a resource. */
   late: ((reply: Protocol.LateReply) => Effect.Effect<void>) | undefined
+}
+
+/** A reply and a failing transport write can race; an owner observes only the first terminal outcome. */
+const settle = (entry: Pending, outcome: "success" | "failure" | "sessionEnded"): void => {
+  const notify = entry.onOutcome
+  entry.onOutcome = undefined
+  notify?.(outcome)
 }
 
 interface SessionState {
@@ -418,6 +433,7 @@ export const make: (
     for (const child of state.children) end(child, why)
     for (const entry of state.pending) {
       pending.delete(entry.id)
+      settle(entry, "sessionEnded")
       if (entry.late === undefined) Deferred.doneUnsafe(entry.reply, Effect.fail(failure(reason)))
     }
     state.pending.clear()
@@ -512,7 +528,9 @@ export const make: (
     const decode = definition.Result === undefined
       ? undefined
       : decoder(definition.Result, method, yield* Protocol.CurrentValidation)
+    const onOutcome = yield* ReplyOutcome
     const entry = register(state, method, encoded, definition.traits.release ?? [])
+    entry.onOutcome = onOutcome
     entry.onReceipt = yield* ReplyReceived
     let consumed = false
     // The caller stopped waiting. A reply still to come is dropped, or handed to the late-reply handler; one
@@ -542,7 +560,10 @@ export const make: (
       write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
         Effect.catch(() =>
           Effect.andThen(
-            Effect.sync(() => unregister(entry)),
+            Effect.sync(() => {
+              unregister(entry)
+              settle(entry, "failure")
+            }),
             Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
           )
         )
@@ -722,6 +743,7 @@ export const make: (
         unregister(entry)
         entry.received = received
         entry.onReceipt?.(received)
+        settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {
           if (entry.late === undefined) {
             Deferred.doneUnsafe(entry.reply, Effect.fail(failure(classify(wire.errors, entry.method, incoming.error))))

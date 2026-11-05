@@ -979,7 +979,6 @@ choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
 
-
 **Actions accept transparent controls; visible means a person can see it.** Action readiness ignores opacity on the
 element and its ancestors and requires the other action checks. Styled controls commonly put a transparent real input over
 their decoration. Pointer reception establishes whether pointer input can reach them. Non-pointer actions such as
@@ -1025,3 +1024,52 @@ Rejected: enabling the flag in automation and concurrent for a once-per-browser 
 silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Chromium screencast ownership belongs to the session
+
+CDP's parameterless Page.stopScreencast stops the session's stream, not one acquisition. Pinned Chromium
+155.0.8059.79 rejects another start with `Screencast is already active`, so consumer counting alone does not
+support overlapping acquisitions. Reuse a confirmed stream without another start, while keeping each acquisition's
+metrics read. If an earlier owned start is still unconfirmed, a newer acquisition sends its own start; only the
+specific already-active reply (-32000) can confirm joining the earlier stream. Other errors keep their mapping,
+and an already-active reply with no earlier owned attempt remains a failure. An unknown start is not silently
+assumed to be a working stream. Native overlapping-consumer coverage requires newly sized frames after the
+first scope closes, so frames buffered before closure cannot establish delivery. A consumer reserves
+ownership before the renderer metrics read and start, and registers its idempotent scope release before either
+can run. Acquisition failure releases the same reservation without waiting for cleanup. Scope closure requests interruption
+of a still-running acquisition before releasing ownership; it does not wait for a held metrics reply or transport
+write. The start claim checks that its reservation is still open immediately before marking the command pending,
+so scope closure cannot leave a later dispatch outside the abandoned-start cleanup path. The protocol client
+reports a command's wire outcome synchronously, before a waiting fiber can consume the reply, including when
+that waiter was abandoned. The adapter can therefore track a successful start without transferring ownership
+after reply consumption. Rejection and session end are distinct outcomes; neither creates a stream to release.
+This preserves the existing session-loss error mapping rather than introducing a new error contract.
+
+A session's live and acquiring consumers suppress stop. Confirmation for sharing is separate from uncertain
+start evidence requiring best-effort cleanup. The last release stops a known stream; an abandoned
+unconfirmed start releases its reservation and supplies uncertain-start cleanup evidence immediately, unless
+another stop was already attempted after it. Abandonment, last release, reply outcome and session end drive
+cleanup; no grace interval or reply wait precedes the cleanup claim. This retains no consumer count indefinitely
+and cleans even a start that never replies. A later rejection adds no cleanup, but cannot undo a stop already
+issued for uncertainty. A stop before a future consumer reserves ownership is valid; a stop while that consumer
+is acquiring or live is forbidden. A later success can establish another cleanup need; it still
+cannot stop a newer consumer. Sharing requires confirmation from a start with no stop dispatched since it;
+a late reply from before a cleanup exchange cannot prove the stream survived that stop. Command metadata retained for a late reply lasts until that reply or session end,
+as it does for other resource-creating commands. Session end clears the ownership state.
+
+Stop claims the session synchronously before its exchange begins. New consumers may reserve and read metrics,
+but cannot send start until that exchange finishes. The whole exchange, including writing to the transport and
+waiting for confirmation, runs interruptibly under a fresh one-second browser-clock budget; it clears the
+acquisition's protocol deadline. A canceled caller waiting behind stop needs no start cleanup. Cleanup is best
+effort and does not retry a failed stop. A transport that ignores interruption can outlive the budget; bytes already
+accepted by a transport can still reach the browser. Missing confirmation does not prove native release.
+The built-in pipe and WebSocket transports preserve command order on their connection. Consumer frame
+subscriptions and acknowledgments remain independent.
+
+Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
+counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
+interval for an unknown outcome, which adds a hidden delay without proving success or failure; serializing entire
+start/reply exchanges, which blocks a newer acquisition behind an abandoned start; registering cleanup after
+consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
+wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
+deadline remain in force, with no retries, activation lease or public options added.

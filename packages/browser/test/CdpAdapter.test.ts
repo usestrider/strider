@@ -21,6 +21,7 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Har from "../src/internal/har.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Readable from "../src/internal/readable.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
@@ -673,126 +674,158 @@ const replyMetrics = (browser: Effect.Success<typeof makeBrowser>, command: Sent
   browser.receive({ id: command.id, sessionId: command.sessionId, result: metrics })
 
 /** A synthetic CDP connection folded into the real public Browser layer. */
-const sentHeaders = Effect.fnUntraced(function*(holdMetrics = false, holdStart = false) {
-  const browser = yield* makeBrowser
-  const ready = yield* Deferred.make<void>()
-  const settled = yield* Queue.unbounded<void>()
-  const facts: Array<Adapter.Fact> = []
-  const commands: Array<Sent> = []
-  const screenshotWork = yield* Queue.unbounded<Sent>()
-  const captures = yield* Queue.unbounded<Sent>()
-  const preparation = yield* Queue.unbounded<Sent>()
-  yield* Effect.gen(function*() {
-    while (true) {
-      const command = yield* browser.next
-      commands.push(command)
-      if (
-        command.method === "Page.getLayoutMetrics" || command.method === "Page.captureScreenshot" ||
-        command.method === "Page.startScreencast"
-      ) {
-        yield* Queue.offer(screenshotWork, command)
-      }
-      if (command.method === "Page.getLayoutMetrics" && !holdMetrics) {
-        yield* replyMetrics(browser, command)
-        continue
-      }
-      if (command.method === "Page.captureScreenshot") {
-        yield* Queue.offer(captures, command)
-        continue
-      }
-      if (
-        command.method === "Page.getLayoutMetrics" || command.method === "Page.createIsolatedWorld" ||
-        (command.method === "Emulation.setDefaultBackgroundColorOverride" && command.params?.color === undefined)
-      ) {
-        yield* Queue.offer(preparation, command)
-        continue
-      }
-      if (holdStart && command.method === "Page.startScreencast") continue
-      const result = command.method === "Runtime.evaluate"
-        ? { result: { type: "number", value: 2 } }
-        : command.method === "Browser.getVersion"
-        ? {
-          protocolVersion: "1.3",
-          product: "Chrome/155.0.8059.79",
-          revision: "test",
-          userAgent: "HeadlessChrome",
-          jsVersion: "test"
+const sentHeaders = Effect.fnUntraced(
+  function*(holdMetrics = false, holdStart = false, holdStop = false, blockStop = false, blockStart = false) {
+    const browser = yield* makeBrowser
+    const ready = yield* Deferred.make<void>()
+    const settled = yield* Queue.unbounded<void>()
+    const facts: Array<Adapter.Fact> = []
+    const commands: Array<Sent> = []
+    const screenshotWork = yield* Queue.unbounded<Sent>()
+    const stops = yield* Queue.unbounded<Sent>()
+    const stopDeadlines: Array<Option.Option<number>> = []
+    const stopWrites = yield* Queue.unbounded<void>()
+    const stopWriteGate = yield* Deferred.make<void>()
+    const startWrites = yield* Queue.unbounded<void>()
+    const startWriteGate = yield* Deferred.make<void>()
+    const captures = yield* Queue.unbounded<Sent>()
+    const preparation = yield* Queue.unbounded<Sent>()
+    yield* Effect.gen(function*() {
+      while (true) {
+        const command = yield* browser.next
+        commands.push(command)
+        if (
+          command.method === "Page.getLayoutMetrics" || command.method === "Page.captureScreenshot" ||
+          command.method === "Page.startScreencast"
+        ) {
+          yield* Queue.offer(screenshotWork, command)
         }
-        : command.method === "Target.getBrowserContexts"
-        ? { browserContextIds: [] }
-        : command.method === "Page.getFrameTree"
-        ? {
-          frameTree: {
-            frame: {
-              id: "76F3487A52CF4F79FE4AD28961E44D32",
-              loaderId: "initial",
-              url: "about:blank",
-              securityOrigin: "://",
-              mimeType: "text/html"
+        if (command.method === "Page.getLayoutMetrics" && !holdMetrics) {
+          yield* replyMetrics(browser, command)
+          continue
+        }
+        if (command.method === "Page.captureScreenshot") {
+          yield* Queue.offer(captures, command)
+          continue
+        }
+        if (
+          command.method === "Page.getLayoutMetrics" || command.method === "Page.createIsolatedWorld" ||
+          (command.method === "Emulation.setDefaultBackgroundColorOverride" && command.params?.color === undefined)
+        ) {
+          yield* Queue.offer(preparation, command)
+          continue
+        }
+        if (command.method === "Page.stopScreencast") {
+          yield* Queue.offer(stops, command)
+          if (holdStop) continue
+        }
+        if (holdStart && command.method === "Page.startScreencast") continue
+        const result = command.method === "Runtime.evaluate"
+          ? { result: { type: "number", value: 2 } }
+          : command.method === "Browser.getVersion"
+          ? {
+            protocolVersion: "1.3",
+            product: "Chrome/155.0.8059.79",
+            revision: "test",
+            userAgent: "HeadlessChrome",
+            jsVersion: "test"
+          }
+          : command.method === "Target.getBrowserContexts"
+          ? { browserContextIds: [] }
+          : command.method === "Page.getFrameTree"
+          ? {
+            frameTree: {
+              frame: {
+                id: "76F3487A52CF4F79FE4AD28961E44D32",
+                loaderId: "initial",
+                url: "about:blank",
+                securityOrigin: "://",
+                mimeType: "text/html"
+              }
             }
           }
-        }
-        : {}
-      yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
-    }
-  }).pipe(Effect.forkScoped)
-  const services = yield* Layer.build(BrowserImpl.layer((sink) =>
-    CdpAdapter.connect(browser.transport, {
-      ownership: "attached",
-      sink: Effect.fnUntraced(function*(fact) {
-        yield* sink(fact)
-        facts.push(fact)
-        if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
-        if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
+          : {}
+        yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+      }
+    }).pipe(Effect.forkScoped)
+    const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+      CdpAdapter.connect({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          if (JSON.parse(message).method === "Page.startScreencast" && blockStart) {
+            yield* Queue.offer(startWrites, undefined)
+            yield* Deferred.await(startWriteGate)
+          }
+          if (JSON.parse(message).method === "Page.stopScreencast") {
+            stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
+            yield* Queue.offer(stopWrites, undefined)
+            if (blockStop) yield* Deferred.await(stopWriteGate)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, {
+        ownership: "attached",
+        sink: Effect.fnUntraced(function*(fact) {
+          yield* sink(fact)
+          facts.push(fact)
+          if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
+          if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
+        })
       })
-    })
-  ))
-  yield* browser.receive({
-    method: "Target.attachedToTarget",
-    params: {
-      sessionId: "S1",
-      targetInfo: {
-        targetId: "76F3487A52CF4F79FE4AD28961E44D32",
-        type: "page",
-        title: "",
-        url: "about:blank",
-        attached: true
-      },
-      waitingForDebugger: false
-    }
-  })
-  yield* Deferred.await(ready)
-  const service = Context.get(services, Browser.Browser)
-  const page = (yield* service.pages.waitFor((pages) => pages.length > 0))[0]!
-  const next = yield* NetworkRequest.next(page, { url: "**" })
-  const send = (event: (typeof captured)[number]) => browser.receive({ ...event, sessionId: "S1" })
-  const barrier = Effect.gen(function*() {
+    ))
     yield* browser.receive({
-      method: "Network.webSocketCreated",
-      sessionId: "S1",
+      method: "Target.attachedToTarget",
       params: {
-        requestId: `sentinel-${facts.length}`,
-        url: "ws://127.0.0.1/"
+        sessionId: "S1",
+        targetInfo: {
+          targetId: "76F3487A52CF4F79FE4AD28961E44D32",
+          type: "page",
+          title: "",
+          url: "about:blank",
+          attached: true
+        },
+        waitingForDebugger: false
       }
     })
-    yield* Queue.take(settled)
-  })
-  yield* send(captured[0]!)
-  yield* barrier
-  const request = yield* next
-  return {
-    browser,
-    page,
-    request,
-    send,
-    barrier,
-    captures,
-    commands,
-    screenshotWork,
-    preparation,
-    facts
+    yield* Deferred.await(ready)
+    const service = Context.get(services, Browser.Browser)
+    const page = (yield* service.pages.waitFor((pages) => pages.length > 0))[0]!
+    const next = yield* NetworkRequest.next(page, { url: "**" })
+    const send = (event: (typeof captured)[number]) => browser.receive({ ...event, sessionId: "S1" })
+    const barrier = Effect.gen(function*() {
+      yield* browser.receive({
+        method: "Network.webSocketCreated",
+        sessionId: "S1",
+        params: {
+          requestId: `sentinel-${facts.length}`,
+          url: "ws://127.0.0.1/"
+        }
+      })
+      yield* Queue.take(settled)
+    })
+    yield* send(captured[0]!)
+    yield* barrier
+    const request = yield* next
+    return {
+      browser,
+      page,
+      request,
+      send,
+      barrier,
+      captures,
+      stops,
+      stopDeadlines,
+      stopWrites,
+      stopWriteGate,
+      startWrites,
+      startWriteGate,
+      commands,
+      screenshotWork,
+      preparation,
+      facts
+    }
   }
-})
+)
 
 /** Advance deadlines without delays, retaining the live epoch used by the real protocol client's command deadline. */
 const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
@@ -1320,6 +1353,655 @@ describe("Chromium screencast renderer readiness", () => {
       const error = Exit.findErrorOption(exit)
       assert(Option.isSome(error) && Deadline.isTimeout(error.value))
       assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
+    }).pipe(onTestClock))
+
+  for (const terminal of ["interrupt", "timeout"] as const) {
+    for (const replyAt of ["before scope close", "after scope close"] as const) {
+      it.effect(`releases a late successful start after ${terminal}, reply ${replyAt}`, () =>
+        Effect.gen(function*() {
+          const h = yield* sentHeaders(false, true)
+          const page = yield* h.page.control
+          const scope = yield* Scope.make()
+          const pending = yield* Effect.forkScoped(Effect.exit(
+            page.capability(Capability.Screencast).pipe(
+              Deadline.within("1 second"),
+              Effect.provideService(Scope.Scope, scope)
+            )
+          ))
+          assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+          const start = yield* Queue.take(h.screenshotWork)
+          assert.strictEqual(start.method, "Page.startScreencast")
+          if (terminal === "interrupt") yield* Fiber.interrupt(pending)
+          else {
+            yield* TestClock.adjust("1 second")
+            const exit = yield* Fiber.join(pending)
+            const error = Exit.findErrorOption(exit)
+            assert(Option.isSome(error) && Deadline.isTimeout(error.value))
+            assert.strictEqual(error.value.phase, "dispatchedUnconfirmed")
+          }
+          if (replyAt === "after scope close") yield* Scope.close(scope, Exit.void)
+          yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+          yield* h.browser.delivered
+          yield* TestClock.adjust("0 millis")
+          if (replyAt === "before scope close") yield* Scope.close(scope, Exit.void)
+          yield* TestClock.adjust("0 millis")
+          assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 2)
+        }).pipe(onTestClock))
+    }
+  }
+
+  it.effect("waits for stop confirmation when the acquisition deadline expired before scope closure", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(
+        Deadline.within("1 second"),
+        Effect.provideService(Scope.Scope, scope)
+      )
+      yield* TestClock.adjust("2 seconds")
+      const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+      const stop = yield* Queue.take(h.stops)
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(closing.pollUnsafe(), "cleanup must wait for the held stop reply")
+      const deadline = h.stopDeadlines[0]!
+      const now = (yield* BrowserClock.CurrentClock).now()
+      assert(Option.isNone(deadline) || deadline.value > now, "cleanup command deadline must still be usable")
+      yield* h.browser.receive({ id: stop.id, sessionId: stop.sessionId, result: {} })
+      yield* Fiber.join(closing)
+    }).pipe(onTestClock))
+
+  it.effect("stops exactly once when interruption follows start reply delivery", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const pending = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(
+          Effect.provideService(Scope.Scope, scope)
+        )
+      )
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* Fiber.interrupt(pending)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("does not add cleanup when an abandoned start is later rejected", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const pending = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(
+          Effect.provideService(Scope.Scope, scope)
+        )
+      )
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(pending)
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      yield* h.browser.receive({
+        id: start.id,
+        sessionId: start.sessionId,
+        error: { code: -32000, message: "start rejected" }
+      })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("bounds unresponsive stop confirmation independently of acquisition", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(
+        Deadline.within("1 second"),
+        Effect.provideService(Scope.Scope, scope)
+      )
+      const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+      yield* Queue.take(h.stops)
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(closing.pollUnsafe())
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(closing)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("closing the acquisition scope interrupts a pending metrics read before any start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      const closedExit = acquiring.pollUnsafe()
+      yield* replyMetrics(h.browser, metrics)
+      yield* Fiber.await(acquiring)
+      yield* TestClock.adjust("1 second")
+      assert.isDefined(closedExit, "scope closure must interrupt acquisition without waiting for a metrics reply")
+      assert(Exit.hasInterrupts(closedExit!))
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+    }).pipe(onTestClock))
+
+  it.effect("closing the acquisition scope cancels a blocked start write before cleanup can be overtaken", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, false, false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.startWrites)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      const closedExit = acquiring.pollUnsafe()
+      yield* TestClock.adjust("1 second")
+      yield* Deferred.succeed(h.startWriteGate, undefined)
+      yield* Fiber.await(acquiring)
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(closedExit, "scope closure must interrupt acquisition without waiting for the blocked write")
+      assert(Exit.hasInterrupts(closedExit!))
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.startScreencast").length,
+        0,
+        "a canceled write must not dispatch start after its cleanup"
+      )
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("bounds a blocked stop write and lets a new acquisition proceed afterward", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, false, true)
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.screenshotWork)
+      const closing = yield* Effect.forkScoped(Scope.close(first, Exit.void))
+      yield* Queue.take(h.stopWrites)
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(
+          Effect.provideService(Scope.Scope, second)
+        )
+      )
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+      yield* TestClock.adjust("0 millis")
+      const startsBeforeBudget = h.commands.filter((c) => c.method === "Page.startScreencast").length
+      const earlyClose = closing.pollUnsafe()
+      yield* TestClock.adjust("1 second")
+      const boundedClose = closing.pollUnsafe()
+      // Release the gate before asserting, so a regression cannot strand the test's closing fiber.
+      yield* Deferred.succeed(h.stopWriteGate, undefined)
+      yield* TestClock.adjust("0 millis")
+      yield* Fiber.join(closing)
+      yield* Fiber.join(acquiring)
+      const stopsBeforeLastRelease = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      yield* Scope.close(second, Exit.void)
+      assert.isDefined(boundedClose, "the whole stop exchange, including its write, must be bounded")
+      assert.strictEqual(startsBeforeBudget, 1, "a new start must wait for the previous stop exchange")
+      assert.isUndefined(earlyClose)
+      assert.strictEqual(stopsBeforeLastRelease, 0, "releasing the write gate cannot resurrect the canceled stop")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("interrupts acquisition promptly while a stop write is blocked without retaining ownership", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, false, true)
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.screenshotWork)
+      const closing = yield* Effect.forkScoped(Scope.close(first, Exit.void))
+      yield* Queue.take(h.stopWrites)
+      const acquiring = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      // This must finish before advancing time or releasing the blocked write.
+      yield* Fiber.interrupt(acquiring)
+      yield* TestClock.adjust("1 second")
+      const boundedClose = closing.pollUnsafe()
+      yield* Deferred.succeed(h.stopWriteGate, undefined)
+      yield* Fiber.join(closing)
+      yield* TestClock.adjust("1 second")
+      assert.isDefined(boundedClose)
+      assert.strictEqual(h.stopDeadlines.length, 1, "a canceled waiter never dispatched start and needs no later stop")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("waits for an in-flight stop confirmation before dispatching a newer start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, true)
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.screenshotWork)
+      const closing = yield* Effect.forkScoped(Scope.close(first, Exit.void))
+      const stop = yield* Queue.take(h.stops)
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(
+          Effect.provideService(Scope.Scope, second)
+        )
+      )
+      yield* Queue.take(h.screenshotWork)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+      yield* h.browser.receive({ id: stop.id, sessionId: stop.sessionId, result: {} })
+      yield* Fiber.join(closing)
+      yield* Fiber.join(acquiring)
+      const closingSecond = yield* Effect.forkScoped(Scope.close(second, Exit.void))
+      const finalStop = yield* Queue.take(h.stops)
+      yield* h.browser.receive({ id: finalStop.id, sessionId: finalStop.sessionId, result: {} })
+      yield* Fiber.join(closingSecond)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 2)
+    }).pipe(onTestClock))
+
+  it.effect("releases an abandoned start with no reply without retaining a consumer count", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(pending)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("cleans a late successful start observed during an earlier unconfirmed cleanup exchange", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      const uncertainStop = yield* Queue.take(h.stops)
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* h.browser.receive({ id: uncertainStop.id, sessionId: uncertainStop.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const stops = h.commands.filter((c) => c.method === "Page.stopScreencast")
+      // Settle all held commands before asserting, including when this regresses to just one stop.
+      for (const stop of stops.slice(1)) {
+        yield* h.browser.receive({ id: stop.id, sessionId: stop.sessionId, result: {} })
+      }
+      yield* h.browser.delivered
+      assert.strictEqual(stops.length, 2, "new success evidence during cleanup needs release after that exchange")
+    }).pipe(onTestClock))
+
+  it.effect("does not repeat cleanup of an unconfirmed start already covered by the last consumer's stop", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.screenshotWork)
+      const scope = yield* Scope.make()
+      const b = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* Fiber.join(b)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("drops an abandoned start on detach without scheduling further cleanup", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const pending = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(pending)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      yield* h.browser.receive({
+        method: "Target.detachedFromTarget",
+        params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
+      })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  for (const interruptAt of ["receipt", "consumed"] as const) {
+    it.effect(`owns stop before interruption at start reply ${interruptAt}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(false, true)
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        let replies = 0
+        let interrupt: () => void = () => {}
+        const pending = yield* Effect.forkScoped(Effect.withFiber((fiber) => {
+          interrupt = () => fiber.interruptUnsafe()
+          return page.capability(Capability.Screencast).pipe(
+            Effect.provideService(Scope.Scope, scope),
+            Effect.provideService(ProtocolClient.ReplyReceived, () => {
+              if (++replies === 2 && interruptAt === "receipt") interrupt()
+            }),
+            Effect.tap(() => interruptAt === "consumed" ? Effect.sync(interrupt) : Effect.void)
+          )
+        }))
+        yield* Queue.take(h.screenshotWork)
+        const start = yield* Queue.take(h.screenshotWork)
+        yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+        yield* Fiber.await(pending)
+        yield* Scope.close(scope, Exit.void)
+        yield* TestClock.adjust("0 millis")
+        assert.strictEqual(
+          h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+          interruptAt === "receipt" ? 2 : 1
+        )
+      }).pipe(onTestClock))
+  }
+
+  it.effect("retains the stream during another consumer's metrics read and releases it if that read fails", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true)
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      const a = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      )
+      yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
+      yield* Queue.take(h.screenshotWork)
+      yield* Fiber.join(a)
+      const b = yield* Effect.forkScoped(
+        Effect.exit(page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second)))
+      )
+      const read = yield* Queue.take(h.screenshotWork)
+      yield* Scope.close(first, Exit.void)
+      const prematureStops = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      yield* h.browser.receive({
+        id: read.id,
+        sessionId: read.sessionId,
+        error: { code: -32000, message: "metrics rejected" }
+      })
+      assert(Exit.isFailure(yield* Fiber.join(b)))
+      yield* Scope.close(second, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(prematureStops, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("preserves a live consumer when an overlapping pending start is rejected", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      const a = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      )
+      yield* Queue.take(h.screenshotWork)
+      const startA = yield* Queue.take(h.screenshotWork)
+      const b = yield* Effect.forkScoped(
+        Effect.exit(page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second)))
+      )
+      yield* Queue.take(h.screenshotWork)
+      const startB = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({ id: startA.id, sessionId: startA.sessionId, result: {} })
+      yield* Fiber.join(a)
+      yield* h.browser.receive({
+        id: startB.id,
+        sessionId: startB.sessionId,
+        error: { code: -32000, message: "rejected" }
+      })
+      assert(Exit.isFailure(yield* Fiber.join(b)))
+      yield* Scope.close(second, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+      yield* Scope.close(first, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("requires a native start outcome before joining an abandoned start whose reply never arrived", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
+      yield* Queue.take(h.screenshotWork)
+      const scope = yield* Scope.make()
+      const b = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      yield* replyMetrics(h.browser, metrics)
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const starts = h.commands.filter((c) => c.method === "Page.startScreencast")
+      if (starts.length > 1) {
+        const start = starts[1]!
+        yield* h.browser.receive({
+          id: start.id,
+          sessionId: start.sessionId,
+          error: { code: -32000, message: "Screencast is already active" }
+        })
+      }
+      yield* Fiber.join(b)
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(starts.length, 2, "an unconfirmed stream cannot be reused without native evidence")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("requires a fresh start when an abandoned success predates an already dispatched stop", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
+      const oldStart = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      const scope = yield* Scope.make()
+      const b = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({ id: oldStart.id, sessionId: oldStart.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* replyMetrics(h.browser, metrics)
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const starts = h.commands.filter((c) => c.method === "Page.startScreencast")
+      if (starts.length > 1) {
+        const fresh = starts[1]!
+        yield* h.browser.receive({ id: fresh.id, sessionId: fresh.sessionId, result: {} })
+      }
+      yield* Fiber.join(b)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(starts.length, 2, "a stop after the old start invalidates sharing its late success")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 2)
+    }).pipe(onTestClock))
+
+  it.effect("joins a confirmed session stream without sending another native start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+      yield* Scope.close(first, Exit.void)
+      const earlyStops = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      yield* Scope.close(second, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+      assert.strictEqual(earlyStops, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  for (const previous of ["pending", "abandoned"] as const) {
+    it.effect(`joins the native already-active stream of an earlier ${previous} start`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(false, true)
+        const page = yield* h.page.control
+        const first = yield* Scope.make()
+        const second = yield* Scope.make()
+        const a = yield* Effect.forkScoped(
+          page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+        )
+        yield* Queue.take(h.screenshotWork)
+        const startA = yield* Queue.take(h.screenshotWork)
+        const b = yield* Effect.forkScoped(
+          page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+        )
+        yield* Queue.take(h.screenshotWork)
+        const startB = yield* Queue.take(h.screenshotWork)
+        if (previous === "abandoned") yield* Fiber.interrupt(a)
+        yield* h.browser.receive({
+          id: startB.id,
+          sessionId: startB.sessionId,
+          error: { code: -32000, message: "Screencast is already active" }
+        })
+        yield* Fiber.join(b)
+        yield* h.browser.receive({ id: startA.id, sessionId: startA.sessionId, result: {} })
+        if (previous === "pending") yield* Fiber.join(a)
+        yield* Scope.close(first, Exit.void)
+        yield* TestClock.adjust("0 millis")
+        const earlyStops = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+        yield* Scope.close(second, Exit.void)
+        assert.strictEqual(earlyStops, 0)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      }).pipe(onTestClock))
+  }
+
+  it.effect("preserves already-active rejection when this session has no earlier owned start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        Effect.exit(page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope)))
+      )
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({
+        id: start.id,
+        sessionId: start.sessionId,
+        error: { code: -32000, message: "Screencast is already active" }
+      })
+      const error = Exit.findErrorOption(yield* Fiber.join(acquiring))
+      assert(Option.isSome(error) && Capability.isCapabilityError(error.value))
+      assert.strictEqual(error.value.reason._tag, "BackendFailure")
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+    }).pipe(onTestClock))
+
+  // Page.stopScreencast is parameterless and session-wide, so a stop for one acquisition also ends another's frames.
+  it.effect("keeps a newer acquisition streaming when an abandoned start succeeds late", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const abandoned = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+      const first = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(first.method, "Page.startScreencast")
+      yield* Fiber.interrupt(abandoned)
+      yield* TestClock.adjust("0 millis")
+      const beforeRetry = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      assert.strictEqual(beforeRetry, 1, "abandonment cleans uncertainty before a future consumer exists")
+
+      const scope = yield* Scope.make()
+      const retry = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+      const second = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(second.method, "Page.startScreencast")
+
+      // Chromium replies in order: the abandoned start first, once the retry's start is already sent
+      yield* h.browser.receive({ id: first.id, sessionId: first.sessionId, result: {} })
+      yield* h.browser.receive({ id: second.id, sessionId: second.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* Fiber.join(retry)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+        beforeRetry,
+        "the retry's scope is open, so nothing may stop the session's screencast"
+      )
+
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, beforeRetry + 1)
+    }).pipe(onTestClock))
+
+  it.effect("keeps a second acquisition streaming when the first one's scope closes", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+      yield* Scope.close(first, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+        0,
+        "the second scope is open, so nothing may stop the session's screencast"
+      )
+      yield* Scope.close(second, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("settles a dispatched start on session loss and closes its scope", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const pending = yield* Effect.forkScoped(Effect.exit(
+        page.capability(Capability.Screencast).pipe(
+          Deadline.within("1 second"),
+          Effect.provideService(Scope.Scope, scope)
+        )
+      ))
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(start.method, "Page.startScreencast")
+      yield* h.browser.receive({
+        method: "Target.detachedFromTarget",
+        params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
+      })
+      const error = Exit.findErrorOption(yield* Fiber.join(pending))
+      assert(Option.isSome(error) && Capability.isCapabilityError(error.value))
+      assert.strictEqual(error.value.reason._tag, "BackendFailure")
+      yield* Scope.close(scope, Exit.void)
+      yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
     }).pipe(onTestClock))
 
   for (const terminal of ["reject", "malformed", "detach", "deadline", "interrupt"] as const) {

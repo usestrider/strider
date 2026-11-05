@@ -16,8 +16,10 @@ import {
   PageNavigation
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
 import * as fs from "node:fs"
@@ -219,6 +221,40 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             }
           }))
         }), timeout)
+
+      it.effect(
+        "delivers newly sized frames after an overlapping screencast consumer closes",
+        () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("capability.screencast"))) return
+            const url = yield* fixture(`<p id="t"></p><script>
+            let n = 0; function paint() { t.textContent = ++n; requestAnimationFrame(paint) } paint()
+          </script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.emulate({ viewport: { width: 640, height: 480 } })
+              const first = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+              const original = yield* page.capability(Capability.Screencast).pipe(
+                Effect.provideService(Scope.Scope, first)
+              )
+              yield* original.frames.pipe(Stream.runDrain, Effect.forkIn(first))
+              const second = yield* page.capability(Capability.Screencast)
+              const shared = yield* second.frames.pipe(Stream.take(2), Stream.runCollect, Deadline.within("20 seconds"))
+              assert.strictEqual(shared.length, 2, "both consumers can acknowledge frames while sharing the stream")
+              yield* Scope.close(first, Exit.void)
+              yield* page.emulate({ viewport: { width: 321, height: 243 } })
+              const frames = yield* second.frames.pipe(
+                Stream.filter((frame) => frame.width === 321 && frame.height === 243),
+                Stream.take(2),
+                Stream.runCollect,
+                Deadline.within("20 seconds")
+              )
+              assert.strictEqual(frames.length, 2)
+            }))
+          }),
+        timeout
+      )
 
       it.effect("records the page to a video file where the browser writes one", () =>
         Effect.gen(function*() {
