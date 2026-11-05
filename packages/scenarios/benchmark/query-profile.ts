@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream"
 import * as assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs"
+import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
 import { type CDPSession, chromium, type Page as PWPage } from "playwright-core"
@@ -21,7 +22,7 @@ import pins from "../../browser/test/integration/browsers.json" with { type: "js
 import { cases as canonicalCases } from "../src/benchmarks/cases.ts"
 import { start } from "../src/site.ts"
 import { type Capture, state, sync, wire } from "./query-hooks.ts"
-import { profileOptions, traceCategories, verifyCompletion } from "./query-profile-config.ts"
+import { profileOptions, traceCategories, verifyCompletion, verifyPipeWrites } from "./query-profile-config.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || executablePath === undefined) {
@@ -276,7 +277,7 @@ try {
       const rotate = ((index % variants.length) + variants.length) % variants.length
       for (const variant of [...variants.slice(rotate), ...variants.slice(0, rotate)]) {
         for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
-          const capture: Capture = { start: 0, spans: [], wire: [], chunks: [] }
+          const capture: Capture = { start: 0, spans: [], wire: [], chunks: [], writes: [], enqueues: [] }
           let ms: number
           let pageTiming: unknown
           let setupStart: number | undefined
@@ -371,6 +372,11 @@ try {
     }
   }
   verifyCompletion(samples, runs * selectedCases.length * selectedVariants.length * 2, instrumented)
+  if (evaluation && instrumented) {
+    for (const sample of samples) {
+      verifyPipeWrites(sample.capture, sample.library === "strider")
+    }
+  }
   status = "completed"
 } finally {
   state.active = undefined
@@ -398,6 +404,12 @@ try {
         clockSync,
         pwClockSync,
         timeOrigin: performance.timeOrigin,
+        platformSourceHashes: Object.fromEntries(["NodeSink", "NodeChildProcessSpawner"].map((name) => {
+          const installed = createRequire(import.meta.resolve("@effect/platform-node/NodeSink")).resolve(
+            `@effect/platform-node-shared/${name}`
+          )
+          return [name, createHash("sha256").update(fs.readFileSync(installed)).digest("hex")]
+        })),
         playwrightSourceHash: createHash("sha256").update(
           fs.readFileSync("packages/scenarios/node_modules/playwright-core/lib/coreBundle.js")
         ).digest("hex"),
@@ -413,7 +425,7 @@ try {
         events,
         pwEvents
       },
-      null,
+      (_key, value) => value instanceof Uint8Array ? { base64: Buffer.from(value).toString("base64") } : value,
       2
     )
   )

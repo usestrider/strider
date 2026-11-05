@@ -15,6 +15,8 @@ export interface Capture {
   readonly start: number
   readonly spans: Array<Span>
   readonly wire: Array<Wire>
+  readonly enqueues: Array<{ at: number; text: string }>
+  readonly writes: Array<{ at: number; data: string | Uint8Array }>
   readonly chunks: Array<{ at: number; bytes: number }>
 }
 export const state = { active: undefined as Capture | undefined }
@@ -43,10 +45,25 @@ export const chunk = (bytes: number) => {
 export const wire = (direction: Wire["direction"], text: string) => {
   state.active?.wire.push({ direction, at: performance.now(), text })
 }
+export const enqueue = (text: string) => {
+  state.active?.enqueues.push({ at: performance.now(), text })
+}
+const pipes = new WeakSet<object>()
+export const registerPipe = (stream: object) => pipes.add(stream)
+// The loader calls this immediately before NodeSink invokes Writable.write on the registered fd 3.
+export const pipeWrite = (stream: object, data: string | Uint8Array) => {
+  if (state.active !== undefined && pipes.has(stream)) {
+    state.active.writes.push({ at: performance.now(), data })
+  }
+}
 // The pinned Playwright server bundle is CommonJS, so it accesses these diagnostic hooks through a symbol.
 Object.assign(globalThis, {
   [Symbol.for("strider.queryProfile")]: {
     sync,
+    write: (stream: { write: (data: string) => boolean }, data: string) => {
+      state.active?.writes.push({ at: performance.now(), data })
+      return stream.write(data)
+    },
     out: (value: unknown) => wire("send", JSON.stringify(value)),
     parse: (text: string) => {
       wire("receive", text)

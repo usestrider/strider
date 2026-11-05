@@ -275,3 +275,19 @@ messages before protocol parsing; Strider UTF-8 decoding/framing precedes that o
 observers in evaluation-instrumented mode bracket public invocation through completion and add
 their own proxy/finalizer/promise work. Treat their plain/instrumented differences as distortion
 estimates with drift, never an exact correction or an attribution to the runtime.
+
+The opt-in loader also observes the pipe write boundary for evaluation attribution. It registers
+the launched child's fd 3 in the installed Effect platform spawner and records bytes immediately
+before the installed NodeSink calls that stream's `Writable.write`; this is after pulling from the
+outbox, not a dequeue marker. A separate marker immediately before queue offer follows UTF-8
+encoding. Playwright records its body and terminating-NUL write calls after argument serialization.
+These are Node write invocations, not kernel completion or browser receipt signals; Node buffering
+and backpressure remain inside the subsequent wait.
+
+Write hooks retain byte references or immutable strings and timestamps only. After collection,
+reassemble NUL-delimited frames (including fragmented UTF-8, split delimiters and batched commands),
+match command/session IDs and payloads, and require send/enqueue/write/reply ordering before an
+instrumented evaluation report can complete. Byte encoding for the report happens outside timing.
+Compare both first-write and frame-completing-write boundaries when framing spans multiple writes.
+Retain plain/instrumented controls: the extra observers can distort both queue and subsequent wait
+intervals. Measured enqueue-to-write time is not promised savings from removing a queue.

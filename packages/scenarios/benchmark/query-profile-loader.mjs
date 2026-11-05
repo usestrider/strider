@@ -5,9 +5,25 @@ const installed = new Set()
 Object.assign(globalThis, { [Symbol.for("strider.queryProfile.instrumentation")]: installed })
 const hooks = new URL("./query-hooks.ts", import.meta.url).href
 const patches = [
+  ["/@effect/platform-node-shared/dist/NodeChildProcessSpawner.js", [
+    [
+      "const nodeStream = childProcess.stdio[fd];",
+      "const nodeStream = childProcess.stdio[fd]; if (fd === 3 && nodeStream) queryProfile.registerPipe(nodeStream);"
+    ]
+  ]],
+  ["/@effect/platform-node-shared/dist/NodeSink.js", [
+    [
+      "const success = options.writable.write(chunk[i++], options.encoding, error => {",
+      "queryProfile.pipeWrite(options.writable, chunk[i]); const success = options.writable.write(chunk[i++], options.encoding, error => {"
+    ]
+  ]],
   ["/protocol/Transport.ts", [
     ["return decoder.decode(bytes)", "return queryProfile.sync(\"utf8.decode\", () => decoder.decode(bytes))"],
-    ["try: () => frame(chunk)", "try: () => { queryProfile.chunk(chunk.length); return frame(chunk) }"]
+    ["try: () => frame(chunk)", "try: () => { queryProfile.chunk(chunk.length); return frame(chunk) }"],
+    [
+      "Queue.offerUnsafe(outbox, encoder.encode(message + \"\\0\"))",
+      "const bytes = encoder.encode(message + \"\\0\"); queryProfile.enqueue(message); Queue.offerUnsafe(outbox, bytes)"
+    ]
   ]],
   ["/internal/protocolClient.ts", [
     ["envelope = JSON.parse(message)", "envelope = queryProfile.sync(\"JSON.parse\", () => JSON.parse(message))"],
@@ -74,8 +90,9 @@ registerHooks({
       section = replaceAnchor(
         section,
         "this._pipeWrite.write(JSON.stringify(message));",
-        `${key}.out(message); this._pipeWrite.write(JSON.stringify(message));`
+        `${key}.out(message); ${key}.write(this._pipeWrite, JSON.stringify(message));`
       )
+      section = replaceAnchor(section, "this._pipeWrite.write(\"\\0\");", `${key}.write(this._pipeWrite, "\\0");`)
       section = replaceAnchor(section, "JSON.parse(message)", `${key}.parse(message)`)
       section = replaceAnchor(section, "JSON.parse(message2)", `${key}.parse(message2)`)
       installed.add("/playwright-core/lib/coreBundle.js")

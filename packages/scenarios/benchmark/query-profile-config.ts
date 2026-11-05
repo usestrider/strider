@@ -3,6 +3,8 @@ import * as path from "node:path"
 import type { Capture } from "./query-hooks.ts"
 
 export const instrumentationTargets = [
+  "/@effect/platform-node-shared/dist/NodeChildProcessSpawner.js",
+  "/@effect/platform-node-shared/dist/NodeSink.js",
   "/protocol/Transport.ts",
   "/internal/protocolClient.ts",
   "/internal/cdpAdapter/evaluation.ts",
@@ -67,5 +69,67 @@ export const verifyCompletion = (
     for (const name of required) {
       assert.ok(sample.capture.spans.some((span) => span.name === name), `Missing diagnostic stage: ${name}`)
     }
+  }
+}
+
+// Reassemble NUL-delimited command frames after collection, never in the timed write hook.
+export const pipeFrames = (writes: Capture["writes"]) => {
+  const frames: Array<
+    { message: Record<string, unknown>; firstWrite: number; lastWrite: number; writeIndices: Array<number> }
+  > = []
+  let pending: Array<number> = []
+  let indices: Array<number> = []
+  let firstWrite = 0
+  for (const [index, write] of writes.entries()) {
+    const bytes = typeof write.data === "string" ? Buffer.from(write.data) : write.data
+    for (const byte of bytes) {
+      if (indices.length === 0) firstWrite = write.at
+      if (indices.at(-1) !== index) indices.push(index)
+      if (byte === 0) {
+        assert.ok(pending.length > 0, "Empty pipe frame")
+        frames.push({
+          message: JSON.parse(Buffer.from(pending).toString("utf8")),
+          firstWrite,
+          lastWrite: write.at,
+          writeIndices: indices
+        })
+        pending = []
+        indices = []
+      } else pending.push(byte)
+    }
+  }
+  assert.equal(pending.length, 0, "Incomplete pipe frame")
+  return frames
+}
+
+export const verifyPipeWrites = (
+  capture: Pick<Capture, "wire" | "writes" | "enqueues">,
+  requireEnqueues = true
+): void => {
+  const frames = pipeFrames(capture.writes)
+  const sends = capture.wire.filter((row) => row.direction === "send")
+  assert.equal(frames.length, sends.length, "Missing or extra pipe writes")
+  if (requireEnqueues) assert.equal(capture.enqueues.length, sends.length, "Missing or extra enqueue observations")
+  for (const send of sends) {
+    const command = JSON.parse(send.text)
+    const matches = frames.filter(({ message }) => message.id === command.id && message.sessionId === command.sessionId)
+    assert.equal(matches.length, 1, "Missing or duplicate command write")
+    const frame = matches[0]!
+    assert.deepEqual(frame.message, command, "Pipe payload differs from send")
+    if (capture.enqueues.length > 0) {
+      const enqueues = capture.enqueues.filter((row) => row.text === send.text)
+      assert.equal(enqueues.length, 1, "Missing or duplicate enqueue")
+      assert.ok(send.at <= enqueues[0]!.at && enqueues[0]!.at <= frame.firstWrite, "Invalid enqueue/write ordering")
+    }
+    const replies = capture.wire.filter((row) => {
+      if (row.direction !== "receive") return false
+      const reply = JSON.parse(row.text)
+      return reply.id === command.id && reply.sessionId === command.sessionId
+    })
+    assert.equal(replies.length, 1, "Missing or duplicate command reply")
+    assert.ok(
+      send.at <= frame.firstWrite && frame.firstWrite <= frame.lastWrite && frame.lastWrite <= replies[0]!.at,
+      "Invalid send/write/reply ordering"
+    )
   }
 }
