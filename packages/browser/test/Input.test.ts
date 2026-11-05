@@ -60,6 +60,20 @@ describe("Input.recover", () => {
       }))
   }
 
+  it.effect("keeps failed cleanup when later recovery succeeds, without changing earlier snapshots", () =>
+    Effect.gen(function*() {
+      yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        const before = record.diagnostics()
+        yield* Input.recover(broken(), () => Effect.fail("release refused"))
+        const failed = record.diagnostics()
+        yield* Input.recover(broken(), () => Effect.void)
+        assert.strictEqual(before.cleanup._tag, "NotNeeded")
+        assert.strictEqual(failed.cleanup._tag, "Failed")
+        assert.deepStrictEqual(record.diagnostics().cleanup, failed.cleanup)
+      }).pipe(Operation.named("recover twice"))
+    }))
+
   it.effect("says why the state is still unknown when the release fails again", () =>
     Effect.gen(function*() {
       const state = broken()

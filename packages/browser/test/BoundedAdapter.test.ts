@@ -29,6 +29,7 @@ const stub = (overrides: Partial<Adapter.AdapterConnection>) =>
   BoundedAdapter.make({
     cookies: () => Effect.never,
     setCookies: () => Effect.never,
+    clearCookies: () => Effect.never,
     ...overrides
   } as unknown as Adapter.AdapterConnection)
 
@@ -122,6 +123,27 @@ describe("BoundedAdapter", () => {
           assert.notStrictEqual(Operation.diagnostics(record.id).dispatch._tag, "Acknowledged")
         }).pipe(Operation.named("CookieJar.set"))
       }
+    }))
+
+  it.effect("does not inherit confirmation when a later write goes unanswered", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, [])
+        yield* adapter.clearCookies(context)
+      }).pipe(Operation.named("cookies"), Deadline.within("50 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  it.effect("records successful claims dismissal", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ claims: { dismiss: () => Effect.succeed(true) } as unknown as Adapter.Claims })
+      yield* Effect.gen(function*() {
+        yield* adapter.claims!.dismiss(page, "prompt" as import("../src/Dialog.ts").PromptId)
+        const record = yield* Operation.record
+        assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "Acknowledged", result: "ok" })
+      }).pipe(Operation.named("dismiss"))
     }))
 
   it.effect("reports pending cleanup while a late creation has not answered", () =>
