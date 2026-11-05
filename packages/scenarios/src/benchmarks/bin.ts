@@ -19,7 +19,7 @@ import { compare, elapsed, measure, options } from "./measure.ts"
 
 const cases = [...ordinaryCases, ...captureCases]
 const config = options(process.argv.slice(2))
-const lifecycleNames = ["launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
+const lifecycleNames = ["launch-first-page", "launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
 const names = ["lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
 if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
@@ -71,6 +71,16 @@ const report = {
   schemaVersion: 2,
   launchArguments: [] as Array<
     { library: string; pid: number; argv: ReadonlyArray<string>; renderers: ReadonlyArray<ReadonlyArray<string>> }
+  >,
+  lifecyclePhases: { strider: [], playwright: [] } as Record<
+    "strider" | "playwright",
+    Array<{
+      launch: number
+      firstPage: number
+      combined: number
+      pages: number
+      defaultPages: number
+    }>
   >,
   startedAt: new Date().toISOString(),
   sourceHash: hash.digest("hex"),
@@ -192,6 +202,91 @@ const launchPlaywright = () => chromium.launch({ executablePath, headless: true,
 const pageOptions = { emulation: { viewport } }
 
 try {
+  if (chosen("launch-first-page")) {
+    await record(
+      "launch-first-page",
+      "Launch and acquire an isolated configured page from the same browser; cleanup and validation excluded",
+      {
+        strider: async () => {
+          const runtime = makeRuntime()
+          const scope = Scope.makeUnsafe()
+          try {
+            const t0 = performance.now()
+            const browser = await runtime.runPromise(Browser.Browser)
+            const t1 = performance.now()
+            const page = await runtime.runPromise(Browser.newPage(pageOptions).pipe(Scope.provide(scope)))
+            const t2 = performance.now()
+            assert.ok(browser.info.product.includes(pins.chromium.version))
+            const state = await runtime.runPromise(
+              page.evaluateInMainWorld(() => ({
+                url: document.URL,
+                width: innerWidth,
+                height: innerHeight,
+                dpr: devicePixelRatio
+              }))
+            )
+            assert.deepEqual(state, { url: "about:blank", width: viewport.width, height: viewport.height, dpr: 1 })
+            const defaultPages = (await runtime.runPromise(browser.defaultContext.pages)).length
+            const pages = (await runtime.runPromise(browser.pages)).length
+            assert.equal(defaultPages, config.striderArgs.includes("--no-startup-window") ? 0 : 1)
+            assert.equal(pages, defaultPages + 1)
+            captureArguments("strider")
+            report.lifecyclePhases.strider.push({
+              launch: t1 - t0,
+              firstPage: t2 - t1,
+              combined: t2 - t0,
+              pages,
+              defaultPages
+            })
+            return t2 - t0
+          } finally {
+            try {
+              await runtime.runPromise(Scope.close(scope, Exit.void))
+            } finally {
+              await runtime.dispose()
+            }
+          }
+        },
+        playwright: async () => {
+          const t0 = performance.now()
+          const browser = await launchPlaywright()
+          try {
+            const t1 = performance.now()
+            const context = await browser.newContext({ viewport, deviceScaleFactor: 1 })
+            const page = await context.newPage()
+            const t2 = performance.now()
+            assert.equal(browser.version(), pins.chromium.version)
+            assert.deepEqual(
+              await page.evaluate(() => ({
+                url: document.URL,
+                width: innerWidth,
+                height: innerHeight,
+                dpr: devicePixelRatio
+              })),
+              { url: "about:blank", width: viewport.width, height: viewport.height, dpr: 1 }
+            )
+            assert.equal(browser.contexts().length, 1)
+            assert.equal(context.pages().length, 1)
+            captureArguments("playwright")
+            report.lifecyclePhases.playwright.push({
+              launch: t1 - t0,
+              firstPage: t2 - t1,
+              combined: t2 - t0,
+              pages: 1,
+              defaultPages: 0
+            })
+            return t2 - t0
+          } finally {
+            await browser.close()
+          }
+        }
+      }
+    )
+    // measure checks warmups too; retain phases only for its measured pairs in identical order.
+    for (const library of ["strider", "playwright"] as const) {
+      report.lifecyclePhases[library] = report.lifecyclePhases[library].slice(-config.runs)
+    }
+  }
   if (chosen("launch")) {
     await record("launch", "Launch a browser and establish its automation connection, excluding shutdown", {
       strider: async () => {
@@ -263,7 +358,7 @@ try {
       }
     )
   }
-  if (config.only === undefined || !["launch", "first-page", "shutdown"].includes(config.only)) {
+  if (config.only === undefined || !["launch-first-page", "launch", "first-page", "shutdown"].includes(config.only)) {
     const site = await start()
     try {
       const runtime = makeRuntime()
