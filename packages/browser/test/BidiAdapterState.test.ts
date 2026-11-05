@@ -64,6 +64,7 @@ const withPage = Effect.fnUntraced(function*(
   buffer.connect(control)
   const { root, sent } = session(replies, failures)
   const state = State.make({
+    cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
     buffer,
@@ -577,6 +578,7 @@ describe("BidiAdapter state", () => {
       const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
       buffer.connect(control)
       const state = State.make({
+        cleanupScope: yield* Effect.scope,
         connect: { sink: () => Effect.void, ownership: "launched" },
         ids: Kit.makeIds(),
         buffer,
@@ -637,6 +639,7 @@ describe("BidiAdapter state", () => {
       const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
       buffer.connect(control)
       const state = State.make({
+        cleanupScope: yield* Effect.scope,
         connect: { sink: () => Effect.void, ownership: "launched" },
         ids: Kit.makeIds(),
         buffer,

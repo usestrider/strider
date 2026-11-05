@@ -243,12 +243,13 @@ export const connect: (
 ) => Effect.Effect<Adapter.AdapterConnection, Browser.BrowserError, Scope.Scope> = Effect.fnUntraced(
   function*(transport: Transport.Transport, options: ConnectOptions) {
     const buffer = yield* Kit.makeFactBuffer(options.sink)
+    const cleanupScope = yield* Effect.scope
     let state!: State.State
     let root!: ProtocolClient.Session
     const client = yield* ProtocolClient.make(transport, BidiWire.wire, {
       fold: (control) => {
         buffer.connect(control)
-        state = State.make({ connect: options, ids: Kit.makeIds(), buffer, control, root: () => root })
+        state = State.make({ cleanupScope, connect: options, ids: Kit.makeIds(), buffer, control, root: () => root })
         return fold(state)
       }
     })

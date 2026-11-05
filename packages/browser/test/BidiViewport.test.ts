@@ -80,6 +80,7 @@ const make = Effect.fnUntraced(function*() {
   )
   buffer.connect(control)
   const state = State.make({
+    cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
     buffer,

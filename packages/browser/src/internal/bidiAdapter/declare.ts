@@ -1,10 +1,12 @@
 /**
- * Declarations on BiDi, which scopes them natively, by context or user context: init scripts as preload scripts,
- * overrides as `emulation` and `browsingContext` commands, intercepts, body collections as data collectors, and
- * downloads. What Firefox can't do is refused before anything is declared.
+ * Declarations on BiDi: native scopes for preload scripts, emulation, intercepts, data collectors and downloads.
+ * Viewport precedence is resolved through the declaration registry rather than native scope layering.
+ * What Firefox cannot do is refused before anything is declared.
  */
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Emulation from "../../bidi-protocol/Emulation.ts"
@@ -13,7 +15,11 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as DeclarationCleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
+import * as Cleanup from "./cleanup.ts"
 import { bidiHeaders, coveringPattern } from "./mapping.ts"
 import { placement, scopeParams, type State } from "./state.ts"
 
@@ -75,21 +81,34 @@ const applyScripts = Effect.fnUntraced(function*(state: State) {
  * context command overwrites existing page settings, and clearing a page restores the browser default rather
  * than a surrounding declaration.
  */
-const applyViewport = Effect.fnUntraced(function*(state: State, scope: Adapter.DeclarationScope) {
+const applyViewport = Effect.fnUntraced(function*<E>(
+  state: State,
+  scope: Adapter.DeclarationScope,
+  apply: (
+    command: Effect.Effect<unknown, Protocol.ProtocolError>,
+    target: Parameters<typeof BrowsingContext.setViewport>[0]
+  ) => Effect.Effect<unknown, E>
+) {
   const set = (target: Parameters<typeof BrowsingContext.setViewport>[0], override: Adapter.Override | undefined) =>
-    state.send(BrowsingContext.setViewport({
-      ...target,
-      viewport: override?._tag === "Viewport" ? { width: override.width, height: override.height } : null,
-      devicePixelRatio: override?._tag === "Viewport" ? override.deviceScaleFactor : null
-    }))
+    apply(
+      state.send(BrowsingContext.setViewport({
+        ...target,
+        viewport: override?._tag === "Viewport" ? { width: override.width, height: override.height } : null,
+        devicePixelRatio: override?._tag === "Viewport" ? override.deviceScaleFactor : null
+      })),
+      target
+    )
   if (scope._tag !== "Page") {
     for (const context of state.contexts.values()) {
-      if (scope._tag === "UserContext" && scope.context !== context.id) continue
+      if (context.removing || (scope._tag === "UserContext" && scope.context !== context.id)) continue
       yield* set({ userContexts: [context.bidi] }, state.registry.overrides({ context: context.id }).get("Viewport"))
     }
   }
   for (const page of state.navigables.values()) {
-    if (page.parent !== undefined || page.removed || !Declarations.covers(scope, placement(page))) continue
+    if (
+      page.parent !== undefined || page.removed || page.closing !== undefined || page.context.removing ||
+      !Declarations.covers(scope, placement(page))
+    ) continue
     const effective = state.registry.overrides(placement(page)).get("Viewport")
     // The user-context command already applied defaults. Only page overrides need restoring after it.
     if (scope._tag !== "Page" && effective === state.registry.overrides({ context: page.context.id }).get("Viewport")) {
@@ -115,7 +134,7 @@ export const applyKind = (
   const where = scopeParams(state, scope)
   switch (kind) {
     case "Viewport":
-      return applyViewport(state, scope)
+      return applyViewport(state, scope, (command) => command)
     case "UserAgent":
       return state.send(Emulation.setUserAgentOverride({
         userAgent: override?._tag === "UserAgent" ? override.userAgent : null,
@@ -258,19 +277,24 @@ export const applyDownloads = (state: State, scope: Adapter.DeclarationScope) =>
 }
 
 /** Removes what a declaration added, once its scope closes. */
-const undeclare = (
+const releaseDeclaration = (
   state: State,
   id: Adapter.RegistrationId,
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ): Effect.Effect<void> =>
   Effect.suspend(() => {
-    state.registry.remove(id)
     switch (declaration._tag) {
       case "InitScript":
         return applyScripts(state).pipe(Effect.ignore)
       case "Override":
-        return applyKind(state, declaration.override._tag, scope).pipe(Effect.ignore)
+        return declaration.override._tag === "Viewport"
+          ? applyViewport(state, scope, (command, target) =>
+            Cleanup.report(
+              Cleanup.bounded(command),
+              `BiDi viewport release could not restore ${JSON.stringify(target)}`
+            ))
+          : applyKind(state, declaration.override._tag, scope).pipe(Effect.ignore)
       case "Intercept":
       case "Challenges": {
         const intercept = state.intercepts.get(id)
@@ -306,7 +330,36 @@ export const declare = Effect.fnUntraced(
     if (refused !== undefined) return yield* Effect.fail(refused)
     const id = state.ids.registration()
     state.registry.add(scope, declaration, id)
-    yield* Effect.addFinalizer(() => undeclare(state, id, scope, declaration))
+    const registrationContext = yield* Effect.context<never>()
+    yield* Scope.addFinalizer(
+      yield* Effect.scope,
+      Effect.gen(function*() {
+        // Recompute from the registry immediately, even if the caller cannot wait for native cleanup.
+        state.registry.remove(id)
+        const release = releaseDeclaration(state, id, scope, declaration)
+        if (declaration._tag !== "Override" || declaration.override._tag !== "Viewport") {
+          return yield* release.pipe(Effect.provideContext(registrationContext))
+        }
+        const caller = yield* Operation.current
+        const confirm = yield* DeclarationCleanup.Confirm
+        const unconfirmed = yield* DeclarationCleanup.Unconfirmed
+        const work = release.pipe(
+          Operation.detached,
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+          Effect.provideContext(registrationContext),
+          Effect.provideService(DeclarationCleanup.Unconfirmed, unconfirmed),
+          Effect.interruptible
+        )
+        // During connection teardown, finish before the transport is released instead of spawning new work.
+        if (state.cleanupScope.state._tag === "Closed") return yield* work
+        const fiber = yield* work.pipe(Effect.forkIn(state.cleanupScope))
+        const joined = Fiber.join(fiber)
+        if (confirm || Option.isNone(caller)) return yield* joined
+        yield* caller.value.bound(joined.pipe(Effect.interruptible)).pipe(
+          Effect.catchTag("Timeout", () => Effect.sync(unconfirmed))
+        )
+      })
+    )
     switch (declaration._tag) {
       case "InitScript":
         yield* Kit.protocol(applyScripts(state))
