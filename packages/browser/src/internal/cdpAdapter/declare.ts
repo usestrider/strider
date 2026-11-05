@@ -317,15 +317,27 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  yield* withOverrides(
-    target,
+  yield* Effect.all([
+    withOverrides(
+      target,
+      Effect.suspend(() => {
+        const overrides = state.registry.overrides(placement(page))
+        return Effect.forEach(
+          overrides,
+          ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+          {
+            discard: true
+          }
+        )
+      })
+    ),
+    // Viewport has its own permit and fresh registry read. Its renderer wait must not
+    // hold up locale or other overrides, including when this target is still configuring.
     Effect.suspend(() => {
       const overrides = state.registry.overrides(placement(page))
-      return Effect.forEach(overrides, ([kind]) => applyOverride(state, target, kind, overrides), {
-        discard: true
-      })
+      return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
     })
-  )
+  ], { concurrency: "unbounded", discard: true })
   yield* applyScripts(state, target, page)
   yield* applyIntercepts(state, target, page)
   yield* keepBodies(state, target, page)
@@ -349,6 +361,9 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
+      if (declaration.override._tag === "Viewport") {
+        return viewport(state, target, state.registry.overrides(placement(page)))
+      }
       return withOverrides(
         target,
         Effect.suspend(() =>
