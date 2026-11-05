@@ -665,6 +665,47 @@ describe("CdpAdapter routed response source", () => {
         }))
     }
   }
+  it.effect("attributes a fulfilled 302 and its network 200 to their own hops", () =>
+    Effect.gen(function*() {
+      const { facts, state, target } = yield* withPage()
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const event = { state, target }
+      const request = sent(`${origin}/redirect`)
+      handlers.apply("Network.requestWillBeSent", request, event)
+      handlers.apply("Fetch.requestPaused", {
+        requestId: "F1",
+        networkId: "R1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request: request.request
+      }, event)
+      const obligation = [...state.obligations.values()][0]!
+      assert.strictEqual(obligation._tag, "PausedRequest")
+      yield* Obligations.resolve(state, obligation.id, {
+        _tag: "Fulfill",
+        status: 302,
+        headers: { location: `${origin}/landed` },
+        body: new Uint8Array()
+      })
+      // CDP delivers the redirect response on the next request event, not responseReceived.
+      handlers.apply(
+        "Network.requestWillBeSent",
+        sent(`${origin}/landed`, {
+          location: "/landed",
+          hasExtraInfo: false
+        }),
+        event
+      )
+      handlers.apply("Network.responseReceived", landedAs({ hasExtraInfo: false, fromDiskCache: false }), event)
+      yield* state.buffer.flush
+      const responses = facts.flatMap((fact) => fact._tag === "ResponseReceived" ? [fact.response] : [])
+      assert.deepStrictEqual(
+        responses.map((response) => [response.url, response.status, response.servedBy]),
+        [[`${origin}/redirect`, 302, "route"], [`${origin}/landed`, 200, "network"]]
+      )
+      assert.notStrictEqual(responses[0]!.hop, responses[1]!.hop)
+    }))
+
   // The failing order permutes captured events; it was not captured in the live failure.
   for (const order of ["pause before request", "request before pause", "fulfill before request"]) {
     it.effect(`attributes a fulfilled response to its route with ${order}`, () =>
