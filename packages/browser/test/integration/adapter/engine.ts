@@ -151,7 +151,8 @@ export const engine = (backend: Backend) =>
       (it) => {
         it.effect("collects provenance only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
-            const { call, send } = yield* open(backend,
+            const { call, send } = yield* open(
+              backend,
               `<h2><span contenteditable>private</span></h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
               `() => {
                 globalThis.fieldReads = 0
@@ -159,18 +160,24 @@ export const engine = (backend: Backend) =>
                 Object.defineProperty(Element.prototype, "assignedSlot", {
                   ...descriptor, get() { globalThis.fieldReads++; return descriptor.get.call(this) }
                 })
-              }`)
+              }`
+            )
             for (const provenance of [false, true, false, true]) {
               yield* call(`() => { globalThis.fieldReads = 0 }`, [])
-              const response = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null, provenance } as Engine.Request)
+              const response = yield* send(
+                { op: "snapshot", steps: null, interactivity: true, depth: null, provenance } as Engine.Request
+              )
               assert.strictEqual(response._tag, "Snapshot")
-              if (response._tag !== "Snapshot") return
-              assert.strictEqual(JSON.stringify(response.root).includes('"fieldContent":true'), provenance)
-              assert.include(JSON.stringify(response.root), '"editable":true')
+              if (response._tag !== "Snapshot") {
+                return
+              }
+              assert.strictEqual(JSON.stringify(response.root).includes("\"fieldContent\":true"), provenance)
+              assert.include(JSON.stringify(response.root), "\"editable\":true")
               const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
               assert(reads._tag === "Value" && reads.value.type === "string")
-              if (provenance) assert.isAbove(Number(reads.value.value), 0)
-              else assert.strictEqual(Number(reads.value.value), 0)
+              if (provenance) {
+                assert.isAbove(Number(reads.value.value), 0)
+              } else assert.strictEqual(Number(reads.value.value), 0)
             }
           }), timeout)
 
@@ -180,9 +187,17 @@ export const engine = (backend: Backend) =>
               backend,
               `<article contenteditable="true" aria-label="Article">private</article><p contenteditable="plaintext-only">plain</p><h2 contenteditable="true">secret heading</h2><input aria-label="Native" readonly><textarea disabled>value</textarea><select><option>Choice</option></select><div role="textbox" aria-label="ARIA">aria value</div><select multiple aria-label="Choices"><option>Choice</option></select><div role="slider" aria-label="Range">range value</div><button>Outside</button>`
             )
-            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
             assert.strictEqual(answer._tag, "Snapshot")
-            if (answer._tag !== "Snapshot") return
+            if (answer._tag !== "Snapshot") {
+              return
+            }
             const nodes = answer.root.children
             assert.deepStrictEqual(nodes.map((node) => [node.role.role, node.editable === true]), [
               ["article", true],
@@ -211,7 +226,13 @@ export const engine = (backend: Backend) =>
               backend,
               `<h2><span contenteditable>ancestor-private</span></h2><button aria-label="Public"><span contenteditable>ignored-private</span></button><input id="field" aria-label="Field" value="embedded-private"><button aria-labelledby="field"></button><div>Nearby public</div><div contenteditable></div><span id="label" contenteditable aria-label="Referenced public"></span><button aria-labelledby="label"></button>`
             )
-            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
             assert.strictEqual(answer._tag, "Snapshot")
             if (answer._tag !== "Snapshot") {
               return
@@ -247,9 +268,17 @@ export const engine = (backend: Backend) =>
               []
             )
             assert.strictEqual(changed._tag, "Value")
-            const next = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            const next = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
             assert.strictEqual(next._tag, "Snapshot")
-            if (next._tag !== "Snapshot") return
+            if (next._tag !== "Snapshot") {
+              return
+            }
             assert.deepStrictEqual(next.root.children[0]!.name, { _tag: "Accessible", value: "Changed public" })
             assert.deepStrictEqual(next.root.children[1]!.name, {
               _tag: "Accessible",
@@ -264,7 +293,13 @@ export const engine = (backend: Backend) =>
               backend,
               `<select aria-label="Plan"><option id="option" selected>option value</option></select><button aria-labelledby="option"></button><div role="textbox" aria-label="Field"><span id="nested">nested value</span><span id="public" aria-label="Explicit public">ignored value</span><input id="action" type="button" value="action value"></div><button aria-labelledby="nested"></button><button aria-labelledby="public"></button><button aria-labelledby="action"></button><article contenteditable aria-label="Editor"><span id="blocked" contenteditable="false">blocked value</span></article><button aria-labelledby="blocked"></button><div role="textbox"><span id="empty"> </span></div><button aria-labelledby="empty" aria-label="Fallback public"></button>`
             )
-            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
             assert.strictEqual(answer._tag, "Snapshot")
             if (answer._tag !== "Snapshot") {
               return
@@ -297,7 +332,13 @@ export const engine = (backend: Backend) =>
                 document.getElementById('shadow').attachShadow({mode:'open'}).innerHTML = '<span id="source">shadow value</span><button aria-labelledby="source"></button>'
               }`
             )
-            const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            const answer = yield* send({
+              op: "snapshot",
+              steps: null,
+              interactivity: true,
+              depth: null,
+              provenance: true
+            })
             assert.strictEqual(answer._tag, "Snapshot")
             if (answer._tag !== "Snapshot") {
               return
@@ -326,7 +367,13 @@ export const engine = (backend: Backend) =>
               `() => { document.getElementById('host').attachShadow({mode:'open'}).innerHTML = '<div role="textbox" aria-label="Slot field"><slot name="private"></slot></div><slot name="public"></slot>' }`
             )
             const check = Effect.fnUntraced(function*(privateReference: boolean, privateText: boolean) {
-              const answer = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+              const answer = yield* send({
+                op: "snapshot",
+                steps: null,
+                interactivity: true,
+                depth: null,
+                provenance: true
+              })
               assert.strictEqual(answer._tag, "Snapshot")
               if (answer._tag !== "Snapshot") {
                 return
@@ -392,8 +439,12 @@ export const engine = (backend: Backend) =>
                   assert(measured._tag === "Value" && measured.value.type === "string")
                   const geometry = JSON.parse(measured.value.value) as LinkGeometry
                   assert.strictEqual(geometry.rects.length, shape.fragments)
-                  if (partial) assert.isBelow(geometry.rects[0]!.bottom, 0)
-                  const first = geometry.rects.find((r) => r.bottom > 0 && r.top < geometry.height)!
+                  if (partial) {
+                    assert.isBelow(geometry.rects[0]!.bottom, 0)
+                  }
+                  const first = geometry.rects.find((r) =>
+                    r.bottom > 0 && r.top < geometry.height
+                  )!
                   const response = yield* send(point(0))
                   assert(response._tag === "Ready", JSON.stringify(response))
                   assert(response.point !== null, JSON.stringify(response))
@@ -445,7 +496,9 @@ export const engine = (backend: Backend) =>
               )
               assert(geometry._tag === "Value" && geometry.value.type === "string")
               const centers = JSON.parse(geometry.value.value) as Array<{ x: number; y: number }>
-              if (mode !== "partial ancestor") assert.strictEqual(centers.length, 3)
+              if (mode !== "partial ancestor") {
+                assert.strictEqual(centers.length, 3)
+              }
               const response = yield* send({
                 ...point(0),
                 cap: 150,

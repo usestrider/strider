@@ -291,6 +291,7 @@ export type Request =
     readonly op: "snapshot"
     readonly steps: ReadonlyArray<Step> | null
     readonly interactivity: boolean
+    readonly provenance?: boolean | undefined
     readonly depth: number | null
   }
   /** Why a locator matches nothing: the nearest match of its steps, and close names. */
@@ -913,6 +914,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   // Propagate only the chosen, nonempty name. Failed naming alternatives must not taint a public label.
   const nameOfElement = (element: Element, context: NameContext): string => {
+    if (!provenance) return nameOfElementValue(element, context)
     const previous = context.contribution.fieldContent
     context.contribution.fieldContent = false
     const value = nameOfElementValue(element, context)
@@ -1028,6 +1030,7 @@ export function engine(render: (root: SnapNode) => string) {
     return ""
   }
 
+  let provenance = false
   const namesFromFields = new Set<Element>()
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
@@ -1038,7 +1041,7 @@ export function engine(render: (root: SnapNode) => string) {
     const name = collapse(
       nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
-    if (contribution.fieldContent) namesFromFields.add(element)
+    if (provenance && contribution.fieldContent) namesFromFields.add(element)
     nameCache.set(element, name)
     return name
   }
@@ -2041,6 +2044,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const fieldAncestry = new Map<Node, boolean>()
   const inField = (node: Node): boolean => {
+    if (!provenance) return false
     const cached = fieldAncestry.get(node)
     if (cached !== undefined) return cached
     const path: Array<Node> = []
@@ -2065,6 +2069,7 @@ export function engine(render: (root: SnapNode) => string) {
   const fieldText = new Map<Element, boolean>()
   // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
   const textContainsField = (element: Element): boolean => {
+    if (!provenance) return false
     const cached = fieldText.get(element)
     if (cached !== undefined) return cached
     const field = textOfNode(element).trim() !== "" && (inField(element) ||
@@ -2083,6 +2088,7 @@ export function engine(render: (root: SnapNode) => string) {
     nameCache.clear()
     namesFromContent.clear()
     namesFromFields.clear()
+    provenance = false
     fieldKinds.clear()
     fieldAncestry.clear()
     fieldText.clear()
@@ -2262,6 +2268,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const snapshot = (request: Extract<Request, { op: "snapshot" }>): Response => {
+    provenance = request.provenance === true
     const walk: Walk = { interactivity: request.interactivity, depth: request.depth }
     if (request.steps === null) return { _tag: "Snapshot", root: documentNode(walk), generation }
     const found = resolve(request.steps)

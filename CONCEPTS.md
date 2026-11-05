@@ -546,7 +546,9 @@ fields retain the signal because they still contain field data. Absence means fa
 nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
 labels retain their existing names. Optional `fieldContent` on accessible and inferred names records that the
 chosen name contains field content, including content copied into an ancestor or another node's name. Absent
-provenance means false for older data. These additions do not change local snapshot text or semantic roles.
+provenance is not evidence of absence: ordinary library snapshots and full capture omit name provenance.
+Only redacted capture requests collect it, including equivalent custom policies; independent editability remains
+available in every snapshot. These additions do not change local snapshot text or semantic roles.
 
 The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
 content and validation messages, including names that contain field content contributed by descendants,

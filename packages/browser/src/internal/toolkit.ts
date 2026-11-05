@@ -229,6 +229,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     readonly entry: Model.ContextEntry
   }
   const capture = options.capture
+  const takeSnapshot = (page: Page.Page) =>
+    page.snapshot().pipe(
+      Effect.provideService(SnapshotImpl.NameProvenance, capture.snapshotText === "redacted")
+    )
   const secrets = Object.entries(options.secrets).map(([name, value]) => ({ name, value: Redacted.value(value) }))
 
   // ── Secrets ──
@@ -643,7 +647,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       ),
     snapshot: ({ page: name }) =>
       onPage(name, (page) =>
-        Effect.map(page.snapshot(), (snapshot) => {
+        Effect.map(takeSnapshot(page), (snapshot) => {
           if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           return capture.snapshotText === "full" ? snapshot.text : SnapshotImpl.render(redacted(snapshot.root))
         })),
@@ -652,7 +656,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         Effect.gen(function*() {
           let snapshot = snapshots.get(name)
           if (snapshot === undefined) {
-            snapshot = yield* page.snapshot()
+            snapshot = yield* takeSnapshot(page)
             if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           }
           const wanted = exact === true ? query : query.toLowerCase()

@@ -13,3 +13,5 @@ older snapshot data remains decodable. Local capture keeps its existing content 
 
 Strict capture remains bounded: assertions such as `expect --text` and action selectors still operate on original
 page content and can confirm guesses at masked values.
+
+Collect field-content name provenance only for redacted capture, including custom masking policies. Ordinary library and local snapshots skip that analysis while retaining independent editability.

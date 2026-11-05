@@ -797,3 +797,11 @@ with names, roles and text before every engine request, expectation observation 
 role changes, slot reassignment and reparenting must be observed by the next walk. Caching across walks would
 retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
 provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
+
+Name provenance is requested only by redacted snapshot capture, including custom policies with the same masking
+setting. Ordinary library and full/local snapshots retain editability but skip field-contribution ancestry and
+subtree analysis. The masking request is internal operation context, forwarded to each frame; it is not inferred
+from a preset's identity. Clear naming caches between requests and scope cached toolkit snapshots to their
+policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
+material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
+when requested rather than introducing separate name strings or speculative optimizations.

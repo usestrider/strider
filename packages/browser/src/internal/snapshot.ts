@@ -9,6 +9,7 @@
  * - **The tree** is narrowed by `depth` in the engine, and by `interactiveOnly` here, once the frames are in.
  * - **`text`** is the tree as indented YAML (`Engine.renderText`).
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as Equivalence from "effect/Equivalence"
 import * as Inspectable from "effect/Inspectable"
@@ -24,6 +25,11 @@ import * as Engine from "./engine.ts"
 import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+
+/** Internal capture request; ordinary library snapshots do not analyze field-content names. @default false */
+export const NameProvenance = Context.Reference<boolean>("@usestrider/browser/internal/snapshot/NameProvenance", {
+  defaultValue: () => false
+})
 
 const TypeId = "~@usestrider/browser/Snapshot"
 
@@ -72,10 +78,11 @@ export const take = (
   Effect.gen(function*() {
     const interactivity = (options?.sources ?? "aria+interactivity") === "aria+interactivity"
     const depth = options?.depth ?? null
+    const provenance = yield* NameProvenance
     const answer = yield* Runtime.sendRouted(
       owner.runtime,
       owner.page,
-      { op: "snapshot", steps, interactivity, depth },
+      { op: "snapshot", steps, interactivity, depth, provenance },
       id,
       at
     )
@@ -132,6 +139,7 @@ export const take = (
         op: "snapshot",
         steps: null,
         interactivity,
+        provenance,
         depth: depth === null ? null : depth - level
       }, id).pipe(Effect.orElseSucceed(() => Option.none<Engine.Response>()))
       if (Option.isNone(inner) || inner.value._tag !== "Snapshot") return []

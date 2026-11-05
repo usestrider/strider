@@ -257,25 +257,46 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         timeout
       )
 
-      it.effect("keeps library and local snapshots free of provenance while custom masking captures it", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const served = yield* site
-          const page = yield* Browser.newPage()
-          yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent('<h2><span contenteditable>private-mode</span></h2><iframe srcdoc="<h2><span contenteditable>private-frame</span></h2>"></iframe>')}`)
-          for (const capture of [CapturePolicy.local, CapturePolicy.strict, new CapturePolicy.CapturePolicy({ screenshots: "allowed", snapshotText: "redacted", consoleText: "full" }), CapturePolicy.local]) {
-            const ordinary = yield* page.snapshot()
-            assert.notInclude(JSON.stringify(ordinary.root), '"fieldContent":true')
-            const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
-            // find before snapshot must collect its own policy's metadata, including in child frames.
-            const found = yield* call(tools, "find", { page: "p1", query: "private-mode" })
-            assert.strictEqual((found.value.outcome as Array<unknown>).length > 0, capture.snapshotText === "full")
-            const result = yield* call(tools, "snapshot", { page: "p1" })
-            assert.isFalse(result.failed)
-            for (const secret of ["private-mode", "private-frame"]) {
-              assert.strictEqual((result.value.outcome as string).includes(secret), capture.snapshotText === "full")
+      it.effect(
+        "keeps library and local snapshots free of provenance while custom masking captures it",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  "<h2><span contenteditable>private-mode</span></h2><iframe srcdoc=\"<h2><span contenteditable>private-frame</span></h2>\"></iframe>"
+                )
+              }`
+            )
+            for (
+              const capture of [
+                CapturePolicy.local,
+                CapturePolicy.strict,
+                new CapturePolicy.CapturePolicy({
+                  screenshots: "allowed",
+                  snapshotText: "redacted",
+                  consoleText: "full"
+                }),
+                CapturePolicy.local
+              ]
+            ) {
+              const ordinary = yield* page.snapshot()
+              assert.notInclude(JSON.stringify(ordinary.root), "\"fieldContent\":true")
+              const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
+              // find before snapshot must collect its own policy's metadata, including in child frames.
+              const found = yield* call(tools, "find", { page: "p1", query: "private-mode" })
+              assert.strictEqual((found.value.outcome as Array<unknown>).length > 0, capture.snapshotText === "full")
+              const result = yield* call(tools, "snapshot", { page: "p1" })
+              assert.isFalse(result.failed)
+              for (const secret of ["private-mode", "private-frame"]) {
+                assert.strictEqual((result.value.outcome as string).includes(secret), capture.snapshotText === "full")
+              }
             }
-          }
-        })), timeout)
+          })),
+        timeout
+      )
 
       it.effect("sends what the capture policy allows", () =>
         Effect.gen(function*() {

@@ -123,9 +123,9 @@ export const Role: Schema.Codec<Role> = Schema.Union([
 /**
  * Schema for a node's name and where it came from: its accessible name (`Accessible`), one inferred from the page
  * (`Inferred`), which says what it came `from`, or none. Accessible names derived from an editable
- * element's content carry optional `from: "text"`; explicit labels do not. Optional `fieldContent` is true when
+ * element's content carry optional `from: "text"`; explicit labels do not. Optional `fieldContent`, collected for redacted capture only, is true when
  * the chosen accessible or inferred name contains field content, even when copied from another node.
- * Its absence means false for older snapshot data.
+ * Ordinary library snapshots and full capture omit this provenance; absence is not evidence that a name is public.
  *
  * @stability unstable
  * @category schemas
