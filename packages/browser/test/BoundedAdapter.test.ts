@@ -10,6 +10,7 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
@@ -169,6 +170,71 @@ describe("BoundedAdapter", () => {
       assert(Deadline.isTimeout(timeout))
       assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
     }))
+
+  for (const nested of [false, true]) {
+    for (const outcome of ["ok", "rejected", "noReply", "interrupt"] as const) {
+      it.effect(`preserves overlapping ${nested ? "step" : "direct"} evidence when the first call ends with ${outcome}`, () =>
+        Effect.gen(function*() {
+          const firstStarted = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const firstReply = yield* Deferred.make<void, Adapter.AdapterError>()
+          const secondReply = yield* Deferred.make<void>()
+          const adapter = stub({
+            clearCookies: () =>
+              Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(firstReply))),
+            setCookies: () =>
+              Deferred.succeed(secondStarted, undefined).pipe(Effect.andThen(Deferred.await(secondReply)))
+          })
+          const wrap = <A, E>(effect: Effect.Effect<A, E>, name: string) =>
+            nested ? effect.pipe(Operation.named(name)) : effect
+          yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            const first = yield* Effect.forkChild(wrap(adapter.clearCookies(context), "first").pipe(Effect.exit))
+            yield* Deferred.await(firstStarted)
+            const second = yield* Effect.forkChild(wrap(adapter.setCookies(context, []), "second").pipe(Effect.exit))
+            yield* Deferred.await(secondStarted)
+            if (outcome === "interrupt") yield* Fiber.interrupt(first)
+            else {
+              if (outcome === "ok") yield* Deferred.succeed(firstReply, undefined)
+              else {yield* Deferred.fail(
+                  firstReply,
+                  new Adapter.AdapterError({
+                    reason: {
+                      _tag: "Protocol",
+                      error: new Protocol.ProtocolError({
+                        reason: outcome === "rejected"
+                          ? new Protocol.Rejected({
+                            method: "clearCookies",
+                            reason: "InvalidArgument",
+                            code: -32602,
+                            description: "refused"
+                          })
+                          : new Protocol.NoReply({ method: "clearCookies", timeout: Duration.zero })
+                      })
+                    }
+                  })
+                )}
+              yield* Fiber.join(first)
+            }
+            // Finish both fibers before asserting so an expected pre-fix failure leaves no wait behind.
+            const whileWaiting = record.diagnostics()
+            yield* Deferred.succeed(secondReply, undefined)
+            yield* Fiber.join(second)
+            const afterReplies = record.diagnostics()
+            assert.deepStrictEqual(whileWaiting.dispatch, { _tag: "MayHaveBeenSent" })
+            assert.deepStrictEqual(
+              afterReplies.dispatch,
+              outcome === "ok" || outcome === "rejected"
+                ? { _tag: "Acknowledged", result: outcome }
+                : { _tag: "MayHaveBeenSent" }
+            )
+            // An independent subsequent write gets evidence of its own after the overlap has ended.
+            yield* wrap(adapter.setCookies(context, []), "later")
+            assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "Acknowledged", result: "ok" })
+          }).pipe(Operation.named("overlapping writes"))
+        }))
+    }
+  }
 
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
