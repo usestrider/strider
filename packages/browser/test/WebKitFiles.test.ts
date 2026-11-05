@@ -184,4 +184,19 @@ describe("WebKit native file replacement", () => {
       assert.deepStrictEqual(target.files, ["previous"])
       assert.isFalse(hasSaved())
     }))
+
+  it.effect("accepts native delivery when an earlier page listener resets the input before Strider observes it", () =>
+    Effect.gen(function*() {
+      // A page's window capture listener added before the upload runs ahead of Strider's, so it can clear the
+      // delivered selection before the observer counts it. The delivery still happened, with its events.
+      const { target, events, replace, hasSaved } = fixture("populate")
+      target.addEventListener("input", () => {
+        target.files = []
+      })
+      const result = yield* replace(["one"]).pipe(Effect.exit)
+      assert(Exit.isSuccess(result), Exit.isFailure(result) ? Cause.pretty(result.cause) : "")
+      assert.deepStrictEqual(target.files, [])
+      assert.deepStrictEqual(events, ["input:one", "change:"])
+      assert.isFalse(hasSaved())
+    }))
 })
