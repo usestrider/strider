@@ -277,3 +277,18 @@ describe("route diagnostics preserve optional-phase requirements", () => {
     >()
   })
 })
+
+describe("route diagnostics keep earlier accepted calls", () => {
+  it("accepts explicit phase type arguments with an omitted phase", () => {
+    expect(page.route<never, never, "request">("**", request)).type.not.toRaiseError()
+    expect(context.route<never, never, "request">("**", request)).type.not.toRaiseError()
+  })
+  it("accepts handlers forwarded by a wrapper generic in the phase", () => {
+    expect(<P extends Route.Phase>(h: Route.Handler<never, never, P | "request">, o?: Route.Options<P>) =>
+      page.route("**", h, o)
+    ).type.not.toRaiseError()
+    expect(<P extends Route.Phase>(h: Route.Handler<never, never, P | "request">, o?: Route.Options<P>) =>
+      context.route("**", h, o)
+    ).type.not.toRaiseError()
+  })
+})
