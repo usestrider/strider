@@ -481,9 +481,18 @@ export const make: (
     const state = entry.session
     const release = Effect.forEach(
       entry.release.flatMap((release) =>
-        valuesAt(entry.raw, release.from).map((value) =>
-          [release.method, { [release.param]: release.list === true ? [value] : value }] as const
-        )
+        valuesAt(entry.raw, release.from).map((value) => {
+          const params: Record<string, unknown> = { [release.param]: release.list === true ? [value] : value }
+          for (const [pointer, from] of Object.entries(release.paramsFrom ?? {})) {
+            const keys = pointer.slice(1).split("/").map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"))
+            let target = params
+            for (const key of keys.slice(0, -1)) {
+              target = (target[key] ??= {}) as Record<string, unknown>
+            }
+            target[keys[keys.length - 1]!] = valuesAt(entry.raw, from)[0]
+          }
+          return [release.method, params] as const
+        })
       ),
       ([method, params]) => Effect.ignore(sendRaw(state, method, params)),
       { discard: true }

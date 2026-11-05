@@ -194,6 +194,18 @@ describe("overlays", () => {
     const valid = { method: "Card.connect", param: "id", from: "/cookies/*/name" }
     const annotated = release("Net#getCookies", { release: [valid] })
     assert.deepStrictEqual(annotated.shapes["Net#getCookies"]?.traits.release, [valid])
+    const extra = { ...valid, paramsFrom: { "/id": "/cookies/*/name" } }
+    assert.deepStrictEqual(release("Net#getCookies", { release: [extra] }).shapes["Net#getCookies"]?.traits.release, [
+      extra
+    ])
+    assert.throws(
+      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/missing": "/cookies/*/name" } }] }),
+      /doesn't resolve/
+    )
+    assert.throws(
+      () => release("Net#getCookies", { release: [{ ...valid, paramsFrom: { "/id": "/missing" } }] }),
+      /doesn't resolve/
+    )
     assert.throws(
       () => release("Net#getCookies", { release: [{ ...valid, method: "Card.gone" }] }),
       /no command Card\.gone/

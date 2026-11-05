@@ -42,7 +42,9 @@ export const Traits = Schema.Struct({
     param: Schema.String,
     from: Schema.String,
     /** The parameter is a list: the value goes in one. */
-    list: Schema.optionalKey(Schema.Literal(true))
+    list: Schema.optionalKey(Schema.Literal(true)),
+    /** Additional parameter pointers mapped to reply pointers. */
+    paramsFrom: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
   })))
 })
 export type Traits = typeof Traits.Type

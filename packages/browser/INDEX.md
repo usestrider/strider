@@ -2222,6 +2222,7 @@ The raw protocol client: commands and events as data, the session they run on, a
   - `readonly method: string`
   - `readonly param: string`
   - `readonly from: string`
+  - `readonly paramsFrom?: Readonly<Record<string, string>> | undefined`
   - `readonly list?: true | undefined`
 - `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
   - `readonly method: M`

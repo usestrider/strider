@@ -8,7 +8,7 @@
  */
 import * as JsonPatch from "effect/JsonPatch"
 import * as Schema from "effect/Schema"
-import type { ProtocolModel, Shape, Traits, TypeExpr } from "./Model.ts"
+import type { ProtocolModel, Traits, TypeExpr } from "./Model.ts"
 import { ProtocolModel as ProtocolModelSchema, sorted, Traits as TraitsSchema } from "./Model.ts"
 
 export const Correction = Schema.Struct({
@@ -141,6 +141,13 @@ const checkReleases = (model: ProtocolModel): void => {
       }
       if (shape.result === null) throw new Error(`${id}: has no result to release from`)
       resolvePointer(model, shape.result, release.from, id)
+      for (const [param, from] of Object.entries(release.paramsFrom ?? {})) {
+        if (releaseShape?._tag !== "Command" || releaseShape.params === null) {
+          throw new Error(`${id}: release has no parameters`)
+        }
+        resolvePointer(model, releaseShape.params, param, id)
+        resolvePointer(model, shape.result, from, id)
+      }
     }
   }
 }
@@ -148,21 +155,28 @@ const checkReleases = (model: ProtocolModel): void => {
 /** Follows a JSON pointer through the model's shapes; `*` steps into a list's items. */
 const resolvePointer = (model: ProtocolModel, from: string, pointer: string, owner: string): void => {
   if (!pointer.startsWith("/")) throw new Error(`${owner}: ${pointer} isn't a JSON pointer`)
-  let type: TypeExpr = { _tag: "Ref", shape: from }
-  for (const segment of pointer.slice(1).split("/")) {
-    while (type._tag === "Ref") {
-      const shape: Shape | undefined = model.shapes[type.shape]
-      if (shape?._tag === "Alias") type = shape.type
-      else break
+  const expand = (type: TypeExpr): ReadonlyArray<TypeExpr> => {
+    if (type._tag === "Ref") {
+      const shape = model.shapes[type.shape]
+      if (shape?._tag === "Alias") return expand(shape.type)
     }
-    if (segment === "*") {
-      if (type._tag !== "List") throw new Error(`${owner}: ${pointer} steps into a list where there is none`)
-      type = type.items
-      continue
+    return type._tag === "Union" ? type.members.flatMap(expand) : [type]
+  }
+  let types: ReadonlyArray<TypeExpr> = [{ _tag: "Ref", shape: from }]
+  for (const raw of pointer.slice(1).split("/")) {
+    const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~")
+    types = types.flatMap(expand).flatMap((type): ReadonlyArray<TypeExpr> => {
+      if (segment === "*") return type._tag === "List" ? [type.items] : []
+      const shape = type._tag === "Ref" ? model.shapes[type.shape] : undefined
+      const member = shape?._tag === "Struct" ? shape.members[segment] : undefined
+      return member === undefined ? [] : [member.type]
+    })
+    if (types.length === 0) {
+      throw new Error(
+        segment === "*"
+          ? `${owner}: ${pointer} steps into a list where there is none`
+          : `${owner}: ${pointer} doesn't resolve at ${segment}`
+      )
     }
-    const shape = type._tag === "Ref" ? model.shapes[type.shape] : undefined
-    const member = shape?._tag === "Struct" ? shape.members[segment] : undefined
-    if (member === undefined) throw new Error(`${owner}: ${pointer} doesn't resolve at ${segment}`)
-    type = member.type
   }
 }
