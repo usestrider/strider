@@ -8,6 +8,7 @@
  */
 import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
+import type * as Scope from "effect/Scope"
 import type * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import type * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import type * as Network from "../../bidi-protocol/Network.ts"
@@ -159,6 +160,8 @@ export interface HandleEntry {
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface State {
+  /** Connection-owned declaration cleanup can finish after its caller stops waiting. */
+  readonly cleanupScope: Scope.Scope
   readonly options: Adapter.ConnectOptions
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
@@ -206,6 +209,7 @@ export interface State {
 
 /** A connection's empty state, with its default context mapped to BiDi's `"default"`. */
 export const make = (options: {
+  readonly cleanupScope: Scope.Scope
   readonly connect: Adapter.ConnectOptions
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
@@ -220,6 +224,7 @@ export const make = (options: {
     removing: false
   }
   const state: State = {
+    cleanupScope: options.cleanupScope,
     options: options.connect,
     ids: options.ids,
     buffer: options.buffer,

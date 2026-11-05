@@ -754,6 +754,56 @@ inferring CLI stability from its implementation's location under `internal/`, wh
 contract.
 
 
+## BiDi viewport precedence belongs to the declaration registry
+
+BiDi viewport declarations use the shared registry's Page, Context, Browser precedence for both dimensions and
+device scale. A broader change first sets each affected user context's effective default for future pages, then
+reapplies the effective value only to existing pages with page overrides. Page release explicitly applies its
+remaining effective value, or null when none remains. Creating a user context initializes only that context.
+
+Firefox 158.0 applies a user-context viewport command to existing pages, overwriting page settings; clearing a
+page restores the implementation default rather than an outer declaration. Native layering therefore cannot
+implement the declaration contract. Rewriting all contexts during creation also overwrites unrelated declarations.
+
+Rejected: relying on native scope precedence; applying only page commands, which leaves future pages without
+defaults; and redundantly writing context defaults to every page, which adds commands without changing their
+effective value and can address startup contexts Firefox announces but rejects by ID. Broader writes and page
+reapplication are sequential protocol commands; successful installation has its effective state when it returns.
+
+Release skips closing pages and removing contexts. Every remaining native context or page write has an independent
+five-second budget on the browser clock, detached from the releasing operation and with a fresh protocol deadline.
+A typed failure warns and marks cleanup unconfirmed; only an ended session is quiet. One failure cannot stop another
+target's restoration. Installation keeps propagating failures on active resources instead of treating them as cleanup.
+
+A failed or interrupted context removal resets its in-progress flag and restores that surviving context's current
+viewport default and page overrides. A failed page close resets only its own closing marker and restores that
+surviving page's current effective viewport. This repairs declaration changes skipped while the resource was
+closing; retaining the skipped native value or replaying the old declaration would leave stale state. Recovery
+uses the same independent target budgets and connection ownership as release, preserving the original close or
+removal outcome even if restoration rejects or times out. An ended transport skips these recovery writes.
+
+Viewport release runs in a connection-owned fiber. Read the releasing caller's operation before supplying the
+registration's captured context: a finished installation's operation is not the releasing caller. An active caller
+waits only within its own deadline and marks cleanup unconfirmed if it stops waiting. Ordinary release outside
+an operation, or release requiring confirmation, joins the cleanup fiber. Registry removal happens synchronously
+before any caller returns. A closing connection performs cleanup inline if its scope can no longer own a fiber.
+Keeping the native cleanup budget separate from the caller's wait avoids extending an expired operation by five
+seconds while still retaining ownership of restoration work.
+
+A context create reply is owned until initialization has installed its rollback path. The context is announced
+before viewport initialization so pages observed during initialization have a known parent. Failure or interruption
+of initialization attempts removal under a separate five-second detached budget, preserving the primary error or
+interruption. Confirmed removal ends any remaining pages before removing the context's tables and emitting its
+removal fact. If removal fails or times out, retain its known state and addition fact, reset the removal-in-progress
+flag, warn, and mark cleanup unconfirmed. A native command may have taken effect without confirmation; neither a
+warning nor a missing reply establishes that the context ended.
+
+Rejected: aborting all release work on the first failure; swallowing install errors; reporting a context removed
+without a successful native removal reply; and borrowing the initialization deadline for rollback, since it may
+already have expired; and waiting for that independent cleanup budget inside an expired caller's finalizer.
+Cleanup does not retry, and unexpected defects remain defects.
+
+
 ## Strict capture matches the redacted snapshot
 
 Use one structured redacted tree for toolkit snapshot output and find matching, including names and paths.

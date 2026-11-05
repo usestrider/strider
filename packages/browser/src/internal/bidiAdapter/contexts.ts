@@ -1,8 +1,9 @@
 /**
- * User contexts, pages and downloads on BiDi. BiDi scopes declarations natively, by context or user context, so a
- * new context needs no pause: preload scripts and overrides registered for its user context apply before its
- * scripts run.
+ * User contexts, pages and downloads on BiDi. Preload scripts and native user-context settings cover future
+ * pages. A new user context receives its effective viewport default without rewriting existing contexts;
+ * viewport precedence for existing pages is resolved by the declaration registry.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
@@ -13,7 +14,8 @@ import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
-import { applyKind } from "./declare.ts"
+import * as Cleanup from "./cleanup.ts"
+import { applyKind, recoverViewport } from "./declare.ts"
 import {
   type ContextEntry,
   contextOf,
@@ -89,26 +91,42 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
-  const { userContext } = yield* Kit.protocol(state.send(BrowserBidi.createUserContext({
-    ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
-    ...(Option.isSome(options.proxy)
-      ? {
-        proxy: {
-          proxyType: "manual",
-          httpProxy: options.proxy.value.server,
-          sslProxy: options.proxy.value.server,
-          noProxy: [...options.proxy.value.bypass]
-        }
-      }
-      : {})
-  })))
-  const entry: ContextEntry = { id: state.ids.userContext(), bidi: userContext, removing: false }
-  state.contexts.set(entry.id, entry)
-  state.contextsByBidi.set(userContext, entry)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
-  // Browser-wide viewports are set per user context, so a new one gets them too
-  yield* applyKind(state, "Viewport", { _tag: "Browser" }).pipe(Effect.ignore)
-  return entry.id
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      // Keep ownership of a successful create reply until setup has installed its rollback path.
+      const { userContext } = yield* Kit.protocol(state.send(BrowserBidi.createUserContext({
+        ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
+        ...(Option.isSome(options.proxy)
+          ? {
+            proxy: {
+              proxyType: "manual",
+              httpProxy: options.proxy.value.server,
+              sslProxy: options.proxy.value.server,
+              noProxy: [...options.proxy.value.bypass]
+            }
+          }
+          : {})
+      })))
+      const entry: ContextEntry = { id: state.ids.userContext(), bidi: userContext, removing: false }
+      state.contexts.set(entry.id, entry)
+      state.contextsByBidi.set(userContext, entry)
+      // Announce before setup: any pages observed during setup must have a known parent context.
+      yield* state.buffer.run(() =>
+        state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })
+      )
+      // Seed only this context; every failure, including interruption, attempts rollback under a fresh budget.
+      yield* Kit.protocol(applyKind(state, "Viewport", { _tag: "UserContext", context: entry.id })).pipe(
+        restore,
+        Effect.onError(() =>
+          Cleanup.report(
+            Cleanup.bounded(removeUserContext(state, entry.id)),
+            `BiDi context ${entry.id} initialization rollback could not confirm removal`
+          )
+        )
+      )
+      return entry.id
+    })
+  )
 })
 
 export const removeUserContext = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
@@ -121,15 +139,36 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
   // A removal under way reports the context's end
   if (context.removing) return
   context.removing = true
-  yield* Kit.protocol(state.send(BrowserBidi.removeUserContext({ userContext: context.bidi }))).pipe(
-    Effect.tapError(() => Effect.sync(() => context.removing = false))
-  )
-  // The command closes the context's navigables before it answers, and their `contextDestroyed` events come
-  // before the reply on the one connection: once they are folded, its pages have ended, so the context ends now
-  yield* state.root().drainObserved
-  state.contexts.delete(id)
-  state.contextsByBidi.delete(context.bidi)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  return yield* Effect.gen(function*() {
+    yield* Kit.protocol(state.send(BrowserBidi.removeUserContext({ userContext: context.bidi })))
+    // The command closes the context's navigables before it answers, and their `contextDestroyed` events come
+    // before the reply on the one connection: once they are folded, its pages have ended, so the context ends now
+    yield* state.root().drainObserved
+    yield* state.buffer.run(() => {
+      // A successful removal confirms every page ended, even if no separate destruction event was observed.
+      for (const page of Array.from(state.navigables.values())) {
+        if (page.context === context && page.parent === undefined) {
+          removeNavigable(
+            state,
+            page,
+            new L1Target.PageClosed({ by: "userContextRemoved" }),
+            "bidi:browser.removeUserContext"
+          )
+        }
+      }
+      state.contexts.delete(id)
+      state.contextsByBidi.delete(context.bidi)
+      state.buffer.emit({ _tag: "UserContextRemoved", context: id })
+    })
+  }).pipe(Effect.onError((cause) =>
+    Effect.gen(function*() {
+      context.removing = false
+      if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
+      if (state.contexts.get(id) === context) {
+        yield* recoverViewport(state, { _tag: "UserContext", context: id })
+      }
+    })
+  ))
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
@@ -151,10 +190,20 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
 export const closePage = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
     const navigable = yield* navigableById(state, id)
-    if (!options.runBeforeUnload) navigable.closing = new L1Target.PageClosed({ by: "command" })
+    const closing = options.runBeforeUnload ? undefined : new L1Target.PageClosed({ by: "command" })
+    if (closing !== undefined) navigable.closing = closing
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
-      state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload }))
+      state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload })).pipe(
+        Effect.onError((cause) =>
+          Effect.gen(function*() {
+            if (navigable.closing !== closing) return
+            navigable.closing = undefined
+            if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
+            if (!navigable.removed) yield* recoverViewport(state, { _tag: "Page", page: navigable.id })
+          })
+        )
+      )
     )
   }
 )
