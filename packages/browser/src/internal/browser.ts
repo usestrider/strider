@@ -177,7 +177,7 @@ const makeContext = (
           ? Option.some("Page.clock")
           : Option.none()
     }, entry),
-    route: <E, R, P extends Route.Phase = "request">(
+    route: (<E, R, P extends Route.Phase = "request">(
       pattern: Url.Pattern | string,
       handler: Route.Handler<E, R, P>,
       options?: Route.Options<P>
@@ -193,7 +193,7 @@ const makeContext = (
         pattern,
         handler,
         (options?.phase ?? "request") as P
-      ),
+      )) as UserContext.UserContext["route"],
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),

@@ -46,6 +46,25 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 An action sends its input at most once. If it fails after the input may have reached the page, the error's
 [`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
 
+A text descendant of a label can check or uncheck its associated checkbox. For
+`<input id="terms" type="checkbox"><label for="terms"><span>Accept terms</span></label>`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const acceptTerms = Effect.fn("acceptTerms")(function*(page: Page.Page) {
+  yield* page.getByText("Accept terms").check()
+  yield* page.getByText("Accept terms").uncheck()
+})
+```
+
+The click stays on the text you selected, and a box already in the right state gets no input. If the text
+sits inside something interactive of its own, such as a link or a button, the action fails with
+`WrongElement` before sending anything. Inside a closed shadow root Strider can't see that control, so the
+click can land on it, and the action then fails with `StateUnchanged`. The full rules are in
+[`check`](/docs/api/browser/Locator#Locator.check)'s reference.
+
 ## Checks
 
 Before sending anything, an action waits, checking at each animation frame, until its element is ready:
