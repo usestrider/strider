@@ -550,7 +550,10 @@ export const engine = (backend: Backend) =>
 
         it.effect("reads an invalid aria-expanded as false, and an absent one as neither", () =>
           Effect.gen(function*() {
-            const { send } = yield* open(backend, `<button aria-expanded="bogus">Invalid</button><button>Absent</button>`)
+            const { send } = yield* open(
+              backend,
+              `<button aria-expanded="bogus">Invalid</button><button>Absent</button>`
+            )
             const check = Effect.fnUntraced(function*(expanded: boolean, expected: number) {
               const step = { ...role("button"), expanded }
               assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected, `expanded: ${expanded}`)
