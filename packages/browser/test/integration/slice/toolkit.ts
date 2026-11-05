@@ -7,6 +7,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Deadline, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
@@ -400,6 +401,100 @@ for (const mode of ["open", "closed"]) {
               yield* active.pipe(Effect.repeat({ until: (count) => Number(count) > 0 }), Effect.timeout("5 seconds"))
               yield* Fiber.interrupt(pending)
               assert.strictEqual(yield* active, 0)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "interrupts optional validation collection promptly and releases listeners after the page responds",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const own = yield* Effect.scope
+              const page = yield* Browser.newPage()
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent("<input id=\"field\" required><button>Quiet</button>")
+                }`
+              )
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const original = runtime.model.adapter.evaluate
+              const evaluate = (functionDeclaration: string) =>
+                original(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const mutable = runtime.model.adapter as { evaluate: typeof original }
+              const stopping = yield* Deferred.make<void>()
+              const busyDone = yield* Deferred.make<void>()
+              let armed = true
+              mutable.evaluate = Effect.fnUntraced(
+                function*(target: Parameters<typeof original>[0], options: Parameters<typeof original>[1]) {
+                  const first = options.arguments[0]
+                  if (
+                    armed && first?._tag === "Value" && first.value.type === "string" &&
+                    first.value.value.includes("\"op\":\"validationStop\"")
+                  ) {
+                    armed = false
+                    // Queue a busy evaluation before the stop on the same realm. This makes interruption
+                    // exercise a pending collection on Chromium too, independent of timer scheduling.
+                    yield* evaluate(`() => {
+                  const end = Date.now() + 8000
+                  while (Date.now() < end);
+                  document.getElementById("field").checkValidity()
+                }`).pipe(
+                      Effect.ensuring(Deferred.succeed(busyDone, undefined)),
+                      Effect.forkIn(own, { startImmediately: true })
+                    )
+                    yield* Deferred.succeed(stopping, undefined)
+                  }
+                  return yield* original(target, options)
+                }
+              )
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  mutable.evaluate = original
+                })
+              )
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const pending = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" }).pipe(
+                Effect.forkChild
+              )
+              yield* Deferred.await(stopping).pipe(Effect.timeout("5 seconds"))
+              const started = Date.now()
+              yield* Fiber.interrupt(pending)
+              assert.isBelow(Date.now() - started, 4000, "interrupt must not wait for the page's busy loop")
+              yield* Deferred.await(busyDone).pipe(Effect.timeout("10 seconds"))
+              const active = yield* evaluate("() => globalThis.activeValidationListeners.size")
+              assert(active._tag === "Value" && active.value.type === "number")
+              assert.strictEqual(active.value.value, 0)
+              const quiet = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+              assert.notInclude(quiet.value.sinceLast.join("\n"), "validation observed")
             }))
           }),
         timeout
