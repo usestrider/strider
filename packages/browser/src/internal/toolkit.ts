@@ -51,6 +51,7 @@ import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Runtime from "./runtime.ts"
 import * as Secrets from "./secrets.ts"
 import * as Tools from "./tools.ts"
 import * as UrlPattern from "./urlPattern.ts"
@@ -708,7 +709,44 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       acting(
         name,
         (page) =>
-          Effect.as(Effect.flatMap(targeted(page, name, target), (locator) => locator.click()), `clicked ${target}`)
+          Effect.gen(function*() {
+            const locator = yield* targeted(page, name, target)
+            const { runtime, entry } = Handles.page(page)
+            const record = yield* Operation.record
+            const token = String(record.id)
+            yield* Effect.acquireUseRelease(
+              runtime.model.documentOf(entry.id),
+              (document) =>
+                Effect.gen(function*() {
+                  if (Option.isSome(document)) {
+                    yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                      op: "validationStart",
+                      token,
+                      full: capture.snapshotText === "full"
+                    }, record.id).pipe(Effect.catchCause(() => Effect.succeedNone))
+                  }
+                  yield* locator.click()
+                }),
+              (document, exit) =>
+                Effect.gen(function*() {
+                  if (Option.isNone(document)) return
+                  const cleanup = yield* Operation.record
+                  const response = yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                    op: "validationStop",
+                    token
+                  }, cleanup.id)
+                  if (Exit.isSuccess(exit) && Option.isSome(response) && response.value._tag === "Validation") {
+                    for (const line of response.value.lines) note(`${name} validation observed during click: ${line}`)
+                  }
+                }).pipe(
+                  Operation.named("Toolkit.click.validationCleanup", { attributes: { "browser.page.id": entry.id } }),
+                  Operation.detached,
+                  // Document loss or a dialog must never replace the original click error.
+                  Effect.catchCause(() => Effect.void)
+                )
+            )
+            return `clicked ${target}`
+          }).pipe(Operation.named("Toolkit.click", { attributes: { "browser.page.id": page.id } }))
       ),
     fill: ({ page: name, target, value }) =>
       acting(name, (page) =>

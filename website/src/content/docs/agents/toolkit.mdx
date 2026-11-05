@@ -63,6 +63,19 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
 [dialog handler](/docs/events/kinds#dialogs-and-file-choosers). A result reads
 [as the CLI prints it](/docs/agents/cli#commands).
 
+A click's digest reports `validation observed during click` once per affected control when an `invalid`
+event occurs during that click operation. This is temporal evidence only: page handlers can call
+`checkValidity()` or `reportValidity()` on unrelated controls, so it does not prove a submission was attempted
+or blocked. Repeated clicks can each report validation even when snapshot invalidity is unchanged. Observation
+does not call validity methods, change focus, cancel events or wait for later timers.
+
+Observation covers the top document and open shadow roots present when observation starts. It excludes child
+frames, closed shadow roots and roots created later. Navigation or document loss can discard observations;
+the original click error is preserved. Strict capture shows the control's role and a masked message, without
+its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
+current validity independently of clicks.
+
+
 - **Every tool names its page.** There's no current tab. Pages are named when created (`p1`, `p2`, or the model's
   name) or when first seen, as a popup is.
 - **A target is a ref or a locator:** `e12` from the page's latest snapshot, or `role=button[name="Save"]`,

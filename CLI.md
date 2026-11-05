@@ -215,6 +215,18 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `strider next` subscribes in the session's scope and prints a wait handle, and `strider await` collects it. The wait's deadline starts at `next` (`--within`, or the default budget), so a wait an agent leaves too long reports `Timeout` when collected. The since-last digest is `history`, read from where the previous command stopped.
 - **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `strider history network --failed`".
+- **Validation during a click.** A click's digest reports `validation observed during click` once per affected control when an `invalid`
+  event occurs during that click operation. This is temporal evidence only: page handlers can call
+  `checkValidity()` or `reportValidity()` on unrelated controls, so it does not prove a submission was attempted
+  or blocked. Repeated clicks can each report validation even when snapshot invalidity is unchanged. Observation
+  does not call validity methods, change focus, cancel events or wait for later timers.
+
+  Observation covers the top document and open shadow roots present when observation starts. It excludes child
+  frames, closed shadow roots and roots created later. Navigation or document loss can discard observations;
+  the original click error is preserved. Strict capture shows the control's role and a masked message, without
+  its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
+  current validity independently of clicks.
+
 - **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser lists no pages until you take control of a tab: use an id from `strider tabs`, for example `strider control N4`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per module error. Interrupting a command (Ctrl-C) interrupts that command, never the session.
 
