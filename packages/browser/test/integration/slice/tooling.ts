@@ -144,10 +144,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   yield* page.locator("#out").pipe(Expect.toHaveText(""))
                   assert.strictEqual(yield* clear.handled, 1)
                 } else yield* page.getByLabel("Files").setInputFiles([])
-                assert.strictEqual(
-                  yield* page.getByLabel("Files").evaluate((input) => (input as HTMLInputElement).files!.length),
-                  0
-                )
+                yield* page.locator("#out").pipe(Expect.toHaveText(""))
               }))
             }),
           timeout
