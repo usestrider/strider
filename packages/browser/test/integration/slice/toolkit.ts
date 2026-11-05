@@ -145,9 +145,13 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 node.role._tag === "Inferred" && node.role.evidence.includes("password")
               )
               assert.deepEqual(field!.name, { _tag: "Accessible", value: "Secret hint" })
-              const query = ExportTest.queryOf(Option.getOrThrow(field!.ref), snapshot)
+              const query = ExportTest.locatorOf("page", Option.getOrThrow(field!.ref), snapshot)
               // The exported test puts the page's variable before the query
-              const locator = new Function("page", `return page.${query}`)(page) as Locator.Locator
+              const locator = yield* new Function(
+                "page",
+                "Effect",
+                `return Effect.gen(function*() { return ${query} })`
+              )(page, Effect) as Effect.Effect<Locator.Locator>
               assert.strictEqual(yield* locator.count, 1, query)
             })),
           timeout
@@ -163,6 +167,34 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           [
             "placeholders",
             "<input type=\"password\" placeholder=\"New secret\"><input type=\"password\" placeholder=\"Confirm secret\">"
+          ],
+          [
+            "titles",
+            "<input type=\"password\" title=\"New secret\"><input type=\"password\" title=\"Confirm secret\">"
+          ],
+          [
+            "aria-labels",
+            "<input type=\"password\" aria-label=\"New secret\"><input type=\"password\" aria-label=\"Confirm secret\">"
+          ],
+          [
+            "aria-label over hints",
+            "<input type=\"password\" aria-label=\"New secret\"><input type=\"password\" aria-label=\"Confirm secret\" title=\"New secret\" placeholder=\"New secret\">"
+          ],
+          [
+            "title over placeholder",
+            "<input type=\"password\" placeholder=\"New secret\"><input type=\"password\" title=\"Confirm secret\" placeholder=\"New secret\">"
+          ],
+          [
+            "label over title",
+            "<input type=\"password\" title=\"New secret\"><label>Confirm secret<input type=\"password\" title=\"New secret\"></label>"
+          ],
+          [
+            "aria-labelledby over aria-label",
+            "<span id=\"confirm\">Confirm secret</span><input type=\"password\" aria-label=\"New secret\"><input type=\"password\" aria-labelledby=\"confirm\" aria-label=\"New secret\">"
+          ],
+          [
+            "aria-label over native label",
+            "<input type=\"password\" aria-label=\"New secret\"><label>New secret<input type=\"password\" aria-label=\"Confirm secret\"></label>"
           ]
         ] as const
       ) {
@@ -179,10 +211,56 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               )
               assert.lengthOf(fields, 2)
               for (const field of fields) {
-                const query = ExportTest.queryOf(Option.getOrThrow(field.ref), snapshot)
+                const query = ExportTest.locatorOf("page", Option.getOrThrow(field.ref), snapshot)
                 // The exported test puts the page's variable before the query
-                const locator = new Function("page", `return page.${query}`)(page) as Locator.Locator
+                const locator = yield* new Function(
+                  "page",
+                  "Effect",
+                  `return Effect.gen(function*() { return ${query} })`
+                )(page, Effect) as Effect.Effect<Locator.Locator>
                 assert.strictEqual(yield* locator.count, 1, query)
+                assert.deepEqual((yield* locator.snapshot()).root.name, field.name, query)
+              }
+              // A lower-priority hint on the other field must not become a replacement target.
+              const first = fields[0]!
+              const query = ExportTest.locatorOf("page", Option.getOrThrow(first.ref), snapshot)
+              yield* snapshot.ref(Option.getOrThrow(first.ref)).evaluate((element) => element.remove())
+              const missing = yield* new Function(
+                "page",
+                "Effect",
+                `return Effect.gen(function*() { return ${query} })`
+              )(page, Effect) as Effect.Effect<Locator.Locator>
+              assert.strictEqual(yield* missing.count, 0, query)
+            })),
+          timeout
+        )
+      }
+
+      for (const attribute of ["placeholder=\"Same secret\"", ""]) {
+        it.effect(
+          `keeps duplicate or absent password export names ambiguous (${attribute})`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const served = yield* site
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  `<input type="password" ${attribute}><input type="password" ${attribute}>`
+                )
+              }`)
+              const snapshot = yield* page.snapshot()
+              for (const [ref, node] of snapshot.refs) {
+                if (node.role._tag !== "Inferred" || !node.role.evidence.includes("password")) continue
+                const query = ExportTest.locatorOf("page", ref, snapshot)
+                const locator = yield* new Function(
+                  "page",
+                  "Effect",
+                  `return Effect.gen(function*() { return ${query} })`
+                )(page, Effect) as Effect.Effect<Locator.Locator>
+                assert.strictEqual(yield* locator.count, 2, query)
+                const error = yield* locator.fill("must-not-fill").pipe(Effect.flip)
+                assert(error._tag === "LocatorError")
+                assert.strictEqual(error.reason._tag, "StrictViolation")
               }
             })),
           timeout
