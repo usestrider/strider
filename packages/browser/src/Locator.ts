@@ -40,11 +40,131 @@ const TypeId = "~@usestrider/browser/Locator"
 /**
  * Settings for `getByRole`.
  *
+ * **Details**
+ *
+ * State filters must be supported by the requested role. Unsupported combinations fail when the
+ * locator is used, including when its scope matches nothing or a frame is missing; construction does not throw.
+ * Locator operations fail with `LocatorError` whose reason is `InvalidInput` for `"selector"`.
+ * Expectations fail with `ExpectationFailed`, as they do for invalid CSS selectors.
+ * `disabled` is supported for every role.
+ *
+ * On stock WebKit, use `includeHidden: true` for native options, which the current visibility
+ * rules exclude; `checkVisibility` reports false for these options.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface RoleOptions {
+  /**
+   * Match a native heading level (1–6), or a positive integer from aria-level on heading, listitem, row
+   * or treeitem. Native headings take precedence over aria-level.
+   *
+   * **Example** (Filter by level)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("heading", { level: 2 })
+   * ```
+   *
+   * @default any level
+   */
+  readonly level?: number | undefined
+  /**
+   * Match a native checkbox or radio, or aria-checked on checkbox, radio, switch, menuitemcheckbox,
+   * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
+   * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
+   * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
+   * roles they match false, as do all other values except "mixed".
+   *
+   * **Example** (Filter by checked)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("checkbox", { checked: true })
+   * ```
+   *
+   * @default any checked state
+   */
+  readonly checked?: boolean | undefined
+  /**
+   * Match aria-pressed on buttons. Mixed matches neither boolean; absent or invalid values match false.
+   *
+   * **Example** (Filter by pressed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { pressed: true })
+   * ```
+   *
+   * @default any pressed state
+   */
+  readonly pressed?: boolean | undefined
+  /**
+   * Match aria-expanded on roles that support expansion, or the open state of details with a supported role.
+   * Absent ARIA values match neither boolean; present values other than case-insensitive "true" match false.
+   *
+   * **Example** (Filter by expanded)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { expanded: false })
+   * ```
+   *
+   * @default any expanded state
+   */
+  readonly expanded?: boolean | undefined
+  /**
+   * Match a native option’s selected property or aria-selected on gridcell, option, row, tab, rowheader,
+   * columnheader or treeitem. Absent or invalid ARIA values match false.
+   *
+   * **Example** (Filter by selected)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("tab", { selected: true })
+   * ```
+   *
+   * @default any selected state
+   */
+  readonly selected?: boolean | undefined
+  /**
+   * Match native disabled controls (including disabled fieldsets and optgroups) or inherited
+   * aria-disabled. An option inherits native disabled state from its optgroup or fieldset, but not its select.
+   * These explicit native rules give the same filter matches across browsers; enabled reads, expectations
+   * and action checks still use the browser's `:disabled` result and can differ for options and optgroups.
+   * Unlike Playwright, the disabled `<fieldset>` element itself also matches; aria-disabled is
+   * case-sensitive, applies on any role, and false on a descendant does not cancel a disabled ancestor.
+   *
+   * **Example** (Filter by disabled)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { disabled: false })
+   * ```
+   *
+   * @default any disabled state
+   */
+  readonly disabled?: boolean | undefined
+
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
    * is used as given.
@@ -260,6 +380,11 @@ export interface FilterOptions {
   readonly hasNotText?: string | RegExp | undefined
   /**
    * Keep only visible elements, or only hidden ones.
+   *
+   * **Details**
+   *
+   * An element with `opacity: 0` on itself or any ancestor counts as hidden: `visible: true` excludes it,
+   * and `visible: false` includes it.
    */
   readonly visible?: boolean | undefined
 }
@@ -507,7 +632,8 @@ export interface ReadonlyLocator
    */
   readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Whether the one match is visible now; `false` when nothing matches.
+   * Whether the one match is visible now; `false` when nothing matches or the element has `opacity: 0` on
+   * itself or any ancestor.
    *
    * **Example** (Dismissing a banner only when it shows)
    *
@@ -628,6 +754,16 @@ export interface ReadonlyLocator
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many.
+ *
+ * An action needs its element reachable; visible means a person can see it. Actions accept `opacity: 0` on
+ * the element or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits,
+ * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
+ * not make an action wait for a fade-in.
+ *
+ * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
+ * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
+ * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
+ * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
  *

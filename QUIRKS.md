@@ -1356,6 +1356,7 @@ An entry with no marker is open.
 - *Seen:* the comparison scripts: `check()` on TodoMVC's first todo timed out `waitingForCondition`, its last observation `NotVisible`; Playwright's passed.
 - *We:* the rule stands; the scenario turned the check off at its call site, `check({ checks: { visible: false } })`, and its note said why, until it was replaced by The Internet's dynamic controls (2026-10-27), TodoMVC's demo being hosted by Playwright.
 - *Reconsider:* whether an action's `visible` should ignore opacity, as `receivesPointer` already says whether the pointer reaches the element; `Expect.toBeVisible` could keep it, which reads as a person would see it. A design change.
+- **Resolved** in `8d10bf79`: actions accept zero opacity on the element or its ancestors and require their other checks; visibility assertions and filters count these transparent elements as hidden.
 
 **Q242. A scenario takes Strider longer than Playwright, on the same Chromium** (Ours). Over 10 runs each, 8 of the comparison's 10 scenarios took 1.4 to 2.4 times as long with Strider, contexts and pages made and closed in each: the README's program 173 ms to Playwright's 98, a popup with a dialog 311 to 145, TodoMVC 424 to 176; a route blocking analytics took the same, and a HAR recorded and replayed 139 to 152. A launch with a first page took 201 ms to 130. Where the time goes isn't known.
 - *Seen:* the comparison scripts (`packages/scenarios/RESULTS.md`), on the maintainer's desktop at `nice 19`.
@@ -1364,8 +1365,9 @@ An entry with no marker is open.
 
 **Q243. `getByRole` matches a role and a name, and none of the states Playwright's filters by** (Ours). `Locator.RoleOptions` has `name`, `exact` and `includeHidden`; Playwright's also has `level`, `checked`, `pressed`, `expanded`, `selected` and `disabled`, so a heading's level or a checked box is a CSS selector or a filter in Strider.
 - *Seen:* the comparison scripts: The Internet's `h2` was to be `getByRole("heading", { level: 2 })`, which doesn't type-check; both versions read `locator("h2")`.
-- *We:* nothing yet.
-- *Reconsider:* the states as `RoleOptions`, from the accessibility tree the engine already computes.
+- *We:* `Locator.RoleOptions` accepts `level`, `checked`, `pressed`, `expanded`, `selected` and `disabled`. The shared role-query engine reads native and ARIA states, combines them with names and visibility, and keeps queries unchanged when filters are omitted.
+- *Reconsider:* nothing for the missing filters. Malformed checked-state values retain the existing reader’s behavior.
+- **Resolved** with the six role-state filters, native/ARIA integration coverage, and type-checked examples.
 
 **Q244. A handler's or a route's decision ran under the deadline in force when it was registered** (Ours). `Dialog.handle`, `FileChooser.handle` and `route` run each decision with the context they captured at registration, the deadline included, so a handler registered inside `Deadline.within("5 seconds")` failed its operations with `Timeout` once those five seconds had passed, though its own budget, `Deadline.DefaultBudget` per decision, had barely begun. Its time limit was also on the fiber's clock, which `TestClock` stops.
 - *Seen:* giving every operation a record and a deadline of its own, which would have handed the registration's to every decision too.

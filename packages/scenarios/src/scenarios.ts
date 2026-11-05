@@ -323,7 +323,7 @@ const theInternetStrider = Effect.fn("the-internet")(function*() {
   yield* page.getByLabel("Password").fill("SuperSecretPassword!")
   yield* page.getByRole("button", { name: "Login" }).click()
   yield* page.getByText("You logged into a secure area!").pipe(Expect.toBeVisible)
-  return yield* page.locator("h2").readText
+  return yield* page.getByRole("heading", { level: 2 }).readText
 })
 // #endregion
 
@@ -338,7 +338,7 @@ const theInternetPlaywright = async (browser: Playwright.Browser, _: string, fil
     await page.getByLabel("Password").fill("SuperSecretPassword!")
     await page.getByRole("button", { name: "Login" }).click()
     await page.getByText("You logged into a secure area!").waitFor()
-    return (await page.locator("h2").textContent()) ?? ""
+    return (await page.getByRole("heading", { level: 2 }).textContent()) ?? ""
   } finally {
     await context.close()
   }
