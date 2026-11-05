@@ -681,6 +681,8 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(ProtocolClient.valuesAt(result, "/result/*/get/objectId"), ["B"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({ targetId: "T" }, "/targetId"), ["T"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({}, "/exceptionDetails/exception/objectId"), [])
+      // Code generation validates pointers with their JSON-pointer escapes decoded, so they must be followed the same way
+      assert.deepStrictEqual(ProtocolClient.valuesAt({ "a/b": { "c~d": "E" } }, "/a~1b/c~0d"), ["E"])
       assert.strictEqual(Ingestion.utf8Length("aé😀"), 1 + 2 + 4)
     }))
 })

@@ -1,5 +1,5 @@
 {
-  "reason": "Commands whose replies hand out something with a remote lifetime: contexts, user contexts, preload scripts, intercepts, data collectors, subscriptions, screencasts and extensions. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the spec's own counterpart command. Remote objects a script.callFunction or script.evaluate hands out are released by L1, which knows their target, with script.disown.",
+  "reason": "Commands whose replies hand out resources with a remote lifetime. The default late handler releases them. Script results carry their own realm, including exception results; root-owned handles are disowned there. Ownership none returns no handle.",
   "annotate": [
     {
       "target": "browsingContext#create",
@@ -102,6 +102,58 @@
             "method": "webExtension.uninstall",
             "param": "extension",
             "from": "/extension"
+          }
+        ]
+      }
+    },
+    {
+      "target": "script#callFunction",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/result/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          },
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/exceptionDetails/exception/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "target": "script#evaluate",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/result/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          },
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/exceptionDetails/exception/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
           }
         ]
       }
