@@ -98,7 +98,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
-            if (name === "WebKit") {
+            if (yield* supports("fileInput.native.clear")) {
               yield* input.setInputFiles([])
               assert.deepStrictEqual(
                 yield* page.evaluateInMainWorld(() =>
@@ -146,27 +146,27 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* page.evaluateInMainWorld(() => document.body.dataset.fileEvents),
               "input:second.txt,change:second.txt"
             )
-            if (name === "WebKit") {
-              assert.strictEqual(
-                yield* page.evaluateInMainWorld(() => document.body.dataset.fileEventFlags),
-                "input:true:true:true,change:true:false:true"
-              )
-              // Caller validation must refuse a mixed replacement without disturbing the previous choice.
-              const failure = yield* input.setInputFiles(
-                [made[0]!, FileInput.remote(FilePath.Remote.make(first))]
-              ).pipe(Effect.flip)
-              assert(Locator.isLocatorError(failure), String(failure))
-              assert.deepStrictEqual(
-                yield* page.evaluateInMainWorld(() =>
-                  [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
-                ),
-                ["second.txt"]
-              )
-              yield* out.pipe(Expect.toHaveText(/^second\.txt:[^:]*:6:second$/))
-              assert.strictEqual(
-                yield* page.evaluateInMainWorld(() => document.body.dataset.fileEvents),
-                "input:second.txt,change:second.txt"
-              )
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.body.dataset.fileEventFlags),
+              `input:true:${yield* supports("fileInput.native.inputComposed")}:true,change:true:false:true`
+            )
+            // Caller validation must refuse a mixed replacement without disturbing the previous choice.
+            const failure = yield* input.setInputFiles(
+              [made[0]!, FileInput.remote(FilePath.Remote.make(first))]
+            ).pipe(Effect.flip)
+            assert(Locator.isLocatorError(failure), String(failure))
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+              ),
+              ["second.txt"]
+            )
+            yield* out.pipe(Expect.toHaveText(/^second\.txt:[^:]*:6:second$/))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.body.dataset.fileEvents),
+              "input:second.txt,change:second.txt"
+            )
+            if (yield* supports("fileInput.native.clear")) {
               yield* input.setInputFiles([])
               assert.deepStrictEqual(
                 yield* page.evaluateInMainWorld(() =>

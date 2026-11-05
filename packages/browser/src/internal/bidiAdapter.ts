@@ -87,6 +87,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
+      entry("fileInput.native.inputComposed", "unsupported", ["native input events are not composed"]),
+      entry("fileInput.native.clear", "supported", []),
+      entry("fileInput.native.lastModified", "supported"),
       entry(
         "fileChooser",
         "partial",

@@ -83,6 +83,9 @@ export const attachedCapabilities = (info: Browser.Info) => {
       entry("frames.readiness", "partial", [
         "a frame's load is reported for the page's main frame only"
       ]),
+      entry("fileInput.native.inputComposed", "unsupported", ["the inspector cannot load browser-host paths"]),
+      entry("fileInput.native.clear", "unsupported", ["the inspector cannot load browser-host paths"]),
+      entry("fileInput.native.lastModified", "unsupported", ["the inspector cannot load browser-host paths"]),
       entry("fileChooser", "unsupported", ["stock WebKit's inspector reports no file chooser"]),
       entry("downloads", "unsupported", [`${noDownloads}: a navigation that becomes one ends as BecameDownload`]),
       entry("downloads.progress", "unsupported", [noDownloads]),
@@ -198,6 +201,11 @@ export const launchedCapabilities = (info: Browser.Info) => {
       "every dialog is Unknown: stock WebKit's Automation says one is open, not which kind"
     ]],
     "close.runBeforeUnload": ["unsupported", ["stock WebKit's Automation closes a page without asking it"]],
+    "fileInput.native.inputComposed": ["supported", []],
+    "fileInput.native.clear": ["supported", ["clearing emits synthetic input/change events"]],
+    "fileInput.native.lastModified": ["unsupported", [
+      "Automation uses selection time rather than disk modification time"
+    ]],
     fileChooser: ["unsupported", [
       "a chooser a click opens is cancelled by the browser, unreported; a file input's files are set (setInputFiles)"
     ]],

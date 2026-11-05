@@ -4,6 +4,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
@@ -370,6 +371,29 @@ export const contentFrameLaunched = Effect.fnUntraced(function*(state: State, no
   return Option.some(matched.value.id)
 })
 
+/** Runs restoration without converting the primary typed failure into a defect. */
+export const restoreOnFailure = <A, E, R, R2>(
+  effect: Effect.Effect<A, E, R>,
+  restore: Effect.Effect<void, Adapter.AdapterError, R2>
+) =>
+  Effect.uninterruptibleMask((resume) =>
+    resume(effect).pipe(
+      Effect.exit,
+      Effect.flatMap((result) => {
+        if (Exit.isSuccess(result)) return Effect.succeed(result.value)
+        return restore.pipe(
+          Effect.orDie,
+          Effect.exit,
+          Effect.flatMap((rollback) =>
+            Effect.failCause(
+              Exit.isFailure(rollback) ? Cause.combine(result.cause, rollback.cause) : result.cause
+            )
+          )
+        )
+      })
+    )
+  )
+
 /**
  * Replaces native files without accepting Automation's append behavior or silently ignored node handles.
  * The saved FileList permits rollback on refusal; clearing and native assignment remain separate browser turns.
@@ -432,13 +456,16 @@ export const replaceFiles = Effect.fnUntraced(function*(
       )
     }
   })
-  yield* Effect.gen(function*() {
-    const prepared = yield* evaluate(
-      `function(element, key) {
+  yield* restoreOnFailure(
+    Effect.gen(function*() {
+      const prepared = yield* evaluate(
+        `function(element, key, count) {
       if (!(element instanceof HTMLInputElement) || element.type !== "file" || !element.isConnected) return false;
-      const saved = { element, files: element.files, accepted: false, observe: null };
+      if (!element.multiple && count > 1) return "single";
+      const saved = { element, files: element.files, deliveredCount: null, observe: null };
       saved.observe = (event) => {
-        if (event.isTrusted && (event.target === element || event.composedPath().includes(element))) saved.accepted = true;
+        if (saved.deliveredCount === null && event.isTrusted &&
+            (event.target === element || event.composedPath().includes(element))) saved.deliveredCount = element.files.length;
       };
       Object.defineProperty(globalThis, key, { value: saved, configurable: true });
       element.addEventListener("input", saved.observe, true);
@@ -447,28 +474,39 @@ export const replaceFiles = Effect.fnUntraced(function*(
       element.files = new DataTransfer().files;
       return true;
     }`,
-      [reference, key]
-    )
-    if (Option.getOrNull(resultOf(prepared.result)) !== true) {
-      return yield* Effect.fail(Kit.undecodable("Automation.evaluateJavaScriptFunction", "No replacement file input"))
-    }
-    if (files.length > 0) {
-      yield* automationOf(
-        process,
-        Automation.setFilesForInputFileUpload({
-          browsingContextHandle: handle,
-          frameHandle,
-          nodeHandle: Object.values(reference)[0] as Automation.NodeHandle,
-          filenames: [...files]
-        })
+        [reference, key, files.length]
       )
-    }
-    const confirmed = yield* evaluate(
-      `function(key, count) {
+      if (Option.getOrNull(resultOf(prepared.result)) === "single") {
+        return yield* Effect.fail(Kit.undecodable(
+          "Automation.evaluateJavaScriptFunction",
+          "Multiple paths require a multiple file input"
+        ))
+      }
+      if (Option.getOrNull(resultOf(prepared.result)) !== true) {
+        return yield* Effect.fail(
+          Kit.undecodable(
+            "Automation.evaluateJavaScriptFunction",
+            "No replacement file input"
+          )
+        )
+      }
+      if (files.length > 0) {
+        yield* automationOf(
+          process,
+          Automation.setFilesForInputFileUpload({
+            browsingContextHandle: handle,
+            frameHandle,
+            nodeHandle: Object.values(reference)[0] as Automation.NodeHandle,
+            filenames: [...files]
+          })
+        )
+      }
+      const confirmed = yield* evaluate(
+        `function(key, count) {
       const saved = globalThis[key];
       if (!saved) return false;
       // Native delivery proves assignment even when a handler resets or removes the input.
-      if (saved.accepted) return true;
+      if (saved.deliveredCount !== null) return saved.deliveredCount === count;
       const element = saved.element;
       if (!element.isConnected || element.type !== "file" || element.files.length !== count) return false;
       if (count === 0) {
@@ -477,22 +515,17 @@ export const replaceFiles = Effect.fnUntraced(function*(
       }
       return true;
     }`,
-      [key, files.length]
-    )
-    // Automation can acknowledge an invalid node handle without setting anything. Restore rather than accept it.
-    if (Option.getOrNull(resultOf(confirmed.result)) !== true) {
-      return yield* Effect.fail(
-        Kit.undecodable("Automation.setFilesForInputFileUpload", "The replacement file selection was not populated")
+        [key, files.length]
       )
-    }
-  }).pipe(
-    Effect.onError((cause) =>
-      restore.pipe(
-        Effect.orDie,
-        Effect.catchCause((rollback) => Effect.failCause(Cause.combine(cause, rollback))),
-        Effect.orDie
-      )
-    ),
+      // Automation can acknowledge an invalid node handle without setting anything. Restore rather than accept it.
+      if (Option.getOrNull(resultOf(confirmed.result)) !== true) {
+        return yield* Effect.fail(
+          Kit.undecodable("Automation.setFilesForInputFileUpload", "The replacement file selection was not populated")
+        )
+      }
+    }),
+    restore
+  ).pipe(
     Effect.ensuring(
       dispose.pipe(
         Effect.catch((error) => Effect.logWarning("WebKit saved file selection cleanup failed", error))

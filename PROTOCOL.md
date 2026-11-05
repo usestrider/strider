@@ -1119,12 +1119,12 @@ since there is no creation operation to receive that failure; an explicit page d
 ### Stock WebKit native file replacement
 
 WebKitGTK 2.54.1's Automation appends native files on multiple inputs. Strider saves the target's FileList,
-assigns a fresh empty DataTransfer FileList, calls Automation, then confirms trusted native input delivery or the resulting file count. Using
+assigns a fresh empty DataTransfer FileList, calls Automation, then confirms the file count captured during trusted native input delivery or the resulting file count. Using
 `value = ""` would mutate the saved FileList in place, preventing rollback. Native files retain their browser-host
 backing; this does not transfer their bytes through the caller. Ordinary refusal or a silently ignored native
 upload restores the saved selection. A temporary window property retains the old FileList and the input listener
-until cleanup. Trusted input delivery counts as success even if a page handler then clears or removes the input. Rollback has a separate five-second deadline; a failed restoration is a
-defect alongside the original failure. Releasing the saved reference also has its own five-second deadline and
+until cleanup. The first trusted input event captures the delivered count before later handlers clear or remove the input. Multiple paths on a single-file input are refused before saving or clearing its selection. Rollback has a separate five-second deadline; a failed restoration is a
+defect alongside the original failure, whose typed cause is retained. Releasing the saved reference also has its own five-second deadline and
 logs cleanup failures.
 
 Nonempty replacement retains Automation's native input/change events. Clearing assigns the empty FileList and

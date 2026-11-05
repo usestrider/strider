@@ -981,10 +981,10 @@ no behavioral role. Caller opt-in keeps that trade explicit.
 Save the current FileList and assign a fresh empty FileList before Automation loads browser-host paths.
 WebKitGTK 2.54.1's Automation appends on multiple inputs; empty assignment avoids that behavior while retaining
 native file backing and native events for nonempty replacement. Do not clear with `value = ""`: WebKit mutates the
-saved FileList in place. Observe trusted input delivery, falling back to the resulting count, because Automation can acknowledge invalid
-node handles without setting files. Observed native delivery must remain successful when a page handler clears or
+saved FileList in place. Observe the file count at the first trusted input event, falling back to the resulting count, because Automation can acknowledge invalid
+node handles without setting files. A matching count at native delivery must remain successful when a page handler clears or
 removes the input; checking only the final count would break those handlers. Restore the previous selection on refusal or incomplete results under a separate cleanup
-deadline. A restoration failure remains visible as a defect alongside the primary failure. Clearing alone uses
+deadline. Refuse multiple native paths on a single-file input before mutation. A restoration failure remains visible as a defect alongside the original typed primary failure. Clearing alone uses
 synthetic input/change events because native loading is unnecessary for an empty list.
 
 Rejected: trusting the native success reply without checking its result; clearing without retaining a restorable

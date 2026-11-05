@@ -4,8 +4,9 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
-import * as Operation from "../src/internal/operation.ts"
 import * as vm from "node:vm"
+import * as Kit from "../src/internal/adapterKit.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as Input from "../src/internal/webkitAdapter/input.ts"
 import type * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
@@ -20,7 +21,7 @@ const rejected = new Protocol.ProtocolError({
   })
 })
 
-const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset" | "partial", primary?: Protocol.ProtocolError) => {
+const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset" | "partial") => {
   const events: Array<string> = []
   class InputElement {
     type = "file"
@@ -64,7 +65,7 @@ const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "
           if (mode === "refuse" || mode === "rollback-failure") {
             if (mode === "rollback-failure") target.type = "text"
             nodes.get(params.nodeHandle)!.files = ["partially loaded"]
-            return Effect.fail(primary ?? rejected)
+            return Effect.fail(rejected)
           }
           if (mode === "populate" || mode === "populate-reset" || mode === "partial") {
             const input = nodes.get(params.nodeHandle)!
@@ -134,9 +135,10 @@ describe("WebKit native file replacement", () => {
       const timeout = yield* Effect.map(Operation.record, (record) => record.timeout(Option.none())).pipe(
         Operation.named("Test.upload")
       )
-      // The fake session models a command whose enclosing deadline expires during native loading.
-      const { replace } = fixture("rollback-failure", timeout as unknown as Protocol.ProtocolError)
-      const result = yield* replace(["new"]).pipe(Effect.exit)
+      const result = yield* Input.restoreOnFailure(
+        Effect.fail(timeout),
+        Effect.fail(Kit.undecodable("restore", "Could not restore the previous file selection"))
+      ).pipe(Effect.exit)
       assert(Exit.isFailure(result))
       assert.isTrue(result.cause.reasons.some((reason) => reason._tag === "Fail" && reason.error === timeout))
       assert.isTrue(Cause.hasDies(result.cause))
