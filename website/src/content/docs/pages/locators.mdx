@@ -99,12 +99,14 @@ const enabled = page.getByRole("button", { name: "Save", disabled: false })
 ```
 
 Native controls use their native states; ARIA controls use the corresponding ARIA attributes. Disabled state is
-inherited, including disabled fieldsets. Mixed checked or pressed states match neither boolean. Missing expanded
+inherited, including disabled fieldsets. Options inherit native disabled state from optgroups and fieldsets,
+but not selects. For options and optgroups, these filters can differ from enabled reads and action checks,
+which retain the browser's native behavior. Mixed checked or pressed states match neither boolean. Missing expanded
 state also matches neither boolean; present expanded values other than case-insensitive `"true"` match false.
 Missing pressed or selected state matches false. Unsupported role/filter combinations fail when used, even
 with an empty scope or a missing frame: locator operations return `LocatorError` with an `InvalidInput` reason, and expectations
 return `ExpectationFailed`. See
-[`RoleOptions`](/docs/api/browser/Locator#roleoptions) for the supported roles and checked-state details.
+[`RoleOptions`](/docs/api/browser/Locator#roleoptions) for the supported roles and state-reading details.
 
 ## Narrowing
 

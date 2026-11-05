@@ -78,7 +78,7 @@ export interface RoleOptions {
    * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
    * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
    * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
-   * roles they match false, as do all other values except "mixed". Non-checkable elements match neither.
+   * roles they match false, as do all other values except "mixed".
    *
    * **Example** (Filter by checked)
    *
@@ -145,7 +145,10 @@ export interface RoleOptions {
   readonly selected?: boolean | undefined
   /**
    * Match native disabled controls (including disabled fieldsets and optgroups) or inherited
-   * aria-disabled. Unlike Playwright, the disabled `<fieldset>` element itself also matches; aria-disabled is
+   * aria-disabled. An option inherits native disabled state from its optgroup or fieldset, but not its select.
+   * These explicit native rules give the same filter matches across browsers; enabled reads, expectations
+   * and action checks still use the browser's `:disabled` result and can differ for options and optgroups.
+   * Unlike Playwright, the disabled `<fieldset>` element itself also matches; aria-disabled is
    * case-sensitive, applies on any role, and false on a descendant does not cancel a disabled ancestor.
    *
    * **Example** (Filter by disabled)

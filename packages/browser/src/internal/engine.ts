@@ -1237,25 +1237,32 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  const ariaDisabled = (element: Element): boolean => {
+    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+      if (current.getAttribute("aria-disabled") === "true") return true
+    }
+    return false
+  }
+
   const enabled = (element: Element): boolean => {
     if (element.matches(":disabled")) return false
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.getAttribute("aria-disabled") === "true") return false
-    }
-    return true
+    return !ariaDisabled(element)
   }
 
   const disabledOf = (element: Element): boolean => {
-    if (!enabled(element)) return true
-    if (!(element instanceof HTMLOptionElement)) return false
-    if (element.parentElement instanceof HTMLOptGroupElement && element.parentElement.disabled) return true
-    // Firefox's :disabled does not include an option's disabled fieldset.
-    for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
-      if (!(ancestor instanceof HTMLFieldSetElement) || !ancestor.disabled) continue
-      const legend = Array.from(ancestor.children).find((child) => child instanceof HTMLLegendElement)
-      if (legend === undefined || !legend.contains(element)) return true
-    }
-    return false
+    if (ariaDisabled(element)) return true
+    const native = element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLOptionElement || element instanceof HTMLOptGroupElement ||
+      element instanceof HTMLFieldSetElement
+    if (!native) return false
+    if (element.hasAttribute("disabled")) return true
+    if (element instanceof HTMLOptionElement && element.closest("optgroup[disabled]") !== null) return true
+    // Role filters use explicit native rules: :disabled differs between browsers for options and optgroups.
+    const fieldset = element.closest("fieldset[disabled]")
+    if (fieldset === null) return false
+    const legend = Array.from(fieldset.children).find((child) => child instanceof HTMLLegendElement)
+    return legend === undefined || !legend.contains(element)
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
