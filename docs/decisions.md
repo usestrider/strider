@@ -754,6 +754,32 @@ inferring CLI stability from its implementation's location under `internal/`, wh
 contract.
 
 
+## One-shot event waits keep their first terminal outcome
+
+An event being published is not a completed match: delivery can load and decode a response body or wait for a
+navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
+completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
+end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
+for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+Scope cancellation commits before stopping workers; completed results, errors and timeouts remain latched.
+
+The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate
+or effectful finalizer. A separate deadline waiter commits independently of blocked delivery on the browser's clock.
+The delivery worker observes the committed outcome and cancels its work through Effect interruption. A user effect
+that is already uninterruptible can finish its own work, but cannot replace the committed result or cause a new
+predicate to start. Closing a scope never drains queued work. A terminal outcome releases the queue and subscriber immediately; the delivery worker releases its internal child
+scope only when it exits. The acquiring scope therefore keeps owning any still-running delivery or predicate,
+even after Timeout or TargetGone notification. A deadline waiter must not close and detach that child scope while
+its delivery worker is still using caller resources. Prompt terminal notification does not imply that acquiring-scope
+release has finished. The caller can keep the latched result. Streams retain their existing ordered
+buffer-draining contract on normal target end.
+
+Rejected: making target failure depend on worker progress, which can return success after the target has ended
+and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
+work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
+unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
+
 ## Validation observation during toolkit clicks
 
 Keep snapshot invalidity as current state, including before interaction. Observe native invalid events only

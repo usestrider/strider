@@ -230,8 +230,86 @@ Saved runs under `.data/` are local and ignored by Git. Preserve review evidence
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
 
-Run screenshot diagnostics with `pnpm profile:screenshot /absolute/path/diagnostic.json` without overlapping
-other browser runs.
+## Observation workloads
+
+`visible` remains the immediate visibility control. `visible-delayed` and `visible-many` arm the same
+100 ms page timer, which appends one visible `#ready`, then await respectively one and twenty independent
+visibility waits. Both libraries must complete every wait; the reported time is per batch. Timing includes
+arming the timer and the intentional delay, protocol traffic and delivery of every result. Page/context
+creation, initial navigation, result verification and page cleanup remain excluded. The timer is not a
+subscription-readiness barrier: these public locator waits have no ready acknowledgment, so a sufficiently
+slow host may start some checks after insertion. These cases characterize ordinary delayed conditions,
+not transient-event capture or a proven count of simultaneously installed page observers.
+
+`console-many` registers twenty one-shot subscriptions before evaluating one `console.log`, then checks
+that all twenty return the exact text `observation-ready`. Strider awaits each `ConsoleMessage.next`
+registration; Playwright's `waitForEvent` installs its listener synchronously before returning its promise.
+The event can arrive before the returned waits are awaited. Timing includes registration, evaluation,
+event delivery, consuming all results and subscription release (the Strider scope closes before return;
+Playwright removes its one-shot listeners on resolution). No console history replay is used. Fresh pages
+isolate samples. This is fan-out of one event, not twenty events, sustained throughput or callback latency.
+
+Correctness boundaries are exercised separately in the shared browser slice tests:
+`starts fresh observations after timeout, interruption and document replacement` checks a missing visibility
+condition fails as `ExpectationFailed` at its deadline, an interrupted waiter can be joined, a replaced DOM
+node is read afresh, and twenty new assertions read the new document after navigation. It does not assert
+that a locator wait spanning navigation succeeds. `keeps ready console subscriptions across document
+replacement and releases their scope` checks an event wait expires as `Deadline.Timeout`, interruption is
+joinable, and twenty subscriptions acquired before navigation capture a console event in the replacement
+document's inline script. The event deadline is set at registration, rather than on the returned wait.
+Interrupting a consumer does not end the scope-owned subscription; closing its scope interrupts the
+still-pending returned wait. A new subscription still works after the earlier scope is closed. Scope ownership
+is Strider's cancellation boundary; Playwright promises have no equivalent general interruption primitive.
+The comparative timing cases exercise successful completion only. These checks establish observable
+outcomes and continued usability; they do not count retained observers/listeners or prove absence of residual
+browser work after cancellation. Reconnect semantics, pending locator navigation, target closure, nested
+frames, very short transients and renderer CPU/wakeups remain outside these measurements.
+
+### Bounded observation diagnostics
+
+After preserving an uninstrumented baseline, run the opt-in observation profiler under the browser lock:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/control.json control
+```
+
+Append `smoke` after the instrumented output path to check the hooks after an engine change: one measured
+pair after one warmup pair at 100 ms for one/twenty waits, plus the two cancellation probes. This mode checks
+tooling compatibility only; it does not refresh the performance baseline.
+
+The fixed stopping bound is five alternating library pairs after one warmup pair at each combination of
+35/100/160/240 ms insertion delay and one/twenty independent visibility waits. Every wait must succeed and
+the resulting text is checked. These smaller diagnostic cells are not a performance gate. The separate control
+uses the same workload without the page counters or Playwright loader; the four existing `pnpm bench` cases
+remain the current uninstrumented baseline with twenty pairs and three warmups. Cell order is fixed, not
+randomized, and separate runs cannot isolate drift from instrumentation overhead.
+
+The instrumented run counts Strider expectation rounds, evaluations, observer creations, active observers,
+mutation callbacks and animation callbacks, and measures time inside evaluation with the page clock. It
+adds counters to the installed engine in memory, not to the library sources. Snapshots read that isolated
+world through additional protocol commands after timing. Callback counts include the final already-scheduled
+animation callback even if it does no check. Evaluation time excludes observer allocation, dispatch, host
+orchestration and other callback overhead; page-clock resolution and the added clock reads limit precision.
+The pinned Playwright loader records protocol traffic and host selector-attempt starts, without changing
+retry intervals or command arguments. A host attempt is not a count of every internal page evaluation.
+Both protocols retain timestamps and full payloads so overlapping command durations can be examined without
+adding them as elapsed time. These are instrumented diagnoses, not speedup measurements or renderer CPU profiles.
+
+Two additional Strider probes start one/twenty missing-condition waits with a one-second deadline. They
+poll page counters for at most 250 ms to confirm all observers are active before interrupting the consumer
+fiber, then snapshot immediately and after 100/700 ms. They fail if that acknowledgment is absent. The reads
+and waiting perturb timing; retained work describes only this bounded page expectation path, and does not
+by itself establish a public-contract violation. No browser restart, reconnect, navigation, nested frame or
+transient condition is covered. JSON preserves source and pinned-bundle hashes, raw protocol events,
+counters, warmup-independent measured cells and failures; preserve the exact tooling source beside the report.
+
+## Capture diagnostics
+
+Screenshot diagnostics use `pnpm profile:screenshot /absolute/path/diagnostic.json` in the same browser lock.
 This separate, instrumented Strider run records command intervals, response sizes, extra JSON parsing cost and
 replayed Effect/Buffer/adapter-helper base64 decoding cost for 20 samples of each screenshot workload. It does not measure an isolated renderer or network duration:
 `Page.captureScreenshot` combines renderer synchronization, capture/encoding and response transfer. Time after
@@ -264,7 +342,7 @@ with no settling waits or extra commands between them. The dense case retains ev
 the default. The selected profile and exact launch arguments are recorded. This does not change production presets
 or Playwright defaults.
 
-### Query result attribution
+## Query result attribution
 
 `benchmark/query-profile.ts` is a diagnostic counterpart to the ordinary query cases. Run it inside the pinned
 integration shell, supplying an absolute JSON report path. The opt-in Node loader applies checked in-memory
