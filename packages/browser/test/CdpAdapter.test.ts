@@ -1284,7 +1284,7 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
-  it.effect("releases a rejected acquiring consumer without stopping an earlier live consumer", () =>
+  it.effect("preserves a live consumer when an overlapping pending start is rejected", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(false, true)
       const page = yield* h.page.control
@@ -1295,13 +1295,13 @@ describe("Chromium screencast renderer readiness", () => {
       )
       yield* Queue.take(h.screenshotWork)
       const startA = yield* Queue.take(h.screenshotWork)
-      yield* h.browser.receive({ id: startA.id, sessionId: startA.sessionId, result: {} })
-      yield* Fiber.join(a)
       const b = yield* Effect.forkScoped(
         Effect.exit(page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second)))
       )
       yield* Queue.take(h.screenshotWork)
       const startB = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({ id: startA.id, sessionId: startA.sessionId, result: {} })
+      yield* Fiber.join(a)
       yield* h.browser.receive({
         id: startB.id,
         sessionId: startB.sessionId,
@@ -1312,6 +1312,112 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
       yield* Scope.close(first, Exit.void)
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("requires a native start outcome before joining an abandoned start whose reply never arrived", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
+      yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      const scope = yield* Scope.make()
+      const b = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* TestClock.adjust("1 second")
+      yield* replyMetrics(h.browser, metrics)
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const starts = h.commands.filter((c) => c.method === "Page.startScreencast")
+      if (starts.length > 1) {
+        const start = starts[1]!
+        yield* h.browser.receive({
+          id: start.id,
+          sessionId: start.sessionId,
+          error: { code: -32000, message: "Screencast is already active" }
+        })
+      }
+      yield* Fiber.join(b)
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(starts.length, 2, "an unconfirmed stream cannot be reused without native evidence")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("joins a confirmed session stream without sending another native start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+      yield* Scope.close(first, Exit.void)
+      const earlyStops = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      yield* Scope.close(second, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+      assert.strictEqual(earlyStops, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  for (const previous of ["pending", "abandoned"] as const) {
+    it.effect(`joins the native already-active stream of an earlier ${previous} start`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(false, true)
+        const page = yield* h.page.control
+        const first = yield* Scope.make()
+        const second = yield* Scope.make()
+        const a = yield* Effect.forkScoped(
+          page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+        )
+        yield* Queue.take(h.screenshotWork)
+        const startA = yield* Queue.take(h.screenshotWork)
+        if (previous === "abandoned") yield* Fiber.interrupt(a)
+        const b = yield* Effect.forkScoped(
+          page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+        )
+        yield* Queue.take(h.screenshotWork)
+        const startB = yield* Queue.take(h.screenshotWork)
+        yield* h.browser.receive({
+          id: startB.id,
+          sessionId: startB.sessionId,
+          error: { code: -32000, message: "Screencast is already active" }
+        })
+        yield* Fiber.join(b)
+        yield* h.browser.receive({ id: startA.id, sessionId: startA.sessionId, result: {} })
+        if (previous === "pending") yield* Fiber.join(a)
+        yield* Scope.close(first, Exit.void)
+        yield* TestClock.adjust("0 millis")
+        const earlyStops = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+        yield* Scope.close(second, Exit.void)
+        assert.strictEqual(earlyStops, 0)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      }).pipe(onTestClock))
+  }
+
+  it.effect("preserves already-active rejection when this session has no earlier owned start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        Effect.exit(page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope)))
+      )
+      yield* Queue.take(h.screenshotWork)
+      const start = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({
+        id: start.id,
+        sessionId: start.sessionId,
+        error: { code: -32000, message: "Screencast is already active" }
+      })
+      const error = Exit.findErrorOption(yield* Fiber.join(acquiring))
+      assert(Option.isSome(error) && Capability.isCapabilityError(error.value))
+      assert.strictEqual(error.value.reason._tag, "BackendFailure")
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("1 second")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
     }).pipe(onTestClock))
 
   // Page.stopScreencast is parameterless and session-wide, so a stop for one acquisition also ends another's frames.
