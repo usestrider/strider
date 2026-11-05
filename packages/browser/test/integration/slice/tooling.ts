@@ -164,14 +164,15 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(url)
             const input = page.getByLabel("Files")
             const out = page.locator("#out")
+            // Host-path MIME comes from the browser; transferred files use our MIME inference.
             yield* input.setInputFiles(remote)
-            yield* out.pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             yield* input.setInputFiles([])
             yield* out.pipe(Expect.toHaveText(""))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
             yield* input.setInputFiles(remote)
-            yield* out.pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
           }))
@@ -200,7 +201,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       for (const source of ["local", "bytes"] as const) {
         it.effect(`refuses several ${source} files for an input that takes one`, () =>
           Effect.gen(function*() {
-            const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p>
+            <button>Inspect</button><p id="selected">none</p><script>
+              document.querySelector("button").onclick = () => {
+                document.getElementById("selected").textContent = [...document.querySelector("input").files].map((file) => file.name).join("|")
+              }
               let changes = 0
               document.querySelector("input").addEventListener("change", (event) => {
                 document.getElementById("out").textContent = event.target.files.length + ":" + ++changes
@@ -219,6 +224,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               assert(Locator.isLocatorError(failure), String(failure))
               assert.strictEqual(failure.reason._tag, "InvalidInput")
               yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
+              yield* page.getByRole("button", { name: "Inspect" }).click()
+              yield* page.locator("#selected").pipe(Expect.toHaveText("a.txt"))
             }))
           }), timeout)
       }
