@@ -531,6 +531,39 @@ export const engine = (backend: Backend) =>
             yield* check("option", { disabled: true, includeHidden: true }, 1)
           }), timeout)
 
+        it.effect("rejects unsupported role filters before matching candidates", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<a href=\"/\">Link</a><input type=\"checkbox\">")
+            for (
+              const options of [{ checked: true }, { pressed: false }, { expanded: false }, { selected: false }, {
+                level: 2
+              }]
+            ) {
+              for (
+                const steps of [
+                  [{ ...role("link"), ...options }],
+                  [{ _tag: "Css" as const, selector: "#missing" }, { ...role("link"), ...options }],
+                  [{ _tag: "Css" as const, selector: "#missing" }, {
+                    _tag: "Filter" as const,
+                    hasText: null,
+                    hasNotText: null,
+                    visible: null,
+                    has: [{ ...role("link"), ...options }],
+                    hasNot: null
+                  }]
+                ]
+              ) {
+                const response = yield* send({ op: "count", steps })
+                assert.strictEqual(response._tag, "InvalidSelector", JSON.stringify({ options, steps, response }))
+                if (response._tag === "InvalidSelector") {
+                  assert.include(response.message, Object.keys(options)[0]!)
+                }
+              }
+            }
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("link")] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("link"), disabled: false }] })), 1)
+          }), timeout)
+
         it.effect("filters options inside a disabled fieldset as disabled, except in its legend", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -538,7 +571,7 @@ export const engine = (backend: Backend) =>
               `<fieldset disabled>
 <legend><select multiple><option>Free</option></select></legend>
 <select multiple><option>Blocked</option></select>
-</fieldset>`
+</fieldset><fieldset></fieldset>`
             )
             const check = Effect.fnUntraced(function*(disabled: boolean, expected: number) {
               const step = { ...role("option", null, true), disabled }
@@ -546,6 +579,8 @@ export const engine = (backend: Backend) =>
             })
             yield* check(true, 1)
             yield* check(false, 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("group"), disabled: true }] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("group"), disabled: false }] })), 1)
           }), timeout)
 
         it.effect("reads an invalid aria-expanded as false, and an absent one as neither", () =>
