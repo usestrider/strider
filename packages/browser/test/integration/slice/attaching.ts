@@ -64,15 +64,7 @@ export const chromiumAttachable = (
     // Headless Chromium takes one URL on its command line (QUIRKS.md): the second tab is opened through its endpoint
     yield* Launch.spawn(
       chromium.executable,
-      ChromiumLauncher.argsFor(
-        {
-          // This external fixture intentionally starts a page for adoption.
-          profileArgs: ChromiumLauncher.profileArgs.automation.filter((arg) => arg !== "--no-startup-window"),
-          args: [first]
-        },
-        dir,
-        "port"
-      ).filter((arg) => arg !== "about:blank"),
+      ChromiumLauncher.argsFor({ args: [first] }, dir, "port").filter((arg) => arg !== "about:blank"),
       dir,
       {}
     )
@@ -134,55 +126,50 @@ export const attaching = (
       it.effect("lists the browser's pages, and controls one it didn't open for a scope", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const fixture = Option.isSome(attachable)
-            ? yield* attachable.value.start(tabUrl(origin, "Initial"), tabUrl(origin, "Other"))
-            : undefined
-          yield* Effect.gen(function*() {
-            const browser = yield* Browser.Browser
+          const browser = yield* Browser.Browser
+          yield* Effect.scoped(Effect.gen(function*() {
+            const ours = yield* Browser.newPage()
+            const pages = yield* browser.pages
+            assert.isTrue(pages.some((page) => Equal.equals(page, ours)))
+            // The launched browser's own first tab: observed, so it has no locators
+            const first = (yield* browser.defaultContext.pages)[0]!
+            assert.isFalse("getByRole" in first)
+            assert.isTrue(pages.some((page) => Equal.equals(page, first)))
+            let kept: Page.Page | undefined
             yield* Effect.scoped(Effect.gen(function*() {
-              const ours = yield* Browser.newPage()
-              const pages = yield* browser.pages
-              assert.isTrue(pages.some((page) => Equal.equals(page, ours)))
-              // An external page: observed, so it has no locators
-              const first = (yield* browser.defaultContext.pages)[0]!
-              assert.isFalse("getByRole" in first)
-              assert.isTrue(pages.some((page) => Equal.equals(page, first)))
-              let kept: Page.Page | undefined
-              yield* Effect.scoped(Effect.gen(function*() {
-                const tab = yield* first.control
-                assert.isTrue(Equal.equals(tab, first))
-                // A tab in the background renders about a frame a second on Firefox, too seldom to act on (Q71)
-                yield* tab.activate
-                yield* tab.goto(tabUrl(origin, "Initial"))
-                const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
-                yield* tab.getByRole("button", { name: "Refresh" }).click()
-                yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
-                assert.strictEqual(yield* blocked.hits, 1)
-                kept = tab
-              }))
-              // Released: what the grant gave fails, and the page stays open
-              const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
-              assert.deepInclude(read, { _tag: "TargetGone" })
-              assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
-              const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
-              assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
-              const routed = reasonOf(
-                yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
-              )
-              // A declaration too: every member declares TargetGone (QUIRKS.md, Q143)
-              assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
-              assert.strictEqual((yield* first.status)._tag, "Open")
-              // A grant's declarations go with it: the analytics call goes through now
-              yield* Effect.scoped(Effect.gen(function*() {
-                const reader = yield* first.inspect
-                assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
-                const tab = yield* first.control
-                yield* tab.activate
-                yield* tab.getByRole("button", { name: "Refresh" }).click()
-                yield* tab.locator("#out").pipe(Expect.toHaveText("sent"))
-              }))
+              const tab = yield* first.control
+              assert.isTrue(Equal.equals(tab, first))
+              // A tab in the background renders about a frame a second on Firefox, too seldom to act on (Q71)
+              yield* tab.activate
+              yield* tab.goto(tabUrl(origin, "Initial"))
+              const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
+              yield* tab.getByRole("button", { name: "Refresh" }).click()
+              yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
+              assert.strictEqual(yield* blocked.hits, 1)
+              kept = tab
             }))
-          }).pipe(Effect.provide(fixture?.layer ?? backend))
+            // Released: what the grant gave fails, and the page stays open
+            const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
+            assert.deepInclude(read, { _tag: "TargetGone" })
+            assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
+            assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const routed = reasonOf(
+              yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
+            )
+            // A declaration too: every member declares TargetGone (QUIRKS.md, Q143)
+            assert.deepStrictEqual((routed as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            assert.strictEqual((yield* first.status)._tag, "Open")
+            // A grant's declarations go with it: the analytics call goes through now
+            yield* Effect.scoped(Effect.gen(function*() {
+              const reader = yield* first.inspect
+              assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
+              const tab = yield* first.control
+              yield* tab.activate
+              yield* tab.getByRole("button", { name: "Refresh" }).click()
+              yield* tab.locator("#out").pipe(Expect.toHaveText("sent"))
+            }))
+          }))
         }), timeout)
 
       it.effect("controls the default context for a scope, and leaves its dialogs to whoever decides them", () =>
