@@ -612,6 +612,59 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("uses a consistent native disabled matrix for role filters", () =>
+          Effect.gen(function*() {
+            const controls = ["button", "input", "select", "textarea", "option", "optgroup", "fieldset"]
+            const cases = controls.flatMap((tag) => {
+              const control = (attributes = "") =>
+                `<${tag} role="button" ${attributes}></${tag}>`
+              return [
+                { html: control(), disabled: false },
+                { html: control("disabled"), disabled: true },
+                { html: `<fieldset disabled>${control()}</fieldset>`, disabled: true },
+                { html: `<fieldset disabled><legend>${control()}</legend></fieldset>`, disabled: false },
+                {
+                  html: `<fieldset disabled><legend>First</legend><legend>${control()}</legend></fieldset>`,
+                  disabled: true
+                }
+              ]
+            })
+            cases.push(
+              { html: `<select disabled><option role="button">One</option></select>`, disabled: false },
+              {
+                html: `<select><optgroup disabled><option role="button">One</option></optgroup></select>`,
+                disabled: true
+              },
+              { html: `<div disabled role="button">One</div>`, disabled: false },
+              { html: `<fieldset disabled><div role="button">One</div></fieldset>`, disabled: false },
+              { html: `<div aria-disabled="true"><button aria-disabled="false">One</button></div>`, disabled: true },
+              { html: `<button aria-disabled="TRUE">One</button>`, disabled: false }
+            )
+            const { send } = yield* open(
+              backend,
+              cases.map(({ html }, index) =>
+                `<div id="case-${index}">${html}</div>`
+              ).join("")
+            )
+            for (const [index, { html, disabled }] of cases.entries()) {
+              const scope = { _tag: "Css" as const, selector: `#case-${index}` }
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [scope, role("button", null, true)] })),
+                1,
+                html
+              )
+              for (const filter of [true, false]) {
+                assert.strictEqual(
+                  count(
+                    yield* send({ op: "count", steps: [scope, { ...role("button", null, true), disabled: filter }] })
+                  ),
+                  filter === disabled ? 1 : 0,
+                  `${html}: disabled=${filter}`
+                )
+              }
+            }
+          }), timeout)
+
         it.effect("rejects unsupported role filters in hasNot, and and or branches", () =>
           Effect.gen(function*() {
             const { send } = yield* open(backend, `<a href="/">Link</a>`)
