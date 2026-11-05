@@ -63,6 +63,87 @@ describe("BoundedAdapter", () => {
       assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
     }))
 
+  it.effect("reports a confirmed write followed by a missing postcondition as acknowledged", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, [])
+        const record = yield* Operation.record
+        return yield* Effect.fail(record.timeout(Option.none()))
+      }).pipe(Operation.named("CookieJar.set"), Effect.flip)
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+      assert.strictEqual(timeout.phase, "postcondition")
+    }))
+
+  it.effect("records a browser rejection as acknowledged without replacing the error", () =>
+    Effect.gen(function*() {
+      const rejected = new Adapter.AdapterError({
+        reason: {
+          _tag: "Protocol",
+          error: new Protocol.ProtocolError({
+            reason: new Protocol.Rejected({
+              method: "Storage.setCookies",
+              reason: "InvalidArgument",
+              code: -32602,
+              description: "Invalid cookie"
+            })
+          })
+        }
+      })
+      const adapter = stub({ setCookies: () => Effect.fail(rejected) })
+      yield* Effect.gen(function*() {
+        const error = yield* adapter.setCookies(context, []).pipe(Effect.flip)
+        assert.strictEqual(error, rejected)
+        const record = yield* Operation.record
+        assert.deepStrictEqual(Operation.diagnostics(record.id).dispatch, { _tag: "Acknowledged", result: "rejected" })
+      }).pipe(Operation.named("CookieJar.set"))
+    }))
+
+  it.effect("does not claim acknowledgement for a local refusal or an unanswered write", () =>
+    Effect.gen(function*() {
+      const reasons: Array<Adapter.AdapterErrorReason> = [
+        { _tag: "Unsupported", capability: "input", hint: "Unavailable" },
+        {
+          _tag: "Protocol",
+          error: new Protocol.ProtocolError({
+            reason: new Protocol.NoReply({
+              method: "Storage.setCookies",
+              timeout: Duration.zero
+            })
+          })
+        }
+      ]
+      for (const reason of reasons) {
+        const adapter = stub({ setCookies: () => Effect.fail(new Adapter.AdapterError({ reason })) })
+        yield* Effect.gen(function*() {
+          yield* adapter.setCookies(context, []).pipe(Effect.exit)
+          const record = yield* Operation.record
+          assert.notStrictEqual(Operation.diagnostics(record.id).dispatch._tag, "Acknowledged")
+        }).pipe(Operation.named("CookieJar.set"))
+      }
+    }))
+
+  it.effect("reports pending cleanup while a late creation has not answered", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Target.NavigableId>()
+      const closed = yield* Deferred.make<void>()
+      const adapter = stub({
+        createPage: () => Deferred.await(made),
+        closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+      })
+      const timeout = yield* adapter.createPage(context).pipe(
+        Operation.named("UserContext.newPage"),
+        Deadline.within("50 millis"),
+        Effect.flip
+      )
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      // Finish detached work even if the assertion below fails.
+      yield* Deferred.succeed(made, page)
+      yield* Deferred.await(closed)
+      assert.deepStrictEqual(timeout.diagnostics.cleanup, { _tag: "Pending" })
+    }))
+
   it.effect("never cuts a release short", () =>
     Effect.gen(function*() {
       const adapter = stub({ closePage: () => real(300) })

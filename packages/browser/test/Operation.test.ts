@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import * as Input from "../src/internal/input.ts"
 import * as Internal from "../src/internal/operation.ts"
 
 /** The `Timeout` an operation's record gives after `record` has run on it. */
@@ -76,6 +77,20 @@ describe("Operation", () => {
         assert.strictEqual(timeout.phase, "postcondition")
       }))
   })
+
+  it.effect("carries completed input recovery into the enclosing operation's timeout", () =>
+    Effect.gen(function*() {
+      const state = Input.make()
+      state.broken = Option.some({ description: "held release was unanswered", release: [] })
+      const timeout = yield* Effect.gen(function*() {
+        yield* Input.recover(state, () => Effect.void).pipe(Internal.named("Test.recover"))
+        const record = yield* Internal.record
+        return yield* Effect.fail(record.timeout(Option.none()))
+      }).pipe(Internal.named("Test.operation"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.isTrue(Option.isNone(state.broken))
+      assert.deepStrictEqual(timeout.diagnostics.cleanup, { _tag: "Completed" })
+    }))
 
   describe("named", () => {
     it.effect("gives everything inside the operation's deadline", () =>

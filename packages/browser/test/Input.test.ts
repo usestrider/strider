@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Input from "../src/internal/input.ts"
+import * as Operation from "../src/internal/operation.ts"
 
 const release: ReadonlyArray<Adapter.InputEvent> = [{
   _tag: "Mouse",
@@ -43,6 +44,21 @@ describe("Input.recover", () => {
       assert.deepStrictEqual(sent, [release])
       assert.isTrue(Option.isNone(state.broken))
     }))
+
+  for (const succeeds of [true, false]) {
+    it.effect(`reports ${succeeds ? "completed" : "failed"} cleanup after retrying a held release`, () =>
+      Effect.gen(function*() {
+        const state = broken()
+        const diagnostics = yield* Effect.gen(function*() {
+          const unknown = yield* Input.recover(state, () => succeeds ? Effect.void : Effect.fail("refused"))
+          assert.strictEqual(Option.isNone(unknown), succeeds)
+          const record = yield* Operation.record
+          return Operation.diagnostics(record.id)
+        }).pipe(Operation.named("Locator.click"))
+        assert.strictEqual(diagnostics.cleanup._tag, succeeds ? "Completed" : "Failed")
+        if (diagnostics.cleanup._tag === "Failed") assert.isTrue(diagnostics.cleanup.cause.length > 0)
+      }))
+  }
 
   it.effect("says why the state is still unknown when the release fails again", () =>
     Effect.gen(function*() {
