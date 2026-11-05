@@ -153,7 +153,7 @@ export const engine = (backend: Backend) =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
               backend,
-              `<h2><span contenteditable>private</span></h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
+              `<h2 contenteditable>private</h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
               `() => {
                 globalThis.fieldReads = 0
                 globalThis.editabilityReads = 0
@@ -184,8 +184,9 @@ export const engine = (backend: Backend) =>
               } else assert.strictEqual(Number(reads.value.value), 0)
               const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
               assert(classifications._tag === "Value" && classifications.value.type === "string")
-              if (provenance) assert.isAbove(Number(classifications.value.value), 0)
-              else assert.strictEqual(Number(classifications.value.value), 0)
+              if (provenance) {
+                assert.isAbove(Number(classifications.value.value), 0)
+              } else assert.strictEqual(Number(classifications.value.value), 0)
             }
           }), timeout)
 
