@@ -192,3 +192,40 @@ changes. Do not create a separate Markdown backlog of findings.
 Saved runs under `.data/` are local and ignored by Git. Preserve review evidence outside disposable worktrees with
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
+
+## Response-body transfer
+
+`pnpm bench --only network` selects navigate, resources and both transfer cases.
+Reports retain mean and sample standard deviation, plus signed Strider-minus-Playwright differences for
+each measured pair and their median/mean/SD/range/p95; these describe spread, not a significance test.
+
+`response-body-small` and `response-body-large` fetch 4 KiB and 4 MiB of deterministic binary data from
+`/benchmark/body`. Every byte is checked after timing, including warmups. The server precomputes bodies,
+sends `application/octet-stream` with `Cache-Control: no-store`, and does not compress. Each sample has a
+fresh context/page and no user route or service worker. Strider's default interception remains enabled;
+Playwright's default network observation remains enabled. Neither installs an artificial matching route.
+
+Timing starts before response subscription registration. Strider awaits body-collection acknowledgement
+before starting the fetch; Playwright installs `waitForResponse` before starting it. Timing includes registration,
+fetch dispatch, server/network completion, protocol body retrieval, decoding and delivery of bytes to the caller.
+The page also consumes the fetch body on both sides. Initial navigation, byte verification and context cleanup
+are excluded. Strider closes the collection scope before returning. These are end-to-end collection cases,
+not isolated decoder measurements or streaming/throughput/memory tests. The 4 MiB case stays below Strider's
+default 10 MiB collection limit; Playwright has no equivalent collection-limit contract here.
+
+For separate critical-path diagnostics (never a speed comparison), use the exact-site loader:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/body-profile-hooks.mjs \
+  packages/scenarios/src/benchmarks/bin.ts --only response-body-large --runs 20 --warmup 3 \
+  --output /absolute/path/body-diagnostic.json
+```
+
+The adjacent `.phases.json` records sample boundaries, collection acknowledgement, adapter/body-reply,
+decode and public decoder phases plus body character counts and source/loader hashes. It timestamps
+Playwright's body command/reply too. The protocol interval includes scheduling, transport, browser work and
+reply parsing; it does not isolate wire latency. Instrumentation and distinct public result paths can bias both
+libraries differently. Warmups remain in phase logs; discard the first three samples of each library when
+summarizing. Pair order follows the uninstrumented runner. Phase durations partition one sample only where
+boundaries are nested; never add overlapping waits or interpret a host interval as removable savings.
