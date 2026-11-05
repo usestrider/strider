@@ -113,6 +113,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   assert.strictEqual(yield* target.isVisible, false)
                   yield* target.filter({ visible: true }).pipe(Expect.toHaveCount(0))
                   yield* target.filter({ visible: false }).pipe(Expect.toHaveCount(1))
+                  yield* target.pipe(Expect.toBeHidden)
                   const unseen = yield* target.pipe(Expect.toBeVisible, Deadline.within("200 millis"), Effect.flip)
                   assert.strictEqual(unseen._tag, "ExpectationFailed")
                   if (action === "fill") {
@@ -176,6 +177,43 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             timeout
           )
         }
+      }
+
+      for (
+        const [layout, html] of [
+          [
+            "behind",
+            `<label style="position:relative;display:block;padding:10px"><input id="target" type="checkbox" style="position:absolute;opacity:0;z-index:-1"><span>Accept terms</span></label>`
+          ],
+          [
+            "under",
+            `<input id="target" type="checkbox" style="position:absolute;opacity:0"><label for="target" style="position:relative;display:block;padding:10px"><span>Accept terms</span></label>`
+          ]
+        ] as const
+      ) {
+        it.effect(
+          `checks a transparent control ${layout} its label through the label's text`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<!doctype html>${html}`)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const control = page.locator("#target")
+                const error = yield* control.check().pipe(Deadline.within("1 second"), Effect.flip)
+                assert.strictEqual(error._tag, "Timeout")
+                assert.include(
+                  String((error as Deadline.Timeout).hint.pipe(Option.getOrUndefined)),
+                  "covers the element's action point"
+                )
+                yield* page.getByText("Accept terms").check().pipe(Deadline.within("3 seconds"))
+                yield* control.pipe(Expect.toBeChecked)
+                yield* page.getByText("Accept terms").uncheck().pipe(Deadline.within("3 seconds"))
+                assert.strictEqual(yield* control.isChecked, false)
+              }))
+            }),
+          timeout
+        )
       }
 
       it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
