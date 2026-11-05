@@ -116,11 +116,24 @@ outside launch timing. Browser availability can precede completion of that gate;
 extra protocol command. Loader
 transforms assert their source sites and add timestamps; they do not change command arguments or ordering.
 The loader depends on the pinned Playwright bundle and must be updated if those source sites change.
+The runner rejects incomplete samples: required phase marks and protocol send/reply pairs must be present
+before their readiness boundary. Missing instrumentation, missing replies or a failed initial-target gate
+make the report an error; retained partial samples are evidence of failure, not timing results. Accept only
+`status: "completed"` reports with all requested pairs, excluding the three warmup pairs from statistics.
 Spawn marks end when the process handle returns; they do not isolate shell execution or browser startup,
 which can continue during the first-reply wait.
 These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
 Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
 that overlap other suites, checks or builds even when those commands did not acquire the browser lock.
+
+The diagnostic's instrumentation-rejection regressions launch real browsers. The ordinary unit suite discovers
+`LaunchProfile.test.ts` but skips these cases outside the integration environment; the integration configuration
+does not discover this file. Run it explicitly with the ordinary configuration inside the pinned environment:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command \
+  pnpm exec vitest --run --config vitest.config.ts packages/scenarios/test/LaunchProfile.test.ts
+```
 
 ## Interpreting a result
 
