@@ -1405,6 +1405,38 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
+  it.effect("requires a fresh start when an abandoned success predates an already dispatched stop", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true, true)
+      const page = yield* h.page.control
+      const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
+      const oldStart = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      const scope = yield* Scope.make()
+      const b = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* h.browser.receive({ id: oldStart.id, sessionId: oldStart.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* replyMetrics(h.browser, metrics)
+      yield* h.browser.delivered
+      yield* TestClock.adjust("0 millis")
+      const starts = h.commands.filter((c) => c.method === "Page.startScreencast")
+      if (starts.length > 1) {
+        const fresh = starts[1]!
+        yield* h.browser.receive({ id: fresh.id, sessionId: fresh.sessionId, result: {} })
+      }
+      yield* Fiber.join(b)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(starts.length, 2, "a stop after the old start invalidates sharing its late success")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 2)
+    }).pipe(onTestClock))
+
   it.effect("joins a confirmed session stream without sending another native start", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders()
