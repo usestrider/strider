@@ -134,6 +134,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   const input = event.target as HTMLInputElement
                   events.push(`${type}:${[...input.files!].map((file) => file.name).join("|")}`)
                   document.body.dataset.fileEvents = events.join(",")
+                  const flags = `${type}:${event.bubbles}:${event.composed}:${event.isTrusted}`
+                  document.body.dataset.fileEventFlags = [document.body.dataset.fileEventFlags, flags].filter(Boolean)
+                    .join(",")
                 }, true)
               }
             })
@@ -144,9 +147,13 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               "input:second.txt,change:second.txt"
             )
             if (name === "WebKit") {
-              // Automation must refuse a missing native file without disturbing the previous choice.
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() => document.body.dataset.fileEventFlags),
+                "input:true:true:true,change:true:false:true"
+              )
+              // Caller validation must refuse a mixed replacement without disturbing the previous choice.
               const failure = yield* input.setInputFiles(
-                FileInput.remote(FilePath.Remote.make(path.join(directory, "missing.txt")))
+                [made[0]!, FileInput.remote(FilePath.Remote.make(first))]
               ).pipe(Effect.flip)
               assert(Locator.isLocatorError(failure), String(failure))
               assert.deepStrictEqual(
@@ -172,6 +179,18 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 "input:second.txt,change:second.txt,input:,change:"
               )
             }
+            // A successful native change may be handled by clearing the input for the next upload.
+            yield* page.evaluateInMainWorld(() => {
+              const input = document.querySelector<HTMLInputElement>("#files")!
+              input.addEventListener("change", () => {
+                input.value = ""
+              }, { once: true })
+            })
+            yield* input.setInputFiles(FileInput.remote(FilePath.Remote.make(first)))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelector<HTMLInputElement>("#files")!.files!.length),
+              0
+            )
           }))
         }), timeout)
 

@@ -975,3 +975,25 @@ Rejected: enabling the flag in automation and concurrent for a once-per-browser 
 silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Normalize stock WebKit native file replacement with rollback
+
+Save the current FileList and assign a fresh empty FileList before Automation loads browser-host paths.
+WebKitGTK 2.54.1's Automation appends on multiple inputs; empty assignment avoids that behavior while retaining
+native file backing and native events for nonempty replacement. Do not clear with `value = ""`: WebKit mutates the
+saved FileList in place. Observe trusted input delivery, falling back to the resulting count, because Automation can acknowledge invalid
+node handles without setting files. Observed native delivery must remain successful when a page handler clears or
+removes the input; checking only the final count would break those handlers. Restore the previous selection on refusal or incomplete results under a separate cleanup
+deadline. A restoration failure remains visible as a defect alongside the primary failure. Clearing alone uses
+synthetic input/change events because native loading is unnecessary for an empty list.
+
+Rejected: trusting the native success reply without checking its result; clearing without retaining a restorable
+FileList; and copying native files through the caller, which changes transport and memory use unnecessarily.
+Detached staging inputs cannot be addressed by WebKit's Automation node handles. A connected staging iframe could
+isolate native staging events, but would expose temporary frame and DOM activity and require synthetic target
+events for every replacement.
+
+The workaround cannot provide an atomic replacement across protocol calls. Page code can observe the empty
+selection before native loading. Native events already delivered by a partially applied command cannot be undone
+by rollback. Navigation and connection loss can prevent restoration, and a lost reply can leave the write's result
+uncertain. Keep these limits explicit rather than describing every failed write as preserving its old selection.

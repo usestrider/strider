@@ -1115,3 +1115,22 @@ preserves the primary outcome, ignoring confirmed vanished windows and warning o
 reserves its last second for a final measurement inside the same shared five-second budget. Nested cleanup
 inherits that deadline rather than extending it; genuine operation deadlines remain timeouts. Popup defaults are attempted without confirmation,
 since there is no creation operation to receive that failure; an explicit page declaration confirms them.
+
+### Stock WebKit native file replacement
+
+WebKitGTK 2.54.1's Automation appends native files on multiple inputs. Strider saves the target's FileList,
+assigns a fresh empty DataTransfer FileList, calls Automation, then confirms trusted native input delivery or the resulting file count. Using
+`value = ""` would mutate the saved FileList in place, preventing rollback. Native files retain their browser-host
+backing; this does not transfer their bytes through the caller. Ordinary refusal or a silently ignored native
+upload restores the saved selection. A temporary window property retains the old FileList and the input listener
+until cleanup. Trusted input delivery counts as success even if a page handler then clears or removes the input. Rollback has a separate five-second deadline; a failed restoration is a
+defect alongside the original failure. Releasing the saved reference also has its own five-second deadline and
+logs cleanup failures.
+
+Nonempty replacement retains Automation's native input/change events. Clearing assigns the empty FileList and
+sends one synthetic `input` event followed by one synthetic `change` event, both with `isTrusted=false`, as with
+files made in the page. Empty assignment, native loading and confirmation are separate protocol calls: page code
+can observe the temporary empty selection. A partially applied native command may already have delivered events
+before failure, and restoring the old FileList cannot undo them. Navigation or connection loss can prevent
+rollback, and a lost reply can leave the caller uncertain whether replacement happened. This is not an atomic
+replacement across protocol calls.

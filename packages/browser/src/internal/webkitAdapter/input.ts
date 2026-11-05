@@ -2,6 +2,7 @@
  * Input, frames and file inputs on stock WebKit launched: its inspector has no Input domain, so Automation types and
  * points, and finds an iframe's frame, or an element, by what both its session and the inspector can read of it.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
@@ -10,6 +11,9 @@ import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import type * as WebKitAutomation from "../webkitAutomation.ts"
 import { automationOf, pageHandleOf, processOfContext, resultOf, settleDialog } from "./automation.ts"
 import { answered, documentOf, type FrameEntry, pageOf, type State, targetOf } from "./state.ts"
@@ -335,10 +339,17 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
   const reference = Option.getOrNull(resultOf(found.result)) as Record<string, string> | null
   const nodeHandle = reference === null ? undefined : Object.values(reference)[0]
   // An element its document no longer holds
-  if (nodeHandle === undefined) {
+  if (reference === null || nodeHandle === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
-  return { frame, handle, process, frameHandle: frameHandle.value, nodeHandle: nodeHandle as Automation.NodeHandle }
+  return {
+    frame,
+    handle,
+    process,
+    frameHandle: frameHandle.value,
+    nodeHandle: nodeHandle as Automation.NodeHandle,
+    reference
+  }
 })
 
 /** The frame an iframe holds, as Automation resolves it, then the inspector's frame showing the same document. */
@@ -359,20 +370,143 @@ export const contentFrameLaunched = Effect.fnUntraced(function*(state: State, no
   return Option.some(matched.value.id)
 })
 
-/** A file input's files, through the element Automation finds by its path: nothing is clicked or marked. */
+/**
+ * Replaces native files without accepting Automation's append behavior or silently ignored node handles.
+ * The saved FileList permits rollback on refusal; clearing and native assignment remain separate browser turns.
+ */
+export const replaceFiles = Effect.fnUntraced(function*(
+  process: WebKitAutomation.Process,
+  handle: Automation.BrowsingContextHandle,
+  frameHandle: Automation.FrameHandle,
+  reference: Readonly<Record<string, string>>,
+  files: ReadonlyArray<string>
+) {
+  const key = `__strider_files_${crypto.randomUUID().replaceAll("-", "")}`
+  const evaluate = (fn: string, args: ReadonlyArray<unknown>) =>
+    automationOf(
+      process,
+      Automation.evaluateJavaScriptFunction({
+        browsingContextHandle: handle,
+        frameHandle,
+        function: fn,
+        arguments: args.map((arg) => JSON.stringify(arg))
+      })
+    )
+  const cleanup = (fn: string) =>
+    Operation.detached(Effect.gen(function*() {
+      const at = yield* BrowserClock.after(5000)
+      return yield* evaluate(fn, [key]).pipe(
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at))
+      )
+    }))
+  const restore = Effect.gen(function*() {
+    const restored = yield* cleanup(`function(key) {
+      const saved = globalThis[key];
+      if (!saved) return true;
+      const element = saved.element;
+      if (!(element instanceof HTMLInputElement) || element.type !== "file") return false;
+      element.files = saved.files;
+      return true;
+    }`)
+    if (Option.getOrNull(resultOf(restored.result)) !== true) {
+      return yield* Effect.fail(
+        Kit.undecodable("Automation.evaluateJavaScriptFunction", "Could not restore the previous file selection")
+      )
+    }
+  })
+  const dispose = Effect.gen(function*() {
+    const disposed = yield* cleanup(
+      `function(key) {
+        const saved = globalThis[key];
+        if (saved) {
+          saved.element.removeEventListener("input", saved.observe, true);
+          globalThis.removeEventListener("input", saved.observe, true);
+        }
+        delete globalThis[key];
+        return !Object.hasOwn(globalThis, key);
+      }`
+    )
+    if (Option.getOrNull(resultOf(disposed.result)) !== true) {
+      return yield* Effect.fail(
+        Kit.undecodable("Automation.evaluateJavaScriptFunction", "Could not release the saved file selection")
+      )
+    }
+  })
+  yield* Effect.gen(function*() {
+    const prepared = yield* evaluate(
+      `function(element, key) {
+      if (!(element instanceof HTMLInputElement) || element.type !== "file" || !element.isConnected) return false;
+      const saved = { element, files: element.files, accepted: false, observe: null };
+      saved.observe = (event) => {
+        if (event.isTrusted && (event.target === element || event.composedPath().includes(element))) saved.accepted = true;
+      };
+      Object.defineProperty(globalThis, key, { value: saved, configurable: true });
+      element.addEventListener("input", saved.observe, true);
+      globalThis.addEventListener("input", saved.observe, true);
+      // Replacing the FileList preserves the saved object; value = "" clears that object in place.
+      element.files = new DataTransfer().files;
+      return true;
+    }`,
+      [reference, key]
+    )
+    if (Option.getOrNull(resultOf(prepared.result)) !== true) {
+      return yield* Effect.fail(Kit.undecodable("Automation.evaluateJavaScriptFunction", "No replacement file input"))
+    }
+    if (files.length > 0) {
+      yield* automationOf(
+        process,
+        Automation.setFilesForInputFileUpload({
+          browsingContextHandle: handle,
+          frameHandle,
+          nodeHandle: Object.values(reference)[0] as Automation.NodeHandle,
+          filenames: [...files]
+        })
+      )
+    }
+    const confirmed = yield* evaluate(
+      `function(key, count) {
+      const saved = globalThis[key];
+      if (!saved) return false;
+      // Native delivery proves assignment even when a handler resets or removes the input.
+      if (saved.accepted) return true;
+      const element = saved.element;
+      if (!element.isConnected || element.type !== "file" || element.files.length !== count) return false;
+      if (count === 0) {
+        element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return true;
+    }`,
+      [key, files.length]
+    )
+    // Automation can acknowledge an invalid node handle without setting anything. Restore rather than accept it.
+    if (Option.getOrNull(resultOf(confirmed.result)) !== true) {
+      return yield* Effect.fail(
+        Kit.undecodable("Automation.setFilesForInputFileUpload", "The replacement file selection was not populated")
+      )
+    }
+  }).pipe(
+    Effect.onError((cause) =>
+      restore.pipe(
+        Effect.orDie,
+        Effect.catchCause((rollback) => Effect.failCause(Cause.combine(cause, rollback))),
+        Effect.orDie
+      )
+    ),
+    Effect.ensuring(
+      dispose.pipe(
+        Effect.catch((error) => Effect.logWarning("WebKit saved file selection cleanup failed", error))
+      )
+    )
+  )
+})
+
+/** Replaces a file input's files, restoring its saved selection when the native command refuses. */
 export const setInputFilesLaunched = Effect.fnUntraced(function*(
   state: State,
   node: Adapter.NodeBinding,
   files: ReadonlyArray<string>
 ) {
-  const { frameHandle, handle, nodeHandle, process } = yield* nodeHandleOf(state, node)
-  yield* automationOf(
-    process,
-    Automation.setFilesForInputFileUpload({
-      browsingContextHandle: handle,
-      frameHandle,
-      nodeHandle,
-      filenames: [...files]
-    })
-  )
+  const { frameHandle, handle, reference, process } = yield* nodeHandleOf(state, node)
+  yield* replaceFiles(process, handle, frameHandle, reference, files)
 })
