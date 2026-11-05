@@ -94,6 +94,62 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       for (const ancestor of [false, true]) {
+        const wrap = (inner: (o: number) => string) =>
+          `<!doctype html><div style="opacity:${ancestor ? 0 : 1}">${inner(ancestor ? 1 : 0)}</div><output id="out"></output><script>const log=(e)=>{document.querySelector('#out').textContent+=e.type+' '};</script>`
+        const cases: ReadonlyArray<readonly [string, (o: number) => string, (t: LocatorImpl | any, page: any) => Effect.Effect<any, any, any>, string]> = [
+          ["dblclick", (o) => `<button id="t" style="opacity:${o}" ondblclick="log(event)">b</button>`, (t) => t.dblclick(), "dblclick "],
+          ["hover", (o) => `<button id="t" style="opacity:${o}" onmouseenter="log(event)">b</button>`, (t) => t.hover(), "mouseenter "],
+          ["tap", (o) => `<button id="t" style="opacity:${o}" onclick="log(event)">b</button>`, (t) => t.tap(), ""],
+          ["uncheck", (o) => `<input id="t" type="checkbox" checked style="opacity:${o}" onclick="log(event)">`, (t) => t.uncheck(), "click "],
+          ["clear", (o) => `<input id="t" value="x" style="opacity:${o}" oninput="log(event)">`, (t) => t.clear(), "input "],
+          ["focus", (o) => `<input id="t" style="opacity:${o}" onfocus="log(event)">`, (t) => t.focus(), "focus "],
+          ["press", (o) => `<input id="t" style="opacity:${o}" onkeydown="log(event)">`, (t) => t.press("a"), "keydown "],
+          ["pressSequentially", (o) => `<input id="t" style="opacity:${o}" onkeydown="log(event)">`, (t) => t.pressSequentially("a"), "keydown "],
+          ["selectOption", (o) => `<select id="t" style="opacity:${o}" onchange="log(event)"><option>a</option><option>b</option></select>`, (t) => t.selectOption({ label: "b" }), "change "],
+          ["scrollIntoView", (o) => `<div style="height:3000px"></div><input id="t" style="opacity:${o}">`, (t) => t.scrollIntoView, ""],
+          ["contents", (o) => `<span id="t" style="display:contents"><button style="opacity:${o}" onclick="log(event)">b</button></span>`, (t) => t.click(), "click "],
+          ["contenteditable", (o) => `<div id="t" contenteditable style="opacity:${o};width:50px;height:20px" oninput="log(event)"></div>`, (t) => t.fill("a"), "input "],
+          ["dragTo", (o) => `<div id="t" style="opacity:${o};width:30px;height:30px" onmousedown="log(event)"></div><div id="end" style="opacity:${o};width:30px;height:30px" onmouseup="log(event)"></div>`, (t, page) => t.dragTo(page.locator("#end")), "mousedown mouseup "]
+        ]
+        for (const [label, html, act, expected] of cases) {
+          it.effect(`reviewscratch ${ancestor ? "ancestor" : "own"} ${label}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => wrap(html))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* act(page.locator("#t"), page).pipe(Deadline.within("3 seconds"))
+                if (expected !== "") yield* page.locator("#out").pipe(Expect.toHaveText(expected))
+              }))
+            }), timeout)
+        }
+      }
+      for (const [label, html, act] of [
+        ["label z-index:-1 check input", `<label style="position:relative;display:block;padding:10px"><input id="t" type="checkbox" style="position:absolute;opacity:0;z-index:-1">x</label>`, (t: any) => t.check()],
+        ["label over for= check input", `<input id="t" type="checkbox" style="position:absolute;opacity:0"><label for="t" style="position:relative;display:block;padding:10px">x</label>`, (t: any) => t.check()],
+        ["display click", `<input id="t" style="opacity:0;display:none">`, (t: any) => t.click()],
+        ["visibility click", `<input id="t" style="opacity:0;visibility:hidden">`, (t: any) => t.click()],
+        ["visibility fill", `<input id="t" style="opacity:0;visibility:hidden">`, (t: any) => t.fill("a")],
+        ["disabled click", `<input id="t" style="opacity:0" disabled>`, (t: any) => t.click()],
+        ["inert fill", `<input id="t" style="opacity:0" inert>`, (t: any) => t.fill("a")],
+        ["readonly fill", `<input id="t" style="opacity:0" readonly>`, (t: any) => t.fill("a")],
+        ["covered click", `<input id="t" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`, (t: any) => t.click()],
+        ["covered fill", `<input id="t" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`, (t: any) => t.fill("a")]
+      ] as const) {
+        it.effect(`reviewscratch reason ${label}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<!doctype html>${html}`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const exit = yield* act(page.locator("#t")).pipe(Deadline.within("500 millis"), Effect.exit)
+              const e: any = exit._tag === "Failure" ? Cause.squash(exit.cause) : null
+              console.log(`REVIEW|${name}|${label}|${exit._tag}|${e?._tag}|${e === null ? "" : String(Option.getOrUndefined(e.hint))}|value=${yield* page.locator("#t").inputValue.pipe(Effect.orElseSucceed(() => "?"))}`)
+            }))
+          }), timeout)
+      }
+
+      for (const ancestor of [false, true]) {
         for (const action of ["click", "check", "fill"] as const) {
           it.effect(
             `acts on transparent controls with ${ancestor ? "ancestor" : "own"} opacity using ${action}`,
