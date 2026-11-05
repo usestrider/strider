@@ -435,7 +435,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const sampling = setInterval(() => {
                 const current = process.memoryUsage()
                 descendantPeakRss = Math.max(descendantPeakRss, descendantRss())
-                for (const key of ["rss", "heapUsed", "external", "arrayBuffers"] as const) {
+                for (const key of ["rss", "heapTotal", "heapUsed", "external", "arrayBuffers"] as const) {
                   peak[key] = Math.max(peak[key], current[key])
                 }
               }, 100)
