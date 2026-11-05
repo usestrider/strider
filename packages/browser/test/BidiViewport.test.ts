@@ -304,6 +304,30 @@ describe("BidiAdapter viewports", () => {
       )
     }))
 
+  it.effect("restores a context skipped during a removal the browser then rejects", () =>
+    Effect.gen(function*() {
+      const { sent, session, state } = yield* make()
+      const context = yield* Contexts.createUserContext(state, options)
+      const lifetime = yield* Scope.make()
+      yield* declare(state, { _tag: "Browser" }, 1100, lifetime)
+      const removing = yield* Deferred.make<void>()
+      const answer = yield* Deferred.make<void>()
+      session.rejects = (entry) => entry.method === "browser.removeUserContext"
+      session.around = (entry, next) =>
+        entry.method === "browser.removeUserContext"
+          ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Deferred.await(answer)), Effect.andThen(next))
+          : next
+      const removal = yield* Contexts.removeUserContext(state, context).pipe(Effect.exit, Effect.forkChild)
+      yield* Deferred.await(removing)
+      // Released while the context is being removed, so its write is skipped
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      yield* Deferred.succeed(answer, undefined)
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(removal)))
+      // The context lives on, and must not keep the viewport nothing declares any more
+      assert.deepStrictEqual(widthsFor(sent, (params) => params.userContexts?.includes("U1") === true), [null])
+    }))
+
   it.effect("preserves install errors on active contexts", () =>
     Effect.gen(function*() {
       const { session, state } = yield* make()
