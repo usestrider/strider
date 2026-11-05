@@ -5,7 +5,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Dialog, Expect, FileInput, Route } from "@usestrider/browser"
+import { Browser, Dialog, Expect, FileInput, FilePath, Route } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -476,6 +476,62 @@ describe("Stock WebKit, launched in automation mode", () => {
           yield* page.locator("#out").pipe(Expect.toHaveText("note.txt:3"))
         }))
       })), timeout)
+
+    for (const stop of [false, true]) {
+      it.effect(
+        `accepts native replacement after an earlier window capture listener resets the input${
+          stop ? " and stops propagation" : ""
+        }`,
+        () =>
+          launched(Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-upload-observer-" })
+            for (const name of ["previous.txt", "one.txt", "two.txt"]) yield* fs.writeFileString(`${dir}/${name}`, name)
+            const remote = (name: string) => FileInput.remote(FilePath.Remote.make(`${dir}/${name}`))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(fixtureUrl(origin, "<input type=\"file\" id=\"files\" multiple>"))
+              const input = page.locator("#files")
+              yield* input.setInputFiles(remote("previous.txt"))
+              yield* page.evaluateInMainWorld((stop) => {
+                const input = document.querySelector<HTMLInputElement>("#files")!
+                const order: Array<string> = []
+                window.addEventListener("input", (event) => {
+                  if (event.target !== input) return
+                  document.body.dataset.delivered = [...input.files!].map((file) => file.name).join("|")
+                  document.body.dataset.trusted = String(event.isTrusted)
+                  order.push("earlier-window")
+                  input.value = ""
+                  if (stop) event.stopImmediatePropagation()
+                }, true)
+                window.addEventListener("input", () => order.push("later-window"), true)
+                input.addEventListener("input", () => order.push("target"))
+                input.addEventListener("change", () => {
+                  order.push("change")
+                  document.body.dataset.order = order.join("|")
+                })
+              }, stop)
+              const result = yield* input.setInputFiles([remote("one.txt"), remote("two.txt")]).pipe(Effect.exit)
+              const observed = yield* page.evaluateInMainWorld(() => ({
+                delivered: document.body.dataset.delivered,
+                trusted: document.body.dataset.trusted,
+                order: document.body.dataset.order,
+                final: [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+              }))
+              assert.strictEqual(observed.delivered, "one.txt|two.txt")
+              assert.strictEqual(observed.trusted, "true")
+              assert.strictEqual(
+                observed.order,
+                stop ? "earlier-window|change" : "earlier-window|later-window|target|change"
+              )
+              assert.deepStrictEqual(observed.final, [], "a handled upload must not restore the previous selection")
+              assert(Exit.isSuccess(result), Exit.isFailure(result) ? Cause.pretty(result.cause) : "")
+            }))
+          })),
+        timeout
+      )
+    }
 
     it.effect("refuses what stock WebKit can't do, saying so", () =>
       launched(Effect.gen(function*() {
