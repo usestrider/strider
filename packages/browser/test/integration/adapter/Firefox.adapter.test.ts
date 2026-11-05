@@ -28,6 +28,5 @@ const backend: Backend = {
 }
 
 conformance(backend)
-// Firefox loses the context viewport when a page override is released.
-viewportRestoration(backend, { nested: false })
+viewportRestoration(backend)
 engine(backend)
