@@ -160,6 +160,15 @@ describe("file preparation", () => {
       yield* test(Handles.page(page).runtime)
     })).pipe(Effect.provide(Layer.provide(connection, NodeServices.layer)))
 
+  it.effect("keeps launched absolute Local and Remote paths without caller services", () =>
+    run((runtime) => Effect.gen(function*() {
+      const launched = { ...runtime, model: { ...runtime.model, adapter: { ...runtime.model.adapter, ownership: "launched" as const } }, fileSystem: Option.none(), path: Option.none() }
+      const prepared = yield* Preparation.prepare(launched, [FileInput.local("/caller/a.txt"), FileInput.remote(FilePath.Remote.make("/host/b.txt"))])
+      assert.deepStrictEqual(prepared, { _tag: "Paths", files: ["/caller/a.txt", "/host/b.txt"] })
+      const mixed = yield* Preparation.prepare(launched, [FileInput.local("/caller/a.txt"), FileInput.bytes("b", "text/plain", new Uint8Array())]).pipe(Effect.flip)
+      assert.strictEqual(mixed._tag, "InvalidInput")
+    })))
+
   it.effect("resolves relative paths, preserves names and infers MIME alongside bytes", () =>
     run((runtime) =>
       Effect.gen(function*() {
