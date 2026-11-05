@@ -366,6 +366,77 @@ describe("BidiAdapter viewports", () => {
       assert.deepStrictEqual(widthsFor(sent, (params) => params.userContexts?.includes("U1") === true), [null])
     }))
 
+  for (const failure of ["rejected", "timeout"] as const) {
+    it.effect(`preserves a removal rejection when viewport recovery ${failure}`, () =>
+      Effect.gen(function*() {
+        const { session, state } = yield* make()
+        const context = yield* Contexts.createUserContext(state, options)
+        const clock = BrowserClock.fromClock(yield* Clock.Clock)
+        let unconfirmed = 0
+        const restoring = yield* Deferred.make<void>()
+        session.rejects = (entry) => entry.method === "browser.removeUserContext" ||
+          (failure === "rejected" && entry.method === "browsingContext.setViewport")
+        session.around = (entry, next) => entry.method === "browsingContext.setViewport" && failure === "timeout"
+          ? Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Effect.never)) : next
+        yield* Effect.gen(function*() {
+          const removal = yield* Contexts.removeUserContext(state, context).pipe(Effect.exit, Effect.forkChild)
+          if (failure === "timeout") {
+            yield* Deferred.await(restoring)
+            yield* TestClock.adjust("5 seconds")
+          }
+          const result = yield* Fiber.join(removal)
+          const error = Option.getOrThrow(Exit.findErrorOption(result))
+          assert.strictEqual(error.reason._tag, "Protocol")
+          if (error.reason._tag === "Protocol") {
+            assert.strictEqual(error.reason.error.reason._tag, "Rejected")
+            if (error.reason.error.reason._tag === "Rejected") {
+              assert.strictEqual(error.reason.error.reason.method, "browser.removeUserContext")
+            }
+          }
+          assert.strictEqual(unconfirmed, 1)
+          assert.isFalse(state.contexts.get(context)!.removing)
+        }).pipe(
+          Effect.provideService(BrowserClock.CurrentClock, clock),
+          Effect.provideService(DeclarationCleanup.Unconfirmed, () => { unconfirmed++ })
+        )
+      }))
+  }
+
+  it.effect("returns a removal error at an expired operation while recovery remains connection-owned", () =>
+    Effect.gen(function*() {
+      const { session, state } = yield* make()
+      const context = yield* Contexts.createUserContext(state, options)
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const removing = yield* Deferred.make<void>()
+      const answer = yield* Deferred.make<void>()
+      const restoring = yield* Deferred.make<void>()
+      const returned = yield* Deferred.make<void>()
+      const order: Array<string> = []
+      session.rejects = (entry) => entry.method === "browser.removeUserContext"
+      session.around = (entry, next) => entry.method === "browser.removeUserContext"
+        ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Deferred.await(answer)), Effect.andThen(next))
+        : entry.method === "browsingContext.setViewport"
+        ? Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Effect.never), Effect.ensuring(Effect.sync(() => { order.push("recovery") })))
+        : next
+      yield* Effect.gen(function*() {
+        const removal = yield* Contexts.removeUserContext(state, context).pipe(
+          Operation.named("Test.removeRecovery"), Deadline.within("10 millis"),
+          Effect.onExit(() => Effect.sync(() => { order.push("caller") }).pipe(Effect.andThen(Deferred.succeed(returned, undefined)))),
+          Effect.exit, Effect.forkChild
+        )
+        yield* Deferred.await(removing)
+        yield* TestClock.adjust("10 millis")
+        yield* Deferred.succeed(answer, undefined)
+        yield* Deferred.await(restoring)
+        yield* Deferred.await(returned)
+        assert.deepStrictEqual(order, ["caller"])
+        const error = Option.getOrThrow(Exit.findErrorOption(yield* Fiber.join(removal)))
+        assert.strictEqual(error.reason._tag, "Protocol")
+        yield* TestClock.adjust("5 seconds")
+        assert.deepStrictEqual(order, ["caller", "recovery"])
+      }).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+    }))
+
   it.effect("preserves install errors on active contexts", () =>
     Effect.gen(function*() {
       const { session, state } = yield* make()
