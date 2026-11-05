@@ -29,6 +29,12 @@ export const runScenarios = async (
       strider: await outcomeOf(run.strider, scenario.expected),
       playwright: await outcomeOf(run.playwright, scenario.expected)
     }
+    for (const library of ["strider", "playwright"] as const) {
+      const result = outcome[library]
+      if (result._tag === "Failed") {
+        log(`${scenario.name}, ${library}, initial outcome: failed: ${result.error}`)
+      }
+    }
     const times = { strider: [] as Array<number>, playwright: [] as Array<number> }
     const attempts = { strider: 0, playwright: 0 }
     const failures: Array<Result["failures"][number]> = []
