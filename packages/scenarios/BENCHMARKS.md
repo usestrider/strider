@@ -192,3 +192,38 @@ changes. Do not create a separate Markdown backlog of findings.
 Saved runs under `.data/` are local and ignored by Git. Preserve review evidence outside disposable worktrees with
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
+
+## Observation workloads
+
+`visible` remains the immediate visibility control. `visible-delayed` and `visible-many` arm the same
+100 ms page timer, which appends one visible `#ready`, then await respectively one and twenty independent
+visibility waits. Both libraries must complete every wait; the reported time is per batch. Timing includes
+arming the timer and the intentional delay, protocol traffic and delivery of every result. Page/context
+creation, initial navigation, result verification and page cleanup remain excluded. The timer is not a
+subscription-readiness barrier: these public locator waits have no ready acknowledgment, so a sufficiently
+slow host may start some checks after insertion. These cases characterize ordinary delayed conditions,
+not transient-event capture or a proven count of simultaneously installed page observers.
+
+`console-many` registers twenty one-shot subscriptions before evaluating one `console.log`, then checks
+that all twenty return the exact text `observation-ready`. Strider awaits each `ConsoleMessage.next`
+registration; Playwright's `waitForEvent` installs its listener synchronously before returning its promise.
+The event can arrive before the returned waits are awaited. Timing includes registration, evaluation,
+event delivery, consuming all results and subscription release (the Strider scope closes before return;
+Playwright removes its one-shot listeners on resolution). No console history replay is used. Fresh pages
+isolate samples. This is fan-out of one event, not twenty events, sustained throughput or callback latency.
+
+Correctness boundaries are exercised separately in the shared browser slice tests:
+`starts fresh observations after timeout, interruption and document replacement` checks a missing visibility
+condition fails as `ExpectationFailed` at its deadline, an interrupted waiter can be joined, a replaced DOM
+node is read afresh, and twenty new assertions read the new document after navigation. It does not assert
+that a locator wait spanning navigation succeeds. `keeps ready console subscriptions across document
+replacement and releases their scope` checks an event wait expires as `Deadline.Timeout`, interruption is
+joinable, and twenty subscriptions acquired before navigation capture a console event in the replacement
+document's inline script. The event deadline is set at registration, rather than on the returned wait.
+Interrupting a consumer does not end the scope-owned subscription; closing its scope interrupts the
+still-pending returned wait. A new subscription still works after the earlier scope is closed. Scope ownership
+is Strider's cancellation boundary; Playwright promises have no equivalent general interruption primitive.
+The comparative timing cases exercise successful completion only. These checks establish observable
+outcomes and continued usability; they do not count retained observers/listeners or prove absence of residual
+browser work after cancellation. Reconnect semantics, pending locator navigation, target closure, nested
+frames, very short transients and renderer CPU/wakeups remain outside these measurements.
