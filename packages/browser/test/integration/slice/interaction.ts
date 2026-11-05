@@ -27,7 +27,7 @@ import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
-import { current as currentRecord, record as importRecord } from "../../../src/internal/operation.ts"
+import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -1783,12 +1783,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   description: "refused"
                 })
               })
-              let actionRecord: import("../../../src/internal/operation.ts").Record | undefined
+              let actionRecord: InternalOperation.Record | undefined
               yield* Effect.acquireRelease(
                 Effect.sync(() =>
                   Object.assign(adapter, {
                     evaluate: (...args: Parameters<typeof original>) =>
-                      Effect.flatMap(currentRecord, (record) => {
+                      Effect.flatMap(InternalOperation.current, (record) => {
                         if (Option.isSome(record)) actionRecord = record.value
                         const call = args[1]
                         const argument = call.arguments[0]
@@ -1814,7 +1814,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const result = yield* Effect.gen(function*() {
                 yield* (action === "fill" ? field.fill("value") : field.focus())
                 assert.deepStrictEqual(actionRecord?.dispatch, { _tag: "Acknowledged", result: "ok" })
-                const record = yield* importRecord
+                const record = yield* InternalOperation.record
                 return record.timeout(Option.none())
               }).pipe(Operation.named("engine action"))
               assert.deepStrictEqual(result.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
