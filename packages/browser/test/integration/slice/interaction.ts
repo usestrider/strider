@@ -27,7 +27,7 @@ import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
-import { record as importRecord } from "../../../src/internal/operation.ts"
+import { current as currentRecord, record as importRecord } from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -1788,8 +1788,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 Effect.sync(() =>
                   Object.assign(adapter, {
                     evaluate: (...args: Parameters<typeof original>) =>
-                      Effect.flatMap(importRecord, (record) => {
-                        actionRecord = record
+                      Effect.flatMap(currentRecord, (record) => {
+                        if (Option.isSome(record)) actionRecord = record.value
                         const call = args[1]
                         const argument = call.arguments[0]
                         if (
