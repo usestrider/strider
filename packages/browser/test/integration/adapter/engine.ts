@@ -149,6 +149,31 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("collects provenance only for masking snapshots and clears it across mode switches", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend,
+              `<h2><span contenteditable>private</span></h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
+              `() => {
+                globalThis.fieldReads = 0
+                const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "assignedSlot")
+                Object.defineProperty(Element.prototype, "assignedSlot", {
+                  ...descriptor, get() { globalThis.fieldReads++; return descriptor.get.call(this) }
+                })
+              }`)
+            for (const provenance of [false, true, false, true]) {
+              yield* call(`() => { globalThis.fieldReads = 0 }`, [])
+              const response = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null, provenance } as Engine.Request)
+              assert.strictEqual(response._tag, "Snapshot")
+              if (response._tag !== "Snapshot") return
+              assert.strictEqual(JSON.stringify(response.root).includes('"fieldContent":true'), provenance)
+              assert.include(JSON.stringify(response.root), '"editable":true')
+              const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
+              assert(reads._tag === "Value" && reads.value.type === "string")
+              if (provenance) assert.isAbove(Number(reads.value.value), 0)
+              else assert.strictEqual(Number(reads.value.value), 0)
+            }
+          }), timeout)
+
         it.effect("carries field editability independently of semantics and enabled state", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
