@@ -20,11 +20,14 @@ import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
+import * as BidiWire from "../src/internal/bidiWire.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
-import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as PageNavigation from "../src/PageNavigation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -57,7 +60,8 @@ const session = (
 /** A state with one page in the default context, its document, and the document's main realm. */
 const withPage = Effect.fnUntraced(function*(
   replies: Readonly<Record<string, unknown>> = {},
-  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {},
+  protocolRoot?: ProtocolClient.Session
 ) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
@@ -68,7 +72,7 @@ const withPage = Effect.fnUntraced(function*(
     ids: Kit.makeIds(),
     buffer,
     control,
-    root: () => root
+    root: () => protocolRoot ?? root
   })
   const page = Tree.addNavigable(state, {
     context: "C1" as BrowsingContext.BrowsingContext,
@@ -1448,6 +1452,37 @@ describe("BidiAdapter state", () => {
       assert.isFalse(state.realms.has(pending.bidi))
       assert.isFalse(state.realmsById.has(pending.id))
       assert.strictEqual(page.pendingRealms.length, 0)
+    }))
+
+  it.effect("disowns a root-owned handle returned after evaluation was interrupted", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+      const { realm, state } = yield* withPage({}, {}, client.root)
+      const evaluation = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => ({})",
+        arguments: [],
+        awaitPromise: false,
+        result: "handle",
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.method, "script.callFunction")
+      assert.strictEqual(sent.params?.resultOwnership, "root")
+      yield* Fiber.interrupt(evaluation)
+      yield* browser.receive({
+        type: "success",
+        id: sent.id,
+        result: { type: "success", realm: realm.bidi, result: { type: "object", handle: "H1" } }
+      })
+      yield* browser.delivered
+      // The caller has no handle to release; cleanup must use the late reply's remote handle and realm.
+      assert.strictEqual(state.handles.size, 0)
+      const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
+      assert(Option.isSome(cleanup), "the abandoned root-owned handle must be disowned while its realm is live")
+      assert.strictEqual(cleanup.value.method, "script.disown")
+      assert.deepStrictEqual(cleanup.value.params, { handles: ["H1"], target: { realm: realm.bidi } })
+      yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
     }))
 
   it.effect("fails a handle it doesn't hold as Gone, and sends nothing", () =>
