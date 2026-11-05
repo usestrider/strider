@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
@@ -19,18 +20,30 @@ const settled = <A, E>(wait: Effect.Effect<A, E>) =>
     })
   )
 
-describe("event wait outcomes decided before its scope closes", () => {
-  it.live("delivers a match published before the scope closes, though the worker hasn't run", () =>
+describe("event wait terminal ordering", () => {
+  it.live("interrupts a queued match without running delivery when the scope closes", () =>
     Effect.gen(function*() {
       const events = channel()
+      let deliveries = 0
       const wait = yield* Effect.scoped(Effect.gen(function*() {
-        const wait = yield* next(events)
+        const wait = yield* Events.next<string, string, never, never>(
+          {
+            ...kind,
+            deliver: (value) => {
+              deliveries++
+              return value
+            }
+          },
+          events,
+          () => true,
+          undefined
+        )
         Events.publish(events, "first")
         return wait
       }))
       const exit = yield* settled(wait)
-      assert(Exit.isSuccess(exit), String(exit))
-      assert.strictEqual(exit.value, "first")
+      assert(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason))
+      assert.strictEqual(deliveries, 0)
     }))
 
   it.live("fails with TargetGone when the target ended before the scope closes, though the worker hasn't run", () =>
