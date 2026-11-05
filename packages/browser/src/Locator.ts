@@ -42,12 +42,14 @@ const TypeId = "~@usestrider/browser/Locator"
  *
  * **Details**
  *
- * Unlike Playwright, unsupported role/filter combinations do not reject the query. Unsupported
- * checked or expanded states match neither boolean; unsupported pressed or selected states match
- * false. Elements without a supported level have level 0.
+ * State filters must be supported by the requested role. Unsupported combinations fail when the
+ * locator is used, including when its scope matches nothing or a frame is missing; construction does not throw.
+ * Locator operations fail with `LocatorError` whose reason is `InvalidInput` for `"selector"`.
+ * Expectations fail with `ExpectationFailed`, as they do for invalid CSS selectors.
+ * `disabled` is supported for every role.
  *
  * On stock WebKit, use `includeHidden: true` for native options, which the current visibility
- * rules exclude because they have no rendered box.
+ * rules exclude; `checkVisibility` reports false for these options.
  *
  * @stability unstable
  * @category models
@@ -108,8 +110,8 @@ export interface RoleOptions {
    */
   readonly pressed?: boolean | undefined
   /**
-   * Match aria-expanded on roles that support expansion, or the open state of details. Absent or invalid
-   * ARIA values match neither boolean.
+   * Match aria-expanded on roles that support expansion, or the open state of details with a supported role.
+   * Absent ARIA values match neither boolean; present values other than case-insensitive "true" match false.
    *
    * **Example** (Filter by expanded)
    *
@@ -143,7 +145,7 @@ export interface RoleOptions {
   readonly selected?: boolean | undefined
   /**
    * Match native disabled controls (including disabled fieldsets and optgroups) or inherited
-   * aria-disabled. Unlike Playwright, native disabled fieldsets also match; aria-disabled is
+   * aria-disabled. Unlike Playwright, the disabled `<fieldset>` element itself also matches; aria-disabled is
    * case-sensitive, applies on any role, and false on a descendant does not cancel a disabled ancestor.
    *
    * **Example** (Filter by disabled)

@@ -66,7 +66,7 @@ export type Step =
   | { readonly _tag: "Or"; readonly other: ReadonlyArray<Step> }
   /**
    * A frame boundary: the steps before it find an iframe, and those after it resolve in
-   * the iframe's document. L1 splits a locator's steps at each one, so the engine never sees it.
+   * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
   /**
@@ -341,7 +341,11 @@ export const Response = Schema.Union([
     changed: Schema.Boolean
   }),
   Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
-  Schema.TaggedStruct("InvalidSelector", { selector: Schema.String, message: Schema.String }),
+  Schema.TaggedStruct("InvalidSelector", {
+    selector: Schema.String,
+    message: Schema.String,
+    kind: Schema.optionalKey(Schema.Literal("role"))
+  }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
     roles: Schema.Array(Schema.Struct({ role: Schema.NullOr(Schema.String), name: Schema.String }))
@@ -996,6 +1000,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   interface InvalidSelector {
     readonly invalidSelector: true
+    readonly kind?: "role" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1131,11 +1136,49 @@ export function engine(render: (root: SnapNode) => string) {
     return elementsUnder(document).filter((element) => set.has(element))
   }
 
+  /** Validate the whole query before searching, including branches whose scope may be empty. */
+  const validateSteps = (steps: ReadonlyArray<Step>): void => {
+    for (const step of steps) {
+      switch (step._tag) {
+        case "Role": {
+          const supported = {
+            level: LEVEL_ROLES,
+            checked: CHECKABLE_ROLES,
+            pressed: PRESSED_ROLES,
+            expanded: EXPANDED_ROLES,
+            selected: SELECTED_ROLES
+          }
+          for (const key of ["level", "checked", "pressed", "expanded", "selected"] as const) {
+            const roles = supported[key]
+            if (step[key] !== undefined && !roles.has(step.role)) {
+              throw {
+                invalidSelector: true,
+                kind: "role",
+                selector: `getByRole(${JSON.stringify(step.role)}, { ${key}: ${step[key]} })`,
+                message: `"${key}" is only supported for roles: ${Array.from(roles).sort().join(", ")}`
+              } satisfies InvalidSelector
+            }
+          }
+          break
+        }
+        case "Filter":
+          if (step.has !== null) validateSteps(step.has)
+          if (step.hasNot !== null) validateSteps(step.hasNot)
+          break
+        case "And":
+        case "Or":
+          validateSteps(step.other)
+          break
+      }
+    }
+  }
+
   /** The matches of a locator's steps, from the document. */
   const resolve = (
     steps: ReadonlyArray<Step>,
     from: ReadonlyArray<Document | Element> = [document]
   ): Array<Element> => {
+    validateSteps(steps)
     let current: ReadonlyArray<Document | Element> = from
     for (const step of steps) {
       switch (step._tag) {
@@ -1202,10 +1245,18 @@ export function engine(render: (root: SnapNode) => string) {
     return true
   }
 
-  const disabledOf = (element: Element): boolean =>
-    !enabled(element) ||
-    (element instanceof HTMLOptionElement && element.parentElement instanceof HTMLOptGroupElement &&
-      element.parentElement.disabled)
+  const disabledOf = (element: Element): boolean => {
+    if (!enabled(element)) return true
+    if (!(element instanceof HTMLOptionElement)) return false
+    if (element.parentElement instanceof HTMLOptGroupElement && element.parentElement.disabled) return true
+    // Firefox's :disabled does not include an option's disabled fieldset.
+    for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+      if (!(ancestor instanceof HTMLFieldSetElement) || !ancestor.disabled) continue
+      const legend = Array.from(ancestor.children).find((child) => child instanceof HTMLLegendElement)
+      if (legend === undefined || !legend.contains(element)) return true
+    }
+    return false
+  }
 
   /** Text inputs whose value is typed; the other input types have it set. */
   const TYPED = new Set(["text", "search", "email", "password", "tel", "url", "number"])
@@ -1279,6 +1330,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const checkedOf = (element: Element): boolean | null => checkedState(element).checked
 
+  const PRESSED_ROLES = new Set(["button"])
   const LEVEL_ROLES = new Set(["heading", "listitem", "row", "treeitem"])
   const SELECTED_ROLES = new Set(["gridcell", "option", "row", "tab", "rowheader", "columnheader", "treeitem"])
   const EXPANDED_ROLES = new Set([
@@ -1308,7 +1360,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const pressedOf = (element: Element): boolean | "mixed" => {
-    if (roleOf(element) !== "button") return false
+    if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
     const value = element.getAttribute("aria-pressed")?.toLowerCase()
     return value === "mixed" ? "mixed" : value === "true"
   }
@@ -1317,7 +1369,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (element instanceof HTMLDetailsElement) return element.open
     if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
     const value = element.getAttribute("aria-expanded")?.toLowerCase()
-    return value === "true" ? true : value === "false" ? false : undefined
+    return value === undefined ? undefined : value === "true"
   }
 
   const selectedOf = (element: Element): boolean => {
@@ -2357,6 +2409,8 @@ export function engine(render: (root: SnapNode) => string) {
   const element = (text: string): Element | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
+      /** The complete query, before frame routing splits it. */
+      readonly validationSteps?: ReadonlyArray<Step>
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
@@ -2366,11 +2420,17 @@ export function engine(render: (root: SnapNode) => string) {
     nameCache.clear()
     let found: Array<Element>
     try {
+      if (request.validationSteps !== undefined) validateSteps(request.validationSteps)
       found = resolve(request.steps)
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
@@ -2526,7 +2586,12 @@ export function engine(render: (root: SnapNode) => string) {
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
