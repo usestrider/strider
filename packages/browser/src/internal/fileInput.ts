@@ -183,95 +183,108 @@ export const validateCount = Effect.fnUntraced(
   }
 )
 
-/** Sequential acknowledged chunks bound caller/wire overhead, while browser storage grows with the files. */
+/** Transfer chunks in the upload scope, returning the final assignment to run before that scope closes. */
+export const prepareMade = Effect.fnUntraced(
+  function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly page: Option.Option<Model.PageEntry>
+    readonly at: MonotonicInstant.MonotonicInstant
+    readonly id: Diagnostics.OperationId
+  }) {
+    const realm = yield* Evaluation.documentRealm(
+      runtime,
+      node.document,
+      yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+      options.id
+    )
+    const call = Effect.fnUntraced(function*(
+      fn: Function,
+      args: ReadonlyArray<Adapter.LocalValue>,
+      result: "value" | "handle" = "value",
+      at = options.at
+    ) {
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail({ _tag: "Deadline" as const })
+      return yield* Evaluation.call(runtime, {
+        realm,
+        functionDeclaration: fn.toString(),
+        arguments: args,
+        result,
+        userActivation: false,
+        ...options,
+        at
+      })
+    })
+    const invalid = () => ({
+      _tag: "Reason" as const,
+      reason: new Reason.InvalidInput({
+        input: "files",
+        expected: "a file input accepting this number of files",
+        hint: "The existing selection is unchanged"
+      })
+    })
+    const collector = yield* Effect.acquireRelease(
+      call(beginUpload, [{ _tag: "Node", node }, ...yield* Evaluation.toLocal([files.length], realm)], "handle"),
+      (value) => {
+        if (!("handle" in value) || value.handle === undefined) return Effect.void
+        const handle = value.handle
+        return Operation.detached(Effect.gen(function*() {
+          const at = yield* BrowserClock.after(1000)
+          yield* call(discardUpload, [{ _tag: "Handle", handle }], "value", at).pipe(Effect.ignore)
+          yield* runtime.model.adapter.releaseHandles([handle]).pipe(BrowserClock.until(at), Effect.ignore)
+        })).pipe(Effect.ignore)
+      }
+    )
+    if (!("handle" in collector) || collector.handle === undefined) return yield* Effect.fail(invalid())
+    const handle: Adapter.LocalValue = { _tag: "Handle", handle: collector.handle }
+    for (const file of files) {
+      yield* Effect.scoped(Effect.gen(function*() {
+        let lastModified: number | undefined
+        const chunk = Effect.fnUntraced(function*(data: Uint8Array) {
+          yield* call(appendChunk, [handle, ...yield* Evaluation.toLocal([Encoding.encode(data)], realm)])
+        })
+        if (file._tag === "Local") {
+          const unreadable = (error: unknown) => ({
+            _tag: "Reason" as const,
+            reason: new Locator.FileUnreadable({ path: file.path, hint: String(error) })
+          })
+          const opened = yield* Option.getOrThrow(runtime.fileSystem).open(file.path).pipe(
+            Effect.mapError(unreadable)
+          )
+          const info = yield* opened.stat.pipe(Effect.mapError(unreadable))
+          lastModified = Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime()))
+          while (true) {
+            const bytes = yield* opened.readAlloc(64 * 1024).pipe(Effect.mapError(unreadable))
+            if (Option.isNone(bytes)) break
+            yield* chunk(bytes.value)
+          }
+        } else {
+          lastModified = file.lastModified
+          for (let offset = 0; offset < file.data.length; offset += 64 * 1024) {
+            yield* chunk(file.data.subarray(offset, offset + 64 * 1024))
+          }
+        }
+        yield* call(finishFile, [
+          handle,
+          ...yield* Evaluation.toLocal([file.name, file.mimeType, lastModified], realm)
+        ])
+      }))
+    }
+    const commit = Effect.fnUntraced(function*() {
+      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }])
+      if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
+    })
+    return commit()
+  }
+)
+
+/** Prepare and commit in one upload scope for locator actions. */
 export const setMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
   }) {
-    const completed = yield* Effect.scoped(Effect.gen(function*() {
-      const realm = yield* Evaluation.documentRealm(
-        runtime,
-        node.document,
-        yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
-        options.id
-      )
-      const call = Effect.fnUntraced(function*(
-        fn: Function,
-        args: ReadonlyArray<Adapter.LocalValue>,
-        result: "value" | "handle" = "value",
-        at = options.at
-      ) {
-        if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail({ _tag: "Deadline" as const })
-        return yield* Evaluation.call(runtime, {
-          realm,
-          functionDeclaration: fn.toString(),
-          arguments: args,
-          result,
-          userActivation: false,
-          ...options,
-          at
-        })
-      })
-      const invalid = () => ({
-        _tag: "Reason" as const,
-        reason: new Reason.InvalidInput({
-          input: "files",
-          expected: "a file input accepting this number of files",
-          hint: "The existing selection is unchanged"
-        })
-      })
-      const collector = yield* Effect.acquireRelease(
-        call(beginUpload, [{ _tag: "Node", node }, ...yield* Evaluation.toLocal([files.length], realm)], "handle"),
-        (value) => {
-          if (!("handle" in value) || value.handle === undefined) return Effect.void
-          const handle = value.handle
-          return Operation.detached(Effect.gen(function*() {
-            const at = yield* BrowserClock.after(1000)
-            yield* call(discardUpload, [{ _tag: "Handle", handle }], "value", at).pipe(Effect.ignore)
-            yield* runtime.model.adapter.releaseHandles([handle]).pipe(BrowserClock.until(at), Effect.ignore)
-          })).pipe(Effect.ignore)
-        }
-      )
-      if (!("handle" in collector) || collector.handle === undefined) return yield* Effect.fail(invalid())
-      const handle: Adapter.LocalValue = { _tag: "Handle", handle: collector.handle }
-      for (const file of files) {
-        yield* Effect.scoped(Effect.gen(function*() {
-          let lastModified: number | undefined
-          const chunk = Effect.fnUntraced(function*(data: Uint8Array) {
-            yield* call(appendChunk, [handle, ...yield* Evaluation.toLocal([Encoding.encode(data)], realm)])
-          })
-          if (file._tag === "Local") {
-            const unreadable = (error: unknown) => ({
-              _tag: "Reason" as const,
-              reason: new Locator.FileUnreadable({ path: file.path, hint: String(error) })
-            })
-            const opened = yield* Option.getOrThrow(runtime.fileSystem).open(file.path).pipe(
-              Effect.mapError(unreadable)
-            )
-            const info = yield* opened.stat.pipe(Effect.mapError(unreadable))
-            lastModified = Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime()))
-            while (true) {
-              const bytes = yield* opened.readAlloc(64 * 1024).pipe(Effect.mapError(unreadable))
-              if (Option.isNone(bytes)) break
-              yield* chunk(bytes.value)
-            }
-          } else {
-            lastModified = file.lastModified
-            for (let offset = 0; offset < file.data.length; offset += 64 * 1024) {
-              yield* chunk(file.data.subarray(offset, offset + 64 * 1024))
-            }
-          }
-          yield* call(finishFile, [
-            handle,
-            ...yield* Evaluation.toLocal([file.name, file.mimeType, lastModified], realm)
-          ])
-        }))
-      }
-      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }])
-      if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
-    })).pipe(BrowserClock.until(options.at))
+    const completed = yield* Effect.scoped(Effect.flatMap(prepareMade(runtime, node, files, options), (apply) => apply))
+      .pipe(BrowserClock.until(options.at))
     if (Option.isNone(completed)) return yield* Effect.fail({ _tag: "Deadline" as const })
   }
 )

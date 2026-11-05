@@ -927,3 +927,9 @@ original absolute browser-clock deadline. Reads and chunk acknowledgements consu
 preparation cannot reset its budget or apply after expiry. Decision failures report in the resolving fiber, and
 staged decisions retain their existing count-before-application ordering. Scope interruption cancels stalled work;
 cleanup cannot leave a chooser waiting without a bound.
+
+Chooser transfer preparation runs before the registration's handled count advances. The internal decision has
+its own scope spanning preparation and staged assignment, so failed reads or acknowledgements stay uncounted,
+while a prepared decision is counted before its final application as before. The user handler retains its
+registration scope; introducing a temporary scope around that user callback would close resources the handler
+intends to keep. The collector is released even if the deadline expires between preparation and application.

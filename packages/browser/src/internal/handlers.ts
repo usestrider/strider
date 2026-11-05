@@ -44,7 +44,12 @@ export interface Options<S, P, D, E, R> {
   /** What the handler is given for an obligation. */
   readonly pending: (subject: S) => P
   /** The adapter's decision for what the handler returned about an obligation, or why it isn't one. */
-  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision | Staged, unknown>
+  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision | Staged, unknown, Scope.Scope>
+  /**
+   * Own a temporary scope for internal preparation through staged application.
+   * @default false
+   */
+  readonly scopedDecision?: boolean | undefined
   /** What it decides, for the log: `"confirm"`, `"file chooser"`. */
   readonly noun: (subject: S) => string
   /** What a wait on `handled` reports: `"Dialog.handle.handled.waitFor"`. */
@@ -103,6 +108,7 @@ export const register = <S, P, D, E, R>(
 ): Effect.Effect<Declaration.HandlerRegistration, never, Scope.Scope | R> =>
   Effect.gen(function*() {
     const context = yield* Effect.context<R>()
+    const registrationScope = yield* Effect.scope
     const budget = yield* Effect.service(Deadline.DefaultBudget)
     const clock = yield* Effect.service(BrowserClock.CurrentClock)
     // The handler's fibers end with its scope, which leaves an undecided obligation to the policy
@@ -126,16 +132,24 @@ export const register = <S, P, D, E, R>(
               const chosen = yield* options.handler(options.pending(subject)).pipe(Effect.exit)
               if (Exit.isFailure(chosen)) return { _tag: "Failed", phase: "handler", cause: chosen.cause } as const
               if (expired()) return { _tag: "Expired" } as const
-              const decision = yield* options.decision(chosen.value, subject).pipe(Effect.exit)
-              if (Exit.isFailure(decision)) return { _tag: "Failed", phase: "decision", cause: decision.cause } as const
-              // A read may finish after its deadline even if its service masks interruption.
-              if (expired()) return { _tag: "Expired" } as const
-              yield* SubscriptionRef.update(handled, (count) => count + 1)
-              if (decision.value._tag !== "Staged") return { _tag: "Decided", decision: decision.value } as const
-              const applied = yield* decision.value.apply.pipe(Effect.exit)
-              return Exit.isFailure(applied)
-                ? { _tag: "Failed", phase: "decision", cause: applied.cause } as const
-                : { _tag: "Decided", decision: applied.value } as const
+              // Internal preparation owns resources through staged application; the user handler keeps its registration scope.
+              const deciding = Effect.gen(function*() {
+                const decision = yield* options.decision(chosen.value, subject).pipe(Effect.exit)
+                if (Exit.isFailure(decision)) {
+                  return { _tag: "Failed", phase: "decision", cause: decision.cause } as const
+                }
+                // A read may finish after its deadline even if its service masks interruption.
+                if (expired()) return { _tag: "Expired" } as const
+                yield* SubscriptionRef.update(handled, (count) => count + 1)
+                if (decision.value._tag !== "Staged") return { _tag: "Decided", decision: decision.value } as const
+                const applied = yield* decision.value.apply.pipe(Effect.exit)
+                return Exit.isFailure(applied)
+                  ? { _tag: "Failed", phase: "decision", cause: applied.cause } as const
+                  : { _tag: "Decided", decision: applied.value } as const
+              })
+              return yield* (options.scopedDecision
+                ? Effect.scoped(deciding)
+                : Scope.provide(deciding, registrationScope))
             }).pipe(
               (self) => Operation.under(self, at),
               Operation.apart(options.name, budget)
