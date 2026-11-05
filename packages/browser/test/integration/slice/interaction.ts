@@ -93,6 +93,73 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const ancestor of [false, true]) {
+        for (const action of ["click", "check", "fill"] as const) {
+          it.effect(
+            `acts on transparent controls with ${ancestor ? "ancestor" : "own"} opacity using ${action}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<!doctype html><div style="opacity:${ancestor ? 0 : 1}"><input id="target" type="${
+                    action === "check" ? "checkbox" : "text"
+                  }" style="opacity:${
+                    ancestor ? 1 : 0
+                  }" onclick="document.querySelector('#out').textContent='clicked'"></div><output id="out"></output>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  assert.strictEqual(yield* target.isVisible, false)
+                  yield* target.filter({ visible: true }).pipe(Expect.toHaveCount(0))
+                  yield* target.filter({ visible: false }).pipe(Expect.toHaveCount(1))
+                  const unseen = yield* target.pipe(Expect.toBeVisible, Deadline.within("200 millis"), Effect.flip)
+                  assert.strictEqual(unseen._tag, "ExpectationFailed")
+                  if (action === "fill") {
+                    yield* target.fill("Ada").pipe(Deadline.within("1 second"))
+                    yield* target.pipe(Expect.toHaveValue("Ada"))
+                  } else {
+                    yield* target[action]().pipe(Deadline.within("1 second"))
+                    yield* page.locator("#out").pipe(Expect.toHaveText("clicked"))
+                    if (action === "check") yield* target.pipe(Expect.toBeChecked)
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (const state of ["covered", "display", "visibility", "disabled", "readonly", "inert"] as const) {
+        for (const action of ["click", "fill"] as const) {
+          if (state === "covered" && action === "fill" || state === "readonly" && action === "click") continue
+          it.effect(`blocks transparent ${state} controls for ${action}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<!doctype html><input id="target" style="opacity:0;position:absolute;left:20px;top:20px;${
+                  state === "display" ? "display:none" : state === "visibility" ? "visibility:hidden" : ""
+                }" ${
+                  state === "disabled" || state === "readonly" || state === "inert" ? state : ""
+                } onclick="document.querySelector('#out').textContent='clicked'">${
+                  state === "covered" ? "<div style=\"position:absolute;inset:0;background:white\"></div>" : ""
+                }<output id="out"></output>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                const error = yield* (action === "fill" ? target.fill("Ada") : target.click()).pipe(
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert.strictEqual(error._tag, "Timeout")
+                yield* target.pipe(Expect.toHaveValue(""))
+                yield* page.locator("#out").pipe(Expect.toHaveText(""))
+              }))
+            }), timeout)
+        }
+      }
+
       for (const shape of wrappedLinks) {
         for (const partial of shape.id === "three" ? [false, true] : [false]) {
           it.effect(
