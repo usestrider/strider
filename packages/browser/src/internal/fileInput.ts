@@ -14,6 +14,7 @@ import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
+import type * as Operation from "./operation.ts"
 import { isAbsolute } from "./paths.ts"
 import * as Runtime from "./runtime.ts"
 
@@ -121,6 +122,7 @@ export const setMade = (
   node: Adapter.NodeBinding,
   files: ReadonlyArray<Made>,
   options: {
+    readonly dispatch: Operation.Record
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
@@ -141,6 +143,7 @@ export const setMade = (
     }))
     const rest = yield* Evaluation.toLocal([encoded], realm, 1)
     yield* Evaluation.call(runtime, {
+      dispatch: options.dispatch,
       realm,
       functionDeclaration: setMadeFiles.toString(),
       arguments: [{ _tag: "Node", node }, ...rest],

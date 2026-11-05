@@ -1112,3 +1112,23 @@ start/reply exchanges, which blocks a newer acquisition behind an abandoned star
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
+
+
+## Diagnostic evidence at failure
+
+An error's diagnostics are a snapshot of what its operation and steps know when it is built. A write starts
+uncertain even after an earlier write was confirmed; a successful adapter reply or explicit browser rejection
+records acknowledgement of that call. Evaluations explicitly sent as writes use the same reply recording;
+read-only evaluations cannot confirm an earlier write. Engine actions record their applied answer, and a guard's proof that
+input did not reach the page remains `NotSent`. Adapter methods may send several protocol commands; their overall
+reply is not a delivery ledger for those commands.
+
+Cleanup reports evidence owned by the operation: completed or failed input recovery, and pending abandoned
+creation cleanup. It preserves existing resource owners and cleanup budgets. A summary gives known failure
+precedence over pending work, pending over completed, and completed over no cleanup; the first known failure
+supplies the cause. A step contributes its cleanup before the enclosing operation builds its error.
+
+Rejected: waiting past the deadline to obtain a final cleanup answer; transferring ownership to diagnostics;
+letting future scope finalizers rewrite earlier errors; treating any adapter failure as a browser rejection;
+and preserving an earlier acknowledgement across a later unanswered write. These would respectively change
+timing, lifetime, snapshot semantics or the evidence available to decide whether repeating an action is safe.

@@ -19,7 +19,7 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Operation from "../Operation.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
-import { type AdapterError, now } from "./adapter.ts"
+import { AdapterError, now } from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Spans from "./spans.ts"
 
@@ -72,6 +72,7 @@ export const diagnostics = (
     readonly dispatch?: Diagnostics.DispatchState | undefined
     readonly progress?: ReadonlyArray<Diagnostics.StepEvidence> | undefined
     readonly last?: Option.Option<Diagnostics.ObservedValue> | undefined
+    readonly cleanup?: Diagnostics.CleanupState | undefined
   } = {}
 ): Diagnostics.Diagnostics => {
   const current = running()
@@ -81,9 +82,23 @@ export const diagnostics = (
     dispatch: options.dispatch ?? record?.dispatch ?? { _tag: "NotSent" },
     progress: options.progress ?? (record === undefined ? [] : [...record.progress]),
     lastObserved: options.last ?? Option.fromNullishOr(record?.history.at(-1)),
-    cleanup: { _tag: "NotNeeded" }
+    cleanup: options.cleanup ?? record?.cleanup ?? { _tag: "NotNeeded" }
   })
 }
+
+/** A reply confirms only this call; arbitrary local or transport failures do not prove a reply. */
+export const answered = <A, E, R>(record: Record, call: Effect.Effect<A, E, R>) =>
+  call.pipe(
+    Effect.tap(() => Effect.sync(() => record.markConfirmed())),
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        if (
+          error instanceof AdapterError && error.reason._tag === "Protocol" &&
+          error.reason.error.reason._tag === "Rejected"
+        ) record.markConfirmed("rejected")
+      })
+    )
+  )
 
 /**
  * A failure an operation reports: the shared reasons, through its module's error, or its target's end or its
@@ -175,10 +190,6 @@ export const appendObservation = (
 /** Where an operation stopped. */
 export type Phase = Deadline.Timeout["phase"]
 
-/** How far a dispatch got: not sent, then may have been sent, then acknowledged. */
-const reach = (dispatch: Diagnostics.DispatchState): number =>
-  dispatch._tag === "NotSent" ? 0 : dispatch._tag === "MayHaveBeenSent" ? 1 : 2
-
 /**
  * What an operation has done (CONCEPTS.md §2, `OperationRecord`): what it observed, whether its input or call may
  * have reached the browser, and its steps. An operation notes facts as they happen, and its `Timeout` takes its phase
@@ -187,6 +198,7 @@ const reach = (dispatch: Diagnostics.DispatchState): number =>
 export class Record implements Operation.Operation {
   readonly "~@usestrider/browser/Operation" = "~@usestrider/browser/Operation" as const
   dispatch: Diagnostics.DispatchState = { _tag: "NotSent" }
+  cleanup: Diagnostics.CleanupState = { _tag: "NotNeeded" }
   readonly history: Array<Diagnostics.ObservedValue> = []
   readonly progress: Array<Diagnostics.StepEvidence> = []
   readonly name: string
@@ -212,7 +224,7 @@ export class Record implements Operation.Operation {
 
   /** From here, input or a call may have reached the browser. */
   markSent(): void {
-    if (this.dispatch._tag === "NotSent") this.dispatch = { _tag: "MayHaveBeenSent" }
+    this.dispatch = { _tag: "MayHaveBeenSent" }
   }
 
   /** What was sent never reached the page: a gesture the guard stopped. */
@@ -221,21 +233,28 @@ export class Record implements Operation.Operation {
   }
 
   /** The browser confirmed what was sent; what the operation waits for now is its outcome. */
-  markConfirmed(): void {
-    this.dispatch = { _tag: "Acknowledged", result: "ok" }
+  markConfirmed(result: "ok" | "rejected" = "ok"): void {
+    this.dispatch = { _tag: "Acknowledged", result }
+  }
+
+  /** Summarizes cleanup owned by this operation; known failure takes precedence over unfinished work. */
+  noteCleanup(cleanup: Diagnostics.CleanupState): void {
+    const priority = { NotNeeded: 0, Completed: 1, Pending: 2, Failed: 3 }
+    if (priority[cleanup._tag] > priority[this.cleanup._tag]) this.cleanup = cleanup
   }
 
   /**
-   * Adds `step`, an operation that ran inside this one and has ended, to its steps, and moves its dispatch as far as
-   * the step's went. A step that succeeded after it sent was confirmed by succeeding. Its state is how far it got:
+   * Adds `step`, an operation that ran inside this one and has ended, to its steps, and takes its dispatch when
+   * the step sent. A step that succeeded after it sent was confirmed by succeeding. Its state is how far it got:
    * `ok` once it succeeded or the browser confirmed it, otherwise `unsent` or `uncertain` by whether it sent. A step
    * that repeats the one before it, in name and state, is kept once, as the history keeps observations.
    */
   addStep(step: Record, succeeded: boolean): void {
+    this.noteCleanup(step.cleanup)
     const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent"
       ? { _tag: "Acknowledged", result: "ok" }
       : step.dispatch
-    if (reach(dispatch) > reach(this.dispatch)) this.dispatch = dispatch
+    if (dispatch._tag !== "NotSent") this.dispatch = dispatch
     const state = succeeded
       ? "ok"
       : dispatch._tag === "NotSent"
@@ -268,6 +287,7 @@ export class Record implements Operation.Operation {
     return diagnostics(this.id, {
       dispatch: this.dispatch,
       progress: [...this.progress],
+      cleanup: this.cleanup,
       last: Option.fromNullishOr(this.history.at(-1))
     })
   }
@@ -290,7 +310,7 @@ export class Record implements Operation.Operation {
   }
 
   /**
-   * The operation's `Timeout` for one a step ran out with: named for this operation, with its budget, its furthest
+   * The operation's `Timeout` for one a step ran out with: named for this operation, with its budget, its latest
    * dispatch and its steps, and the step's phase, history and hint, which say where it stopped.
    */
   adopt<T extends Deadline.Timeout>(step: T): T {

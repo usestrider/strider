@@ -128,7 +128,12 @@ const setMade = Effect.fnUntraced(function*(
   // Part of the handler's decision, under its deadline
   const record = yield* Operation.start("FileChooser.handle")
   record.markSent()
-  yield* FileInputImpl.setMade(runtime, node, files, { page: Option.some(page), at: record.budget.at, id: record.id })
+  yield* FileInputImpl.setMade(runtime, node, files, {
+    dispatch: record,
+    page: Option.some(page),
+    at: record.budget.at,
+    id: record.id
+  })
     .pipe(
       Effect.mapError((failure) =>
         failure._tag === "Gone"

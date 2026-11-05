@@ -78,7 +78,7 @@ export interface Options {
  * Every library operation, such as a click, is one. A `Timeout` that leaves an operation is the operation's own: one
  * a step ran out with keeps the step's `phase`, `history` and `hint`, which say where it stopped, and takes the
  * operation's name, budget and diagnostics. The diagnostics list its steps in `progress`, and their `dispatch` is
- * the furthest any step got.
+ * the latest step that sent. An unanswered later write does not inherit an earlier acknowledgement.
  *
  * **Gotchas**
  *
