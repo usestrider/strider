@@ -23,24 +23,28 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case                 | Timed work                                                                                               |
-| -------------------- | -------------------------------------------------------------------------------------------------------- |
-| `launch`             | Start a fresh browser and establish its automation connection; shutdown excluded                         |
-| `first-page`         | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
-| `shutdown`           | Release each library’s freshly launched browser after availability; launch excluded                      |
-| `repeated-lifecycle` | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
-| `page-lifecycle`     | Create and close an isolated context and page, including viewport configuration                          |
-| `navigate`           | Navigate to a local document through `load`, then read its title                                         |
-| `resources`          | Load a local document with 100 uncached images through `load`, then count loaded images                  |
-| `evaluate`           | 20 sequential main-world evaluations returning small objects; time per batch                             |
-| `locator-read`       | 20 sequential role locator text reads; time per batch                                                    |
-| `locator-values`     | 20 sequential input value reads across distinct elements; time per batch                                 |
-| `read-snapshot-100`  | One synchronous main-world query returning 100 inputs × four properties                                  |
-| `read-snapshot-1000` | The same query returning 1,000 inputs × four properties                                                  |
-| `click`              | Click with default actionability, then read the updated counter                                          |
-| `fill`               | Fill a labeled input with default actionability, then read its value                                     |
-| `visible`            | Wait for an already visible heading                                                                      |
-| `screenshot`         | Capture the viewport as PNG                                                                              |
+| Case                  | Timed work                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `launch`              | Start a fresh browser and establish its automation connection; shutdown excluded                         |
+| `first-page`          | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
+| `shutdown`            | Release each library’s freshly launched browser after availability; launch excluded                      |
+| `repeated-lifecycle`  | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
+| `page-lifecycle`      | Create and close an isolated context and page, including viewport configuration                          |
+| `navigate`            | Navigate to a local document through `load`, then read its title                                         |
+| `resources`           | Load a local document with 100 uncached images through `load`, then count loaded images                  |
+| `evaluate`            | 20 sequential main-world evaluations returning small objects; time per batch                             |
+| `locator-read`        | 20 sequential role locator text reads; time per batch                                                    |
+| `locator-values`      | 20 sequential input value reads across distinct elements; time per batch                                 |
+| `read-snapshot-100`   | One synchronous main-world query returning 100 inputs × four properties                                  |
+| `read-snapshot-1000`  | The same query returning 1,000 inputs × four properties                                                  |
+| `click`               | Click with default actionability, then read the updated counter                                          |
+| `fill`                | Fill a labeled input with default actionability, then read its value                                     |
+| `visible`             | Wait for an already visible heading                                                                      |
+| `screenshot`          | Capture the viewport as PNG                                                                              |
+| `screenshot-repeated` | Five sequential viewport PNG captures on one page; time per batch                                        |
+| `screenshot-dense`    | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                                      |
+| `screenshot-large`    | Capture a 1280 × 2880 full page; fixture setup excluded                                                  |
+| `screenshot-element`  | Capture a visible 320 × 180 element; fixture setup excluded                                              |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
@@ -210,6 +214,39 @@ changes. Do not create a separate Markdown backlog of findings.
 Saved runs under `.data/` are local and ignored by Git. Preserve review evidence outside disposable worktrees with
 the workflow runner's `--output`, or copy complete named run directories. Keep a readable result and environment
 summary on the issue; a Git revision or source hash alone does not preserve uncommitted experimental code.
+
+Screenshot diagnostics use `pnpm profile:screenshot /absolute/path/diagnostic.json` in the same browser lock.
+This separate, instrumented Strider run records command intervals, response sizes, extra JSON parsing cost and
+replayed Effect/Buffer/adapter-helper base64 decoding cost for 20 samples of each screenshot workload. It does not measure an isolated renderer or network duration:
+`Page.captureScreenshot` combines renderer synchronization, capture/encoding and response transfer. Time after
+its response includes protocol decoding, base64 decoding and operation completion. Do not use diagnostic times
+as uninstrumented performance results. The dense case reconstructs every PNG row and checks every seeded pixel.
+Solid large and element cases check dimensions and the first pixel's color. The cross-browser capture integration
+tests retain the broader scale, clip, transparency and invalidation checks.
+
+### Screenshot surface experiment
+
+`--screenshot-surface on` or `off` adds an explicit Strider-only Chromium feature switch for
+`CDPScreenshotNewSurface`; `default` adds nothing. The off variant retains the automation profile's existing disabled-feature list in the
+replacement switch, so other feature defaults stay fixed. Playwright keeps its pinned defaults. This is benchmark
+configuration, not a production launch-profile change. `--strider-arg=--enable-features=Other` appends a raw
+argument after the experiment switch; it can be repeated to investigate Chromium's own override behavior.
+
+Reports include actual Linux `/proc` browser arguments (including generated profile directories) and renderer
+arguments observed after launch, outside operation timing. Schema version 2 also retains each measured sample's
+pair index, sequence index including warmups, library, pair order, position, preceding library/position/pair index,
+and duration. Preceding positions include warmup samples; tracking restarts for each case. The duration arrays
+remain in pair-index order. Alternation couples pair position to preceding-library identity; those fields are
+strata, not independent causal variables. Compare distributions and tails within them. Aggregate median ratios
+can mix distinct modes and do not establish a stable overhead.
+
+Viewport and repeated captures check three opaque 64 × 64 color markers across the viewport after capture.
+Preparation and PNG reconstruction remain outside timing; repeated capture still times five screenshot calls,
+with no settling waits or extra commands between them. The dense case retains every-pixel verification.
+
+`--strider-profile automation|concurrent` selects the named Strider preset for a benchmark; automation remains
+the default. The selected profile and exact launch arguments are recorded. This does not change production presets
+or Playwright defaults.
 
 ### Query result attribution
 
