@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
+import * as Input from "../src/internal/input.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as Target from "../src/Target.ts"
@@ -135,6 +136,46 @@ describe("BoundedAdapter", () => {
       assert(Deadline.isTimeout(timeout))
       assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
     }))
+
+  it.effect("does not inherit a completed step's confirmation in a later unanswered step", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Operation.named("first"))
+        yield* adapter.clearCookies(context).pipe(Operation.named("second"))
+      }).pipe(Operation.named("cookies"), Deadline.within("50 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+      assert.deepStrictEqual(timeout.diagnostics.progress.map((step) => step.state), ["ok", "uncertain"])
+    }))
+
+  for (const failed of [false, true]) {
+    for (const recoverFirst of [false, true]) {
+      it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
+        Effect.gen(function*() {
+          const made = yield* Deferred.make<Target.NavigableId>()
+          const closed = yield* Deferred.make<void>()
+          const adapter = stub({
+            createPage: () => Deferred.await(made),
+            closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+          })
+          const result = yield* Effect.gen(function*() {
+            const state = Input.make()
+            state.broken = Option.some({ description: "held input", release: [] })
+            const recover = Input.recover(state, () => failed ? Effect.fail("release refused") : Effect.void)
+            if (recoverFirst) yield* recover
+            const timeout = yield* adapter.createPage(context).pipe(Effect.flip)
+            assert(Deadline.isTimeout(timeout))
+            if (!recoverFirst) yield* recover
+            return { snapshot: timeout.diagnostics, current: (yield* Operation.record).diagnostics() }
+          }).pipe(Operation.named("cleanup"), Deadline.within("50 millis"))
+          yield* Deferred.succeed(made, page)
+          yield* Deferred.await(closed)
+          assert.strictEqual(result.current.cleanup._tag, failed ? "Failed" : "Pending")
+          assert.strictEqual(result.snapshot.cleanup._tag, failed && recoverFirst ? "Failed" : "Pending")
+        }))
+    }
+  }
 
   it.effect("records successful claims dismissal", () =>
     Effect.gen(function*() {

@@ -1774,6 +1774,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(field instanceof LocatorImpl)
               const adapter = field.owner.runtime.model.adapter
               const original = adapter.evaluate
+              let reject = false
+              const rejected = new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.callFunctionOn",
+                  reason: "InvalidArgument",
+                  code: -32602,
+                  description: "refused"
+                })
+              })
               let actionRecord: import("../../../src/internal/operation.ts").Record | undefined
               yield* Effect.acquireRelease(
                 Effect.sync(() =>
@@ -1781,6 +1790,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     evaluate: (...args: Parameters<typeof original>) =>
                       Effect.flatMap(importRecord, (record) => {
                         actionRecord = record
+                        const call = args[1]
+                        const argument = call.arguments[0]
+                        if (
+                          reject && call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                          argument.value.type === "string"
+                        ) {
+                          const request = JSON.parse(argument.value.value) as Engine.Request
+                          if (request.op === "act" && request.apply) {
+                            return Effect.fail(
+                              new Adapter.AdapterError({
+                                reason: { _tag: "Protocol", error: rejected }
+                              })
+                            )
+                          }
+                        }
                         return original(...args)
                       })
                   })
@@ -1794,6 +1818,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 return record.timeout(Option.none())
               }).pipe(Operation.named("engine action"))
               assert.deepStrictEqual(result.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+              reject = true
+              const error = yield* (action === "fill" ? field.fill("other") : field.focus()).pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === "BackendFailure")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "rejected" })
+              assert.strictEqual(error.reason.cause, rejected)
             }))
           }), timeout)
       }
