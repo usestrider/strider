@@ -50,6 +50,7 @@ export interface End {
 export type Failure = Subscription.EventOverflow | Target.TargetGone | Cause.Done
 
 interface Subscriber<A> {
+  readonly onEnd: ((how: End) => void) | undefined
   readonly accepts: (entry: Entry<A>) => boolean
   readonly queue: Queue.Queue<Entry<A>, Failure>
   /** The entries offered already, so a revised entry reaches a subscription at most once. */
@@ -134,7 +135,10 @@ export const end = <A>(channel: Channel<A>, how: End): void => {
 }
 
 const close = <A>(channel: Channel<A>, subscriber: Subscriber<A>, how: End): void => {
-  if (how.normal) Queue.endUnsafe(subscriber.queue)
+  if (subscriber.onEnd !== undefined) {
+    subscriber.onEnd(how)
+    Queue.shutdownUnsafe(subscriber.queue)
+  } else if (how.normal) Queue.endUnsafe(subscriber.queue)
   else Queue.failCauseUnsafe(subscriber.queue, Cause.fail(gone(channel.target, how.reason)))
 }
 
@@ -142,11 +146,12 @@ const close = <A>(channel: Channel<A>, subscriber: Subscriber<A>, how: End): voi
 const subscribe = <A>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
-  bound: number
+  bound: number,
+  onEnd?: ((how: End) => void) | undefined
 ): Effect.Effect<Subscriber<A>, never, Scope.Scope> =>
   Effect.gen(function*() {
     const queue = yield* Queue.make<Entry<A>, Failure>({ capacity: bound })
-    const subscriber: Subscriber<A> = { accepts, queue, offered: new WeakSet(), bound, from: channel.published }
+    const subscriber: Subscriber<A> = { accepts, queue, offered: new WeakSet(), bound, from: channel.published, onEnd }
     if (Option.isSome(channel.end)) {
       close(channel, subscriber, channel.end.value)
       return subscriber
@@ -221,49 +226,70 @@ export const next = <A, B, PE, PR, DE = never>(
     const subscribed = now()
     // A child scope releases completed waits before their acquiring scope closes.
     const lifetime = yield* Effect.flatMap(Effect.scope, (scope) => Scope.fork(scope))
-    const subscriber = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY).pipe(
-      Effect.provideService(Scope.Scope, lifetime)
-    )
-    const release = Effect.sync(() => {
-      channel.subscribers.delete(subscriber)
-      Queue.shutdownUnsafe(subscriber.queue)
-    })
     const deferred = Deferred.makeUnsafe<B, PE | DE | Target.TargetGone | Deadline.Timeout>()
     let outcome: Exit.Exit<B, PE | DE | Target.TargetGone | Deadline.Timeout> | undefined
-    // Scope closure also completes the wait when its worker never starts.
-    yield* Scope.addFinalizer(
-      lifetime,
-      Effect.andThen(
-        release,
-        Effect.suspend(() => outcome === undefined ? Deferred.interrupt(deferred) : Deferred.done(deferred, outcome))
-      )
-    )
+    let subscriber: Subscriber<A> | undefined
+    const release = () => {
+      if (subscriber === undefined) return
+      channel.subscribers.delete(subscriber)
+      Queue.shutdownUnsafe(subscriber.queue)
+    }
+    // The fold can latch target end without running delivery, predicates or finalizers.
+    const commit = (exit: Exit.Exit<B, PE | DE | Target.TargetGone | Deadline.Timeout>, notify = true) => {
+      if (outcome === undefined) {
+        outcome = exit
+        release()
+      }
+      if (notify) Deferred.doneUnsafe(deferred, outcome)
+    }
+    const registered = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY, (how) =>
+      commit(Exit.fail(gone(channel.target, how.reason)))).pipe(Effect.provideService(Scope.Scope, lifetime))
+    subscriber = registered
+    if (outcome !== undefined) {
+      release()
+    }
     // The entry being delivered, if the deadline passes while it is
     let delivering: Option.Option<A> = Option.none()
     const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
       function*() {
         while (true) {
-          const entry = yield* Queue.take(subscriber.queue)
+          if (outcome !== undefined) {
+            return yield* Effect.interrupt
+          }
+          const entry = yield* Queue.take(registered.queue)
+          if (outcome !== undefined) {
+            return yield* Effect.interrupt
+          }
           delivering = Option.some(entry.value)
           const event = yield* delivery.deliver(entry.value)
           delivering = Option.none()
-          if (where === undefined || (yield* Effect.provideContext(where(event), context))) return event
+          if (outcome !== undefined) {
+            return yield* Effect.interrupt
+          }
+          if (where === undefined || (yield* Effect.provideContext(where(event), context))) {
+            return event
+          }
         }
       }
     )
     const missed = (): Option.Option<string> => {
-      if (Option.isSome(delivering)) return Option.some(delivery.unfinished(delivering.value))
-      const late = channel.entries.filter((entry) => entry.sequence < since && accepts(entry)).at(-1)
+      if (Option.isSome(delivering)) {
+        return Option.some(delivery.unfinished(delivering.value))
+      }
+      const late = channel.entries.filter((entry) =>
+        entry.sequence < since && accepts(entry)
+      ).at(-1)
       return late === undefined ? Option.none() : Option.some(
         `${kind.noun} came ${
           Math.round((subscribed - late.at) / 1e6)
         } ms before ${kind.operation} subscribed; call ${kind.operation} before the action that causes it`
       )
     }
-    yield* take.pipe(
-      (waiting) => record.bound(waiting, missed, "waitingForEvent"),
+    const work = take.pipe(
       Effect.catch((failure): Effect.Effect<never, PE | DE | Target.TargetGone | Deadline.Timeout> => {
-        if (Deadline.isTimeout(failure) || Target.isTargetGone(failure)) return Effect.fail(failure)
+        if (Deadline.isTimeout(failure) || Target.isTargetGone(failure)) {
+          return Effect.fail(failure)
+        }
         if (Cause.isDone(failure)) {
           // Its target ended normally, which a wait still fails on; or its scope closed, which interrupts it
           return Option.isSome(channel.end)
@@ -274,12 +300,27 @@ export const next = <A, B, PE, PR, DE = never>(
         return Subscription.isEventOverflow(failure)
           ? Effect.interrupt
           : Effect.fail(failure as PE | DE)
-      }),
-      Effect.onExit((exit) => {
-        outcome = exit
-        return Scope.close(lifetime, Exit.void)
-      }),
+      })
+    )
+    const complete = (exit: Exit.Exit<B, PE | DE | Target.TargetGone | Deadline.Timeout>) => {
+      commit(exit, false)
+      return Scope.close(lifetime, Exit.void)
+    }
+    // The deadline can commit while delivery is blocked, just as target end can.
+    yield* record.bound(Effect.never, missed, "waitingForEvent").pipe(
+      Effect.onExit(complete),
       Effect.forkIn(lifetime)
+    )
+    yield* Effect.raceFirst(work, Deferred.await(deferred)).pipe(
+      Effect.onExit(complete),
+      Effect.forkIn(lifetime)
+    )
+    // Registered last: scope cancellation commits before interrupting either worker.
+    yield* Scope.addFinalizer(
+      lifetime,
+      Effect.withFiber((fiber) =>
+        Effect.sync(() => commit(Exit.interrupt(fiber.id)))
+      )
     )
     // The read side only: an effect that awaits it, which nothing can complete. Awaited inside an operation, the
     // wait is a step of it

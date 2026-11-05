@@ -62,6 +62,39 @@ describe("event wait first terminal outcome", () => {
     }
   }
 
+  it.live("publishes target end while uninterruptible delivery is pending and starts no predicate afterward", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const events = channel()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const stopped = yield* Deferred.make<void>()
+      let predicates = 0
+      const wait = yield* Events.next(kind, events, () => true, () =>
+        Effect.sync(() => {
+          predicates++
+          return true
+        }), {
+        deliver: () =>
+          Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release)).pipe(
+            Effect.as("delivered"),
+            Effect.uninterruptible,
+            Effect.onExit(() => Deferred.succeed(stopped, undefined))
+          ),
+        unfinished: () => "pending uninterruptible delivery"
+      })
+      yield* Effect.gen(function*() {
+        Events.publish(events, "first")
+        yield* Deferred.await(entered)
+        const reason = new Target.BrowserClosed({})
+        Events.end(events, { normal: true, reason })
+        targetFailure(yield* settled(wait), reason)
+        yield* Deferred.succeed(release, undefined)
+        yield* settled(Deferred.await(stopped))
+        assert.strictEqual(predicates, 0)
+        targetFailure(yield* settled(wait), reason)
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+    })))
+
   it.live("preserves target end before scope closure and scope cancellation before target end", () =>
     Effect.gen(function*() {
       for (const targetFirst of [true, false]) {
