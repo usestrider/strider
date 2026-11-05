@@ -10,4 +10,5 @@ export type Handler<E, R, P extends Route.Phase, D extends Route.Phase> =
 type DefaultPhaseDiagnostic<D extends Route.Phase, P extends Route.Phase> = [P] extends [D] ? unknown
   : D extends "response" ? "Response decisions need { phase: 'response' }"
   : D extends "auth" ? "Auth decisions need { phase: 'auth' }"
+  : D extends "request" ? `Request decisions cannot run at { phase: '${Exclude<P, "request">}' }`
   : never
