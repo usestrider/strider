@@ -1479,6 +1479,18 @@ export const viewportRestoration = (backend: Backend, options: { readonly nested
               yield* goto(world, page, `${world.site.origin}/hello`)
               const measure = (target: Target.NavigableId) =>
                 evaluate(world, target, "() => [innerWidth, innerHeight, devicePixelRatio]")
+              const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+              const viewport = capabilities.entries.find((entry) => entry.name === "emulation.viewport")
+              assert.isDefined(viewport)
+              const contextScale = viewport.status === "supported" ? 2 : 1
+              const pageScale = viewport.status === "supported" ? 3 : 1
+              if (viewport.status !== "supported") {
+                const refused = yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 600, deviceScaleFactor: 2, mobile: false }
+                })).pipe(Effect.flip)
+                assert.strictEqual(refused.reason._tag, "Unsupported")
+              }
               const original = yield* measure(page)
               const browser = yield* Scope.make()
               const userContext = yield* Scope.make()
@@ -1492,31 +1504,31 @@ export const viewportRestoration = (backend: Backend, options: { readonly nested
                   override: { _tag: "Viewport", width, height: 600, deviceScaleFactor: ratio, mobile: false }
                 }).pipe(Effect.provideService(Scope.Scope, lifetime))
               yield* declare({ _tag: "Browser" }, 1100, 1, browser)
-              yield* declare({ _tag: "UserContext", context }, 1000, 2, userContext)
-              yield* declare({ _tag: "Page", page }, 640, 3, pageScope)
+              yield* declare({ _tag: "UserContext", context }, 1000, contextScale, userContext)
+              yield* declare({ _tag: "Page", page }, 640, pageScale, pageScope)
               yield* Effect.scoped(Effect.gen(function*() {
                 yield* world.adapter.declare({ _tag: "UserContext", context }, {
                   _tag: "Override",
                   override: { _tag: "Viewport", width: 900, height: 600, deviceScaleFactor: 1, mobile: false }
                 })
-                assert.deepStrictEqual(yield* measure(page), [640, 600, 3])
+                assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
                 const sibling = yield* world.adapter.createPage(context)
                 yield* goto(world, sibling, `${world.site.origin}/hello`)
                 assert.deepStrictEqual(yield* measure(sibling), [900, 600, 1])
               }))
               const sibling = yield* world.adapter.createPage(context)
               yield* goto(world, sibling, `${world.site.origin}/hello`)
-              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, 2])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
               const other = yield* newPage(world)
               yield* goto(world, other.page, `${world.site.origin}/hello`)
               assert.deepStrictEqual(yield* measure(other.page), [1100, 600, 1])
-              assert.deepStrictEqual(yield* measure(page), [640, 600, 3])
-              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, 2])
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
               yield* Scope.close(browser, Exit.void)
-              assert.deepStrictEqual(yield* measure(page), [640, 600, 3])
-              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, 2])
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
               yield* Scope.close(pageScope, Exit.void)
-              assert.deepStrictEqual(yield* measure(page), [1000, 600, 2])
+              assert.deepStrictEqual(yield* measure(page), [1000, 600, contextScale])
               yield* Scope.close(userContext, Exit.void)
               assert.deepStrictEqual(yield* measure(page), original)
               assert.deepStrictEqual(yield* measure(sibling), original)
