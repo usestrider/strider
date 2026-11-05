@@ -775,6 +775,13 @@ five-second budget on the browser clock, detached from the releasing operation a
 A typed failure warns and marks cleanup unconfirmed; only an ended session is quiet. One failure cannot stop another
 target's restoration. Installation keeps propagating failures on active resources instead of treating them as cleanup.
 
+A failed or interrupted context removal resets its in-progress flag and restores that surviving context's current
+viewport default and page overrides. A failed page close resets only its own closing marker and restores that
+surviving page's current effective viewport. This repairs declaration changes skipped while the resource was
+closing; retaining the skipped native value or replaying the old declaration would leave stale state. Recovery
+uses the same independent target budgets and connection ownership as release, preserving the original close or
+removal outcome even if restoration rejects or times out. An ended transport skips these recovery writes.
+
 Viewport release runs in a connection-owned fiber. Read the releasing caller's operation before supplying the
 registration's captured context: a finished installation's operation is not the releasing caller. An active caller
 waits only within its own deadline and marks cleanup unconfirmed if it stops waiting. Ordinary release outside

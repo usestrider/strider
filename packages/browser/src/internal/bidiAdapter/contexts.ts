@@ -3,6 +3,7 @@
  * pages. A new user context receives its effective viewport default without rewriting existing contexts;
  * viewport precedence for existing pages is resolved by the declaration registry.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
@@ -14,7 +15,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import * as Cleanup from "./cleanup.ts"
-import { applyKind } from "./declare.ts"
+import { applyKind, recoverViewport } from "./declare.ts"
 import {
   type ContextEntry,
   contextOf,
@@ -145,7 +146,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     yield* state.root().drainObserved
     yield* state.buffer.run(() => {
       // A successful removal confirms every page ended, even if no separate destruction event was observed.
-      for (const page of [...state.navigables.values()]) {
+      for (const page of Array.from(state.navigables.values())) {
         if (page.context === context && page.parent === undefined) {
           removeNavigable(
             state,
@@ -159,7 +160,15 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       state.contextsByBidi.delete(context.bidi)
       state.buffer.emit({ _tag: "UserContextRemoved", context: id })
     })
-  }).pipe(Effect.onError(() => Effect.sync(() => context.removing = false)))
+  }).pipe(Effect.onError((cause) =>
+    Effect.gen(function*() {
+      context.removing = false
+      if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
+      if (state.contexts.get(id) === context) {
+        yield* recoverViewport(state, { _tag: "UserContext", context: id })
+      }
+    })
+  ))
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
@@ -181,10 +190,20 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
 export const closePage = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
     const navigable = yield* navigableById(state, id)
-    if (!options.runBeforeUnload) navigable.closing = new L1Target.PageClosed({ by: "command" })
+    const closing = options.runBeforeUnload ? undefined : new L1Target.PageClosed({ by: "command" })
+    if (closing !== undefined) navigable.closing = closing
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
-      state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload }))
+      state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload })).pipe(
+        Effect.onError((cause) =>
+          Effect.gen(function*() {
+            if (navigable.closing !== closing) return
+            navigable.closing = undefined
+            if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
+            if (!navigable.removed) yield* recoverViewport(state, { _tag: "Page", page: navigable.id })
+          })
+        )
+      )
     )
   }
 )

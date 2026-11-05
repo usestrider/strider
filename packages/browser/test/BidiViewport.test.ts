@@ -335,7 +335,11 @@ describe("BidiAdapter viewports", () => {
       const lifetime = yield* Scope.make()
       yield* declare(state, { _tag: "Page", page: target.id }, 640, lifetime)
       let command = Effect.void as Effect.Effect<unknown, unknown>
-      Object.assign(state.buffer, { start: (effect: Effect.Effect<unknown, unknown>) => { command = effect } })
+      Object.assign(state.buffer, {
+        start: (effect: Effect.Effect<unknown, unknown>) => {
+          command = effect
+        }
+      })
       session.rejects = (entry) => entry.method === "browsingContext.close"
       yield* Contexts.closePage(state, target.id, { runBeforeUnload: false })
       yield* Scope.close(lifetime, Exit.void)
@@ -353,8 +357,10 @@ describe("BidiAdapter viewports", () => {
       const lifetime = yield* Scope.make()
       yield* declare(state, { _tag: "UserContext", context }, 1100, lifetime)
       const removing = yield* Deferred.make<void>()
-      session.around = (entry, next) => entry.method === "browser.removeUserContext"
-        ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Effect.never)) : next
+      session.around = (entry, next) =>
+        entry.method === "browser.removeUserContext"
+          ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Effect.never)) :
+          next
       const removal = yield* Contexts.removeUserContext(state, context).pipe(Effect.forkChild)
       yield* Deferred.await(removing)
       yield* Scope.close(lifetime, Exit.void)
@@ -374,10 +380,13 @@ describe("BidiAdapter viewports", () => {
         const clock = BrowserClock.fromClock(yield* Clock.Clock)
         let unconfirmed = 0
         const restoring = yield* Deferred.make<void>()
-        session.rejects = (entry) => entry.method === "browser.removeUserContext" ||
+        session.rejects = (entry) =>
+          entry.method === "browser.removeUserContext" ||
           (failure === "rejected" && entry.method === "browsingContext.setViewport")
-        session.around = (entry, next) => entry.method === "browsingContext.setViewport" && failure === "timeout"
-          ? Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Effect.never)) : next
+        session.around = (entry, next) =>
+          entry.method === "browsingContext.setViewport" && failure === "timeout"
+            ? Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Effect.never)) :
+            next
         yield* Effect.gen(function*() {
           const removal = yield* Contexts.removeUserContext(state, context).pipe(Effect.exit, Effect.forkChild)
           if (failure === "timeout") {
@@ -397,7 +406,9 @@ describe("BidiAdapter viewports", () => {
           assert.isFalse(state.contexts.get(context)!.removing)
         }).pipe(
           Effect.provideService(BrowserClock.CurrentClock, clock),
-          Effect.provideService(DeclarationCleanup.Unconfirmed, () => { unconfirmed++ })
+          Effect.provideService(DeclarationCleanup.Unconfirmed, () => {
+            unconfirmed++
+          })
         )
       }))
   }
@@ -413,16 +424,28 @@ describe("BidiAdapter viewports", () => {
       const returned = yield* Deferred.make<void>()
       const order: Array<string> = []
       session.rejects = (entry) => entry.method === "browser.removeUserContext"
-      session.around = (entry, next) => entry.method === "browser.removeUserContext"
-        ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Deferred.await(answer)), Effect.andThen(next))
-        : entry.method === "browsingContext.setViewport"
-        ? Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Effect.never), Effect.ensuring(Effect.sync(() => { order.push("recovery") })))
-        : next
+      session.around = (entry, next) =>
+        entry.method === "browser.removeUserContext"
+          ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(Deferred.await(answer)), Effect.andThen(next))
+          : entry.method === "browsingContext.setViewport"
+          ? Deferred.succeed(restoring, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Effect.sync(() => {
+              order.push("recovery")
+            }))
+          )
+          : next
       yield* Effect.gen(function*() {
         const removal = yield* Contexts.removeUserContext(state, context).pipe(
-          Operation.named("Test.removeRecovery"), Deadline.within("10 millis"),
-          Effect.onExit(() => Effect.sync(() => { order.push("caller") }).pipe(Effect.andThen(Deferred.succeed(returned, undefined)))),
-          Effect.exit, Effect.forkChild
+          Operation.named("Test.removeRecovery"),
+          Deadline.within("10 millis"),
+          Effect.onExit(() =>
+            Effect.sync(() => {
+              order.push("caller")
+            }).pipe(Effect.andThen(Deferred.succeed(returned, undefined)))
+          ),
+          Effect.exit,
+          Effect.forkChild
         )
         yield* Deferred.await(removing)
         yield* TestClock.adjust("10 millis")

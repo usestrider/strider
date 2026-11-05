@@ -4,7 +4,6 @@
  * What Firefox cannot do is refused before anything is declared.
  */
 import * as Effect from "effect/Effect"
-import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
@@ -117,6 +116,15 @@ const applyViewport = Effect.fnUntraced(function*<E>(
     yield* set({ context: page.bidi }, effective)
   }
 })
+
+/** Reconciles surviving resources after a close/removal failed, independently for each native target. */
+export const recoverViewport = (state: State, scope: Adapter.DeclarationScope) =>
+  Cleanup.owned(
+    applyViewport(state, scope, (command, target) =>
+      Cleanup.report(Cleanup.bounded(command), `BiDi viewport recovery could not restore ${JSON.stringify(target)}`))
+      .pipe(Operation.detached, Effect.provideService(ProtocolClient.CommandDeadline, Option.none())),
+    state.cleanupScope
+  )
 
 /** Sets or clears a kind at its scope; viewport precedence is resolved by the registry. */
 export const applyKind = (
@@ -340,8 +348,6 @@ export const declare = Effect.fnUntraced(
         if (declaration._tag !== "Override" || declaration.override._tag !== "Viewport") {
           return yield* release.pipe(Effect.provideContext(registrationContext))
         }
-        const caller = yield* Operation.current
-        const confirm = yield* DeclarationCleanup.Confirm
         const unconfirmed = yield* DeclarationCleanup.Unconfirmed
         const work = release.pipe(
           Operation.detached,
@@ -350,14 +356,7 @@ export const declare = Effect.fnUntraced(
           Effect.provideService(DeclarationCleanup.Unconfirmed, unconfirmed),
           Effect.interruptible
         )
-        // During connection teardown, finish before the transport is released instead of spawning new work.
-        if (state.cleanupScope.state._tag === "Closed") return yield* work
-        const fiber = yield* work.pipe(Effect.forkIn(state.cleanupScope))
-        const joined = Fiber.join(fiber)
-        if (confirm || Option.isNone(caller)) return yield* joined
-        yield* caller.value.bound(joined.pipe(Effect.interruptible)).pipe(
-          Effect.catchTag("Timeout", () => Effect.sync(unconfirmed))
-        )
+        yield* Cleanup.owned(work, state.cleanupScope)
       })
     )
     switch (declaration._tag) {
