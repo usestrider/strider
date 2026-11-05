@@ -35,6 +35,7 @@ describe("FileInput across a connection", () => {
           "stat-failure",
           "read-failure",
           "missing-time",
+          "changed-cardinality",
           "missing-services",
           "mixed",
           "empty",
@@ -70,6 +71,9 @@ describe("FileInput across a connection", () => {
                 realm: () => Effect.succeed("upload-realm" as Target.RealmId),
                 evaluate: (_realm, call) => {
                   evaluations.push(call)
+                  if (
+                    source === "changed-cardinality" && call.functionDeclaration.includes("function commitUpload")
+                  ) return Effect.succeed({ _tag: "Value", value: { type: "boolean", value: false } })
                   return Effect.succeed({
                     _tag: "Value",
                     value: call.result === "handle"
@@ -157,6 +161,7 @@ describe("FileInput across a connection", () => {
               const failure = ownership === "launched"
                 ? source === "unreadable" && operation === "Locator.setInputFiles"
                 : source === "missing-services" || unreadable || source === "mixed" ||
+                  source === "changed-cardinality" ||
                   (source === "no-element" && operation === "FileChooser.choose")
               if (operation === "Locator.setInputFiles") {
                 const action = page.locator("#file").setInputFiles(input)
@@ -168,7 +173,19 @@ describe("FileInput across a connection", () => {
                   }
                 } else yield* action
               } else {
-                const handler = yield* FileChooser.handle(page, FileChooser.choose(input))
+                let userScopeClosed = false
+                const choose = FileChooser.choose(input)
+                const handler = yield* FileChooser.handle(
+                  page,
+                  Effect.fnUntraced(function*(chooser) {
+                    yield* Effect.addFinalizer(() =>
+                      Effect.sync(() => {
+                        userScopeClosed = true
+                      })
+                    )
+                    return yield* choose(chooser)
+                  })
+                )
                 yield* send({
                   _tag: "ObligationOpened",
                   obligation: "upload-chooser" as Adapter.ObligationId,
@@ -180,7 +197,11 @@ describe("FileInput across a connection", () => {
                   }
                 })
                 yield* Deferred.await(decided)
-                assert.strictEqual(yield* handler.handled, failure ? 0 : 1)
+                assert.isFalse(userScopeClosed, "preparation must not close the user handler's registration scope")
+                assert.strictEqual(
+                  yield* handler.handled,
+                  ownership === "attached" && source === "changed-cardinality" ? 1 : failure ? 0 : 1
+                )
                 if (failure) {
                   assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
                 }
@@ -194,7 +215,7 @@ describe("FileInput across a connection", () => {
               if (failure || source === "empty") {
                 assert.deepStrictEqual(paths, [])
                 if (failure) {
-                  if (!unreadable) assert.deepStrictEqual(evaluations, [])
+                  if (!unreadable && source !== "changed-cardinality") assert.deepStrictEqual(evaluations, [])
                 } else assert.strictEqual(evaluations.length, 3)
                 return
               }
