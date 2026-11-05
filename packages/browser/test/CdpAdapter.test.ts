@@ -27,27 +27,28 @@ import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
 // Share one dispatcher across the protocol fibers so a checkpoint drains all runnable work,
 // stopping only at an actual protocol reply or permit wait, without counting scheduler turns.
-const withProtocolScheduler = <A, E, R>(run: (drain: Effect.Effect<void>) => Effect.Effect<A, E, R>) =>
-  Effect.gen(function*() {
-    const parent = yield* Scheduler.Scheduler
-    const dispatcher = parent.makeDispatcher()
-    const checkpoint = parent.makeDispatcher()
-    const drain = Effect.callback<void>((resume) => {
-      checkpoint.scheduleTask(() => {
-        dispatcher.flush()
-        resume(Effect.void)
-      }, 0)
-    })
-    return yield* run(drain).pipe(
-      Effect.forkChild,
-      Effect.flatMap(Fiber.join),
-      Effect.provideService(Scheduler.Scheduler, {
-        executionMode: parent.executionMode,
-        shouldYield: (fiber) => parent.shouldYield(fiber),
-        makeDispatcher: () => dispatcher
-      })
-    )
+const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
+  run: (drain: Effect.Effect<void>) => Effect.Effect<A, E, R>
+) {
+  const parent = yield* Scheduler.Scheduler
+  const dispatcher = parent.makeDispatcher()
+  const checkpoint = parent.makeDispatcher()
+  const drain = Effect.callback<void>((resume) => {
+    checkpoint.scheduleTask(() => {
+      dispatcher.flush()
+      resume(Effect.void)
+    }, 0)
   })
+  return yield* run(drain).pipe(
+    Effect.forkChild,
+    Effect.flatMap(Fiber.join),
+    Effect.provideService(Scheduler.Scheduler, {
+      executionMode: parent.executionMode,
+      shouldYield: (fiber) => parent.shouldYield(fiber),
+      makeDispatcher: () => dispatcher
+    })
+  )
+})
 
 describe("CDP locale declaration release", () => {
   for (const holdLanguageReply of [false, true]) {
