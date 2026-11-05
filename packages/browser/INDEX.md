@@ -1659,7 +1659,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 
 - `const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))`
 - `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
-- `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
+- `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute", "password"])`
 - `const Role: Schema.Codec<Role>`
 - `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String }), Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.Literals(["text", "title", "placeholder", "alt", "nearb…`
 - `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])`

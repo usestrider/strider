@@ -2009,6 +2009,7 @@ export function engine(render: (root: SnapNode) => string) {
   /** What makes an element with no role look interactive. */
   const evidenceOf = (element: Element): Array<string> => {
     const evidence: Array<string> = []
+    if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
     // `cursor` is inherited: only the element that sets it counts
     if (
@@ -2102,7 +2103,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (evidence.length > 0) {
         inferred = {
           _tag: "Inferred",
-          role: evidence.includes("contentEditable")
+          role: evidence.includes("password") || evidence.includes("contentEditable")
             ? "editable"
             : evidence.includes("cursorPointer") || evidence.includes("onclickAttribute")
             ? "clickable"
@@ -2123,7 +2124,7 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
-    const name: SnapNode["name"] = role._tag === "Inferred"
+    const name: SnapNode["name"] = role._tag === "Inferred" && !role.evidence.includes("password")
       ? inferredName(element)
       : accessible === ""
       ? { _tag: "None" }

@@ -157,6 +157,11 @@ export const queryOf = (
         ? `getByRole(${quote(node.role.role)})`
         : `getByRole(${quote(node.role.role)}, { name: ${quote(name)}, exact: true })`
     }
+    if (node.role.evidence.includes("password")) {
+      return name === undefined
+        ? "locator(\"input[type=password]\")"
+        : `getByLabel(${quote(name)}, { exact: true })`
+    }
     return name === undefined
       ? `locator("*") /* ${target}: a ${node.role.role} element with no name */`
       : `getByText(${quote(name)}, { exact: true })`

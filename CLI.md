@@ -275,3 +275,7 @@ None. Type-checking was settled by leaving it to the project's own `tsc`, and fa
 
 Candidates:
 - **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input. Designed (docs/decisions.md), and built once a browser ships the API.
+
+Password inputs without an explicit ARIA role appear in snapshots as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. A real accessible label is retained; an unlabeled password input stays unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Password values are never included in snapshot or find data. The designation does not give the input an implicit ARIA textbox role.
+
+`find Password` matches the password designation as well as real names. Substring matching ignores case; `find password --exact` matches the designation case-sensitively. Use `--role editable` to filter inferred password controls; `--role textbox` does not select them.

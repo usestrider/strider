@@ -820,3 +820,18 @@ following labels for public state reads, which expands an unrelated contract; us
 choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
+
+## Password snapshot designation
+
+Password inputs have no implicit ARIA role, but agents need a ref to fill them. When inferred interactivity is
+enabled, the engine represents a roleless password input as an inferred editable node with password evidence,
+including disabled and read-only controls. The designation describes its kind rather than promising an action
+will succeed. Real accessible labels remain names; unlabeled controls remain unnamed. Password nodes bypass
+inferred names so nearby text cannot become a false label. Their values are absent from snapshot and find data.
+
+Find matches the literal designation `password` under its existing case and exact rules, separately from the
+accessible name, and filters these nodes as `editable`. Snapshot diffs already compare role evidence.
+Exported refs use a password input selector or the real label.
+
+Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
+"Password", which would replace or invent an accessible name; and including its value, even under local capture.

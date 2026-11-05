@@ -678,7 +678,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
               privateName(nodeRole, node.name._tag === "Inferred" && node.name.from === "text", inside)
             const shown = hidden && node.name._tag !== "None" ? "•••" : nodeName
             const holder = Option.isSome(node.ref) ? { node, name: shown } : owner
-            if (holder !== undefined && Option.isSome(holder.node.ref) && matches(nodeName)) {
+            if (
+              holder !== undefined && Option.isSome(holder.node.ref) &&
+              (matches(nodeName) ||
+                (node.role._tag === "Inferred" && node.role.evidence.includes("password") && matches("password")))
+            ) {
               const holderRole = String(holder.node.role.role)
               const ref = holder.node.ref.value
               if ((role === undefined || holderRole === role) && !seen.has(ref)) {

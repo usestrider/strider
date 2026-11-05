@@ -1273,3 +1273,5 @@ Decided:
 - **No `BrowserTest` helpers.** A test opens its page with `Browser.newPage()` (5.25, reversing 5.18 and 5.21).
 - **No Vitest reporter plugin.** The library stays runner-agnostic, and flakiness is classified from `test.retry` / `test.outcome` span attributes and `TestInfo`.
 - **Testing ships for Vitest first, behind `TestRun`,** so that moving to etest is a new adapter, not a redesign (revision 5.18).
+
+Password inputs without an explicit ARIA role appear in snapshots as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. A real accessible label is retained; an unlabeled password input stays unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Password values are never included in snapshot or find data. The designation does not give the input an implicit ARIA textbox role.

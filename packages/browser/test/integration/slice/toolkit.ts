@@ -12,6 +12,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
+import * as ExportTest from "../../../src/internal/cli/exportTest.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -53,6 +54,48 @@ const call = (tools: Tools, name: BrowserToolkit.ToolName, params: Record<string
 export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} toolkit`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "fills password refs and diffs password designation changes",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.origin}/fixture?html=${
+              encodeURIComponent(
+                "<span>Nearby label</span><input type=\"password\"><input type=\"password\" disabled><input type=\"password\" readonly>"
+              )
+            }`)
+            const before = yield* page.snapshot()
+            const fields = [...before.refs.values()].filter((node) =>
+              node.role._tag === "Inferred" && node.role.evidence.includes("password")
+            )
+            assert.lengthOf(fields, 3)
+            assert.deepEqual(fields.map((node) => node.name), [
+              { _tag: "None" },
+              { _tag: "None" },
+              { _tag: "None" }
+            ])
+            assert.isTrue(fields[1]!.states.has("disabled"))
+            const id = Option.getOrThrow(fields[0]!.ref)
+            assert.strictEqual(ExportTest.queryOf(id, before), "locator(\"input[type=password]\")")
+            yield* before.ref(id).fill("private-filled")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelector("input")!.value),
+              "private-filled"
+            )
+            const filled = yield* page.snapshot()
+            assert.notInclude(JSON.stringify(filled.root), "private-filled")
+            assert.notInclude(filled.text, "private-filled")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("input")!.type = "text"
+            })
+            const after = yield* page.snapshot()
+            const diff = yield* after.diff(filled)
+            assert.isTrue(diff.changed.some((node) => Option.isSome(node.ref) && node.ref.value === id))
+          })),
+        timeout
+      )
+
       it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
         () =>

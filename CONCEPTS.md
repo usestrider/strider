@@ -637,3 +637,5 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 ## 11. Open questions
 
 No design questions are open at this layer right now.
+
+Password inputs without an explicit ARIA role appear in snapshots as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. A real accessible label is retained; an unlabeled password input stays unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Password values are never included in snapshot or find data. The designation does not give the input an implicit ARIA textbox role.
