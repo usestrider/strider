@@ -296,10 +296,18 @@ describe("route diagnostics keep earlier accepted calls", () => {
 describe("route diagnostics keep explicit-phase mismatches readable", () => {
   it("names the handler a selected response phase needs", () => {
     expect(page.route("**", request, { phase: "response" })).type.toRaiseError(
-      /parameter of type 'Handler<never, never, "response">'/
+      "Request decisions cannot run at { phase: 'response' }"
     )
     expect(context.route("**", request, { phase: "response" })).type.toRaiseError(
-      /parameter of type 'Handler<never, never, "response">'/
+      "Request decisions cannot run at { phase: 'response' }"
+    )
+  })
+  it("names the incompatible auth phase for request decisions", () => {
+    expect(page.route("**", request, { phase: "auth" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'auth' }"
+    )
+    expect(context.route("**", request, { phase: "auth" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'auth' }"
     )
   })
 })
