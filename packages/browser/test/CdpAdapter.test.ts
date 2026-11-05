@@ -979,7 +979,7 @@ describe("Chromium screencast renderer readiness", () => {
           yield* TestClock.adjust("0 millis")
           if (replyAt === "before scope close") yield* Scope.close(scope, Exit.void)
           yield* TestClock.adjust("0 millis")
-          assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+          assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 2)
         }).pipe(onTestClock))
     }
   }
@@ -1039,6 +1039,7 @@ describe("Chromium screencast renderer readiness", () => {
       const start = yield* Queue.take(h.screenshotWork)
       yield* Fiber.interrupt(pending)
       yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
       yield* h.browser.receive({
         id: start.id,
         sessionId: start.sessionId,
@@ -1046,7 +1047,7 @@ describe("Chromium screencast renderer readiness", () => {
       })
       yield* h.browser.delivered
       yield* TestClock.adjust("0 millis")
-      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
   it.effect("bounds unresponsive stop confirmation independently of acquisition", () =>
@@ -1224,7 +1225,6 @@ describe("Chromium screencast renderer readiness", () => {
       yield* Queue.take(h.screenshotWork)
       const start = yield* Queue.take(h.screenshotWork)
       yield* Fiber.interrupt(a)
-      yield* TestClock.adjust("1 second")
       const uncertainStop = yield* Queue.take(h.stops)
       yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
       yield* h.browser.delivered
@@ -1247,21 +1247,21 @@ describe("Chromium screencast renderer readiness", () => {
       const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
       yield* Queue.take(h.screenshotWork)
       yield* Queue.take(h.screenshotWork)
-      yield* Fiber.interrupt(a)
       const scope = yield* Scope.make()
       const b = yield* Effect.forkScoped(
         page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
       )
       yield* Queue.take(h.screenshotWork)
       const start = yield* Queue.take(h.screenshotWork)
+      yield* Fiber.interrupt(a)
       yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
       yield* Fiber.join(b)
       yield* Scope.close(scope, Exit.void)
-      yield* TestClock.adjust("1 second")
+      yield* TestClock.adjust("0 millis")
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
-  it.effect("drops an abandoned start on detach before its cleanup grace expires", () =>
+  it.effect("drops an abandoned start on detach without scheduling further cleanup", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(false, true)
       const page = yield* h.page.control
@@ -1269,16 +1269,18 @@ describe("Chromium screencast renderer readiness", () => {
       yield* Queue.take(h.screenshotWork)
       const start = yield* Queue.take(h.screenshotWork)
       yield* Fiber.interrupt(pending)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
       yield* h.browser.receive({
         method: "Target.detachedFromTarget",
         params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
       })
       yield* h.browser.delivered
-      yield* TestClock.adjust("1 second")
+      yield* TestClock.adjust("0 millis")
       yield* h.browser.receive({ id: start.id, sessionId: start.sessionId, result: {} })
       yield* h.browser.delivered
       yield* TestClock.adjust("0 millis")
-      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
   for (const interruptAt of ["receipt", "consumed"] as const) {
@@ -1305,7 +1307,10 @@ describe("Chromium screencast renderer readiness", () => {
         yield* Fiber.await(pending)
         yield* Scope.close(scope, Exit.void)
         yield* TestClock.adjust("0 millis")
-        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+        assert.strictEqual(
+          h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+          interruptAt === "receipt" ? 2 : 1
+        )
       }).pipe(onTestClock))
   }
 
@@ -1376,13 +1381,12 @@ describe("Chromium screencast renderer readiness", () => {
       const a = yield* Effect.forkScoped(page.capability(Capability.Screencast))
       yield* replyMetrics(h.browser, yield* Queue.take(h.screenshotWork))
       yield* Queue.take(h.screenshotWork)
-      yield* Fiber.interrupt(a)
       const scope = yield* Scope.make()
       const b = yield* Effect.forkScoped(
         page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
       )
       const metrics = yield* Queue.take(h.screenshotWork)
-      yield* TestClock.adjust("1 second")
+      yield* Fiber.interrupt(a)
       yield* replyMetrics(h.browser, metrics)
       yield* h.browser.delivered
       yield* TestClock.adjust("0 millis")
@@ -1429,12 +1433,12 @@ describe("Chromium screencast renderer readiness", () => {
         )
         yield* Queue.take(h.screenshotWork)
         const startA = yield* Queue.take(h.screenshotWork)
-        if (previous === "abandoned") yield* Fiber.interrupt(a)
         const b = yield* Effect.forkScoped(
           page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
         )
         yield* Queue.take(h.screenshotWork)
         const startB = yield* Queue.take(h.screenshotWork)
+        if (previous === "abandoned") yield* Fiber.interrupt(a)
         yield* h.browser.receive({
           id: startB.id,
           sessionId: startB.sessionId,
@@ -1485,6 +1489,9 @@ describe("Chromium screencast renderer readiness", () => {
       const first = yield* Queue.take(h.screenshotWork)
       assert.strictEqual(first.method, "Page.startScreencast")
       yield* Fiber.interrupt(abandoned)
+      yield* TestClock.adjust("0 millis")
+      const beforeRetry = h.commands.filter((c) => c.method === "Page.stopScreencast").length
+      assert.strictEqual(beforeRetry, 1, "abandonment cleans uncertainty before a future consumer exists")
 
       const scope = yield* Scope.make()
       const retry = yield* Effect.forkScoped(
@@ -1502,13 +1509,13 @@ describe("Chromium screencast renderer readiness", () => {
       yield* TestClock.adjust("0 millis")
       assert.strictEqual(
         h.commands.filter((c) => c.method === "Page.stopScreencast").length,
-        0,
+        beforeRetry,
         "the retry's scope is open, so nothing may stop the session's screencast"
       )
 
       yield* Scope.close(scope, Exit.void)
       yield* TestClock.adjust("0 millis")
-      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, beforeRetry + 1)
     }).pipe(onTestClock))
 
   it.effect("keeps a second acquisition streaming when the first one's scope closes", () =>
