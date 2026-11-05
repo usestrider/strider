@@ -142,7 +142,8 @@ const isRef = Schema.is(Tools.Ref)
 
 /**
  * A target as a query on its page, such as `getByRole("button")`; a ref as its snapshot named it. The test puts the
- * page's variable before it, which a page renamed later changes.
+ * page's variable before it, which a page renamed later changes. A named password query resolves a fresh
+ * snapshot, so its pipe expression returns an effect of the locator.
  */
 export const queryOf = (
   target: string,
@@ -158,8 +159,18 @@ export const queryOf = (
         : `getByRole(${quote(node.role.role)}, { name: ${quote(name)}, exact: true })`
     }
     if (node.role.evidence.includes("password")) {
-      // An accessible name can come from a placeholder or title, which getByLabel does not match.
-      return "locator(\"input[type=password]\")"
+      if (name === undefined) return "locator(\"input[type=password]\")"
+      // Match computed names, not overridden label/title/placeholder strings.
+      return `pipe((page) => page.snapshot().pipe(Effect.map((snapshot) => {
+          let matches = page.locator(":not(*)")
+          for (const [ref, node] of snapshot.refs) {
+            if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
+              node.name._tag !== "None" && node.name.value === ${quote(name)}) {
+              matches = matches.or(snapshot.ref(ref))
+            }
+          }
+          return matches
+        })))`
     }
     return name === undefined
       ? `locator("*") /* ${target}: a ${node.role.role} element with no name */`
@@ -190,9 +201,13 @@ export const queryOf = (
   }
 }
 
+/** A named password query resolves its snapshot before returning the ref locators. */
+const queryOn = (page: string, query: string): string =>
+  query.startsWith("pipe(") ? `(yield* ${page}.${query})` : `${page}.${query}`
+
 /** A locator expression for a target, on the page variable `page`. */
 export const locatorOf = (page: string, target: string, snapshot: Snapshot.Snapshot | undefined): string =>
-  `${page}.${queryOf(target, snapshot)}`
+  queryOn(page, queryOf(target, snapshot))
 
 /** A JavaScript name for a page's name. */
 const variable = (name: string) => {
@@ -473,7 +488,7 @@ export const render = (options: {
     }
     const pageName = pageOf(step)
     const page = pageName === undefined ? "page" : use(pageName)
-    const target = step.target === undefined ? "" : `${page}.${step.target}`
+    const target = step.target === undefined ? "" : queryOn(page, step.target)
     // Through strider mcp, newPage opens a page under the name the toolkit gave it
     const opens = step.tool === "newPage" ? step.result ?? step.params.name ?? "page" : undefined
     const popups = popupsOf(step.popups, opens)

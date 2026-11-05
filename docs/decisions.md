@@ -832,9 +832,15 @@ elements. Explicit ARIA roles remain intact.
 
 Find matches the literal designation `password` under its existing case and exact rules, separately from the
 accessible name, and filters these nodes as `editable`. Snapshot diffs already compare role evidence.
-Exported refs use a password input selector. Snapshot names do not retain whether their source was a label,
-title or placeholder, so assuming a label query can silently find nothing. A selector may need narrowing when
-several password inputs exist.
+Exported named password refs take a fresh snapshot and combine the ref locators of inferred password controls
+whose computed accessible name matches exactly. This uses the engine's naming precedence without duplicating it
+in generated selectors or inventing a role. No match remains empty; duplicate names remain ambiguous rather than
+choosing one control. Unnamed refs retain a password input selector and can require narrowing.
+
+Rejected: dropping every name, which makes ordinary new/confirm forms ambiguous; treating every name as a label,
+which misses title and placeholder names; and joining label/title/placeholder queries, which can match another
+field's overridden hint even when its accessible name differs. The fresh snapshot adds a read when the exported
+test resolves a named password target, and its returned refs retain their normal stale-ref guarantees.
 
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.
