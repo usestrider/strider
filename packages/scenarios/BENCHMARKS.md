@@ -8,6 +8,7 @@ the command enters the same Nix environment as the integration tests.
 pnpm bench                                      # 20 measured pairs after 3 warmup pairs per case
 pnpm bench --check                              # fail if any Strider median is > 1.10 × Playwright
 pnpm bench --check --max-ratio 1                 # require parity or better for every selected case
+pnpm bench --only lifecycle                      # launch, first page, shutdown and persistent lifecycle cases
 pnpm bench --only click --runs 50 --check         # investigate one operation
 pnpm bench --runs 2 --warmup 1                    # smoke check, not a performance gate
 pnpm bench --output .data/benchmarks/before.json  # preserve a report before changing code
@@ -22,32 +23,70 @@ score can hide a slow operation. A failed operation or wrong result always exits
 
 ## Cases and timing boundaries
 
-| Case                  | Timed work                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| `launch`              | Start a fresh browser and establish its automation connection; shutdown excluded        |
-| `page-lifecycle`      | Create and close an isolated context and page, including viewport configuration         |
-| `navigate`            | Navigate to a local document through `load`, then read its title                        |
-| `resources`           | Load a local document with 100 uncached images through `load`, then count loaded images |
-| `evaluate`            | 20 sequential main-world evaluations returning small objects; time per batch            |
-| `locator-read`        | 20 sequential role locator text reads; time per batch                                   |
-| `click`               | Click with default actionability, then read the updated counter                         |
-| `fill`                | Fill a labeled input with default actionability, then read its value                    |
-| `visible`             | Wait for an already visible heading                                                     |
-| `screenshot`          | Capture the viewport as PNG                                                             |
-| `screenshot-repeated` | Five sequential viewport PNG captures on one page; time per batch                       |
-| `screenshot-dense`    | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                     |
-| `screenshot-large`    | Capture a 1280 × 2880 full page; fixture setup excluded                                 |
-| `screenshot-element`  | Capture a visible 320 × 180 element; fixture setup excluded                             |
+| Case                  | Timed work                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `launch`              | Start a fresh browser and establish its automation connection; shutdown excluded                         |
+| `first-page`          | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded             |
+| `shutdown`            | Release each library’s freshly launched browser after availability; launch excluded                      |
+| `repeated-lifecycle`  | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded |
+| `page-lifecycle`      | Create and close an isolated context and page, including viewport configuration                          |
+| `navigate`            | Navigate to a local document through `load`, then read its title                                         |
+| `resources`           | Load a local document with 100 uncached images through `load`, then count loaded images                  |
+| `evaluate`            | 20 sequential main-world evaluations returning small objects; time per batch                             |
+| `locator-read`        | 20 sequential role locator text reads; time per batch                                                    |
+| `locator-values`      | 20 sequential input value reads across distinct elements; time per batch                                 |
+| `read-snapshot-100`   | One synchronous main-world query returning 100 inputs × four properties                                  |
+| `read-snapshot-1000`  | The same query returning 1,000 inputs × four properties                                                  |
+| `click`               | Click with default actionability, then read the updated counter                                          |
+| `fill`                | Fill a labeled input with default actionability, then read its value                                     |
+| `visible`             | Wait for an already visible heading                                                                      |
+| `screenshot`          | Capture the viewport as PNG                                                                              |
+| `screenshot-repeated` | Five sequential viewport PNG captures on one page; time per batch                                        |
+| `screenshot-dense`    | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                                      |
+| `screenshot-large`    | Capture a 1280 × 2880 full page; fixture setup excluded                                                  |
+| `screenshot-element`  | Capture a visible 320 × 180 element; fixture setup excluded                                              |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
 each evaluation/read in a batch, image load counts, and screenshot format and dimensions. Warmups are checked
 too. Cases stop on the first failure; the report marks an incomplete run as an error.
 
+The query/read controls retain `evaluate` (small objects) and `locator-read` (one repeated role query).
+`locator-values` reads distinct inputs independently and sequentially: each operation can observe a later moment.
+It compares Strider `readValue` with Playwright `inputValue`, including each library's normal locator resolution.
+The snapshot cases instead use Strider `evaluateInMainWorld` and Playwright `page.evaluate` with the identical
+synchronous `querySelectorAll`/mapping function. Playwright's page-side bulk API avoids a per-element host loop;
+these snapshots are a different consistency contract from independent reads, not a faster equivalent of them.
+Each snapshot returns ordered records containing id, current value, disabled state and nullable aria-label.
+The two fixture sizes grow both document and result size, so their difference alone cannot separate query cost
+from serialization/decoding cost. All records are checked, including Unicode strings, booleans and nulls.
+Fixture navigation and parsing are outside timing; query execution, property access, transport,
+serialization and host decoding are inside it. Deferred browser rendering can still overlap the measured operation. These static success workloads do not establish exception,
+mutation/replacement freshness, navigation, cancellation or deadline correctness. Use the integration contents,
+locator and adapter suites for those boundaries before changing shared read machinery; do not infer them from
+passing timing samples. No browser work is shared across independent reads by the harness.
+
 The runner awaits one sample at a time and alternates which library goes first in each pair. Both use a
 1280 × 720 viewport at device scale 1, the same server, and the same browser binary, whose reported version is
-checked against the integration pin. Persistent browsers are used for all cases except launch. Every launch
+checked against the integration pin. Persistent browsers are used except for `launch`, `first-page` and `shutdown`. Every launch
 gets a fresh profile; warmup reduces library and OS cache effects, so this is not a cold-machine startup test.
+`first-page` checks that the acquired page evaluates `document.URL` as `about:blank`. It includes context
+creation and the same viewport configuration as `page-lifecycle`. Both `first-page` and `shutdown` start
+immediately after Browser availability. Strider has an initial observed `about:blank` page whose setup gate
+can still be running; Playwright's nonpersistent launch has no initial targets or owned contexts. First-page
+acquisition can overlap Strider's initial-page setup, and shutdown can interrupt it. The shutdown case creates
+no additional context or page. Strider disposes its scope, signals the process and removes its temporary profile;
+Playwright uses its supported `browser.close()` path. Shutdown costs and first-page comparisons describe these
+supported defaults with different initial resources, readiness and release paths, rather than equal work.
+`repeated-lifecycle` reports the sum of acquisition and release times for five sequential isolated context/page
+cycles, not a per-cycle average. Between timers, it checks `about:blank`, one additional live page and return
+to the initial page count after every release. Strider also awaits each context's acknowledged terminal state;
+Playwright checks context/page counts return to their initial values. Strider's public browser has no context
+registry, so this checks page counts and context termination rather than an independent wire-level context census.
+Checks, including the page evaluation, are excluded; their browser work can affect subsequent cycles. These
+checks establish ordinary successful release, not interruption or partial-initialization correctness. No case
+here characterizes simultaneous scale, page reuse within one context, remote attach, or memory/OS resource leaks.
+
 Module imports are outside timing. Both libraries retain their default launch flags, instrumentation and
 actionability behavior: the comparison measures the cost of each library's supported public behavior.
 
@@ -56,6 +95,32 @@ configuration, browser/library/Node versions, machine details, and a SHA-256 of 
 plus lockfile. The hash includes uncommitted source edits. A Markdown summary is written beside it. Reports
 default to `.data/benchmarks/latest.{json,md}` (gitignored); use `--output` to preserve multiple runs. An interrupted
 report may still say `running`; only a completed report can establish a result.
+
+## Launch diagnostics
+
+Use the diagnostic loader and runner to timestamp fresh launch through browser availability without changing
+launch flags or resource ownership. Run it under the browser lock in the pinned integration environment:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/launch-profile-hooks.mjs \
+  packages/scenarios/benchmark/launch-profile.ts /absolute/path/launch-profile.json 20
+```
+
+The numeric argument selects measured pairs after three warmup pairs. Append `persistent` to compare with
+Playwright’s persistent launch with its initial page and native viewport; this is a distinct resource/readiness
+contract, not an equivalent replacement for the nonpersistent launch benchmark. The JSON retains phase marks, protocol
+traffic, actual process arguments, initial resource counts and source/instrumentation hashes. Samples alternate
+library order. Events after `launch.available` are verification, observation of the initial target gate finishing, and cleanup,
+outside launch timing. Browser availability can precede completion of that gate; the diagnostic wait sends no
+extra protocol command. Loader
+transforms assert their source sites and add timestamps; they do not change command arguments or ordering.
+The loader depends on the pinned Playwright bundle and must be updated if those source sites change.
+Spawn marks end when the process handle returns; they do not isolate shell execution or browser startup,
+which can continue during the first-reply wait.
+These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
+Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
+that overlap other suites, checks or builds even when those commands did not acquire the browser lock.
 
 ## Interpreting a result
 
@@ -182,3 +247,131 @@ with no settling waits or extra commands between them. The dense case retains ev
 `--strider-profile automation|concurrent` selects the named Strider preset for a benchmark; automation remains
 the default. The selected profile and exact launch arguments are recorded. This does not change production presets
 or Playwright defaults.
+
+### Query result attribution
+
+`benchmark/query-profile.ts` is a diagnostic counterpart to the ordinary query cases. Run it inside the pinned
+integration shell, supplying an absolute JSON report path. The opt-in Node loader applies checked in-memory
+transforms; it does not edit browser sources or installed Playwright files:
+
+```sh
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/plain.json plain
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/instrumented.json instrumented
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-profile.ts /absolute/path/trace.json trace
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/query-profile-loader.mjs \
+  packages/scenarios/benchmark/query-replay.ts /absolute/path/instrumented.json /absolute/path/replay.json
+```
+
+Coordinate these commands and checks with other work on the machine; retain the browser lock for the entire run.
+Flag overlap with an unlocked suite as contaminated. The profiler uses 20 alternating library pairs and three
+warmups (trace mode uses three pairs and one warmup); a fourth argument overrides the measured count for smoke
+checks. Modes are exactly `plain`, `instrumented`, `trace`, `boundary`, `boundary-trace`, `evaluation` and
+`evaluation-instrumented`; measured counts must be positive safe integers. Invalid arguments are rejected before collection. Instrumented modes require the loader
+and all required in-memory transformations; completion also requires the expected sample count and actual stage/
+wire captures. Completion checks require both send and receive wire rows and the named host stages in every instrumented sample; these checks do not prove that every diagnostic hook is complete or measure its overhead. Repeat plain/instrumented generations in reverse order to expose instrumentation overhead and drift.
+Neither generation is a performance gate or an optimized runtime. Preserve the scripts, source hashes, raw replies,
+spans and browser events alongside the reports outside disposable worktrees.
+
+Controls retain the small-evaluation batch and the 100/1,000-record snapshots, then return only 100 records from
+1,000 inputs and generate the equivalent 1,000 records without a large DOM. Page timers measure query and property
+work; retrieving those timers is outside the operation timer. The profiler's snapshot function adds a slice and
+page timers, so compare its plain timings with the canonical uninstrumented cases too. Host hooks bracket parsing,
+result validation (or identify its configured skip), CDP-to-remote conversion and final value decoding. Raw command
+send/receive timestamps describe dependency intervals, including transport, browser scheduling and browser work;
+they are not pure browser duration. Nested/overlapping intervals must not be added. Browser trace mode is separate
+because tracing has its own overhead; a clock-sync marker brackets the host/browser clock alignment; a trace that lacks a serializer event cannot establish serialization cost
+by subtracting host wall timers.
+
+Offline replay measures captured host work without browser waits. Its direct decoder accepts only the plain-value
+trees in these fixtures, verifies equality, and estimates a lower bound for an alternative without an intermediate
+tree. It deliberately refuses other kinds. It is not a production decoder: any proposed runtime alternative still
+has to preserve all supported values, omissions, depth/error paths, world selection, freshness, deadlines,
+cancellation and ownership. Replay savings alone do not establish end-to-end savings.
+
+The same diagnostic runner accepts `boundary` (ordinary wall timings) and `boundary-trace` (separate renderer
+verification, with the loader). These modes test setup timing only. They retain the canonical evaluation and
+100/1,000-record functions, plus the fixed-100-result/1,000-input control. Every index pairs fresh identical pages
+across three variants, rotating variant order and alternating library order:
+
+- `original`: start the operation timer after navigation through `load`.
+- `warm`: first complete one main-world no-op evaluation, outside timing, to initialize Playwright's utility and
+  exercise either library's evaluation path.
+- `prepared`: complete that same no-op evaluation, then capture the viewport as PNG and await its bytes outside
+  timing. Successful PNG readback is the setup completion signal; it adds real setup cost and does not promise
+  that animation frames, display presentation, or arbitrary future rendering have completed.
+
+The snapshot function, fixture, viewport and full result checks stay identical within each comparison. These are
+different measurement boundaries, never library speedups. Compare `warm` with `prepared` to isolate the added
+screenshot step, and `original` with each later boundary to study the first-evaluation wait. The original rendering
+hypothesis's less-than-5-ms/within-spread stopping rule applies to `original` versus `prepared`; it must not be
+reinterpreted as a rule about `warm` versus `prepared`. A small screenshot increment does not refute rendering
+when the warm variant has already moved rendering outside the timer. Initialization, caching, scheduling and
+rendering may all move into setup, so no contrast alone establishes a millisecond-exact causal split.
+
+A no-op evaluation is not a reliable rendering barrier. Trace observations apply to the traced samples, while
+ordinary sample tails must remain visible: report p95, spread and slow-sample counts rather than only medians.
+Fresh pages, discarded warmups and rotated paired order reduce reusable-cache and ordering effects; they do not
+guarantee that every sample observes the same rendering boundary. Keep the small-evaluation comparison separate:
+a repeated deficit after utility initialization is excluded remains unattributed until its own cost is split.
+Rejecting decoder fusion or finding no added screenshot benefit does not settle that gap or justify closing an
+entire query/read investigation.
+
+The prepared setup invokes each library's supported screenshot defaults, which need not perform identical work.
+In particular, pinned Playwright hides the caret by default and restores styles after capture, while Strider has no
+equivalent step here. That restoration is a plausible, unconfirmed explanation for later style/paint events on the
+input-heavy fixture. Without a controlled test, do not assign those events to caret restoration or generalize them
+to PNG readback, screenshots, or Playwright as a whole. Record setup cost and setup-plus-query latency too.
+
+`boundary-trace` collects each browser's renderer events independently, with clock-sync brackets and recorded
+setup/timing windows. Both now use the same category list from `query-profile-config.ts`, also recorded in reports.
+Historical boundary traces through commit `c66ef71` used `v8`, `devtools.timeline`,
+`disabled-by-default-devtools.timeline`, `disabled-by-default-v8.runtime_stats` and `blink.console` for Strider,
+but only `devtools.timeline` and `disabled-by-default-devtools.timeline` for Playwright. Keep those artifacts and
+measurements unchanged; their different tracing overhead limits cross-library duration comparisons.
+
+Map local document requests to renderer processes, then check setup and operation windows for layout, pre-paint
+and paint. Keep traces separate from ordinary wall-time comparisons. Report whether rendering overlapped timing
+in those samples, with clock-alignment uncertainty; do not turn a few absent events into a general completion
+guarantee. Original/prepared reductions can support pending-rendering overlap without identifying its entire
+causal cost. Serialization, scheduling and pre-first-byte IPC remain unallocated by subtraction.
+
+Small-evaluation attribution can use private modes `evaluation` and `evaluation-instrumented`.
+They call the canonical twenty-evaluation case on fresh pages at original and one-no-op warmed boundaries,
+alternating libraries and rotating boundary order. Existing modes and defaults are unchanged.
+The warmed boundary excludes first-call initialization; it is not a rendering barrier.
+Wire send/reply intervals include scheduling, transport and browser work and cannot identify serialization time.
+Reply-to-next-send intervals include host continuation work, observers and scheduling; their residual is not an Effect cost.
+No renderer traces are required for this host/wire partition. Current trace runs share categories but still use
+different recording options: only Strider requests `record-as-much-as-possible`. They do not validate
+`dataLossOccurred` or reject missing events. Align the recording options and add checks that reject data loss
+and missing events before relying on new traces.
+
+In these captures Strider's send observer precedes transport enqueueing; Playwright's checked send
+observer precedes its pipe write. Send-to-reply comparisons therefore include different host transport
+boundaries, including Strider's outbox/writer scheduling. Receive observers mark complete framed
+messages before protocol parsing; Strider UTF-8 decoding/framing precedes that observer. Per-call
+observers in evaluation-instrumented mode bracket public invocation through completion and add
+their own proxy/finalizer/promise work. Treat their plain/instrumented differences as distortion
+estimates with drift, never an exact correction or an attribution to the runtime.
+
+The opt-in loader also observes the pipe write boundary for evaluation attribution. It registers
+the launched child's fd 3 in the installed Effect platform spawner and records bytes immediately
+before the installed NodeSink calls that stream's `Writable.write`; this is after pulling from the
+outbox, not a dequeue marker. A separate marker immediately before queue offer follows UTF-8
+encoding. Playwright records its body and terminating-NUL write calls after argument serialization.
+These are Node write invocations, not kernel completion or browser receipt signals; Node buffering
+and backpressure remain inside the subsequent wait.
+
+Write hooks retain byte references or immutable strings and timestamps only. After collection,
+reassemble NUL-delimited frames (including fragmented UTF-8, split delimiters and batched commands),
+match command/session IDs and payloads, and require send/enqueue/write/reply ordering before an
+instrumented evaluation report can complete. Byte encoding for the report happens outside timing.
+Compare both first-write and frame-completing-write boundaries when framing spans multiple writes.
+Retain plain/instrumented controls: the extra observers can distort both queue and subsequent wait
+intervals. Measured enqueue-to-write time is not promised savings from removing a queue.

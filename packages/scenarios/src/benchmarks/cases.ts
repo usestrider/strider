@@ -9,6 +9,7 @@ export const viewport = { width: 1280, height: 720 }
 export interface Case {
   readonly name: string
   readonly description: string
+  readonly fixture?: string
   readonly strider: (page: Page.Page, origin: string) => Effect.Effect<unknown, unknown>
   readonly playwright: (page: Playwright.Page, origin: string) => Promise<unknown>
   readonly prepareStrider?: (page: Page.Page) => Effect.Effect<unknown, unknown>
@@ -17,6 +18,30 @@ export interface Case {
 }
 
 const equals = (expected: unknown) => (value: unknown) => assert.deepEqual(value, expected)
+
+// One synchronous page-side turn: fields in a row share an observation moment.
+const snapshot = () =>
+  Array.from(document.querySelectorAll("input"), (input) => ({
+    id: input.id,
+    value: input.value,
+    disabled: input.disabled,
+    label: input.getAttribute("aria-label")
+  }))
+
+const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
+  name: `read-snapshot-${size}`,
+  description:
+    `One coherent main-world snapshot of ${size} inputs and four properties; includes query, serialization and decoding`,
+  fixture: `/benchmark-reads?n=${size}`,
+  strider: (page) => page.evaluateInMainWorld(snapshot),
+  playwright: (page) => page.evaluate(snapshot),
+  verify: equals(Array.from({ length: size }, (_, i) => ({
+    id: `field-${i}`,
+    value: `Value ${i} café`,
+    disabled: i % 2 === 0,
+    label: i % 3 === 0 ? null : `Field ${i}`
+  })))
+}))
 
 export const cases: ReadonlyArray<Case> = [
   {
@@ -68,6 +93,20 @@ export const cases: ReadonlyArray<Case> = [
     },
     verify: equals(Array.from({ length: 20 }, () => "Benchmark"))
   },
+  {
+    name: "locator-values",
+    description: "20 sequential independent input value reads across distinct elements (ms per batch)",
+    fixture: "/benchmark-reads?n=20",
+    strider: (page) =>
+      Effect.forEach(Array.from({ length: 20 }, (_, i) => i), (i) => page.locator(`#field-${i}`).readValue),
+    playwright: async (page) => {
+      const values = []
+      for (let i = 0; i < 20; i++) values.push(await page.locator(`#field-${i}`).inputValue())
+      return values
+    },
+    verify: equals(Array.from({ length: 20 }, (_, i) => `Value ${i} café`))
+  },
+  ...snapshots,
   {
     name: "click",
     description: "Click a button with default actionability, then read its counter",

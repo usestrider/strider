@@ -55,7 +55,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
   the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
   and guide block (`code.json`).
-- `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
+- `packages/tools/utils`: barrel codegen; `readme`, which writes `packages/browser/README.md` from the root's, so never
+  edit that one; `clean`, which `pnpm build` runs first, so no earlier build's output is
   published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
   project of its own with only its peers, imported under Node and type-checked under `nodenext`, with its MIT
   `LICENSE`.
@@ -104,9 +105,14 @@ Use the narrowest check that covers the change:
 | A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
 | The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
 | The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
 | Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
+
+Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
+`integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
+`packages/browser/test/integration/failureTrace.ts`.
 
 ## Conventions
 

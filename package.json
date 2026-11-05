@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "node scripts/setup-agents.mjs && effect-tsgo patch",
     "codegen": "pnpm --recursive --filter \"./packages/*\" run codegen",
-    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit-stock --check && strider-codegen generate webkit-automation --check && strider-codegen keyboards --check",
+    "check": "tsc -b tsconfig.json && pnpm --recursive --filter \"./packages/*\" run codegen --check && strider-codegen generate cdp --check && strider-codegen generate bidi --check && strider-codegen generate webkit-stock --check && strider-codegen generate webkit-automation --check && strider-codegen keyboards --check && node packages/tools/utils/src/bin.mjs readme --check",
     "build": "node packages/tools/utils/src/bin.mjs clean && tsc -b tsconfig.packages.json && pnpm --recursive --filter \"./packages/*\" run build",
     "lint": "oxlint && dprint check && strider-docs format --check",
     "lint-fix": "oxlint --fix && dprint fmt && strider-docs format",
@@ -26,6 +26,7 @@
     "website:deploy": "pnpm --filter @usestrider/website run deploy",
     "strider": "node packages/browser/src/bin/strider.ts",
     "pack-check": "node packages/tools/utils/src/bin.mjs pack-check",
+    "readme": "node packages/tools/utils/src/bin.mjs readme",
     "release": "pnpm build && pnpm pack-check && changeset publish",
     "scenarios": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/bin.ts",
     "bench": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/benchmarks/bin.ts",

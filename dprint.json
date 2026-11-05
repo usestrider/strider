@@ -22,6 +22,7 @@
     "**/*.tsbuildinfo",
     "**/CHANGELOG.md",
     "packages/*/INDEX.md",
+    "packages/browser/README.md",
     "packages/scenarios/RESULTS.md",
     "packages/scenarios/upstream/*/fixture/**",
     "packages/tools/docs/src/jsdocs/**",

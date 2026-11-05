@@ -320,8 +320,13 @@ describe("Chromium adapter, CDP only", () => {
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(other.browser)
             )
-            // The browser never answers `Page.crash` (recorded), so it is sent without waiting for a reply
-            yield* Page.crash().pipe(Protocol.on(yield* other.session(sessionId)), Effect.ignore, Effect.forkChild)
+            // Page.crash can remain pending until cleanup, so observe its outcome without waiting for a reply.
+            yield* Page.crash().pipe(
+              Protocol.on(yield* other.session(sessionId)),
+              Effect.exit,
+              Effect.flatMap((exit) => Effect.log("Page.crash outcome", exit)),
+              Effect.forkChild
+            )
             const removed = yield* facts.when("NavigableRemoved", (fact) => fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new L1Target.PageCrashed({}))
           }),
