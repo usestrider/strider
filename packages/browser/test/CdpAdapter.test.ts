@@ -18,10 +18,93 @@ import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
+import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Har from "../src/internal/har.ts"
 import * as Readable from "../src/internal/readable.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
+
+describe("CDP locale declaration release", () => {
+  it.effect("does not reapply a released locale from an in-flight target configuration", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const heldLocale = yield* Deferred.make<Sent>()
+      const ready = yield* Deferred.make<void>()
+      const commands: Array<Sent> = []
+      const reply = (command: Sent, result: object = {}) =>
+        browser.receive({ id: command.id, sessionId: command.sessionId, result })
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          commands.push(command)
+          // Hold configuration's first locale reply, while later cleanup replies can complete.
+          // This forces the lifetime overlap using out-of-order replies, not a claimed Chromium reply order.
+          if (command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR") {
+            yield* Deferred.succeed(heldLocale, command)
+            continue
+          }
+          const result = command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Page.getFrameTree"
+            ? {
+              frameTree: {
+                frame: {
+                  id: "T1",
+                  loaderId: "initial",
+                  url: "about:blank",
+                  securityOrigin: "://",
+                  mimeType: "text/html"
+                }
+              }
+            }
+            : {}
+          yield* reply(command, result)
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "attached",
+        sink: (fact) => fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+      })
+      const declarationScope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(declarationScope, Exit.void))
+      // Installing before attachment makes configureTarget the sole source of fr-FR application.
+      yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+        _tag: "Override",
+        override: { _tag: "Locale", locale: "fr-FR" }
+      }).pipe(Scope.provide(declarationScope))
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      const held = yield* Deferred.await(heldLocale)
+      yield* Scope.close(declarationScope, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+      const restored = commands.filter((command) => command.method === "Emulation.setLocaleOverride").at(-1)!
+      assert.deepStrictEqual(restored.params, {})
+      assert.strictEqual(restored.sessionId, "S1")
+      const releaseEnd = commands.length
+      yield* reply(held)
+      yield* Deferred.await(ready)
+      // Target readiness must not leave a language override after confirmed release.
+      assert.deepStrictEqual(
+        commands.slice(releaseEnd).filter((command) =>
+          command.method === "Emulation.setUserAgentOverride" && command.params?.acceptLanguage === "fr-FR"
+        ),
+        []
+      )
+    }))
+})
 
 describe("CDP adapter redirect headers", () => {
   for (
