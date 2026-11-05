@@ -10,6 +10,8 @@ const directory = path.resolve(import.meta.dirname, "../../../../.data/integrati
 const shared = new TraceBuffer()
 const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
 let sharedFile = ""
+const retained = new Set<string>()
+let retainShared = false
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
 const serialize = (value: unknown): string =>
@@ -36,6 +38,12 @@ const save = (file: string, trace: TraceBuffer, scope: string) => {
   console.error(`Integration failure trace: ${file}`)
 }
 install({
+  retain() {
+    const current = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+    if (current === undefined || !active.has(current)) throw new Error("Trace retention requires a running test")
+    retained.add(current)
+    retainShared = true
+  },
   connection(label) {
     const id = `${++nextConnection}:${label}`
     // Vitest exposes one global current test, so it cannot identify a concurrent creator safely.
@@ -98,6 +106,8 @@ export default class FailureTraceRunner extends TestRunner {
     shared.clear()
     active.clear()
     completed.clear()
+    retained.clear()
+    retainShared = false
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)
@@ -129,7 +139,7 @@ export default class FailureTraceRunner extends TestRunner {
     const running = active.get(task.id)
     if (running === undefined) return
     active.delete(task.id)
-    const file = task.result?.state === "fail" ? filename(task, "test") : undefined
+    const file = task.result?.state === "fail" || retained.has(task.id) ? filename(task, "test") : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
     if (file !== undefined) save(file, running.trace, task.name)
     if (file !== undefined) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
@@ -138,7 +148,7 @@ export default class FailureTraceRunner extends TestRunner {
   override async onAfterRunSuite(suite: RunnerTestSuite) {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
-    if (suite.result?.state === "fail") {
+    if (suite.result?.state === "fail" || retainShared) {
       save(
         filename(suite, "shared"),
         shared,
