@@ -356,7 +356,7 @@ describe("strider", () => {
               const server = http.createServer((_, response) => {
                 response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
                 response.end(
-                  `<input type="password" value="private-unlabeled"><label>Account password<input type="password" value="private-labeled"></label>`
+                  `<input type="password" value="private-unlabeled"><label>Account password<input type="password" value="private-labeled"></label><label>Code<input id="code" type="password" role="textbox" value="private-explicit"></label><button aria-labelledby="code">Show</button>`
                 )
               })
               yield* Effect.acquireRelease(
@@ -389,6 +389,7 @@ describe("strider", () => {
                   assert.strictEqual(result.code, 0, result.err)
                   assert.notInclude(result.out, "private-unlabeled")
                   assert.notInclude(result.out, "private-labeled")
+                  assert.notInclude(result.out, "private-explicit")
                 }
                 for (
                   const [query, extra, expected] of [
@@ -398,7 +399,8 @@ describe("strider", () => {
                     ["password", ["--role", "textbox"], 0],
                     ["password", ["--role", "editable"], 2],
                     ["private-unlabeled", [], 0],
-                    ["private-labeled", [], 0]
+                    ["private-labeled", [], 0],
+                    ["private-explicit", [], 0]
                   ] as const
                 ) {
                   const result = yield* page("--json", "find", query, ...extra)

@@ -105,10 +105,13 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(`${served.origin}/fixture?html=${
               encodeURIComponent(
                 "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
-                  "<button aria-labelledby=\"code\">Show</button>"
+                  "<button aria-labelledby=\"code\">Show</button>" +
+                  "<input id=\"plain\" role=\"textbox\" value=\"ordinary-embedded\"><button aria-labelledby=\"plain\">Plain</button>"
               )
             }`)
             const snapshot = yield* page.snapshot()
+            assert.include(snapshot.text, "button \"ordinary-embedded\"")
+            assert.strictEqual(yield* page.getByRole("textbox", { name: "Code", exact: true }).count, 1)
             assert.notInclude(snapshot.text, "private-explicit")
             assert.notInclude(JSON.stringify(snapshot.root), "private-explicit")
           })),
@@ -119,7 +122,8 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         const [source, attributes] of [
           ["placeholder", "placeholder=\"Secret hint\""],
           ["title", "title=\"Secret hint\""],
-          ["aria-label", "aria-label=\"Secret hint\""]
+          ["aria-label", "aria-label=\"Secret hint\""],
+          ["label", "id=\"labeled-secret\""]
         ] as const
       ) {
         it.effect(
@@ -129,7 +133,12 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const served = yield* site
               const page = yield* Browser.newPage()
               yield* page.goto(
-                `${served.origin}/fixture?html=${encodeURIComponent(`<input type="password" ${attributes}>`)}`
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<input type="password" ${attributes}>` +
+                      (source === "label" ? "<label for=\"labeled-secret\">Secret hint</label>" : "")
+                  )
+                }`
               )
               const snapshot = yield* page.snapshot()
               const [field] = [...snapshot.refs.values()].filter((node) =>
