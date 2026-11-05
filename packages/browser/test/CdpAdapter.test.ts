@@ -269,7 +269,7 @@ const replyMetrics = (browser: Effect.Success<typeof makeBrowser>, command: Sent
 
 /** A synthetic CDP connection folded into the real public Browser layer. */
 const sentHeaders = Effect.fnUntraced(
-  function*(holdMetrics = false, holdStart = false, holdStop = false, blockStop = false) {
+  function*(holdMetrics = false, holdStart = false, holdStop = false, blockStop = false, blockStart = false) {
     const browser = yield* makeBrowser
     const ready = yield* Deferred.make<void>()
     const settled = yield* Queue.unbounded<void>()
@@ -280,6 +280,8 @@ const sentHeaders = Effect.fnUntraced(
     const stopDeadlines: Array<Option.Option<number>> = []
     const stopWrites = yield* Queue.unbounded<void>()
     const stopWriteGate = yield* Deferred.make<void>()
+    const startWrites = yield* Queue.unbounded<void>()
+    const startWriteGate = yield* Deferred.make<void>()
     const captures = yield* Queue.unbounded<Sent>()
     const preparation = yield* Queue.unbounded<Sent>()
     yield* Effect.gen(function*() {
@@ -344,6 +346,10 @@ const sentHeaders = Effect.fnUntraced(
       CdpAdapter.connect({
         ...browser.transport,
         send: Effect.fnUntraced(function*(message: string) {
+          if (JSON.parse(message).method === "Page.startScreencast" && blockStart) {
+            yield* Queue.offer(startWrites, undefined)
+            yield* Deferred.await(startWriteGate)
+          }
           if (JSON.parse(message).method === "Page.stopScreencast") {
             stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
             yield* Queue.offer(stopWrites, undefined)
@@ -405,6 +411,8 @@ const sentHeaders = Effect.fnUntraced(
       stopDeadlines,
       stopWrites,
       stopWriteGate,
+      startWrites,
+      startWriteGate,
       commands,
       screenshotWork,
       preparation,
@@ -1056,6 +1064,54 @@ describe("Chromium screencast renderer readiness", () => {
       assert.isUndefined(closing.pollUnsafe())
       yield* TestClock.adjust("1 second")
       yield* Fiber.join(closing)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("closing the acquisition scope interrupts a pending metrics read before any start", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      const metrics = yield* Queue.take(h.screenshotWork)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      const closedExit = acquiring.pollUnsafe()
+      yield* replyMetrics(h.browser, metrics)
+      yield* Fiber.await(acquiring)
+      yield* TestClock.adjust("1 second")
+      assert.isDefined(closedExit, "scope closure must interrupt acquisition without waiting for a metrics reply")
+      assert(Exit.hasInterrupts(closedExit!))
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+    }).pipe(onTestClock))
+
+  it.effect("closing the acquisition scope cancels a blocked start write before cleanup can be overtaken", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, false, false, false, true)
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const acquiring = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      yield* Queue.take(h.screenshotWork)
+      yield* Queue.take(h.startWrites)
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      const closedExit = acquiring.pollUnsafe()
+      yield* TestClock.adjust("1 second")
+      yield* Deferred.succeed(h.startWriteGate, undefined)
+      yield* Fiber.await(acquiring)
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(closedExit, "scope closure must interrupt acquisition without waiting for the blocked write")
+      assert(Exit.hasInterrupts(closedExit!))
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.startScreencast").length,
+        0,
+        "a canceled write must not dispatch start after its cleanup"
+      )
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
