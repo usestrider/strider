@@ -70,10 +70,12 @@ or blocked. Repeated clicks can each report validation even when snapshot invali
 does not call validity methods, change focus, cancel events or wait for later timers.
 
 Observation covers the top document and open shadow roots present when observation starts. It excludes child
-frames, closed shadow roots and roots created later. Navigation or document loss can discard observations;
+frames, closed shadow roots and roots created later. Navigation, document loss or an open dialog can discard observations;
 the original click error is preserved. Strict capture shows the control's role and a masked message, without
 its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
-current validity independently of clicks.
+current validity independently of clicks. Feedback collection shares the click's deadline and interruption.
+If collection cannot finish, observer release runs separately and never adds feedback to a later result.
+A busy document may retain listeners until it executes the queued release or ends; the caller does not wait for it.
 
 
 - **Every tool names its page.** There's no current tab. Pages are named when created (`p1`, `p2`, or the model's
@@ -83,7 +85,7 @@ current validity independently of clicks.
 - **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
   decided them, file choosers the policy canceled, closed pages, downloads, uncaught exceptions, failed requests,
-  and console errors where the [capture policy](#capture-policy) allows them.
+  validation observed during clicks, and console errors where the [capture policy](#capture-policy) allows them.
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a

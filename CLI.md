@@ -38,7 +38,7 @@ interface CommandResult {                                 // a Schema: text by d
   readonly elapsed: Duration
   readonly acquired: ReadonlyArray<Handle>
   readonly sinceLast: ReadonlyArray<DigestEntry>          // navigations, popups, dialogs and who decided them, downloads,
-                                                          // uncaught exceptions, console errors, failed requests, crashes, latched waits
+                                                          // uncaught exceptions, console errors, failed requests, validation observed during clicks, crashes, latched waits
   readonly files: ReadonlyArray<FilePath.Local>           // screenshots, snapshots, traces: written to artifacts/, only the path printed
 }
 
@@ -222,10 +222,12 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
   does not call validity methods, change focus, cancel events or wait for later timers.
 
   Observation covers the top document and open shadow roots present when observation starts. It excludes child
-  frames, closed shadow roots and roots created later. Navigation or document loss can discard observations;
+  frames, closed shadow roots and roots created later. Navigation, document loss or an open dialog can discard observations;
   the original click error is preserved. Strict capture shows the control's role and a masked message, without
   its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
-  current validity independently of clicks.
+  current validity independently of clicks. Feedback collection shares the click's deadline and interruption.
+  If collection cannot finish, observer release runs separately and never adds feedback to a later result.
+  A busy document may retain listeners until it executes the queued release or ends; the caller does not wait for it.
 
 - **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser lists no pages until you take control of a tab: use an id from `strider tabs`, for example `strider control N4`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per module error. Interrupting a command (Ctrl-C) interrupts that command, never the session.
