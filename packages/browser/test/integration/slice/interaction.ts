@@ -169,7 +169,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     yield* target.pipe(Expect.toHaveValue("b"))
                   } else {
                     yield* target.scrollIntoView().pipe(within)
-                    assert.isAbove(yield* page.evaluate(() => globalThis.scrollY), 0)
+                    assert.isAbove(yield* page.evaluateInMainWorld(() => globalThis.scrollY), 0)
                   }
                 }))
               }),
