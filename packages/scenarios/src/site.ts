@@ -78,6 +78,18 @@ const routes: Record<
       `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
     )
   }),
+  "/benchmark-reads": (url) => ({
+    body: page(
+      "Read benchmark",
+      Array.from(
+        { length: Number(url.searchParams.get("n") ?? 100) },
+        (_, i) =>
+          `<input id="field-${i}" value="Value ${i} café"${i % 2 === 0 ? " disabled" : ""}${
+            i % 3 === 0 ? "" : ` aria-label="Field ${i}"`
+          }>`
+      ).join("")
+    )
+  }),
   // The README's program: a heading, and a button that shows a message
   "/": () => ({
     body: page(
