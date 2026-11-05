@@ -64,6 +64,15 @@ describe("LaunchProfile", () => {
     assert.notInclude(LaunchProfile.automation.args, "--disable-renderer-backgrounding")
   })
 
+  it("shares the screenshot surface feature with concurrent", () => {
+    const feature = "--enable-features=CDPScreenshotNewSurface"
+    for (const profile of [LaunchProfile.automation, LaunchProfile.concurrent]) {
+      assert.strictEqual(profile.args.filter((arg) => arg === feature).length, 1)
+    }
+    assert.deepStrictEqual(LaunchProfile.concurrent.args.slice(0, LaunchProfile.automation.args.length), LaunchProfile.automation.args)
+    assert.notInclude(LaunchProfile.stock.args, feature)
+  })
+
   it("launches with a profile value's own arguments, in place of its name's", () => {
     const args = Chromium.argsFor({ profile: "automation", profileArgs: ["--custom"] }, "/tmp/profile", "pipe")
     assert.strictEqual(args[0], "--custom")
