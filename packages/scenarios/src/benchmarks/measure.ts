@@ -8,6 +8,7 @@ export const options = (args: Array<string>) => {
       runs: { type: "string", default: "20" },
       warmup: { type: "string", default: "3" },
       only: { type: "string" },
+      "strider-profile": { type: "string", default: "automation" },
       "screenshot-surface": { type: "string", default: "default" },
       "strider-arg": { type: "string", multiple: true, default: [] },
       output: { type: "string", default: ".data/benchmarks/latest.json" },
@@ -30,14 +31,18 @@ export const options = (args: Array<string>) => {
   }
   // A second disable-features switch replaces the profile's list in Chromium. Keep those defaults
   // fixed across off/on variants; only the selected screenshot feature may differ.
-  const disabled = chromiumArgs.automation.filter((arg) => arg.startsWith("--disable-features="))
+  if (!["automation", "concurrent"].includes(values["strider-profile"])) {
+    throw new Error("--strider-profile must be automation or concurrent")
+  }
+  const striderProfile = values["strider-profile"] as "automation" | "concurrent"
+  const disabled = chromiumArgs[striderProfile].filter((arg) => arg.startsWith("--disable-features="))
     .map((arg) => arg.slice("--disable-features=".length)).join(",")
   const surfaceArgs = values["screenshot-surface"] === "default" ? [] : [
     values["screenshot-surface"] === "on" ?
       "--enable-features=CDPScreenshotNewSurface" :
       `--disable-features=${disabled ? `${disabled},` : ""}CDPScreenshotNewSurface`
   ]
-  return { ...values, runs, warmup, maxRatio, striderArgs: [...surfaceArgs, ...values["strider-arg"]] }
+  return { ...values, runs, warmup, maxRatio, striderProfile, striderArgs: [...surfaceArgs, ...values["strider-arg"]] }
 }
 
 export const summarize = (samples: ReadonlyArray<number>) => {

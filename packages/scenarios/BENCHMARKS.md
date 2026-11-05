@@ -178,3 +178,7 @@ can mix distinct modes and do not establish a stable overhead.
 Viewport and repeated captures check three opaque 64 × 64 color markers across the viewport after capture.
 Preparation and PNG reconstruction remain outside timing; repeated capture still times five screenshot calls,
 with no settling waits or extra commands between them. The dense case retains every-pixel verification.
+
+`--strider-profile automation|concurrent` selects the named Strider preset for a benchmark; automation remains
+the default. The selected profile and exact launch arguments are recorded. This does not change production presets
+or Playwright defaults.

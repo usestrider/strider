@@ -340,3 +340,20 @@ describe("viewport capture pixels", () => {
     expect(() => entry.verify(images)).toThrow()
   })
 })
+
+it("selects a named benchmark profile without changing the default or raw argument precedence", () => {
+  expect(options([]).striderProfile).toBe("automation")
+  const concurrent = options([
+    "--strider-profile",
+    "concurrent",
+    "--screenshot-surface",
+    "off",
+    "--strider-arg=--enable-features=Other"
+  ])
+  expect(concurrent.striderProfile).toBe("concurrent")
+  expect(concurrent.striderArgs[0]).toContain(
+    "Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface"
+  )
+  expect(concurrent.striderArgs[1]).toBe("--enable-features=Other")
+  expect(() => options(["--strider-profile", "stock"])).toThrow("--strider-profile")
+})

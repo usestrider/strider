@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { Browser, Deadline } from "@usestrider/browser"
+import { Browser, Deadline, LaunchProfile } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -22,6 +22,7 @@ if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
   --runs N          measured pairs per case (default 20)
   --warmup N        discarded pairs per case (default 3)
+  --strider-profile NAME    Strider automation (default) or concurrent preset
   --screenshot-surface MODE  Strider-only experimental default/off/on feature override
   --strider-arg ARG          append a raw Strider launch argument (repeatable)
   --only NAME       one case: ${names.join(", ")}
@@ -174,7 +175,12 @@ const captureArguments = (library: string) => {
 }
 const makeRuntime = () =>
   ManagedRuntime.make(
-    Chromium.layer({ executablePath, headless: true, args: config.striderArgs }).pipe(
+    Chromium.layer({
+      executablePath,
+      headless: true,
+      profile: LaunchProfile[config.striderProfile],
+      args: config.striderArgs
+    }).pipe(
       Layer.provideMerge(NodeServices.layer)
     )
   )
