@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
+import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
 
@@ -810,6 +811,46 @@ export const contents = (
 
       // ── Captures ──
 
+      it.effect("captures fresh pixels after mutation, replacement and opening another window", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const url = (color: string) =>
+              fixtureUrl(
+                origin,
+                `<body style="margin:0;background:${color}"><div id="color" style="height:1400px;background:inherit"></div></body>`
+              )
+            const pixel = (png: Uint8Array) =>
+              Effect.sync(() => {
+                const pixels = pngRegion(png, { x: 4, y: 4, width: 8, height: 8 })
+                for (const value of pixels) {
+                  assert.deepStrictEqual(value, pixels[0])
+                }
+                return pixels[0]
+              })
+            yield* page.goto(url("rgb(200,40,60)"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [200, 40, 60, 255])
+            yield* page.evaluateInMainWorld(() => {
+              document.body.style.background = "rgb(30,170,90)"
+            })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [30, 170, 90, 255])
+            assert.deepStrictEqual(
+              yield* pixel(
+                yield* page.screenshot({
+                  area: { _tag: "Clip", rect: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
+                })
+              ),
+              [30, 170, 90, 255]
+            )
+            yield* page.goto(url("rgb(50,80,220)"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+            const other = yield* Browser.newPage()
+            yield* other.goto(url("black"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+          }))
+        }), timeout)
+
       it.effect("captures the viewport, a clip, an element and the full page, in device pixels", () =>
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
@@ -998,7 +1039,9 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
+              const token = (yield* jar.list).find((cookie) =>
+                cookie.name === "token"
+              )
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")
@@ -1020,7 +1063,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

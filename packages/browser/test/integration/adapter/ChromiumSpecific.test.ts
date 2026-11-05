@@ -32,6 +32,59 @@ describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
+        "attributes a route-fulfilled redirect to the route and its final response to the network",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const facts = makeRecorder()
+            const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+            const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
+            const page = yield* adapter.createPage(adapter.defaultContext)
+            const navigation = yield* adapter.navigate(page, `${served.origin}/hello`, { referrer: Option.none() })
+            const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            assert(ended.outcome._tag === "Committed")
+            const realm = yield* adapter.realm(ended.outcome.document, { _tag: "Main" })
+            const start = `${served.origin}/r-start`
+            const end = `${served.origin}/json`
+            yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+              _tag: "Intercept",
+              patterns: [start],
+              phases: ["request"]
+            })
+            const fetched = yield* adapter.evaluate(realm, {
+              functionDeclaration: "() => fetch('/r-start').then((response) => response.text())",
+              arguments: [],
+              awaitPromise: true,
+              result: "value",
+              userActivation: false
+            }).pipe(Effect.forkChild)
+            const paused = yield* facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "PausedRequest" && fact.subject.request.url === start)
+            yield* adapter.resolve(paused.obligation, {
+              _tag: "Fulfill",
+              status: 302,
+              headers: { location: end },
+              body: new Uint8Array()
+            })
+            const redirected = yield* facts.when("ResponseReceived", (fact) =>
+              fact.response.url === start)
+            const landed = yield* facts.when("ResponseReceived", (fact) => fact.response.url === end)
+            assert.deepStrictEqual(
+              [redirected, landed].map(({ response }) => [response.url, response.status, response.servedBy]),
+              [[start, 302, "route"], [end, 200, "network"]]
+            )
+            assert.notStrictEqual(redirected.response.hop, landed.response.hop)
+            const result = yield* Fiber.join(fetched)
+            assert(result._tag === "Value")
+            assert.deepStrictEqual(result.value, { type: "string", value: "{\"hello\":\"world\"}" })
+            assert.isFalse(served.served.some((request) => request.path === "/r-start"))
+            assert.isTrue(served.served.some((request) => request.path === "/json"))
+          }),
+        timeout
+      )
+
+      it.effect(
         "click sends stay ordered across a suspended transport and do not wait for earlier acknowledgments",
         () =>
           Effect.gen(function*() {

@@ -25,8 +25,9 @@ assert.equal(process.env["STRIDER_ENVIRONMENT"], "nix-integration")
 assert.ok(executablePath)
 const output = path.resolve(process.argv[2]!)
 const instrumented = process.argv[3] !== "control"
-const repeats = 5
-const delays = [35, 100, 160, 240]
+assert.ok([undefined, "control", "smoke"].includes(process.argv[3]), "Mode must be control or smoke")
+const repeats = process.argv[3] === "smoke" ? 1 : 5
+const delays = process.argv[3] === "smoke" ? [100] : [35, 100, 160, 240]
 type Sample = {
   library: string
   count: number

@@ -10,9 +10,11 @@ export type Profile = "stock" | "automation" | "concurrent"
  * Each profile's arguments.
  *
  * - `automation` turns off first-run, sync, update and crash-report prompts, the browser's own background
- *   traffic, and the component extensions that would otherwise attach as targets. Nothing a page can observe.
- * - `concurrent` adds the throttling switches for many pages at once. Pages can observe those (timer cadence,
- *   background rendering), so they are opt-in.
+ *   traffic, and the component extensions that would otherwise attach as targets. Chromium also enables
+ *   CDPScreenshotNewSurface to request repaint on a new surface for captures. Capture can drive rendering;
+ *   the profile does not promise that captures are unobservable to the page.
+ * - `concurrent` includes all automation settings and adds the throttling switches for many pages at once.
+ *   Pages can observe those (timer cadence, background rendering), so they are opt-in.
  */
 const chromiumAutomation: ReadonlyArray<string> = [
   "--no-first-run",
@@ -29,6 +31,7 @@ const chromiumAutomation: ReadonlyArray<string> = [
   "--disable-prompt-on-repost",
   "--disable-component-extensions-with-background-pages",
   "--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication",
+  "--enable-features=CDPScreenshotNewSurface",
   "--metrics-recording-only",
   "--password-store=basic",
   "--use-mock-keychain"
