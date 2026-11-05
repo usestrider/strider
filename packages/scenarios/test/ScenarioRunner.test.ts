@@ -83,6 +83,22 @@ describe("scenario runner", () => {
     expect(publish(results, () => {})).toBe(1)
   })
 
+  it.each(["strider", "playwright"] as const)("logs an initial %s failure as it logs timed ones", async (library) => {
+    const lines: Array<string> = []
+    let calls = 0
+    const fails = async () => {
+      if (++calls === 1) throw new Error("initial failure")
+      return "42 sold"
+    }
+    const passes = async () => "42 sold"
+    const results = await runScenarios([scenario("initial")], 10, () => ({
+      strider: library === "strider" ? fails : passes,
+      playwright: library === "playwright" ? fails : passes
+    }), (line) => lines.push(line))
+    expect(publish(results, () => {})).toBe(1)
+    expect(lines.join("\n")).toContain(`initial, ${library}, initial outcome: failed: initial failure`)
+  })
+
   it("rejects timed output mismatches even after a successful initial outcome", async () => {
     let calls = 0
     const results = await runScenarios([scenario("mismatch")], 10, () => ({
