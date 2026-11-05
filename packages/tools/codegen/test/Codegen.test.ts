@@ -185,6 +185,41 @@ describe("overlays", () => {
     assert.isTrue(cookie.members["value"]?.traits.sensitive)
   })
 
+  it("refuse a release's extra parameters that the client can't build as they say", () => {
+    const params = model.shapes["Card#connect.Params"]
+    assert(params?._tag === "Struct")
+    const wider = {
+      ...model,
+      shapes: {
+        ...model.shapes,
+        "Card#connect.Params": { ...params, members: { ...params.members, other: params.members["id"]! } }
+      }
+    }
+    const release = (entry: object) =>
+      applyOverlays(wider, [["resources.json", {
+        reason: "fixture",
+        annotate: [{ target: "Net#getCookies", traits: { createsResource: true, release: [entry] } }]
+      }]])
+    const valid = { method: "Card.connect", param: "id", from: "/cookies/*/name" }
+    // Each released value gets its own command; a parameter that fans out would send the first element's every time
+    assert.throws(() => release({ ...valid, paramsFrom: { "/other": "/cookies/*/name" } }), /paramsFrom|fans out|\*/)
+    // The extra parameter would overwrite the resource being released
+    assert.throws(() => release({ ...valid, paramsFrom: { "/id": "/cookies" } }), /paramsFrom|collide|overwrite/)
+    // A parameter pointer names where a value goes, and there is no element for `*` to stand for
+    assert.throws(
+      () =>
+        release({
+          method: "Net.getCookies",
+          param: "urls",
+          from: "/cookies/*/name",
+          list: true,
+          paramsFrom: { "/urls/*": "/cookies" }
+        }),
+      /paramsFrom|\*/
+    )
+    release({ ...valid, paramsFrom: { "/other": "/cookies" } })
+  })
+
   it("check that a release names a command, its parameter, and a path through the result", () => {
     const release = (target: string, traits: object) =>
       applyOverlays(model, [["resources.json", {

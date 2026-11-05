@@ -8,6 +8,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -1575,6 +1576,78 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(cleanup.value.method, "script.disown")
       assert.deepStrictEqual(cleanup.value.params, { handles: ["H1"], target: { realm: realm.bidi } })
       yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+    }))
+
+  it.effect("disowns the root-owned exception of a call whose reply it consumed", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+      const { realm, state } = yield* withPage({}, {}, client.root)
+      const evaluation = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => { throw new Error('boom') }",
+        arguments: [],
+        awaitPromise: false,
+        result: "handle",
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.params?.resultOwnership, "root")
+      yield* browser.receive({
+        type: "success",
+        id: sent.id,
+        result: {
+          type: "exception",
+          realm: realm.bidi,
+          exceptionDetails: {
+            exception: { type: "error", handle: "E1" },
+            text: "Error: boom",
+            lineNumber: 0,
+            columnNumber: 0,
+            stackTrace: { callFrames: [] }
+          }
+        }
+      })
+      yield* browser.delivered
+      const result = yield* Fiber.join(evaluation)
+      assert.strictEqual(result._tag, "Exception")
+      // The caller gets no handle for the exception, so nothing else can ever release it.
+      assert.strictEqual(result._tag === "Exception" ? result.exception.handle : undefined, undefined)
+      const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 200))
+      assert(Option.isSome(cleanup), "a root-owned exception nobody can reach must be disowned")
+      assert.strictEqual(cleanup.value.method, "script.disown")
+      assert.deepStrictEqual(cleanup.value.params, { handles: ["E1"], target: { realm: realm.bidi } })
+      yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+    }))
+
+  it.effect("keeps the connection when a hand-written release's parameters overlap", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+      const make = Protocol.command("probe.make", undefined, Schema.Unknown, {
+        status: "stable",
+        createsResource: true,
+        release: [{
+          method: "probe.free",
+          param: "id",
+          from: "/id",
+          paramsFrom: { "/target": "/realm", "/target/realm": "/realm" }
+        }]
+      })
+      const fiber = yield* client.root.send(make()).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      yield* Fiber.interrupt(fiber)
+      yield* browser.receive({ type: "success", id: sent.id, result: { id: "I", realm: "R" } })
+      yield* browser.delivered
+      const after = yield* client.root.send(
+        Protocol.command("probe.after", undefined, Schema.Unknown, {
+          status: "stable"
+        })()
+      ).pipe(Effect.forkChild)
+      const next = yield* browser.next
+      const command = next.method === "probe.free" ? yield* browser.next : next
+      assert.strictEqual(command.method, "probe.after")
+      yield* browser.receive({ type: "success", id: command.id, result: {} })
+      yield* Fiber.join(after)
     }))
 
   it.effect("fails a handle it doesn't hold as Gone, and sends nothing", () =>
