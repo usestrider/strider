@@ -93,6 +93,41 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "reports unsupported role filters as typed selector errors on use",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            // Construction remains lazy, including under a scope that matches nothing.
+            const invalid = page.getByRole("link", { pressed: false })
+            const empty = page.locator("#missing").getByRole("link", { pressed: false })
+            for (
+              const operation of [
+                invalid.count,
+                empty.count,
+                invalid.readText,
+                invalid.click(),
+                invalid.evaluate(() => true)
+              ]
+            ) {
+              const error = yield* operation.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error), String(error))
+              assert.strictEqual(error.reason._tag, "InvalidInput")
+              if (error.reason._tag === "InvalidInput") {
+                assert.strictEqual(error.reason.input, "selector")
+                assert.strictEqual(error.reason.expected, "a role query with supported state filters")
+                assert.include(error.reason.hint ?? "", "pressed")
+              }
+            }
+            const assertion = yield* invalid.pipe(Expect.toHaveCount(0), Effect.flip)
+            assert.strictEqual(assertion._tag, "ExpectationFailed")
+            assert.strictEqual(yield* page.getByRole("link").count, 1)
+          })),
+        timeout
+      )
+
       for (const shape of wrappedLinks) {
         for (const partial of shape.id === "three" ? [false, true] : [false]) {
           it.effect(
