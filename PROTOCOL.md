@@ -1026,7 +1026,13 @@ Adapter responsibilities:
   - **The recordings aren't committed:** they hold the demo sites' own files, Apache-2.0 and MIT, which the repository would redistribute with their notices; the licence work is deferred, so each machine records once.
   - **One demo site, not a list:** The Internet. TodoMVC's demo, the other at first, is hosted by Playwright, so its scenario became The Internet's dynamic controls (2026-10-27).
   - **No `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`,** which `playwright-core` doesn't need.
-- **Tests.** The scenarios are a script a person runs, not tests; `pnpm all` type-checks them. Every outcome read what it should with both libraries.
+- **Tests.** The scenarios are a script a person runs, not tests; `pnpm all` type-checks them. In the 2026-10-27 run, every outcome read what it should with both libraries; this is a historical result, not a guarantee about later runs.
+
+**Updated** (2026-11-05): scenario failure reporting.
+
+- **Initial and timed failures stay visible.** A rejection or unexpected returned text is a failed scenario attempt. The runner logs initial failures with the scenario, library and `initial outcome: failed:`, and timed failures with the scenario, library and repetition number. It retains the initial outcomes separately in the report, continues all scheduled repetitions and later scenarios without extra attempts, and lists every timed failure.
+- **Timing counts are successful/attempted repetitions.** Failed attempts are excluded from statistics; zero successful samples have no timing statistics. A failed initial attempt does not skip timed repetitions. If any scenario attempt fails, the command returns a nonzero status after publishing the report (writing `RESULTS.md`, or printing it for `--only`). This handling covers scenario attempts only: failures in the later waiting-expectation, interceptor or page probe measurements can still abort publication.
+- **The captured full run at `c732173` (2026-11-05) includes failures.** Both libraries failed The Internet's dynamic-controls navigation initially and in all ten timed repetitions because the preserved `the-internet.har` lacks `https://the-internet.herokuapp.com/dynamic_controls`, which replay therefore aborts. These are stale-recording failures, not established library or browser defects. The other nine scenarios passed their initial and ten timed attempts for both libraries. The local HAR recording/replay scenario's success in this run does not resolve its earlier intermittent failure. The dated 2026-10-27 findings above describe that earlier run.
 
 ### Pause-on-start granularity
 
