@@ -234,9 +234,14 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const page = yield* Browser.newPage()
               yield* page.goto(url)
               yield* page.emulate({ viewport: { width: 640, height: 480 } })
-              const first = yield* Scope.make()
-              yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+              const first = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+              const original = yield* page.capability(Capability.Screencast).pipe(
+                Effect.provideService(Scope.Scope, first)
+              )
+              yield* original.frames.pipe(Stream.runDrain, Effect.forkIn(first))
               const second = yield* page.capability(Capability.Screencast)
+              const shared = yield* second.frames.pipe(Stream.take(2), Stream.runCollect, Deadline.within("20 seconds"))
+              assert.strictEqual(shared.length, 2, "both consumers can acknowledge frames while sharing the stream")
               yield* Scope.close(first, Exit.void)
               yield* page.emulate({ viewport: { width: 321, height: 243 } })
               const frames = yield* second.frames.pipe(
