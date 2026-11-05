@@ -849,6 +849,11 @@ export interface Locator extends ReadonlyLocator {
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
    *   `input.pointerModifiers`, an action with modifiers fails with `Unsupported` before anything is sent.
    *
+   * **Gotchas**
+   *
+   * On stock WebKit, a `mousedown` handler that opens a dialog causes the browser to lose the `mouseup` and
+   * `click` events, even though this operation can succeed.
+   *
    * **Example** (Adding to the cart)
    *
    * ```ts import.meta.vitest
