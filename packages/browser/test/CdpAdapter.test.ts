@@ -137,6 +137,86 @@ describe("CDP locale declaration release", () => {
   }
 })
 
+describe("CDP viewport restoration", () => {
+  it.effect("leaves other overrides free to apply while it waits for the renderer", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const ready = yield* Deferred.make<void>()
+      const commands: Array<Sent> = []
+      // The renderer stays at another width after the override clears, so restoration keeps waiting for a resize.
+      let width = 800
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          commands.push(command)
+          if (command.method === "Emulation.clearDeviceMetricsOverride") width = 999
+          const result = command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Page.getFrameTree"
+            ? {
+              frameTree: {
+                frame: {
+                  id: "T1",
+                  loaderId: "initial",
+                  url: "about:blank",
+                  securityOrigin: "://",
+                  mimeType: "text/html"
+                }
+              }
+            }
+            : command.method === "Page.createIsolatedWorld"
+            ? { executionContextId: 7 }
+            : command.method === "Runtime.evaluate"
+            ? { result: { type: "object", value: [width, 600] } }
+            : {}
+          yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "attached",
+        sink: (fact) => fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+      })
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Deferred.await(ready)
+      const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+      const viewportScope = yield* Scope.make()
+      yield* adapter.declare(context, {
+        _tag: "Override",
+        override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+      }).pipe(Scope.provide(viewportScope))
+      const drain = Effect.forEach(Array.from({ length: 200 }), () => Effect.yieldNow, { discard: true })
+      const restoring = yield* Scope.close(viewportScope, Exit.void).pipe(Effect.forkChild)
+      yield* drain
+      const locale = yield* adapter.declare(context, {
+        _tag: "Override",
+        override: { _tag: "Locale", locale: "fr-FR" }
+      }).pipe(Effect.forkScoped)
+      yield* drain
+      const sentWhileRestoring = commands.some((command) => command.method === "Emulation.setLocaleOverride")
+      // Let restoration finish, so a failure reports the assertion rather than a hung teardown.
+      width = 800
+      yield* browser.receive({ method: "Page.frameResized", params: {}, sessionId: "S1" })
+      yield* Fiber.join(restoring)
+      yield* Fiber.join(locale)
+      assert.isTrue(sentWhileRestoring)
+    }))
+})
+
 describe("CDP adapter redirect headers", () => {
   for (
     const ordering of [
