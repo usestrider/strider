@@ -324,6 +324,32 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
+      it.effect("verifies contents across upload chunk boundaries", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
+            document.querySelector("input").onchange = async (event) => {
+              const file = event.target.files[0]
+              const data = new Uint8Array(await file.arrayBuffer())
+              document.getElementById("out").textContent = data.every((value, index) => value === (index * 17 + 23) % 256) ? file.name + ":" + data.length : "mismatch"
+            }
+          </script>`)
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-chunks-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const page = yield* Browser.newPage()
+          yield* page.goto(url)
+          for (const length of [0, 1, 65535, 65536, 65537, 131073]) {
+            const data = Uint8Array.from({ length }, (_, index) => (index * 17 + 23) % 256)
+            const file = path.join(directory, "boundary.bin")
+            fs.writeFileSync(file, data)
+            for (
+              const input of [FileInput.local(file), FileInput.bytes("boundary.bin", "application/octet-stream", data)]
+            ) {
+              yield* page.getByLabel("File").setInputFiles(input)
+              yield* page.locator("#out").pipe(Expect.toHaveText(`boundary.bin:${length}`))
+            }
+          }
+        })), timeout)
+
       for (const megabytes of [32, 256, 600]) {
         it.effect(`transfers a local file of ${megabytes} MiB`, () =>
           Effect.gen(function*() {

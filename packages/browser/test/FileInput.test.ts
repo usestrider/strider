@@ -24,152 +24,200 @@ const node: Adapter.NodeBinding = { document, binding: "upload-input" }
 const routed: Runtime.Routed = { document, hops: [] }
 
 describe("FileInput across a connection", () => {
-  for (const operation of ["Locator.setInputFiles", "FileChooser.choose"] as const) {
-    for (
-      const source of [
-        "local",
-        "bytes",
-        "remote",
-        "unreadable",
-        "missing-services",
-        "mixed",
-        "empty",
-        "no-element"
-      ] as const
-    ) {
-      it.effect(`${operation}: ${source}`, () =>
-        Effect.scoped(Effect.gen(function*() {
-          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-upload-"))
-          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-          const file = path.join(directory, "caller.txt")
-          const contents = "only on the caller: upload these bytes".repeat(5000)
-          fs.writeFileSync(file, contents)
-          const paths: Array<string> = []
-          const evaluations: Array<Adapter.EvaluationCall> = []
-          const decisions: Array<Adapter.Decision> = []
-          let send!: Adapter.Sink
-          const decided = yield* Deferred.make<void>()
-          // No shared filesystem is implemented by this peer: paths refer to its own host.
-          const connection = BrowserImpl.layer((sink) => {
-            send = sink
-            return Fake.connect([], {
-              info: new Browser.Info(Fake.info),
-              capabilities: new Browser.CapabilitySet({
-                entries: Fake.capabilities.map((entry) =>
-                  entry.name === "fileChooser" ? { ...entry, status: "supported", limitations: [] } : entry
-                )
-              })
-            })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
-              ...adapter,
-              realm: () => Effect.succeed("upload-realm" as Target.RealmId),
-              evaluate: (_realm, call) => {
-                evaluations.push(call)
-                return Effect.succeed({
-                  _tag: "Value",
-                  value: call.result === "handle"
-                    ? { type: "object", handle: "collector" as Adapter.HandleId }
-                    : { type: "undefined" }
+  for (const ownership of ["launched", "attached"] as const) {
+    for (const operation of ["Locator.setInputFiles", "FileChooser.choose"] as const) {
+      for (
+        const source of [
+          "local",
+          "bytes",
+          "remote",
+          "unreadable",
+          "stat-failure",
+          "read-failure",
+          "missing-services",
+          "mixed",
+          "empty",
+          "no-element"
+        ] as const
+      ) {
+        it.effect(`${ownership} ${operation}: ${source}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-upload-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const file = path.join(directory, "caller.txt")
+            const contents = "only on the caller: upload these bytes".repeat(5000)
+            fs.writeFileSync(file, contents)
+            const paths: Array<string> = []
+            const evaluations: Array<Adapter.EvaluationCall> = []
+            const decisions: Array<Adapter.Decision> = []
+            const released: Array<Adapter.HandleId> = []
+            let send!: Adapter.Sink
+            const decided = yield* Deferred.make<void>()
+            // No shared filesystem is implemented by this peer: paths refer to its own host.
+            const connection = BrowserImpl.layer((sink) => {
+              send = sink
+              return Fake.connect([], {
+                info: new Browser.Info(Fake.info),
+                capabilities: new Browser.CapabilitySet({
+                  entries: Fake.capabilities.map((entry) =>
+                    entry.name === "fileChooser" ? { ...entry, status: "supported", limitations: [] } : entry
+                  )
                 })
-              },
-              setInputFiles: (_node, files) =>
-                Effect.sync(() => {
-                  paths.push(...files)
-                }),
-              resolve: Effect.fnUntraced(function*(_obligation, decision) {
-                decisions.push(decision)
-                if (decision._tag === "SetFiles") paths.push(...decision.files)
-                yield* Deferred.succeed(decided, undefined)
-              })
-            })))
-          })
-          // Stub only DOM lookup/readiness: keep file preparation and adapter dispatch real.
-          const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
-            routed,
-            response: {
-              _tag: "Ready",
-              element: "upload-input",
-              scrolled: false,
-              point: null,
-              draggable: false,
-              checked: null,
-              fill: null
-            }
-          }))
-          const element = vi.spyOn(Runtime, "element").mockReturnValue(Effect.succeed({ _tag: "Found", node, routed }))
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              ready.mockRestore()
-              element.mockRestore()
+              })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+                ...adapter,
+                ownership,
+                realm: () => Effect.succeed("upload-realm" as Target.RealmId),
+                evaluate: (_realm, call) => {
+                  evaluations.push(call)
+                  return Effect.succeed({
+                    _tag: "Value",
+                    value: call.result === "handle"
+                      ? { type: "object", handle: "collector" as Adapter.HandleId }
+                      : { type: "undefined" }
+                  })
+                },
+                releaseHandles: (handles) =>
+                  Effect.sync(() => {
+                    released.push(...handles)
+                  }),
+                setInputFiles: (_node, files) =>
+                  Effect.sync(() => {
+                    paths.push(...files)
+                  }),
+                resolve: Effect.fnUntraced(function*(_obligation, decision) {
+                  decisions.push(decision)
+                  if (decision._tag === "SetFiles") paths.push(...decision.files)
+                  yield* Deferred.succeed(decided, undefined)
+                })
+              })))
             })
-          )
-          yield* Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            if (source === "missing-services") Object.assign(Handles.page(page).runtime, { fileSystem: Option.none() })
-            const input = source === "bytes" ?
-              FileInput.bytes("caller.txt", "text/plain", new TextEncoder().encode(contents)) :
-              source === "remote" ?
-              FileInput.remote(FilePath.Remote.make(file))
-              : source === "unreadable" ?
-              FileInput.local(path.join(directory, "missing.txt"))
-              : source === "mixed" ?
-              [FileInput.local(file), FileInput.remote(FilePath.Remote.make(file))]
-              : source === "empty"
-              ? []
-              : FileInput.local(file)
-            const failure = source === "missing-services" || source === "unreadable" || source === "mixed" ||
-              (source === "no-element" && operation === "FileChooser.choose")
-            if (operation === "Locator.setInputFiles") {
-              const action = page.locator("#file").setInputFiles(input)
-              if (failure) {
-                const error = yield* action.pipe(Effect.flip)
-                assert.strictEqual(error._tag, "LocatorError")
-                if (error._tag === "LocatorError") {
-                  assert.strictEqual(error.reason._tag, source === "unreadable" ? "FileUnreadable" : "InvalidInput")
-                }
-              } else yield* action
-            } else {
-              const handler = yield* FileChooser.handle(page, FileChooser.choose(input))
-              yield* send({
-                _tag: "ObligationOpened",
-                obligation: "upload-chooser" as Adapter.ObligationId,
-                subject: {
-                  _tag: "FileChooser",
-                  navigable: Handles.page(page).entry.id,
-                  multiple: true,
-                  element: source === "no-element" ? Option.none() : Option.some(node)
-                }
-              })
-              yield* Deferred.await(decided)
-              assert.strictEqual(yield* handler.handled, source === "unreadable" ? 1 : failure ? 0 : 1)
-              if (failure) {
-                assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
+            // Stub only DOM lookup/readiness: keep file preparation and adapter dispatch real.
+            const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+              routed,
+              response: {
+                _tag: "Ready",
+                element: "upload-input",
+                scrolled: false,
+                point: null,
+                draggable: false,
+                checked: null,
+                fill: null
               }
-              yield* handler.remove
-            }
-            if (failure || source === "empty") {
-              assert.deepStrictEqual(paths, [])
-              if (failure) {
-                if (source !== "unreadable") assert.deepStrictEqual(evaluations, [])
-              } else assert.strictEqual(evaluations.length, 3)
-              return
-            }
-            if (source === "remote") assert.deepStrictEqual(paths, [file])
-            else {
-              assert.notInclude(paths, file, "the caller's path is not a file on the browser host")
-              const chunks = evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk"))
-              assert.isAbove(chunks.length, 1)
-              const decoded = chunks.map((call) => {
-                const value = call.arguments[1]!
-                assert.strictEqual(value._tag, "Value")
-                if (value._tag !== "Value" || value.value.type !== "string") throw new Error("missing chunk")
-                const bytes = Buffer.from(value.value.value, "base64")
-                assert.isAtMost(bytes.length, 64 * 1024)
-                return bytes
+            }))
+            const element = vi.spyOn(Runtime, "element").mockReturnValue(
+              Effect.succeed({ _tag: "Found", node, routed })
+            )
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                ready.mockRestore()
+                element.mockRestore()
               })
-              assert.strictEqual(Buffer.concat(decoded).toString(), contents)
-            }
-          }).pipe(Effect.provide(connection))
-        })).pipe(Effect.provide(NodeServices.layer)))
+            )
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              if (source === "missing-services") {
+                Object.assign(Handles.page(page).runtime, { fileSystem: Option.none() })
+              }
+              if (source === "stat-failure" || source === "read-failure") {
+                const runtime = Handles.page(page).runtime
+                Object.assign(runtime, {
+                  fileSystem: Option.map(runtime.fileSystem, (fs) => ({
+                    ...fs,
+                    open: (path: string) =>
+                      fs.open(path).pipe(Effect.map((file) =>
+                        source === "stat-failure"
+                          ? Object.defineProperty(Object.create(file), "stat", {
+                            value: fs.stat("/nowhere/stat-failure")
+                          })
+                          : Object.assign(Object.create(file), {
+                            readAlloc: (size: number) =>
+                              Effect.andThen(fs.stat("/nowhere/read-failure"), file.readAlloc(size))
+                          })
+                      ))
+                  }))
+                })
+              }
+              const unreadable = source === "unreadable" || source === "stat-failure" || source === "read-failure"
+              const input = source === "bytes" ?
+                FileInput.bytes("caller.txt", "text/plain", new TextEncoder().encode(contents)) :
+                source === "remote" ?
+                FileInput.remote(FilePath.Remote.make(file))
+                : source === "unreadable" ?
+                FileInput.local(path.join(directory, "missing.txt"))
+                : source === "mixed" ?
+                [FileInput.local(file), FileInput.remote(FilePath.Remote.make(file))]
+                : source === "empty"
+                ? []
+                : FileInput.local(file)
+              const failure = ownership === "launched"
+                ? source === "unreadable" && operation === "Locator.setInputFiles"
+                : source === "missing-services" || unreadable || source === "mixed" ||
+                  (source === "no-element" && operation === "FileChooser.choose")
+              if (operation === "Locator.setInputFiles") {
+                const action = page.locator("#file").setInputFiles(input)
+                if (failure) {
+                  const error = yield* action.pipe(Effect.flip)
+                  assert.strictEqual(error._tag, "LocatorError")
+                  if (error._tag === "LocatorError") {
+                    assert.strictEqual(error.reason._tag, unreadable ? "FileUnreadable" : "InvalidInput")
+                  }
+                } else yield* action
+              } else {
+                const handler = yield* FileChooser.handle(page, FileChooser.choose(input))
+                yield* send({
+                  _tag: "ObligationOpened",
+                  obligation: "upload-chooser" as Adapter.ObligationId,
+                  subject: {
+                    _tag: "FileChooser",
+                    navigable: Handles.page(page).entry.id,
+                    multiple: true,
+                    element: source === "no-element" ? Option.none() : Option.some(node)
+                  }
+                })
+                yield* Deferred.await(decided)
+                assert.strictEqual(yield* handler.handled, ownership === "attached" && unreadable ? 1 : failure ? 0 : 1)
+                if (failure) {
+                  assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
+                }
+                yield* handler.remove
+              }
+              const hasCollector = evaluations.some((call) => call.result === "handle")
+              assert.strictEqual(released.length, hasCollector ? 1 : 0)
+              if (hasCollector) {
+                assert.isTrue(evaluations.some((call) => call.functionDeclaration.includes("function discardUpload")))
+              }
+              if (failure || source === "empty") {
+                assert.deepStrictEqual(paths, [])
+                if (failure) {
+                  if (!unreadable) assert.deepStrictEqual(evaluations, [])
+                } else assert.strictEqual(evaluations.length, 3)
+                return
+              }
+              if (source === "remote" || (ownership === "launched" && source !== "bytes")) {
+                assert.deepStrictEqual(
+                  paths,
+                  source === "mixed"
+                    ? [file, file]
+                    : [source === "unreadable" ? path.join(directory, "missing.txt") : file]
+                )
+                assert.deepStrictEqual(evaluations, [])
+              } else {
+                assert.notInclude(paths, file, "the caller's path is not a file on the browser host")
+                const chunks = evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk"))
+                assert.isAbove(chunks.length, 1)
+                const decoded = chunks.map((call) => {
+                  const value = call.arguments[1]!
+                  assert.strictEqual(value._tag, "Value")
+                  if (value._tag !== "Value" || value.value.type !== "string") throw new Error("missing chunk")
+                  const bytes = Buffer.from(value.value.value, "base64")
+                  assert.isAtMost(bytes.length, 64 * 1024)
+                  return bytes
+                })
+                assert.strictEqual(Buffer.concat(decoded).toString(), contents)
+              }
+            }).pipe(Effect.provide(connection))
+          })).pipe(Effect.provide(NodeServices.layer)))
+      }
     }
   }
 })
@@ -302,6 +350,8 @@ describe("a local read under the deadline", () => {
       let send!: Adapter.Sink
       const decisions: Array<Adapter.Decision> = []
       const evaluations: Array<Adapter.EvaluationCall> = []
+      let released = 0
+      let closed = 0
       return Effect.scoped(Effect.gen(function*() {
         const decided = yield* Deferred.make<void>()
         const reading = yield* Deferred.make<void>()
@@ -328,6 +378,10 @@ describe("a local read under the deadline", () => {
                   : { type: "undefined" }
               })
             },
+            releaseHandles: () =>
+              Effect.sync(() => {
+                released++
+              }),
             resolve: Effect.fnUntraced(function*(_obligation, decision) {
               decisions.push(decision)
               yield* Deferred.succeed(decided, undefined)
@@ -342,6 +396,13 @@ describe("a local read under the deadline", () => {
               ...fs,
               open: () =>
                 fs.open(import.meta.filename).pipe(
+                  Effect.tap(() =>
+                    Effect.addFinalizer(() =>
+                      Effect.sync(() => {
+                        closed++
+                      })
+                    )
+                  ),
                   Effect.map((file) =>
                     Object.assign(Object.create(file), {
                       readAlloc: () =>
@@ -389,6 +450,8 @@ describe("a local read under the deadline", () => {
             "canceled reads must never apply files"
           )
           assert.strictEqual(yield* handler.handled, 1)
+          assert.strictEqual(released, 1)
+          assert.strictEqual(closed, 1)
         }).pipe(
           Deadline.withDefaultBudget(scenario === "scope interruption" ? "30 seconds" : "200 millis"),
           Effect.provide(connection)
