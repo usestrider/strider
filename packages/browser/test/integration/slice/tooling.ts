@@ -26,7 +26,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
-import { supports } from "./capabilities.ts"
+import { nativeFileModificationTime, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -194,6 +194,12 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             yield* input.setInputFiles([])
             yield* out.pipe(Expect.toHaveText(""))
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+              ),
+              []
+            )
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
             yield* input.setInputFiles(remote)
@@ -204,10 +210,18 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             ))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
+            yield* input.setInputFiles([])
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+              ),
+              []
+            )
+            yield* out.pipe(Expect.toHaveText(""))
           }))
         }), timeout)
 
-      it.effect("keeps a local file's modification time", () =>
+      it.effect("asserts native and local modification times", () =>
         Effect.gen(function*() {
           const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
             document.querySelector("input").addEventListener("change", (event) => {
@@ -222,8 +236,24 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
-            yield* page.locator("#out").pipe(Expect.toHaveText("978307200000"))
+            const nativeTime = nativeFileModificationTime[name]
+            assert.isDefined(nativeTime, `${name} has a native timestamp expectation`)
+            for (const source of ["native", "local"] as const) {
+              yield* page.goto(url)
+              const before = Date.now()
+              yield* page.getByLabel("File").setInputFiles(
+                source === "native" ? FileInput.remote(FilePath.Remote.make(file)) : FileInput.local(file)
+              )
+              const actual = yield* page.evaluateInMainWorld(() =>
+                document.querySelector<HTMLInputElement>("input")!.files![0]!.lastModified
+              )
+              if (nativeTime === "disk" || (source === "local" && attached)) {
+                assert.strictEqual(actual, 978307200000, `${source} preserves disk modification time`)
+              } else {
+                assert.isAtLeast(actual, before, `${source} uses native creation time`)
+                assert.isAtMost(actual, Date.now(), `${source} uses native creation time`)
+              }
+            }
           }))
         }), timeout)
 
@@ -297,7 +327,20 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* input.setInputFiles(FileInput.remote(FilePath.Remote.make(second)))
             yield* out.pipe(Expect.toHaveText(/second\.txt:[^:]*:6:second$/))
             const nativeSecond = yield* out.readText
-            yield* Effect.logInfo({ nativeFirst, nativeSecond })
+            assert.match(nativeFirst, /^first\.txt:[^:]*:5:first$/)
+            assert.match(
+              nativeSecond,
+              name === "WebKit"
+                ? /^first\.txt:[^:]*:5:first\|second\.txt:[^:]*:6:second$/
+                : /^second\.txt:[^:]*:6:second$/
+            )
+            yield* input.setInputFiles([])
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                [...document.querySelector<HTMLInputElement>("#files")!.files!].map((file) => file.name)
+              ),
+              []
+            )
           }))
         }), timeout)
 
@@ -322,27 +365,6 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* Effect.logInfo({ native, transferred })
           }))
         }), timeout)
-
-      it.effect("compares native and local modification times", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
-            document.querySelector("input").onchange = (event) => { document.getElementById("out").textContent = String(event.target.files[0].lastModified) }
-          </script>`)
-          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-native-time-"))
-          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-          const file = path.join(directory, "dated.txt")
-          fs.writeFileSync(file, "dated")
-          fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
-          const page = yield* Browser.newPage()
-          yield* page.goto(url)
-          yield* page.getByLabel("File").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
-          const native = yield* page.locator("#out").readText
-          yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
-          const local = yield* page.locator("#out").readText
-          yield* Effect.logInfo({ name, attached, expectedMtime: 978307200000, native, local })
-          assert.match(native, /^[0-9]+$/)
-          assert.match(local, /^[0-9]+$/)
-        })), timeout)
 
       it.effect("gives local files to a chooser whose input isn't in the document", () =>
         Effect.gen(function*() {
