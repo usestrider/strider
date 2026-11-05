@@ -51,6 +51,159 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
   )
 })
 
+describe("CDP combined locale and user-agent declarations", () => {
+  for (const order of ["Locale first", "UserAgent first"] as const) {
+    for (const timing of ["existing target", "new targets"] as const) {
+      it.effect(`preserves both fields across precedence, replacement and release (${order}, ${timing})`, () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Queue.unbounded<Extract<Adapter.Fact, { _tag: "PageReady" }>>()
+          const commands: Array<Sent> = []
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : command.method === "Page.getFrameTree"
+                ? {
+                  frameTree: {
+                    frame: {
+                      id: command.sessionId!.replace("S", "T"),
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : {}
+              yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "attached",
+            sink: (fact) => fact._tag === "PageReady" ? Queue.offer(ready, fact).pipe(Effect.asVoid) : Effect.void
+          })
+          let target = 0
+          const attach = Effect.gen(function*() {
+            const id = ++target
+            yield* browser.receive({
+              method: "Target.attachedToTarget",
+              params: {
+                sessionId: `S${id}`,
+                targetInfo: { targetId: `T${id}`, type: "page", title: "", url: "about:blank", attached: true },
+                waitingForDebugger: false
+              }
+            })
+            return (yield* Queue.take(ready)).page
+          })
+          const page = timing === "existing target" ? yield* attach : undefined
+          const observed: Array<object> = []
+          const expected: Array<object> = []
+          const snapshot = Effect.fnUntraced(
+            function*(step: string, userAgent: string, locale?: string, platform?: string) {
+              if (timing === "new targets") yield* attach
+              const sessionId = timing === "new targets" ? `S${target}` : "S1"
+              observed.push({
+                step,
+                params: commands.filter((command) =>
+                  command.sessionId === sessionId && command.method === "Emulation.setUserAgentOverride"
+                ).at(-1)?.params
+              })
+              expected.push({
+                step,
+                params: {
+                  userAgent,
+                  ...(locale === undefined ? {} : { acceptLanguage: locale }),
+                  ...(platform === undefined ? {} : { platform })
+                }
+              })
+            }
+          )
+          const install = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, override: Adapter.Override) {
+            const lifetime = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(lifetime, Exit.void))
+            yield* adapter.declare(scope, { _tag: "Override", override }).pipe(Scope.provide(lifetime))
+            return Scope.close(lifetime, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+          })
+          const locale = (value: string): Adapter.Override => ({ _tag: "Locale", locale: value })
+          const ua = (value: string): Adapter.Override => ({
+            _tag: "UserAgent",
+            userAgent: `${value} UA`,
+            platform: Option.some(`${value} platform`)
+          })
+          const browserScope: Adapter.DeclarationScope = { _tag: "Browser" }
+          const contextScope: Adapter.DeclarationScope = { _tag: "UserContext", context: adapter.defaultContext }
+          const first = order === "Locale first" ? locale("en-GB") : ua("Browser")
+          const second = order === "Locale first" ? ua("Browser") : locale("en-GB")
+          const releaseFirst = yield* install(browserScope, first)
+          yield* snapshot(
+            "first kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          const releaseSecond = yield* install(browserScope, second)
+          yield* snapshot("both browser kinds", "Browser UA", "en-GB", "Browser platform")
+          const releaseContextLocale = yield* install(contextScope, locale("fr-FR"))
+          yield* snapshot("context locale over browser UA", "Browser UA", "fr-FR", "Browser platform")
+          const releaseContextUa = yield* install(contextScope, ua("Context"))
+          yield* snapshot("both context kinds", "Context UA", "fr-FR", "Context platform")
+          // Later browser declarations must not beat the more specific context fields.
+          const releaseBrowserLocale = yield* install(browserScope, locale("de-DE"))
+          const releaseBrowserUa = yield* install(browserScope, ua("Later browser"))
+          yield* snapshot("later browser under context", "Context UA", "fr-FR", "Context platform")
+          if (page !== undefined) {
+            const pageScope: Adapter.DeclarationScope = { _tag: "Page", page }
+            const releasePageLocale = yield* install(pageScope, locale("ja-JP"))
+            yield* snapshot("page locale over context UA", "Context UA", "ja-JP", "Context platform")
+            const releasePageUa = yield* install(pageScope, ua("Page"))
+            yield* snapshot("both page kinds", "Page UA", "ja-JP", "Page platform")
+            yield* releasePageLocale
+            yield* snapshot("release page locale", "Page UA", "fr-FR", "Page platform")
+            yield* releasePageUa
+            yield* snapshot("release page UA", "Context UA", "fr-FR", "Context platform")
+          }
+          const releaseReplacementLocale = yield* install(contextScope, locale("it-IT"))
+          yield* snapshot("replace context locale", "Context UA", "it-IT", "Context platform")
+          const releaseReplacementUa = yield* install(contextScope, ua("Replacement"))
+          yield* snapshot("replace context UA", "Replacement UA", "it-IT", "Replacement platform")
+          yield* releaseReplacementLocale
+          yield* snapshot("release replacement locale", "Replacement UA", "fr-FR", "Replacement platform")
+          yield* releaseReplacementUa
+          yield* snapshot("release replacement UA", "Context UA", "fr-FR", "Context platform")
+          yield* releaseContextLocale
+          yield* snapshot("release context locale", "Context UA", "de-DE", "Context platform")
+          yield* releaseContextUa
+          yield* snapshot("release context UA", "Later browser UA", "de-DE", "Later browser platform")
+          yield* releaseBrowserLocale
+          yield* releaseBrowserUa
+          yield* snapshot("release browser replacements", "Browser UA", "en-GB", "Browser platform")
+          yield* releaseSecond
+          yield* snapshot(
+            "release second kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          // A fresh target with no declarations needs no command; restoration is checked on the existing target.
+          yield* releaseFirst
+          if (timing === "existing target") yield* snapshot("release last kind", "HeadlessChrome")
+          assert.deepStrictEqual(observed, expected)
+        }))
+    }
+  }
+})
+
 describe("CDP locale declaration release", () => {
   for (const holdLanguageReply of [false, true]) {
     for (const mode of ["reset", "remaining", "replacement"] as const) {
