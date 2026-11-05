@@ -1388,6 +1388,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly …`
   - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect.Effect<Route.Registration, Route.RouteErr…`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> …`
+  - `route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(pattern: Url.Pattern | string, handler: RoutePhaseDiagnostic.Handler<E, R…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1896,6 +1897,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly …`
   - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect.Effect<Route.Registration, Route.RouteErr…`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> …`
+  - `route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(pattern: Url.Pattern | string, handler: RoutePhaseDiagnostic.Handler<E, R…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
