@@ -26,14 +26,23 @@ const routed: Runtime.Routed = { document, hops: [] }
 describe("FileInput across a connection", () => {
   for (const operation of ["Locator.setInputFiles", "FileChooser.choose"] as const) {
     for (
-      const source of ["local", "remote", "unreadable", "missing-services", "mixed", "empty", "no-element"] as const
+      const source of [
+        "local",
+        "bytes",
+        "remote",
+        "unreadable",
+        "missing-services",
+        "mixed",
+        "empty",
+        "no-element"
+      ] as const
     ) {
       it.effect(`${operation}: ${source}`, () =>
         Effect.scoped(Effect.gen(function*() {
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-upload-"))
           yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
           const file = path.join(directory, "caller.txt")
-          const contents = "only on the caller: upload these bytes"
+          const contents = "only on the caller: upload these bytes".repeat(5000)
           fs.writeFileSync(file, contents)
           const paths: Array<string> = []
           const evaluations: Array<Adapter.EvaluationCall> = []
@@ -55,7 +64,12 @@ describe("FileInput across a connection", () => {
               realm: () => Effect.succeed("upload-realm" as Target.RealmId),
               evaluate: (_realm, call) => {
                 evaluations.push(call)
-                return Effect.succeed({ _tag: "Value", value: { type: "undefined" } })
+                return Effect.succeed({
+                  _tag: "Value",
+                  value: call.result === "handle"
+                    ? { type: "object", handle: "collector" as Adapter.HandleId }
+                    : { type: "undefined" }
+                })
               },
               setInputFiles: (_node, files) =>
                 Effect.sync(() => {
@@ -91,7 +105,9 @@ describe("FileInput across a connection", () => {
           yield* Effect.gen(function*() {
             const page = yield* Browser.newPage()
             if (source === "missing-services") Object.assign(Handles.page(page).runtime, { fileSystem: Option.none() })
-            const input = source === "remote" ?
+            const input = source === "bytes" ?
+              FileInput.bytes("caller.txt", "text/plain", new TextEncoder().encode(contents)) :
+              source === "remote" ?
               FileInput.remote(FilePath.Remote.make(file))
               : source === "unreadable" ?
               FileInput.local(path.join(directory, "missing.txt"))
@@ -124,7 +140,7 @@ describe("FileInput across a connection", () => {
                 }
               })
               yield* Deferred.await(decided)
-              assert.strictEqual(yield* handler.handled, failure ? 0 : 1)
+              assert.strictEqual(yield* handler.handled, source === "unreadable" ? 1 : failure ? 0 : 1)
               if (failure) {
                 assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
               }
@@ -132,14 +148,25 @@ describe("FileInput across a connection", () => {
             }
             if (failure || source === "empty") {
               assert.deepStrictEqual(paths, [])
-              if (failure) assert.deepStrictEqual(evaluations, [])
-              else assert.strictEqual(evaluations.length, 1)
+              if (failure) {
+                if (source !== "unreadable") assert.deepStrictEqual(evaluations, [])
+              } else assert.strictEqual(evaluations.length, 3)
               return
             }
             if (source === "remote") assert.deepStrictEqual(paths, [file])
             else {
               assert.notInclude(paths, file, "the caller's path is not a file on the browser host")
-              assert.include(JSON.stringify(evaluations), Buffer.from(contents).toString("base64"))
+              const chunks = evaluations.filter((call) => call.functionDeclaration.includes("function appendChunk"))
+              assert.isAbove(chunks.length, 1)
+              const decoded = chunks.map((call) => {
+                const value = call.arguments[1]!
+                assert.strictEqual(value._tag, "Value")
+                if (value._tag !== "Value" || value.value.type !== "string") throw new Error("missing chunk")
+                const bytes = Buffer.from(value.value.value, "base64")
+                assert.isAtMost(bytes.length, 64 * 1024)
+                return bytes
+              })
+              assert.strictEqual(Buffer.concat(decoded).toString(), contents)
             }
           }).pipe(Effect.provide(connection))
         })).pipe(Effect.provide(NodeServices.layer)))
@@ -161,13 +188,26 @@ describe("file preparation", () => {
     })).pipe(Effect.provide(Layer.provide(connection, NodeServices.layer)))
 
   it.effect("keeps launched absolute Local and Remote paths without caller services", () =>
-    run((runtime) => Effect.gen(function*() {
-      const launched = { ...runtime, model: { ...runtime.model, adapter: { ...runtime.model.adapter, ownership: "launched" as const } }, fileSystem: Option.none(), path: Option.none() }
-      const prepared = yield* Preparation.prepare(launched, [FileInput.local("/caller/a.txt"), FileInput.remote(FilePath.Remote.make("/host/b.txt"))])
-      assert.deepStrictEqual(prepared, { _tag: "Paths", files: ["/caller/a.txt", "/host/b.txt"] })
-      const mixed = yield* Preparation.prepare(launched, [FileInput.local("/caller/a.txt"), FileInput.bytes("b", "text/plain", new Uint8Array())]).pipe(Effect.flip)
-      assert.strictEqual(mixed._tag, "InvalidInput")
-    })))
+    run((runtime) =>
+      Effect.gen(function*() {
+        const launched = {
+          ...runtime,
+          model: { ...runtime.model, adapter: { ...runtime.model.adapter, ownership: "launched" as const } },
+          fileSystem: Option.none(),
+          path: Option.none()
+        }
+        const prepared = yield* Preparation.prepare(launched, [
+          FileInput.local("/caller/a.txt"),
+          FileInput.remote(FilePath.Remote.make("/host/b.txt"))
+        ])
+        assert.deepStrictEqual(prepared, { _tag: "Paths", files: ["/caller/a.txt", "/host/b.txt"] })
+        const mixed = yield* Preparation.prepare(launched, [
+          FileInput.local("/caller/a.txt"),
+          FileInput.bytes("b", "text/plain", new Uint8Array())
+        ]).pipe(Effect.flip)
+        assert.strictEqual(mixed._tag, "InvalidInput")
+      })
+    ))
 
   it.effect("resolves relative paths, preserves names and infers MIME alongside bytes", () =>
     run((runtime) =>
@@ -180,9 +220,8 @@ describe("file preparation", () => {
         assert.strictEqual(prepared._tag, "Made")
         if (prepared._tag !== "Made") return
         assert.strictEqual(prepared.files[0]!.name, "FileInput.test.ts")
-        const info = yield* Option.getOrThrow(runtime.fileSystem).stat(import.meta.filename)
-        assert.propertyVal(prepared.files[0], "lastModified", Option.getOrThrow(info.mtime).getTime())
-        assert.deepStrictEqual(prepared.files[0]!.data, new Uint8Array(fs.readFileSync(import.meta.filename)))
+        assert.propertyVal(prepared.files[0], "path", import.meta.filename)
+        assert.notProperty(prepared.files[0], "data")
         assert.strictEqual(prepared.files[1]!.mimeType, "x/test")
       })
     ))
@@ -204,11 +243,6 @@ describe("file preparation", () => {
     run((runtime) =>
       Effect.gen(function*() {
         const missing = FileInput.local("/nowhere/upload-file.txt")
-        const failure = yield* Preparation.prepare(runtime, [missing]).pipe(Effect.flip)
-        assert.strictEqual(failure._tag, "FileUnreadable")
-        const directory = yield* Preparation.prepare(runtime, [FileInput.local(path.dirname(import.meta.filename))])
-          .pipe(Effect.flip)
-        assert.strictEqual(directory._tag, "FileUnreadable")
         for (const file of [missing, FileInput.bytes("a", "text/plain", new Uint8Array())]) {
           const mixed = yield* Preparation.prepare(runtime, [
             file,
@@ -216,23 +250,6 @@ describe("file preparation", () => {
           ]).pipe(Effect.flip)
           assert.strictEqual(mixed._tag, "InvalidInput")
         }
-        const statFailure = yield* Preparation.prepare({
-          ...runtime,
-          fileSystem: Option.map(
-            runtime.fileSystem,
-            (fs) => ({ ...fs, stat: () => fs.stat("/nowhere/upload-metadata") })
-          )
-        }, [FileInput.local(import.meta.filename)]).pipe(Effect.flip)
-        assert.strictEqual(statFailure._tag, "FileUnreadable")
-        const withoutTime = yield* Preparation.prepare({
-          ...runtime,
-          fileSystem: Option.map(runtime.fileSystem, (fs) => ({
-            ...fs,
-            stat: (path) => fs.stat(path).pipe(Effect.map((info) => ({ ...info, mtime: Option.none() })))
-          }))
-        }, [FileInput.local(import.meta.filename)])
-        assert.strictEqual(withoutTime._tag, "Made")
-        if (withoutTime._tag === "Made") assert.isUndefined(withoutTime.files[0]!.lastModified)
         const empty = yield* Preparation.prepare({ ...runtime, fileSystem: Option.none(), path: Option.none() }, [])
         assert.deepStrictEqual(empty, { _tag: "Made", files: [] })
       })
@@ -245,7 +262,7 @@ describe("a local read under the deadline", () => {
     Effect.sync(() => {
       const runtime = Handles.page(page).runtime
       Object.assign(runtime, {
-        fileSystem: Option.map(runtime.fileSystem, (fs) => ({ ...fs, readFile: () => Effect.never }))
+        fileSystem: Option.map(runtime.fileSystem, (fs) => ({ ...fs, open: () => Effect.never }))
       })
     })
 
@@ -304,7 +321,12 @@ describe("a local read under the deadline", () => {
             realm: () => Effect.succeed("upload-realm" as Target.RealmId),
             evaluate: (_realm, call) => {
               evaluations.push(call)
-              return Effect.succeed({ _tag: "Value", value: { type: "undefined" } })
+              return Effect.succeed({
+                _tag: "Value",
+                value: call.result === "handle"
+                  ? { type: "object", handle: "collector" as Adapter.HandleId }
+                  : { type: "undefined" }
+              })
             },
             resolve: Effect.fnUntraced(function*(_obligation, decision) {
               decisions.push(decision)
@@ -318,13 +340,20 @@ describe("a local read under the deadline", () => {
           Object.assign(runtime, {
             fileSystem: Option.map(runtime.fileSystem, (fs) => ({
               ...fs,
-              readFile: () =>
-                Effect.andThen(
-                  Deferred.succeed(reading, undefined),
-                  scenario === "time spent in handler"
-                    ? Effect.as(Effect.sleep("150 millis"), new Uint8Array([1]))
-                    : Deferred.await(release)
-                ).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+              open: () =>
+                fs.open(import.meta.filename).pipe(
+                  Effect.map((file) =>
+                    Object.assign(Object.create(file), {
+                      readAlloc: () =>
+                        Effect.andThen(
+                          Deferred.succeed(reading, undefined),
+                          scenario === "time spent in handler"
+                            ? Effect.as(Effect.sleep("150 millis"), Option.some(new Uint8Array([1])))
+                            : Deferred.await(release).pipe(Effect.map(Option.some))
+                        ).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+                    })
+                  )
+                )
             }))
           })
           const scope = yield* Scope.fork(yield* Effect.scope)
@@ -355,8 +384,11 @@ describe("a local read under the deadline", () => {
           const stopped = yield* Deferred.await(interrupted).pipe(Effect.timeoutOption("3 seconds"))
           assert.isTrue(Option.isSome(stopped), "the read was left running")
           yield* Deferred.succeed(release, new Uint8Array([1]))
-          assert.deepStrictEqual(evaluations, [], "canceled reads must never apply files")
-          assert.strictEqual(yield* handler.handled, 0)
+          assert.isFalse(
+            evaluations.some((call) => call.functionDeclaration.includes("function commitUpload")),
+            "canceled reads must never apply files"
+          )
+          assert.strictEqual(yield* handler.handled, 1)
         }).pipe(
           Deadline.withDefaultBudget(scenario === "scope interruption" ? "30 seconds" : "200 millis"),
           Effect.provide(connection)

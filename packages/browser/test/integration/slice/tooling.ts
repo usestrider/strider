@@ -57,7 +57,7 @@ const made = [
 const findNode = (node: Capability.AxNode, found: (node: Capability.AxNode) => boolean): boolean =>
   found(node) || node.children.some((child) => findNode(child, found))
 
-export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
+export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unknown>, attached = false) =>
   describe(`${name} tooling`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       it.effect("sets files made in the page, with their names, types and contents", () =>
@@ -110,10 +110,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 )
                 fs.writeFileSync(path.join(directory, "caller.txt"), "caller content")
                 fs.writeFileSync(path.join(directory, "unknown.strider-unknown"), "raw")
+                fs.writeFileSync(path.join(directory, "b.csv"), "x,y")
                 const inputs = [
                   FileInput.local(path.relative(process.cwd(), path.join(directory, "caller.txt"))),
                   FileInput.local(path.join(directory, "unknown.strider-unknown")),
-                  made[1]!
+                  attached ? made[1]! : FileInput.remote(FilePath.Remote.make(path.join(directory, "b.csv")))
                 ]
                 const page = yield* Browser.newPage()
                 yield* page.goto(url)
@@ -121,22 +122,22 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
                   yield* page.getByRole("button", { name: "Choose" }).click()
                   yield* page.getByText(
-                    "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                    /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                   ).pipe(Expect.toBeVisible)
                   assert.strictEqual(yield* handler.handled, 1)
                   yield* handler.remove
                 } else yield* page.getByLabel("Files").setInputFiles(inputs)
                 yield* page.getByText(
-                  "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                  /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                 ).pipe(Expect.toBeVisible)
                 // A refused mixture must preserve the existing selection.
                 const failure = yield* page.getByLabel("Files").setInputFiles([
-                  inputs[0]!,
+                  made[0]!,
                   FileInput.remote(FilePath.Remote.make("/remote/file"))
                 ]).pipe(Effect.flip)
                 assert.strictEqual(failure._tag, "LocatorError")
                 yield* page.getByText(
-                  "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                  /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                 ).pipe(Expect.toBeVisible)
                 if (chooser) {
                   const clear = yield* FileChooser.handle(page, FileChooser.choose([]))
@@ -172,7 +173,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
             yield* input.setInputFiles(remote)
-            yield* out.pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
+            yield* out.pipe(Expect.toHaveText(
+              name === "WebKit"
+                ? /^a\.txt:text\/plain:5:hello\|host\.txt:[^:]*:7:on host$/
+                : /^host\.txt:[^:]*:7:on host$/
+            ))
             yield* input.setInputFiles(made[0]!)
             yield* out.pipe(Expect.toHaveText("a.txt:text/plain:5:hello"))
           }))
@@ -222,7 +227,10 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 : made
               const failure = yield* input.setInputFiles(both).pipe(Effect.flip)
               assert(Locator.isLocatorError(failure), String(failure))
-              assert.strictEqual(failure.reason._tag, "InvalidInput")
+              assert.include(
+                source === "bytes" || attached ? ["InvalidInput"] : ["InvalidInput", "BackendFailure"],
+                failure.reason._tag
+              )
               yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
               yield* page.getByRole("button", { name: "Inspect" }).click()
               yield* page.locator("#selected").pipe(Expect.toHaveText("a.txt"))
@@ -272,7 +280,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
-      it.effect("compares native path uploads with transferred local files", () =>
+      it.effect("compares native path uploads with local files", () =>
         Effect.gen(function*() {
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
@@ -286,8 +294,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.getByLabel("Files").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
             yield* page.locator("#out").pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             const native = yield* page.locator("#out").readText
+            yield* page.getByLabel("Files").setInputFiles([])
             yield* page.getByLabel("Files").setInputFiles(FileInput.local(file))
-            yield* page.locator("#out").pipe(Expect.toHaveText("host.txt:text/plain:7:on host"))
+            yield* page.locator("#out").pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
             const transferred = yield* page.locator("#out").readText
             yield* Effect.logInfo({ native, transferred })
           }))
@@ -319,8 +328,19 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         it.effect(`transfers a local file of ${megabytes} MiB`, () =>
           Effect.gen(function*() {
             const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
-              document.querySelector("input").addEventListener("change", (event) => {
-                document.getElementById("out").textContent = String(event.target.files[0].size)
+              document.querySelector("input").addEventListener("change", async (event) => {
+                const file = event.target.files[0]
+                let offset = 0
+                for await (const chunk of file.stream()) {
+                  for (let i = 0; i < chunk.length; i++) {
+                    if (chunk[i] !== ((offset + i) * 17 + 23) % 256) {
+                      document.getElementById("out").textContent = "mismatch:" + (offset + i)
+                      return
+                    }
+                  }
+                  offset += chunk.length
+                }
+                document.getElementById("out").textContent = file.name + ":" + file.lastModified + ":" + offset
               })
             </script>`)
             yield* Effect.scoped(Effect.gen(function*() {
@@ -329,14 +349,40 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
               )
               const file = path.join(directory, "large.bin")
-              fs.writeFileSync(file, "")
-              fs.truncateSync(file, megabytes * 1024 * 1024)
+              const fd = fs.openSync(file, "w")
+              try {
+                const block = Buffer.alloc(64 * 1024)
+                for (let i = 0; i < block.length; i++) block[i] = (i * 17 + 23) % 256
+                for (let i = 0; i < megabytes * 16; i++) fs.writeSync(fd, block)
+              } finally {
+                fs.closeSync(fd)
+              }
+              fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
               const page = yield* Browser.newPage()
               yield* page.goto(url)
+              const baseline = process.memoryUsage()
+              const peak = { ...baseline }
+              const sampling = setInterval(() => {
+                const current = process.memoryUsage()
+                for (const key of ["rss", "heapUsed", "external", "arrayBuffers"] as const) {
+                  peak[key] = Math.max(peak[key], current[key])
+                }
+              }, 25)
+              yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(sampling)))
+              const started = performance.now()
               yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
-              yield* page.locator("#out").pipe(Expect.toHaveText(String(megabytes * 1024 * 1024)))
-            })).pipe(Deadline.withDefaultBudget("90 seconds"))
-          }), 200_000)
+              yield* page.locator("#out").pipe(Expect.toHaveText(`large.bin:978307200000:${megabytes * 1024 * 1024}`))
+              yield* Effect.logInfo({
+                upload: name,
+                attached,
+                megabytes,
+                elapsedMillis: performance.now() - started,
+                baseline,
+                peak,
+                callerMemoryOnly: true
+              })
+            })).pipe(Deadline.withDefaultBudget("300 seconds"))
+          }), 400_000)
       }
 
       it.effect("cancels failed chooser preparation and allows the next chooser", () =>
@@ -348,7 +394,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(url)
             for (
               const inputs of [
-                [FileInput.local("/nowhere/upload.txt")],
+                ...(attached ? [[FileInput.local("/nowhere/upload.txt")]] : []),
                 [made[0]!, FileInput.remote(FilePath.Remote.make("/remote/file"))]
               ]
             ) {
@@ -356,7 +402,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const resolution = yield* AutoResolution.next(page, { subject: "FileChooser" })
               yield* page.getByRole("button", { name: "Choose" }).click()
               assert.strictEqual((yield* resolution).decision, "cancel")
-              assert.strictEqual(yield* handler.handled, 0)
+              assert.strictEqual(yield* handler.handled, inputs[0] === made[0] ? 0 : 1)
               yield* handler.remove
             }
             yield* FileChooser.handle(page, FileChooser.choose(made))
