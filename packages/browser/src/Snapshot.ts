@@ -66,6 +66,8 @@ export type Generation = typeof Generation.Type
 
 /**
  * Schema for what made a node count as interactive when its role doesn't say so.
+ * Password inputs carry `password` evidence on an inferred `editable` role, preserving their accessible
+ * label without inferring a name or exposing their value.
  *
  * @stability unstable
  * @category schemas
@@ -76,7 +78,8 @@ export const InteractivityEvidence = Schema.Literals([
   "cursorPointer",
   "tabindex",
   "contentEditable",
-  "onclickAttribute"
+  "onclickAttribute",
+  "password"
 ])
 
 /**

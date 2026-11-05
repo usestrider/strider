@@ -439,6 +439,52 @@ export const engine = (backend: Backend) =>
             yield* check(false, false)
           }), timeout)
 
+        it.effect("keeps unlabeled and labeled password controls discoverable in snapshots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<input type="password" value="private-unlabeled"><label>Account password<input type="password" value="private-labeled"></label>`
+            )
+            const response = yield* send({ op: "snapshot", steps: null, interactivity: true, depth: null })
+            assert(response._tag === "Snapshot", JSON.stringify(response))
+            const nodes: Array<Engine.SnapNode> = []
+            const visit = (node: Engine.SnapNode) => {
+              if (node.ref !== null) {
+                nodes.push(node)
+              }
+              for (const child of node.children) {
+                visit(child)
+              }
+            }
+            visit(response.root)
+            assert.notInclude(JSON.stringify(response), "private-unlabeled")
+            assert.notInclude(JSON.stringify(response), "private-labeled")
+            assert.deepEqual(
+              nodes.map((node) =>
+                node.role
+              ),
+              [
+                { _tag: "Inferred", role: "editable", evidence: ["password"] },
+                { _tag: "Inferred", role: "editable", evidence: ["password"] }
+              ]
+            )
+            assert.deepEqual(nodes[0]!.name, { _tag: "None" })
+            const without = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(without._tag === "Snapshot")
+            assert.notInclude(JSON.stringify(without.root), "\"password\"")
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox")] })), 0)
+            const rendered = Engine.renderText(response.root)
+            assert.notInclude(rendered, "private-unlabeled")
+            assert.notInclude(rendered, "private-labeled")
+            assert.strictEqual(nodes.length, 2, rendered)
+            assert.isTrue(
+              nodes.some((node) =>
+                node.name._tag === "Accessible" && node.name.value === "Account password"
+              ),
+              rendered
+            )
+          }), timeout)
+
         for (const shape of wrappedLinks) {
           for (const partial of shape.id === "three" ? [false, true] : [false]) {
             it.effect(

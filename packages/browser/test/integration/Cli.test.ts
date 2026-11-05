@@ -346,6 +346,82 @@ describe("strider", () => {
       webkitgtk.executable
     ]] as const
   ) {
+    for (const capture of ["local", "strict"]) {
+      it.live(
+        `${backend} discovers password controls with ${capture} capture`,
+        () =>
+          Effect.scoped(
+            Effect.gen(function*() {
+              if (backend === "webkit") yield* useXvfb("1920x1200x24")
+              const server = http.createServer((_, response) => {
+                response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+                response.end(
+                  `<input type="password" value="private-unlabeled"><label>Account password<input type="password" value="private-labeled"></label><label>Code<input id="code" type="password" role="textbox" value="private-explicit"></label><button aria-labelledby="code">Show</button>`
+                )
+              })
+              yield* Effect.acquireRelease(
+                Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+                () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+              )
+              const { port } = server.address() as { readonly port: number }
+              const env = environment()
+              const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "passwords", ...args)
+              const started = yield* strider(
+                env,
+                "start",
+                "--name",
+                "passwords",
+                "--capture",
+                capture,
+                `--${backend}`,
+                executable
+              )
+              assert.strictEqual(started.code, 0, started.err)
+              try {
+                const opened = yield* run("page", "new", "--name", "form", `http://127.0.0.1:${port}/form`)
+                assert.strictEqual(opened.code, 0, opened.err)
+                const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+                const snapshot = yield* page("snapshot")
+                const all = yield* page("--json", "find", "")
+                const found = yield* page("--json", "find", "Password")
+                const labeled = yield* page("--json", "find", "Account password")
+                for (const result of [snapshot, all, found, labeled]) {
+                  assert.strictEqual(result.code, 0, result.err)
+                  assert.notInclude(result.out, "private-unlabeled")
+                  assert.notInclude(result.out, "private-labeled")
+                  assert.notInclude(result.out, "private-explicit")
+                }
+                for (
+                  const [query, extra, expected] of [
+                    ["password", ["--exact"], 2],
+                    ["Password", ["--exact"], 0],
+                    ["Account password", ["--exact"], 1],
+                    ["password", ["--role", "textbox"], 0],
+                    ["password", ["--role", "editable"], 2],
+                    ["private-unlabeled", [], 0],
+                    ["private-labeled", [], 0],
+                    ["private-explicit", [], 0]
+                  ] as const
+                ) {
+                  const result = yield* page("--json", "find", query, ...extra)
+                  assert.strictEqual(result.code, 0, result.err)
+                  assert.lengthOf(JSON.parse(result.out).outcome.value, expected, result.out)
+                }
+                const matches = JSON.parse(found.out).outcome.value as ReadonlyArray<unknown>
+                assert.strictEqual(
+                  matches.length,
+                  2,
+                  JSON.stringify({ snapshot: snapshot.out, all: all.out, found: found.out, labeled: labeled.out })
+                )
+              } finally {
+                yield* run("stop")
+              }
+            }).pipe(Effect.provide(NodeServices.layer))
+          ),
+        timeout
+      )
+    }
+
     it.live(`${backend} preserves startup and repeated page viewports`, () =>
       Effect.scoped(
         Effect.gen(function*() {
