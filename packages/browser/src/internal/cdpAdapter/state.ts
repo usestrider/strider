@@ -53,6 +53,7 @@ export interface TargetEntry {
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
+  overrideLock?: Semaphore.Semaphore | undefined
   viewportLock?: Semaphore.Semaphore | undefined
 }
 

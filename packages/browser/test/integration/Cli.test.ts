@@ -1117,112 +1117,307 @@ describe("strider", () => {
     timeout
   )
 
-  for (const capture of ["strict", "local"]) {
-    it.live(
-      `masks all of an editable field's content with ${capture} capture`,
-      () =>
-        Effect.scoped(Effect.gen(function*() {
-          const server = http.createServer((_, response) => {
-            response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
-            response.end(
-              `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><p id="status">ready</p>`
+  for (const backend of ["chromium", "firefox", "webkit"] as const) {
+    for (const capture of ["strict", "local"]) {
+      it.live(
+        `masks all of an editable field's content with ${capture} capture on ${backend}`,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            if (backend === "webkit") yield* useXvfb()
+            const server = http.createServer((_, response) => {
+              response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+              response.end(
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
+              )
+            })
+            yield* Effect.acquireRelease(
+              Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+              () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
             )
-          })
-          yield* Effect.acquireRelease(
-            Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
-            () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
-          )
-          const { port } = server.address() as { readonly port: number }
-          const url = `http://127.0.0.1:${port}/form`
-          const env = environment()
-          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
-          const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
-          const started = yield* strider(
-            env,
-            "start",
-            "--name",
-            capture,
-            "--capture",
-            capture,
-            "--chromium",
-            chromium.executable
-          )
-          assert.strictEqual(started.code, 0, started.err)
-          try {
-            const opened = yield* run("page", "new", "--name", "form", url)
-            assert.strictEqual(opened.code, 0, opened.err)
-            const snapshot = yield* page("snapshot")
-            assert.strictEqual(snapshot.code, 0, snapshot.err)
-            assert.include(snapshot.out, "textbox \"Rich\"")
-            const found = yield* page("--json", "find", "")
-            assert.strictEqual(found.code, 0, found.err)
-            const contents = [
-              "rich-heading",
-              "rich-link",
-              "rich-button",
-              "rich-image",
-              "roleless-field",
-              "labeled-private"
-            ]
-            const check = (output: string, find = false) => {
-              if (capture === "strict") {
-                assert.deepStrictEqual(contents.filter((content) => output.includes(content)), [], output)
-                assert.include(output, "•••")
-              } else {
-                for (const content of find ? contents.slice(0, -1) : contents) assert.include(output, content)
+            const { port } = server.address() as { readonly port: number }
+            const url = `http://127.0.0.1:${port}/form`
+            const env = environment()
+            const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+            const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+            const started = yield* strider(
+              env,
+              "start",
+              "--name",
+              capture,
+              "--capture",
+              capture,
+              `--${backend}`,
+              backend === "chromium"
+                ? chromium.executable
+                : backend === "firefox"
+                ? firefox.executable
+                : webkitgtk.executable
+            )
+            assert.strictEqual(started.code, 0, started.err)
+            try {
+              const opened = yield* run("page", "new", "--name", "form", url)
+              assert.strictEqual(opened.code, 0, opened.err)
+              const snapshot = yield* page("snapshot")
+              assert.strictEqual(snapshot.code, 0, snapshot.err)
+              assert.include(snapshot.out, "textbox \"Rich\"")
+              const found = yield* page("--json", "find", "")
+              assert.strictEqual(found.code, 0, found.err)
+              const contents = [
+                "rich-heading",
+                "rich-link",
+                "rich-button",
+                "rich-image",
+                "roleless-field",
+                "labeled-private",
+                "article-private",
+                "paragraph-private",
+                "heading-private"
+              ]
+              const check = (output: string, find = false) => {
+                if (capture === "strict") {
+                  assert.deepStrictEqual(contents.filter((content) => output.includes(content)), [], output)
+                  assert.include(output, "•••")
+                } else {
+                  for (
+                    const content of find
+                      ? contents.filter((content) =>
+                        !["labeled-private", "article-private", "paragraph-private"].includes(content)
+                      )
+                      : contents
+                  ) assert.include(output, content)
+                }
               }
-            }
-            check(snapshot.out)
-            check(found.out, true)
-            const matches = JSON.parse(found.out).outcome.value as Array<
-              { ref: string; role: string; name: string; path: string }
-            >
-            assert.includeMembers(matches.map((match) => match.name), ["Rich", "Labeled"])
-            const link = matches.find((match) => match.role === "link")!
-            assert.isDefined(link)
-            assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
-            const button = matches.find((match) => match.role === "button")!
-            assert.match(button.ref, /^e\d+$/)
-            const clicked = yield* page("click", button.ref)
-            assert.strictEqual(clicked.code, 0, clicked.err)
-            const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
-            assert.strictEqual(checked.code, 0, checked.err)
+              check(snapshot.out)
+              check(found.out, true)
+              for (const query of ["rich-heading", "article-private", "paragraph-private", "heading-private"]) {
+                const guessed = yield* page("--json", "find", query)
+                assert.strictEqual(guessed.code, 0, guessed.err)
+                assert.strictEqual(JSON.parse(guessed.out).outcome.value.length > 0, capture === "local", guessed.out)
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: { name: "find", arguments: { page: "form", query } }
+                }], 2)
+                const result = answers.find((answer) => answer.id === 2)?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(answers))
+                assert.strictEqual(result.structuredContent.outcome.length > 0, capture === "local")
+              }
+              const labeled = yield* page("--json", "find", "Article", "--role", "article")
+              assert.strictEqual(JSON.parse(labeled.out).outcome.value.length, 1, labeled.out)
+              const thrown = yield* page("click", "role=button[name=\"Throw\"]")
+              assert.strictEqual(thrown.code, 0, thrown.err)
+              const exceptions = yield* page("--json", "history", "exception")
+              assert.strictEqual(exceptions.code, 0, exceptions.err)
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(thrown.out + exceptions.out, text)
+                }
+                assert.match(exceptions.out, /uncaught.*at [0-9]/)
+              } else assert.include(exceptions.out, "exception-private")
+              const clickedAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "tools/call",
+                params: { name: "click", arguments: { page: "form", target: "role=button[name=\"Throw\"]" } }
+              }], 2)
+              const clickedResult = clickedAnswers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(clickedResult?.isError, JSON.stringify(clickedAnswers))
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(JSON.stringify(clickedResult), text)
+                }
+              }
+              const historyAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "tools/call",
+                params: { name: "history", arguments: { page: "form", kind: "exception" } }
+              }], 2)
+              const historyResult = JSON.stringify(historyAnswers.find((answer) => answer.id === 2)?.result)
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(historyResult, text)
+                }
+                assert.match(historyResult, /uncaught.*at [0-9]/)
+              } else assert.include(historyResult, "exception-private")
+              const matches = JSON.parse(found.out).outcome.value as Array<
+                { ref: string; role: string; name: string; path: string }
+              >
+              assert.includeMembers(matches.map((match) => match.name), ["Rich", "Labeled"])
+              const link = matches.find((match) => match.role === "link")!
+              assert.isDefined(link)
+              assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+              const button = matches.find((match) => match.role === "button")!
+              assert.match(button.ref, /^e\d+$/)
+              const clicked = yield* page("click", button.ref)
+              assert.strictEqual(clicked.code, 0, clicked.err)
+              const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
+              assert.strictEqual(checked.code, 0, checked.err)
 
-            for (const name of ["snapshot", "find"] as const) {
-              const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+              for (const name of ["snapshot", "find"] as const) {
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                  ...handshake,
+                  {
+                    jsonrpc: "2.0",
+                    id: 2,
+                    method: "tools/call",
+                    params: {
+                      name,
+                      arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
+                    }
+                  }
+                ], 2)
+                const answer = answers.find((answer) => answer.id === 2)
+                assert.isUndefined(answer?.error, JSON.stringify(answer))
+                assert.isDefined(answer?.result, JSON.stringify(answers))
+                assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
+                const output = JSON.stringify(answer.result)
+                check(output, name === "find")
+                assert.include(output, "Rich")
+                assert.include(output, "Labeled")
+                if (name === "find") {
+                  const matches = answer.result.structuredContent.outcome
+                  const link = matches.find((match: any) => match.role === "link")
+                  assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+                  assert.match(link.ref, /^e\d+$/)
+                }
+              }
+            } finally {
+              const stopped = yield* run("stop")
+              assert.strictEqual(stopped.code, 0, stopped.err)
+            }
+          })).pipe(Effect.provide(NodeServices.layer)),
+        timeout
+      )
+    }
+  }
+
+  for (const backend of ["chromium", "firefox", "webkit"] as const) {
+    for (const capture of ["strict", "local"]) {
+      it.live(
+        `keeps editable content out of other nodes' names with ${capture} capture on ${backend}`,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            if (backend === "webkit") yield* useXvfb()
+            const pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+            // Each private string reaches the name of a node other than the field itself: an ancestor named from
+            // its content, a clickable element, an empty field named from the field before it, an image's alt.
+            const html = `<title>probe</title>
+<h2><span contenteditable="true">heading-descendant-private</span></h2>
+<a href="#x"><span contenteditable="plaintext-only">link-descendant-private</span></a>
+<table><tr><td><input aria-label="Card" value="cell-value-private"></td></tr></table>
+<input id="referenced" aria-label="Referenced" value="reference-value-private"><button aria-labelledby="referenced"></button>
+<div onclick="void 0"><span contenteditable="true">clickable-descendant-private</span></div>
+<p contenteditable="true">nearby-private</p><div contenteditable="true"></div>
+<div contenteditable="true"><img alt="image-alt-private" src="${pixel}"></div>
+<select aria-label="Plan"><option id="chosen-option" selected>option-private</option></select><button aria-labelledby="chosen-option"></button>
+<div role="textbox" aria-label="Rich"><span id="inside-aria">aria-descendant-private</span></div><button aria-labelledby="inside-aria"></button>
+<div onclick="void 0"><div role="textbox" aria-label="Inner"><img alt="aria-image-private" src="${pixel}"></div></div>
+<h4><span contenteditable="true"><b aria-label="descendant-label-private">x</b></span></h4>
+<h5><span contenteditable="true"><b title="descendant-title-private"></b></span></h5>
+<h6><span contenteditable="true" aria-label="public-field-label">field-root-private</span></h6>
+<h3>public-heading</h3>
+<div>public-nearby</div><div contenteditable="true"></div>`
+            const server = http.createServer((_, response) => {
+              response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+              response.end(html)
+            })
+            yield* Effect.acquireRelease(
+              Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+              () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+            )
+            const { port } = server.address() as { readonly port: number }
+            const env = environment()
+            const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+            const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+            const started = yield* strider(
+              env,
+              "start",
+              "--name",
+              capture,
+              "--capture",
+              capture,
+              `--${backend}`,
+              backend === "chromium"
+                ? chromium.executable
+                : backend === "firefox"
+                ? firefox.executable
+                : webkitgtk.executable
+            )
+            assert.strictEqual(started.code, 0, started.err)
+            try {
+              const opened = yield* run("page", "new", "--name", "form", `http://127.0.0.1:${port}/form`)
+              assert.strictEqual(opened.code, 0, opened.err)
+              const snapshot = yield* page("snapshot")
+              assert.strictEqual(snapshot.code, 0, snapshot.err)
+              const shown: Array<string> = []
+              const matched: Array<string> = []
+              const contents = [
+                "heading-descendant-private",
+                "link-descendant-private",
+                "cell-value-private",
+                "reference-value-private",
+                "clickable-descendant-private",
+                "nearby-private",
+                "image-alt-private",
+                "option-private",
+                "aria-descendant-private",
+                "aria-image-private",
+                "descendant-label-private",
+                "descendant-title-private",
+                "field-root-private"
+              ]
+              for (const content of [...contents, "public-field-label", "public-heading", "public-nearby"]) {
+                if (snapshot.out.includes(content)) shown.push(content)
+                const found = yield* page("--json", "find", content)
+                assert.strictEqual(found.code, 0, found.err)
+                if (JSON.parse(found.out).outcome.value.length > 0) matched.push(content)
+              }
+              const expected = capture === "strict"
+                ? ["public-field-label", "public-heading", "public-nearby"]
+                : [...contents, "public-field-label", "public-heading", "public-nearby"]
+              const queries = [...contents, "public-field-label", "public-heading", "public-nearby"]
+              const snapshotAnswers = yield* mcp(env, ["-s", capture, "mcp"], [
                 ...handshake,
                 {
                   jsonrpc: "2.0",
                   id: 2,
                   method: "tools/call",
-                  params: {
-                    name,
-                    arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
-                  }
+                  params: { name: "snapshot", arguments: { page: "form" } }
                 }
               ], 2)
-              const answer = answers.find((answer) => answer.id === 2)
-              assert.isUndefined(answer?.error, JSON.stringify(answer))
-              assert.isDefined(answer?.result, JSON.stringify(answers))
-              assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
-              const output = JSON.stringify(answer.result)
-              check(output, name === "find")
-              assert.include(output, "Rich")
-              assert.include(output, "Labeled")
-              if (name === "find") {
-                const matches = answer.result.structuredContent.outcome
-                const link = matches.find((match: any) => match.role === "link")
-                assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
-                assert.match(link.ref, /^e\d+$/)
+              const mcpSnapshot = snapshotAnswers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswers))
+              const mcpShown = queries.filter((query) => JSON.stringify(mcpSnapshot).includes(query))
+              const mcpMatched: Array<string> = []
+              for (const query of queries) {
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                  ...handshake,
+                  {
+                    jsonrpc: "2.0",
+                    id: 2,
+                    method: "tools/call",
+                    params: { name: "find", arguments: { page: "form", query } }
+                  }
+                ], 2)
+                const result = answers.find((answer) => answer.id === 2)?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(answers))
+                if (result.structuredContent.outcome.length > 0) mcpMatched.push(query)
               }
+              assert.deepStrictEqual(
+                { shown, matched, mcpShown, mcpMatched },
+                { shown: expected, matched: expected, mcpShown: expected, mcpMatched: expected },
+                snapshot.out
+              )
+            } finally {
+              const stopped = yield* run("stop")
+              assert.strictEqual(stopped.code, 0, stopped.err)
             }
-          } finally {
-            const stopped = yield* run("stop")
-            assert.strictEqual(stopped.code, 0, stopped.err)
-          }
-        })),
-      timeout
-    )
+          })).pipe(Effect.provide(NodeServices.layer)),
+        timeout
+      )
+    }
   }
 
   it.live("exits 0 when its MCP client closes standard input", () =>

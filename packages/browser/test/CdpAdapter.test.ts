@@ -10,6 +10,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
+import * as Scheduler from "effect/Scheduler"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -18,10 +19,415 @@ import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
+import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Har from "../src/internal/har.ts"
 import * as Readable from "../src/internal/readable.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
+
+// Share one dispatcher across the protocol fibers so a checkpoint drains all runnable work,
+// stopping only at an actual protocol reply or permit wait, without counting scheduler turns.
+const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
+  run: (drain: Effect.Effect<void>) => Effect.Effect<A, E, R>
+) {
+  const parent = yield* Scheduler.Scheduler
+  const dispatcher = parent.makeDispatcher()
+  const checkpoint = parent.makeDispatcher()
+  const drain = Effect.callback<void>((resume) => {
+    checkpoint.scheduleTask(() => {
+      dispatcher.flush()
+      resume(Effect.void)
+    }, 0)
+  })
+  return yield* run(drain).pipe(
+    Effect.forkChild,
+    Effect.flatMap(Fiber.join),
+    Effect.provideService(Scheduler.Scheduler, {
+      executionMode: parent.executionMode,
+      shouldYield: (fiber) => parent.shouldYield(fiber),
+      makeDispatcher: () => dispatcher
+    })
+  )
+})
+
+describe("CDP locale declaration release", () => {
+  for (const holdLanguageReply of [false, true]) {
+    for (const mode of ["reset", "remaining", "replacement"] as const) {
+      it.effect(`does not reapply a released locale from an in-flight target configuration (${mode}, ${holdLanguageReply ? "held release language reply" : "overtaking replies"})`, () =>
+        withProtocolScheduler((drain) =>
+          Effect.gen(function*() {
+            const remaining = mode === "reset" ? undefined : "de-DE"
+            const browser = yield* makeBrowser
+            const heldLocale = yield* Deferred.make<Sent>()
+            const resumeReplies = yield* Deferred.make<void>()
+            const ready = yield* Deferred.make<void>()
+            const commands: Array<Sent> = []
+            const reply = (command: Sent, result: object = {}) =>
+              browser.receive({ id: command.id, sessionId: command.sessionId, result })
+            yield* Effect.gen(function*() {
+              while (true) {
+                const command = yield* browser.next
+                commands.push(command)
+                // Hold configuration at its locale command. Holding reset's language reply too
+                // reproduces the observed FIFO overlap. With a remaining/replacement locale,
+                // its locale reply overtakes this one before its language reply is held.
+                if (command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR") {
+                  yield* Deferred.succeed(heldLocale, command)
+                  continue
+                }
+                if (
+                  holdLanguageReply && command.method === "Emulation.setUserAgentOverride" &&
+                  command.params?.acceptLanguage !== "fr-FR"
+                ) {
+                  yield* Deferred.await(resumeReplies)
+                }
+                const result = command.method === "Browser.getVersion"
+                  ? {
+                    protocolVersion: "1.3",
+                    product: "Chrome/155.0.8059.79",
+                    revision: "test",
+                    userAgent: "HeadlessChrome",
+                    jsVersion: "test"
+                  }
+                  : command.method === "Target.getBrowserContexts"
+                  ? { browserContextIds: [] }
+                  : command.method === "Page.getFrameTree"
+                  ? {
+                    frameTree: {
+                      frame: {
+                        id: "T1",
+                        loaderId: "initial",
+                        url: "about:blank",
+                        securityOrigin: "://",
+                        mimeType: "text/html"
+                      }
+                    }
+                  }
+                  : {}
+                yield* reply(command, result)
+              }
+            }).pipe(Effect.forkScoped)
+            const adapter = yield* CdpAdapter.connect(browser.transport, {
+              ownership: "attached",
+              sink: (fact) =>
+                fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+            })
+            if (mode === "remaining") {
+              yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+                _tag: "Override",
+                override: { _tag: "Locale", locale: "de-DE" }
+              })
+            }
+            const declarationScope = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(declarationScope, Exit.void))
+            // Installing before attachment makes configureTarget the sole source of fr-FR application.
+            yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+              _tag: "Override",
+              override: { _tag: "Locale", locale: "fr-FR" }
+            }).pipe(Scope.provide(declarationScope))
+            yield* browser.receive({
+              method: "Target.attachedToTarget",
+              params: {
+                sessionId: "S1",
+                targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+                waitingForDebugger: false
+              }
+            })
+            const held = yield* Deferred.await(heldLocale)
+            const replacement = mode === "replacement"
+              ? yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+                _tag: "Override",
+                override: { _tag: "Locale", locale: "de-DE" }
+              }).pipe(Effect.forkScoped)
+              : undefined
+            // Start release while configuration is awaiting its locale reply. Let runnable fibers drain:
+            // the unfixed adapter sends reset-UA here, matching the retained Chromium FIFO overlap.
+            const closing = yield* Scope.close(declarationScope, Exit.void).pipe(
+              Effect.provideService(Cleanup.Confirm, true),
+              Effect.forkChild
+            )
+            yield* drain
+            yield* reply(held)
+            yield* Deferred.succeed(resumeReplies, undefined)
+            yield* Fiber.join(closing)
+            if (replacement !== undefined) yield* Fiber.join(replacement)
+            yield* Deferred.await(ready)
+            const localeCommands = commands.filter((command) => command.method === "Emulation.setLocaleOverride")
+            assert.deepStrictEqual(localeCommands.at(-1)?.params, remaining === undefined ? {} : { locale: remaining })
+            const languageCommands = commands.filter((command) => command.method === "Emulation.setUserAgentOverride")
+            assert.deepStrictEqual(languageCommands.at(-1)?.params, {
+              userAgent: "HeadlessChrome",
+              ...(remaining === undefined ? {} : { acceptLanguage: remaining })
+            })
+            assert.strictEqual(languageCommands.at(-1)?.sessionId, "S1")
+          })
+        ))
+    }
+  }
+  it.effect("reads current declarations when queued target configuration acquires the permit", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const heldLocale = yield* Deferred.make<Sent>()
+        const heldGate = yield* Deferred.make<Sent>()
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        let holdingLocale = true
+        const reply = (command: Sent, result: object = {}) =>
+          browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            // Hold installation's first locale reply; any stale configuration command must
+            // still receive its reply so the regression reports an assertion, not a deadlock.
+            if (
+              command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR" && holdingLocale
+            ) {
+              holdingLocale = false
+              yield* Deferred.succeed(heldLocale, command)
+              continue
+            }
+            if (command.method === "Target.setAutoAttach" && command.sessionId === "S1") {
+              yield* Deferred.succeed(heldGate, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "about:blank",
+                    securityOrigin: "://",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : {}
+            yield* reply(command, result)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        // Attachment has registered the target, but its gate has not reached configureTarget yet.
+        const gate = yield* Deferred.await(heldGate)
+        const scope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+        const installing = yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Scope.provide(scope), Effect.forkChild)
+        const locale = yield* Deferred.await(heldLocale)
+        // Installation holds the override permit. Configuration now queues behind it.
+        yield* reply(gate)
+        yield* drain
+        // Remove the declaration before configuration can acquire the permit.
+        const closing = yield* Scope.close(scope, Exit.void).pipe(
+          Effect.provideService(Cleanup.Confirm, true),
+          Effect.forkChild
+        )
+        yield* drain
+        yield* reply(locale)
+        yield* Fiber.join(installing)
+        yield* Fiber.join(closing)
+        yield* Deferred.await(ready)
+        // Only installation may write fr-FR; a pre-permit snapshot makes configuration write it again.
+        assert.strictEqual(
+          commands.filter((command) =>
+            command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR"
+          ).length,
+          1
+        )
+        assert.deepStrictEqual(
+          commands.filter((command) => command.method === "Emulation.setUserAgentOverride").at(-1)?.params,
+          { userAgent: "HeadlessChrome" }
+        )
+      })
+    ))
+})
+
+describe("CDP viewport restoration", () => {
+  it.effect("leaves other overrides free to apply while it waits for the renderer", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        // The renderer stays at another width after the override clears, so restoration keeps waiting for a resize.
+        let width = 800
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Emulation.clearDeviceMetricsOverride") width = 999
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "about:blank",
+                    securityOrigin: "://",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.createIsolatedWorld"
+              ? { executionContextId: 7 }
+              : command.method === "Runtime.evaluate"
+              ? { result: { type: "object", value: [width, 600] } }
+              : {}
+            yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        yield* Deferred.await(ready)
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        const viewportScope = yield* Scope.make()
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+        }).pipe(Scope.provide(viewportScope))
+        const restoring = yield* Scope.close(viewportScope, Exit.void).pipe(Effect.forkChild)
+        yield* drain
+        const locale = yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        const sentWhileRestoring = commands.some((command) => command.method === "Emulation.setLocaleOverride")
+        // Let restoration finish, so a failure reports the assertion rather than a hung teardown.
+        width = 800
+        yield* browser.receive({ method: "Page.frameResized", params: {}, sessionId: "S1" })
+        yield* Fiber.join(restoring)
+        yield* Fiber.join(locale)
+        assert.isTrue(sentWhileRestoring)
+      })
+    ))
+  it.effect("leaves other overrides free to apply while target configuration waits for viewport measurement", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        const measurement = yield* Deferred.make<Sent>()
+        let holdMeasurement = true
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Page.createIsolatedWorld" && holdMeasurement) {
+              holdMeasurement = false
+              yield* Deferred.succeed(measurement, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "about:blank",
+                    securityOrigin: "://",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.createIsolatedWorld"
+              ? { executionContextId: 7 }
+              : command.method === "Runtime.evaluate"
+              ? { result: { type: "object", value: [800, 600] } }
+              : {}
+            yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        // Installation before attachment means the blocked viewport operation belongs to configuration.
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        const held = yield* Deferred.await(measurement)
+        const locale = yield* adapter.declare(context, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        const sentWhileConfiguring = commands.some((command) => command.method === "Emulation.setLocaleOverride")
+        yield* browser.receive({ id: held.id, sessionId: held.sessionId, result: { executionContextId: 7 } })
+        yield* Deferred.await(ready)
+        yield* Fiber.join(locale)
+        assert.isTrue(sentWhileConfiguring)
+      })
+    ))
+})
 
 describe("CDP adapter redirect headers", () => {
   for (
