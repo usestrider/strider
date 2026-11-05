@@ -219,12 +219,14 @@ class LaunchProfile extends Schema.Class<LaunchProfile>("@usestrider/browser/Lau
   prefs: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean]))
 }) {}
 declare const stock: LaunchProfile                       // the browser's own defaults; nothing added
-declare const automation: LaunchProfile                  // first-run, sync and update prompts off; nothing a page can observe; and Firefox's JSON viewer off, so a JSON response is the document served, and its new pages opened as windows, so a page behind a popup keeps rendering
+declare const automation: LaunchProfile                  // first-run, sync and update prompts off; Chromium new-surface captures; and Firefox's JSON viewer off, so a JSON response is the document served, and its new pages opened as windows, so a page behind a popup keeps rendering
 declare const concurrent: LaunchProfile                  // automation, plus background-timer and renderer throttling off, for many pages at once
 
 program.pipe(Effect.provide(Chromium.layer({ executablePath: "/usr/bin/chromium" })))
 program.pipe(Effect.provide(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))   // each machine says
 ```
+
+- Chromium's automation and concurrent profiles enable `CDPScreenshotNewSurface`, which requests repaint on a new surface for captures. Capture can drive rendering and is not guaranteed to be unobservable to the page. Concurrent includes automation and adds background timer/renderer throttling switches. Stock adds nothing, and a caller-created profile's own arguments replace the named preset's arguments. Attached browsers are unchanged.
 
 - **A launch names its browser's executable, and the library never looks for or installs one.** `executablePath` is required, so `Chromium.layer({})` doesn't compile, and it must be absolute: a relative path depends on the working directory and a bare command name on `PATH`, so either fails with `InvalidInput`. There are no channels, because no table of install locations is right on every system: NixOS, Snap, Flatpak and the open-source Chromium are never where it says, and Firefox's channels share their install paths. Install a browser as you would any program (an operating system's package, a vendor's installer, a Nix package): stock browsers only, none patched for automation. A path where nothing is fails with `ExecutableNotFound{searched}`.
 - **`strider browsers` finds the paths, for a person or an agent, once.** It lists the browsers on the machine, by backend: on `PATH` under the command names browsers install, where Chrome's, Edge's and Firefox's installers put them, and, on Linux, where WebKitGTK's and WPE's packages put their MiniBrowser, each with the version it prints and where its path leads; a MiniBrowser's version is read from the path it leads to, where that names one, since asking it would open a window. `--json` prints the same as data. It runs nothing but `--version`, and the library never calls it. Code that runs on several machines reads the path from each one's environment with `layerConfig`.
