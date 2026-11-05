@@ -31,6 +31,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
+import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Page from "./Page.ts"
 import type * as PageClock from "./PageClock.ts"
@@ -277,9 +278,11 @@ export interface UserContext extends ObservedUserContext {
     handler: Route.Handler<E, R>,
     options?: Route.Options | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
-  route<E, R, P extends Route.Phase = "request">(
+  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = Route.Phase>(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, NoInfer<P> | "request">,
+    handler:
+      & ((intercepted: Route.Intercepted<NoInfer<P> | "request">) => Effect.Effect<Route.Decision<D>, E, R>)
+      & RoutePhaseDiagnostic.DefaultPhaseDiagnostic<D, NoInfer<P> | "request">,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**

@@ -243,14 +243,37 @@ describe("route phase variance", () => {
   })
 })
 
-
 describe("omitted route phase diagnostics", () => {
   it("names the phase required by response decisions", () => {
-    expect(page.route("**", response)).type.toRaiseError('Response decisions need { phase: "response" }')
-    expect(context.route("**", response)).type.toRaiseError('Response decisions need { phase: "response" }')
+    expect(page.route("**", response)).type.toRaiseError("Response decisions need { phase: 'response' }")
+    expect(context.route("**", response)).type.toRaiseError("Response decisions need { phase: 'response' }")
   })
   it("names the phase required by auth decisions", () => {
-    expect(page.route("**", auth)).type.toRaiseError('Auth decisions need { phase: "auth" }')
-    expect(context.route("**", auth)).type.toRaiseError('Auth decisions need { phase: "auth" }')
+    expect(page.route("**", auth)).type.toRaiseError("Auth decisions need { phase: 'auth' }")
+    expect(context.route("**", auth)).type.toRaiseError("Auth decisions need { phase: 'auth' }")
+  })
+})
+
+describe("route diagnostics preserve optional-phase requirements", () => {
+  const handler: Route.Handler<"handler failure", Dependency, Route.Phase> = () =>
+    Effect.flatMap(dependency, () => Route.continue)
+
+  it("page.route retains the requirements of broader handlers", () => {
+    expect(page.route("**", handler, optionalAuth)).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
+  })
+  it("context.route retains the requirements of broader handlers", () => {
+    expect(context.route("**", handler, optionalAuth)).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
   })
 })
