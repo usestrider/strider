@@ -34,6 +34,7 @@ describe("FileInput across a connection", () => {
           "unreadable",
           "stat-failure",
           "read-failure",
+          "missing-time",
           "missing-services",
           "mixed",
           "empty",
@@ -118,14 +119,18 @@ describe("FileInput across a connection", () => {
               if (source === "missing-services") {
                 Object.assign(Handles.page(page).runtime, { fileSystem: Option.none() })
               }
-              if (source === "stat-failure" || source === "read-failure") {
+              if (source === "stat-failure" || source === "read-failure" || source === "missing-time") {
                 const runtime = Handles.page(page).runtime
                 Object.assign(runtime, {
                   fileSystem: Option.map(runtime.fileSystem, (fs) => ({
                     ...fs,
                     open: (path: string) =>
                       fs.open(path).pipe(Effect.map((file) =>
-                        source === "stat-failure"
+                        source === "missing-time" ?
+                          Object.defineProperty(Object.create(file), "stat", {
+                            value: file.stat.pipe(Effect.map((info) => ({ ...info, mtime: Option.none() })))
+                          }) :
+                          source === "stat-failure"
                           ? Object.defineProperty(Object.create(file), "stat", {
                             value: fs.stat("/nowhere/stat-failure")
                           })
@@ -217,6 +222,20 @@ describe("FileInput across a connection", () => {
                   return bytes
                 })
                 assert.strictEqual(Buffer.concat(decoded).toString(), contents)
+                const metadata = evaluations.find((call) =>
+                  call.functionDeclaration.includes("function finishFile")
+                )!.arguments
+                assert.deepStrictEqual(metadata[1], { _tag: "Value", value: { type: "string", value: "caller.txt" } })
+                assert.deepStrictEqual(metadata[2], { _tag: "Value", value: { type: "string", value: "text/plain" } })
+                if (source === "bytes" || source === "missing-time") {
+                  assert.deepStrictEqual(metadata[3], { _tag: "Value", value: { type: "undefined" } })
+                } else {
+                  const stat = yield* Option.getOrThrow(Handles.page(page).runtime.fileSystem).stat(file)
+                  assert.deepStrictEqual(metadata[3], {
+                    _tag: "Value",
+                    value: { type: "number", value: Option.getOrThrow(stat.mtime).getTime() }
+                  })
+                }
               }
             }).pipe(Effect.provide(connection))
           })).pipe(Effect.provide(NodeServices.layer)))
@@ -252,6 +271,14 @@ describe("file preparation", () => {
           FileInput.remote(FilePath.Remote.make("/host/b.txt"))
         ])
         assert.deepStrictEqual(prepared, { _tag: "Paths", files: ["/caller/a.txt", "/host/b.txt"] })
+        const relative = yield* Preparation.prepare({ ...launched, path: runtime.path }, [
+          FileInput.local(path.relative(process.cwd(), import.meta.filename))
+        ])
+        assert.deepStrictEqual(relative, { _tag: "Paths", files: [import.meta.filename] })
+        assert.strictEqual(
+          (yield* Preparation.prepare(launched, [FileInput.local("relative.txt")]).pipe(Effect.flip))._tag,
+          "InvalidInput"
+        )
         const mixed = yield* Preparation.prepare(launched, [
           FileInput.local("/caller/a.txt"),
           FileInput.bytes("b", "text/plain", new Uint8Array())
