@@ -1526,6 +1526,425 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const checked of [true, false]) {
+        for (const association of ["explicit", "wrapping"] as const) {
+          for (
+            const kind of [
+              "ordinary",
+              "inert-link",
+              "inert-media",
+              "image",
+              "nearest",
+              "own-ancestor",
+              "prevented",
+              "own",
+              "native",
+              "missing",
+              "text",
+              "plain",
+              "button",
+              "a",
+              "area",
+              "input",
+              "select",
+              "textarea",
+              "summary",
+              "audio",
+              "video",
+              "iframe",
+              "embed",
+              "object",
+              "details",
+              "img",
+              "role-link",
+              "editable",
+              "role",
+              "ancestor",
+              "link-ancestor",
+              "editable-false",
+              "editable-ancestor"
+            ] as const
+          ) {
+            it.effect(
+              `label descendant ${association} ${kind} ${checked ? "check" : "uncheck"}`,
+              () =>
+                Effect.gen(function*() {
+                  const ordinary = kind === "ordinary" || kind === "prevented" || kind === "inert-link" ||
+                    kind === "inert-media" || kind === "image"
+                  const own = kind === "own" || kind === "own-ancestor" || kind === "native"
+                  const attrs = kind === "a" || kind === "area" ?
+                    "href=\"#away\"" :
+                    kind === "audio" || kind === "video" ?
+                    "controls" :
+                    kind === "editable" ?
+                    "contenteditable=\"true\"" :
+                    kind === "role"
+                    ? "role=\"button\""
+                    : kind === "role-link"
+                    ? "role=\"link\""
+                    : kind === "editable-false" ?
+                    "contenteditable=\"false\""
+                    : kind === "img"
+                    ? "usemap=\"#map\""
+                    : ""
+                  const tag = [
+                      "button",
+                      "a",
+                      "area",
+                      "input",
+                      "select",
+                      "textarea",
+                      "summary",
+                      "audio",
+                      "video",
+                      "iframe",
+                      "embed",
+                      "object",
+                      "details",
+                      "img"
+                    ].includes(kind) ?
+                    kind :
+                    "span"
+                  const targetTag = kind === "inert-link"
+                    ? "a"
+                    : kind === "inert-media"
+                    ? "video"
+                    : kind === "image"
+                    ? "img"
+                    : tag
+                  const target = kind === "native" ?
+                    `<input id="target" type="checkbox" ${checked ? "" : "checked"}>` :
+                    `<${targetTag} id="target" ${attrs} ${
+                      (kind === "own" || kind === "own-ancestor")
+                        ? `role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault();this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"`
+                        : ""
+                    } style="display:inline-block;width:100px;height:30px">Toggle</${targetTag}>`
+                  const wrapped = kind === "ancestor" || kind === "own-ancestor" ?
+                    `<button>${target}</button>` :
+                    kind === "link-ancestor" ?
+                    `<a href="#away">${target}</a>` :
+                    kind === "editable-ancestor" || kind === "editable-false"
+                    ? `<div contenteditable="true">${target}</div>`
+                    : target
+                  const input = `<input id="box" type="${kind === "text" ? "text" : "checkbox"}" ${
+                    checked ? "" : "checked"
+                  }>`
+                  const { url } = yield* fixture(() =>
+                    `${association === "explicit" ? input : ""}<label for="${
+                      kind === "missing" ? "absent" : kind === "plain" ? "" : "box"
+                    }" ${
+                      association === "wrapping" && kind !== "missing" && kind !== "plain" ? "id=\"wrapping\"" : ""
+                    } ${kind === "prevented" ? "onclick=\"event.preventDefault()\"" : ""}>${
+                      association === "wrapping" ? input : ""
+                    }${wrapped}</label>${out}<script>
+                  const label = document.querySelector('#wrapping'); if(label) label.removeAttribute('for');
+                  ${
+                      kind === "nearest"
+                        ? "const target = document.querySelector('#target'); const inner = document.createElement('label'); inner.htmlFor = 'absent'; target.before(inner); inner.append(target);"
+                        : ""
+                    }
+                  document.addEventListener('pointerdown', e => { const r=document.querySelector('#target').getBoundingClientRect(); ${
+                      say("e.target.id + ':' + (e.clientX-r.left) + ':' + (e.clientY-r.top)")
+                    } });
+                  </script>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const target = page.locator("#target")
+                    const action = () =>
+                      checked
+                        ? target.check({ position: { x: 7, y: 9 } })
+                        : target.uncheck({ position: { x: 7, y: 9 } })
+                    if (ordinary || own) {
+                      if (kind === "prevented") {
+                        const error = yield* action().pipe(Effect.flip)
+                        assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
+                        assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                      } else {
+                        yield* action()
+                        assert.strictEqual(yield* (own ? target : page.locator("#box")).isChecked, checked)
+                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        yield* page.evaluateInMainWorld(() => {
+                          document.querySelector("#out")!.textContent = "reset"
+                        })
+                        yield* action()
+                        assert.strictEqual(yield* page.locator("#out").readText, "reset")
+                      }
+                      if (!own) {
+                        const error = yield* target.isChecked.pipe(Effect.flip)
+                        assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+                        const expectation = yield* target.pipe(
+                          Expect.toBeChecked,
+                          Deadline.within("1 second"),
+                          Effect.flip
+                        )
+                        assert(expectation instanceof Expect.ExpectationFailed, String(expectation))
+                      } else assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
+                    } else {
+                      for (const state of [false, true]) {
+                        yield* page.evaluateInMainWorld((value: boolean) => {
+                          ;(document.querySelector("#box") as HTMLInputElement).checked = value
+                        }, state)
+                        const error = yield* action().pipe(Effect.flip)
+                        assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+                        assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+                      }
+                    }
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      it.effect("label descendant refuses ARIA widget ancestors before input", () =>
+        Effect.gen(function*() {
+          const roles = [
+            "button",
+            "checkbox",
+            "combobox",
+            "grid",
+            "gridcell",
+            "link",
+            "listbox",
+            "menu",
+            "menubar",
+            "menuitem",
+            "menuitemcheckbox",
+            "menuitemradio",
+            "option",
+            "radio",
+            "radiogroup",
+            "scrollbar",
+            "searchbox",
+            "separator",
+            "slider",
+            "spinbutton",
+            "switch",
+            "tab",
+            "tablist",
+            "textbox",
+            "tree",
+            "treegrid",
+            "treeitem"
+          ]
+          const { url } = yield* fixture(() =>
+            `<input id="box" type="checkbox">${
+              roles.map((role) =>
+                `<label for="box"><span role="${role}"><span id="${role}">Toggle</span></span></label>`
+              ).join("")
+            }${out}<script>document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} })</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            for (const role of roles) {
+              const target = page.locator(`#${role}`)
+              for (const action of [target.check(), target.uncheck()]) {
+                const error = yield* action.pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+              }
+            }
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            assert.strictEqual(yield* page.locator("#box").isChecked, false)
+          }))
+        }), timeout)
+
+      // A slot places light DOM inside a shadow tree's control, and SVG links may carry only xlink:href; the pointer
+      // reaches that control or link, so each is an interactive ancestor the parent chain alone doesn't show.
+      const slotted = `<span id="host"><span id="target">Toggle</span></span>`
+      const shadowed = (inner: string) =>
+        `document.querySelector("#host").attachShadow({mode:"open"}).innerHTML=${JSON.stringify(inner)};`
+      for (
+        const [kind, content, script] of [
+          ["slotted into a shadow button", slotted, shadowed("<button><slot></slot></button>")],
+          ["slotted into a shadow link", slotted, shadowed(`<a href="#away"><slot></slot></a>`)],
+          [
+            "in an SVG xlink:href link",
+            `<svg width="100" height="30" xmlns:xlink="http://www.w3.org/1999/xlink"><a xlink:href="#away"><rect id="target" width="100" height="30"/></a></svg>`,
+            ""
+          ]
+        ] as const
+      ) {
+        it.effect(`label descendant refuses before input when ${kind}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box">${content}</label>${out}<script>${script}
+              document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} }, true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              for (const state of [false, true]) {
+                yield* page.evaluateInMainWorld((value: boolean) => {
+                  ;(document.querySelector("#box") as HTMLInputElement).checked = value
+                }, state)
+                for (const action of [target.check(), target.uncheck()]) {
+                  const error = yield* action.pipe(Effect.flip)
+                  assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+                }
+                assert.strictEqual(yield* page.locator("#box").isChecked, state)
+              }
+              assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => location.hash), "")
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "label descendant slotted into an ordinary shadow element follows the label",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box">${slotted}</label><script>${
+                shadowed("<b><slot></slot></b>")
+              }</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#target").check()
+              assert.strictEqual(yield* page.locator("#box").isChecked, true)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "label descendant boundary follows the DOM label control rather than its ARIA state",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box" role="checkbox" aria-checked="true"><span id="target">Toggle</span></label><label role="checkbox" aria-checked="true"><span id="orphan">Orphan</span></label>${out}<script>document.addEventListener('pointerdown', e => { ${
+                say("'pointer ' + e.target.id")
+              } }, true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              for (const checked of [true, false]) {
+                yield* page.evaluateInMainWorld((value: boolean) => {
+                  document.querySelector("label[for=\"box\"]")!.setAttribute("aria-checked", String(value))
+                  document.querySelector("#out")!.textContent = "reset"
+                }, checked)
+                yield* checked ? target.check() : target.uncheck()
+                assert.strictEqual(yield* page.locator("#box").isChecked, checked)
+                assert.strictEqual(yield* page.locator("#out").readText, "pointer target")
+                yield* page.evaluateInMainWorld((value: boolean) => {
+                  document.querySelector("label[for=\"box\"]")!.setAttribute("aria-checked", String(!value))
+                  document.querySelector("#out")!.textContent = "reset"
+                }, checked)
+                yield* checked ? target.check() : target.uncheck()
+                assert.strictEqual(yield* page.locator("#out").readText, "reset")
+              }
+              const orphan = page.locator("#orphan")
+              for (const action of [orphan.check(), orphan.uncheck()]) {
+                const error = yield* action.pipe(Effect.flip)
+                assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+              }
+              assert.strictEqual(yield* page.locator("#out").readText, "reset")
+            }))
+          }),
+        timeout
+      )
+
+      for (const kind of ["shadow target", "DOM widget behind a shadow label"] as const) {
+        it.effect(`label descendant boundary refuses ${kind} without input`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox"><label for="box"><span id="host" ${
+                kind === "shadow target" ? "" : "role=\"button\""
+              }>${kind === "shadow target" ? "" : "<span id=\"target\">Toggle</span>"}</span></label>${out}<script>${
+                shadowed(
+                  kind === "shadow target" ? "<span id=\"target\">Toggle</span>" : "<label><slot></slot></label>"
+                )
+              }document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} }, true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              for (const state of [false, true]) {
+                yield* page.evaluateInMainWorld((value: boolean) => {
+                  ;(document.querySelector("#box") as HTMLInputElement).checked = value
+                }, state)
+                for (const action of [target.check(), target.uncheck()]) {
+                  const error = yield* action.pipe(Effect.flip)
+                  assert(Locator.isLocatorError(error) && error.reason._tag === "WrongElement", String(error))
+                }
+              }
+              assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => location.hash), "")
+            }))
+          }), timeout)
+      }
+
+      for (const kind of ["DOM", "slot"] as const) {
+        it.effect(
+          `label descendant boundary excludes interactive ancestors above its ${kind} label`,
+          () =>
+            Effect.gen(function*() {
+              const label = "<label for=\"box\"><span id=\"target\">Toggle</span></label>"
+              const { url } = yield* fixture(() =>
+                `<input id="box" type="checkbox">${
+                  kind === "DOM" ? `<a href="#away">${label}</a>` : `<span id="host">${label}</span>`
+                }${out}<script>${
+                  kind === "slot" ? shadowed("<button><slot></slot></button>") : ""
+                }document.addEventListener('pointerdown', e => { ${say("e.target.id")} }, true)</script>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#target")
+                yield* target.check()
+                assert.strictEqual(yield* page.locator("#box").isChecked, true)
+                yield* target.uncheck()
+                assert.strictEqual(yield* page.locator("#box").isChecked, false)
+                assert.strictEqual(yield* page.locator("#out").readText, "target")
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => location.hash), "")
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "label descendant boundary preserves own state when slotted into a button",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" checked><label for="box"><span id="host"><span id="target" role="checkbox" aria-checked="false" onclick="event.preventDefault();this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))">Toggle</span></span></label>${out}<script>${
+                shadowed("<button><slot></slot></button>")
+              }document.addEventListener('pointerdown', e => { ${say("e.target.id")} }, true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#target")
+              yield* target.check()
+              assert.strictEqual(yield* target.isChecked, true)
+              assert.strictEqual(yield* page.locator("#box").isChecked, true)
+              assert.strictEqual(yield* page.locator("#out").readText, "target")
+              yield* page.evaluateInMainWorld(() => {
+                ;(document.querySelector("#box") as HTMLInputElement).checked = false
+                document.querySelector("#out")!.textContent = "reset"
+              })
+              yield* target.check()
+              assert.strictEqual(yield* page.locator("#out").readText, "reset")
+              yield* target.uncheck()
+              assert.strictEqual(yield* target.isChecked, false)
+              assert.strictEqual(yield* page.locator("#box").isChecked, false)
+              assert.strictEqual(yield* page.locator("#out").readText, "target")
+            }))
+          }),
+        timeout
+      )
+
       // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
