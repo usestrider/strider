@@ -18,7 +18,7 @@ const rejected = new Protocol.ProtocolError({
   })
 })
 
-const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset") => {
+const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "populate-reset" | "partial") => {
   const events: Array<string> = []
   class InputElement {
     type = "file"
@@ -64,9 +64,9 @@ const fixture = (mode: "populate" | "ignore" | "refuse" | "rollback-failure" | "
             nodes.get(params.nodeHandle)!.files = ["partially loaded"]
             return Effect.fail(rejected)
           }
-          if (mode === "populate" || mode === "populate-reset") {
+          if (mode === "populate" || mode === "populate-reset" || mode === "partial") {
             const input = nodes.get(params.nodeHandle)!
-            input.files = [...params.filenames]
+            input.files = mode === "partial" ? params.filenames.slice(0, 1) : [...params.filenames]
             input.dispatchEvent({ type: "input", isTrusted: true })
             input.dispatchEvent({ type: "change", isTrusted: true })
             if (mode === "populate-reset") input.files = []
@@ -142,6 +142,16 @@ describe("WebKit native file replacement", () => {
       yield* replace([])
       assert.deepStrictEqual(target.files, [])
       assert.deepStrictEqual(events, ["input:one|two", "change:one|two", "input:", "change:"])
+      assert.isFalse(hasSaved())
+    }))
+
+  it.effect("refuses a trusted native delivery that loaded fewer files than requested", () =>
+    Effect.gen(function*() {
+      // A trusted input event proves Automation touched the input, not that it loaded every file asked for.
+      const { target, replace, hasSaved } = fixture("partial")
+      const result = yield* replace(["one", "two"]).pipe(Effect.exit)
+      assert(Exit.isFailure(result), `accepted ${target.files.join("|")} for one|two`)
+      assert.deepStrictEqual(target.files, ["previous"])
       assert.isFalse(hasSaved())
     }))
 })
