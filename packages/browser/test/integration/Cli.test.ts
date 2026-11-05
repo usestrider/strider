@@ -390,6 +390,21 @@ describe("strider", () => {
                   assert.notInclude(result.out, "private-unlabeled")
                   assert.notInclude(result.out, "private-labeled")
                 }
+                for (
+                  const [query, extra, expected] of [
+                    ["password", ["--exact"], 2],
+                    ["Password", ["--exact"], 0],
+                    ["Account password", ["--exact"], 1],
+                    ["password", ["--role", "textbox"], 0],
+                    ["password", ["--role", "editable"], 2],
+                    ["private-unlabeled", [], 0],
+                    ["private-labeled", [], 0]
+                  ] as const
+                ) {
+                  const result = yield* page("--json", "find", query, ...extra)
+                  assert.strictEqual(result.code, 0, result.err)
+                  assert.lengthOf(JSON.parse(result.out).outcome.value, expected, result.out)
+                }
                 const matches = JSON.parse(found.out).outcome.value as ReadonlyArray<unknown>
                 assert.strictEqual(
                   matches.length,

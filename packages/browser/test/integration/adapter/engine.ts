@@ -167,14 +167,28 @@ export const engine = (backend: Backend) =>
               }
             }
             visit(response.root)
+            assert.notInclude(JSON.stringify(response), "private-unlabeled")
+            assert.notInclude(JSON.stringify(response), "private-labeled")
+            assert.deepEqual(
+              nodes.map((node) =>
+                node.role
+              ),
+              [
+                { _tag: "Inferred", role: "editable", evidence: ["password"] },
+                { _tag: "Inferred", role: "editable", evidence: ["password"] }
+              ]
+            )
+            assert.deepEqual(nodes[0]!.name, { _tag: "None" })
+            const without = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(without._tag === "Snapshot")
+            assert.notInclude(JSON.stringify(without.root), "\"password\"")
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox")] })), 0)
             const rendered = Engine.renderText(response.root)
             assert.notInclude(rendered, "private-unlabeled")
             assert.notInclude(rendered, "private-labeled")
             assert.strictEqual(nodes.length, 2, rendered)
             assert.isTrue(
-              nodes.some((node) =>
-                node.name._tag === "Accessible" && node.name.value === "Account password"
-              ),
+              nodes.some((node) => node.name._tag === "Accessible" && node.name.value === "Account password"),
               rendered
             )
           }), timeout)
