@@ -752,3 +752,71 @@ Rejected: treating every addition as a minor release regardless of stability, wh
 unstable breaks the same version signal; treating every pre-1.0 change as a patch, which removes that signal; and
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
+
+## Chromium captures use a new surface in automation and concurrent
+
+The shared Chromium automation arguments enable `CDPScreenshotNewSurface`; concurrent inherits the same setting
+and adds its three throttling switches. On Chromium 155.0.8059.79, paired off/on runs in both variant orders
+suppressed the slow viewport mode: order-stratified p95 fell from 58–71 ms to 37–41 ms. Repeated five-capture
+batches approached Playwright's two observed modes, with p95 falling from 255–265 ms to about 170 ms. These
+mixed distributions support lower tails, not a fixed median saving, parity, a general element benefit or a dense
+image improvement. Renderer, encoding and transfer costs remain unsplit.
+
+Pinned Playwright 1.64.1's `playwright-core/lib/coreBundle.js`, in `chromiumSwitches`, includes
+`process.env.PLAYWRIGHT_LEGACY_SCREENSHOT ? "" : "--enable-features=CDPScreenshotNewSurface"` in its default
+switches. The surrounding switch array filters empty entries and also disables background timer, occluded-window
+and renderer throttling. Thus setting its legacy opt-out omits the enable switch; it does not explicitly disable
+the feature. This is prior art for the path, not proof of compatibility or a reason to copy its other defaults.
+Strider uses its own measured scope and retains every capture guard and required layout-metrics read.
+
+Captures can drive rendering and are not promised to be unobservable. With both paths, genuinely minimized
+windows under private Xvfb/Openbox remained natively minimized while capture transiently emitted visible/hidden
+page events and animation callbacks; matched no-capture controls emitted neither. All bounded captures returned
+exact interior pixels within ten seconds with live connections. The new path changed observed duration and
+callback counts; those observations do not isolate a new scheduling rule. Only Chromium 155.0.8059.79 on Linux
+was validated; other Chrome/Edge builds and desktop configurations remain unverified. Browser rolls must recheck
+capture, navigation and genuine minimization, as the browser-pin notes require.
+
+Stock, independently constructed custom profiles and attached browsers keep their behavior. Caller arguments
+remain verbatim after preset arguments. Chromium replaces repeated feature lists: a later enable list omitting
+the surface feature selects the older path on the tested build, and the effective disable list wins. Callers can
+retain the feature by including it in their own enable list, or explicitly disable it. Strider does not merge lists.
+
+Rejected: keeping the legacy default and requiring raw opt-in, given the repeatable tail improvement and bounded
+compatibility checks; enabling automation alone, which contradicts concurrent's inheritance; rewriting caller
+feature lists, which changes raw argument semantics; removing navigation synchronization, adding retries or
+repairing native screenshot pixels, none of which this launch setting justifies. No runtime version gate or
+assumed fallback for unknown feature names is introduced. The changed unstable default and narrowed previous
+observability contract require a minor release under the release policy, including the CLI launches using it.
+
+## Checked actions on ordinary label descendants
+
+Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
+or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
+remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
+checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+
+Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
+ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.
+
+For descendants, check both DOM ancestors and the path through assigned slots and shadow hosts, up to, excluding,
+that associated DOM label. Interactive ancestors above the label remain outside this guard. The slot-aware walk
+adds refusals without introducing associations or replacing the DOM guard: a shadow label encountered along that
+path must neither choose another control nor hide a DOM interactive ancestor. Refuse
+buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects, links with href (including
+SVG links with namespaced xlink:href), images with
+usemap, audio/video with controls, ARIA widget roles (button, checkbox, combobox, grid, gridcell, link,
+listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup, scrollbar,
+searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid and treeitem) and
+editable content. This conservative boundary keeps separate controls from receiving
+input meant for the associated checkbox, including when that checkbox already matches. Association uses the
+browser's label.control; missing or non-checkable controls are refused.
+
+Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
+receive input before the action fails with `StateUnchanged`.
+
+Rejected: clicking the associated input directly, which loses the selected target and its relative coordinates;
+following labels for public state reads, which expands an unrelated contract; using a slot-aware path to
+choose the label, which would create associations across shadow roots; replacing
+DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
+of links before reporting unchanged state, which sends input to a separate control unnecessarily.

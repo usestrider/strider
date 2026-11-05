@@ -1254,6 +1254,70 @@ export function engine(render: (root: SnapNode) => string) {
     return state === "true"
   }
 
+  const LABEL_WIDGET_ROLES = new Set([
+    "button",
+    "checkbox",
+    "combobox",
+    "grid",
+    "gridcell",
+    "link",
+    "listbox",
+    "menu",
+    "menubar",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "radiogroup",
+    "scrollbar",
+    "searchbox",
+    "separator",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "tablist",
+    "textbox",
+    "tree",
+    "treegrid",
+    "treeitem"
+  ])
+
+  const interactiveLabelDescendant = (element: Element): boolean => {
+    const role = roleOf(element)
+    return element.matches(
+      "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
+    ) || (
+      element.namespaceURI === "http://www.w3.org/2000/svg" && element.localName === "a" &&
+      element.hasAttributeNS("http://www.w3.org/1999/xlink", "href")
+    ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
+  }
+
+  /** Association stays in the DOM; slots can add refusals without choosing another label. */
+  const checkedForAction = (element: Element): boolean | null => {
+    const own = checkedOf(element)
+    if (own !== null) return own
+    let label: Element | null = element
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    if (label === null || label.control === null) return null
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
+      ancestor = ancestor.parentElement
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
+    }
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
+      ancestor = ancestor.assignedSlot ?? composedParent(ancestor)
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
+    }
+    return checkedOf(label.control)
+  }
+
   /** The element with focus, through open shadow roots. */
   const deepActive = (): Element | null => {
     let active: Element | null = document.activeElement
@@ -1733,11 +1797,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        let checked = checkedOf(element)
-        if (checked === null && request.read.followLabel && element instanceof HTMLLabelElement) {
-          const control = element.control
-          checked = control === null ? null : checkedOf(control)
-        }
+        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
