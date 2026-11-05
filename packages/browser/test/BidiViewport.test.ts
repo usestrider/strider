@@ -369,4 +369,50 @@ describe("BidiAdapter viewports", () => {
       if (error.reason._tag === "Protocol") assert.strictEqual(error.reason.error.reason._tag, "Rejected")
       assert.strictEqual(unconfirmed, 0)
     }))
+
+  it.effect("returns an expired scoped declaration before its connection-owned cleanup finishes", () =>
+    Effect.gen(function*() {
+      const { page, session, state } = yield* make()
+      const target = page("P1")
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const installed = yield* Deferred.make<void>()
+      const cleaning = yield* Deferred.make<void>()
+      const order: Array<string> = []
+      session.around = (entry, next) =>
+        entry.method !== "browsingContext.setViewport" ?
+          next
+          : entry.params.viewport === null
+          ? Deferred.succeed(cleaning, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Effect.sync(() => {
+              order.push("cleanup")
+            }))
+          )
+          : Deferred.succeed(installed, undefined).pipe(Effect.andThen(Effect.never))
+      const adapter = Bounded.make({
+        declare: (scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) =>
+          Declare.declare(state, scope, declaration)
+      } as unknown as Adapter.AdapterConnection)
+      yield* Effect.gen(function*() {
+        const waiting = yield* Effect.scoped(adapter.declare({ _tag: "Page", page: target.id }, viewport(640))).pipe(
+          Operation.named("Test.scopedViewport"),
+          Deadline.within("10 millis"),
+          Effect.onExit(() =>
+            Effect.sync(() => {
+              order.push("caller")
+            })
+          ),
+          Effect.exit,
+          Effect.forkChild
+        )
+        yield* Deferred.await(installed)
+        yield* TestClock.adjust("10 millis")
+        yield* Deferred.await(cleaning)
+        yield* TestClock.adjust("5 seconds")
+        const result = yield* Fiber.join(waiting)
+        assert.isTrue(Deadline.isTimeout(Option.getOrThrow(Exit.findErrorOption(result))))
+        assert.deepStrictEqual(order, ["caller", "cleanup"])
+        assert.lengthOf(state.registry.all(), 0)
+      }).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+    }))
 })
