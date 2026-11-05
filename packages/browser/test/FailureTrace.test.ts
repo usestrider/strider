@@ -75,12 +75,6 @@ describe("failure trace runner lifecycle", () => {
         "\n"
       )
     expect(files.some((name) => name.startsWith("passing.fixture"))).toBe(false)
-    expect(read("retained.fixture")).toContain("RETAINED_BEGIN")
-    expect(read("retained.fixture")).toContain("RETAINED_END")
-    expect(read("retained.fixture")).toContain("RETAINED_SETUP")
-    expect(read("retained.fixture")).toContain("RETAINED_TEARDOWN")
-    expect(read("retained.fixture")).toContain("Target.getTargets")
-    expect(read("retained.fixture")).toContain("sessionId")
     const test = read("lifecycle.fixture").split("\n").filter(Boolean).map((line) => JSON.parse(line))
     const payloads = test.map((entry) => entry.payload)
     expect(payloads).toContain("FAIL_ONLY")

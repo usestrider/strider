@@ -4,7 +4,7 @@
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
  * `integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,
  * with explicit payload truncation and history overflow. Shared setup/teardown context has its own file. Passing
- * tests discard their buffers unless they explicitly request retention with `retain`. Each active test and the shared context keep at most 2 MiB of serialized UTF-16
+ * tests discard their buffers. Each active test and the shared context keep at most 2 MiB of serialized UTF-16
  * history; individual payloads keep 32 Ki characters, and late failed-test cleanup has a separate 256 KiB budget.
  * The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
  *
@@ -92,7 +92,6 @@ export class TraceBuffer {
 }
 
 interface Sink {
-  retain(): void
   connection(label: string): (kind: string, payload: unknown) => void
 }
 const key = Symbol.for("strider.integration.failureTrace")
@@ -102,9 +101,3 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): (kind: string, payload: unknown) => void =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
-
-/** Retain the current test and shared context even on success; return a timestamped boundary recorder. */
-export const retain = (label: string): (kind: string, payload: unknown) => void => {
-  ;(globalThis as typeof globalThis & { [key]?: Sink })[key]?.retain()
-  return connection(label)
-}

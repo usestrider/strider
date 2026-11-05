@@ -33,7 +33,6 @@ import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import { assertPinned, chromium } from "../browsers.ts"
-import { retain } from "../failureTrace.ts"
 
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -952,8 +951,6 @@ describe("Chromium claims", () => {
           `${failure} storageState reclaim unwinds registrations without destroying survivors`,
           () =>
             Effect.gen(function*() {
-              const trace = failure === "interrupted" ? retain("storageState-reclaim-boundaries") : undefined
-              trace?.("boundary", "launch")
               const browser = yield* launch
               const { origin } = yield* serve
               const old = yield* Scope.make()
@@ -966,9 +963,7 @@ describe("Chromium claims", () => {
                 yield* page.goto(url)
                 return yield* api.UserContext.claim(context)
               }).pipe(Scope.provide(old), Effect.provide(services))
-              trace?.("boundary", "source handoff begin")
               yield* handoff(old)
-              trace?.("boundary", "source handoff complete")
               yield* Effect.scoped(Effect.gen(function*() {
                 const connected = yield* Browser.Browser
                 const adapter = ClaimHooks.get(connected).runtime.model.adapter
@@ -981,18 +976,15 @@ describe("Chromium claims", () => {
                     function*(scope: Parameters<typeof declare>[0], declaration: Parameters<typeof declare>[1]) {
                       const id = yield* declare(scope, declaration)
                       registrations++
-                      trace?.("declaration installed", { id, scope, declaration, registrations })
                       yield* Effect.addFinalizer(() =>
                         Effect.sync(() => {
                           registrations--
-                          trace?.("registration counter finalizer", { id, registrations })
                         })
                       )
                       return id
                     }
                   ),
                   setCookies: Effect.fnUntraced(function*() {
-                    trace?.("boundary", "storageState setCookies entered")
                     yield* Deferred.succeed(entered, undefined)
                     if (failure === "timed-out") return yield* (yield* Operation.record).bound(Effect.never)
                     if (failure === "interrupted") return yield* Effect.never
@@ -1030,12 +1022,9 @@ describe("Chromium claims", () => {
                 }).pipe(Scope.provide(destination), Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
                 const setup = failure === "timed-out" ? restore.pipe(Deadline.within("1 second")) : restore
                 if (failure === "interrupted") {
-                  trace?.("boundary", "reclaim fork")
                   const fiber = yield* setup.pipe(Effect.forkChild)
                   yield* Deferred.await(entered)
-                  trace?.("boundary", "interrupt begin")
                   yield* Fiber.interrupt(fiber)
-                  trace?.("boundary", "interrupt and reclaim rollback complete")
                 } else {
                   const exit = yield* setup.pipe(Effect.exit)
                   assert(Exit.isFailure(exit))
@@ -1046,17 +1035,13 @@ describe("Chromium claims", () => {
                 }
                 assert.deepStrictEqual(warnings, [], "rollback commands must complete with their own cleanup budget")
                 assert.strictEqual(registrations, 0, "setup registrations must unwind before the caller's scope ends")
-                trace?.("boundary", "destination close begin")
                 yield* Scope.close(destination, Exit.void)
-                trace?.("boundary", "destination close complete")
                 assert.isTrue((yield* browser.targets).some((info) => info.url === url), "surviving tab was destroyed")
                 // Read the survivor through its actual URL rather than assuming a public id survives reconnect.
                 for (const page of yield* connected.pages) {
                   if ((yield* page.url) !== url) continue
                   const control = yield* page.control
-                  const language = yield* control.evaluateInMainWorld(() => navigator.language)
-                  trace?.("survivor observation", { url, page: page.id, language })
-                  assert.strictEqual(language, "en-US")
+                  assert.strictEqual(yield* control.evaluateInMainWorld(() => navigator.language), "en-US")
                 }
               })).pipe(Effect.provide(browser.connect))
             }),
