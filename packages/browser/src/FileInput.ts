@@ -67,14 +67,20 @@ export interface FileInput {
  *
  * **Details**
  *
- * The caller reads and transfers the file on every connection, including launched browsers. Build the browser's
- * layer with Effect's `FileSystem` and `Path` services; relative paths resolve against the caller's working
- * directory. The file keeps its basename and the modification time reported by `FileSystem.stat`; if the
- * file system omits that time, it uses the time the file is made in the page. Its MIME type comes from its extension, falling back to
- * `application/octet-stream`. Unreadable files fail with `FileUnreadable` in locator operations; chooser handlers
- * report preparation failures and cancel the chooser.
+ * A browser Strider launched receives the path directly. Absolute paths need no caller services; relative
+ * paths require Effect's `Path` service when building the browser layer. Launching through a container or wrapper
+ * with a different file system requires `bytes` instead.
  *
- * Local files may be mixed with `bytes`. Mixing either with `remote` fails before the selection changes.
+ * An attached browser receives caller-side contents, read with the captured Effect `FileSystem` and `Path`
+ * services. Relative paths resolve against the caller's working directory. The basename and available open-file
+ * stat modification time are preserved; absent times use page-side creation time. MIME comes from the extension,
+ * with `application/octet-stream` as fallback. Reads fail with `FileUnreadable` in locator operations; chooser
+ * failures are reported and cancel the chooser. Transfer uses sequential 64 KiB chunks, with no library size cap;
+ * browser storage grows with the files and browser resource limits still apply.
+ *
+ * Launched local paths may be mixed with `remote`; attached local files may be mixed with `bytes`.
+ * Native paths and transferred files cannot be combined in one selection. Stock WebKit currently appends native
+ * paths to an existing multiple selection instead of replacing it.
  *
  * **Example** (Uploading an avatar)
  *
@@ -134,7 +140,8 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * **Gotchas**
  *
- * One call may combine bytes and local files. Mixing either with remote paths fails with `InvalidInput`
+ * One call may combine bytes and local files on attached connections. Mixing bytes with launched local paths
+ * or remote paths fails with `InvalidInput`
  * before the selection changes. Multiple files for an input without `multiple` fail with `InvalidInput`
  * before changing the selection or dispatching events.
  *

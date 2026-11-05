@@ -304,6 +304,7 @@ export const connect: (
     const capabilitySet = yield* SubscriptionRef.make(capabilities(info, options.ownership))
 
     return {
+      ownership: options.ownership,
       info,
       capabilities: capabilitySet,
       pauseScope: "context",

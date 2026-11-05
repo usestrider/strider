@@ -120,7 +120,7 @@ const setMade = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
   node: Adapter.NodeBinding,
-  files: ReadonlyArray<FileInputImpl.Made>
+  files: ReadonlyArray<FileInputImpl.TransferFile>
 ) {
   // Part of the handler's decision, under its deadline
   const record = yield* Operation.start("FileChooser.handle")

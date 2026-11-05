@@ -1179,12 +1179,13 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Local files require Effect's `FileSystem` and `Path` services when building the browser layer and are
-   * transferred from the caller. A local file that cannot be read fails with `FileUnreadable` before the
-   * selection changes; an element other than a file input fails with `WrongElement`. Local files and bytes may
-   * be combined, but mixing either with remote paths fails with `InvalidInput`. Multiple local files or bytes
-   * for an input without `multiple` also fail with `InvalidInput` before selection or events change. An empty
-   * list clears the input.
+   * Launched browsers read local paths directly; relative paths require the captured Effect `Path` service.
+   * Attached browsers transfer local files through captured `FileSystem` and `Path` services. A local read failure
+   * is `FileUnreadable`; an element other than a file input is `WrongElement`. Launched local paths can combine
+   * with remote paths; attached local files can combine with bytes. Mixing native paths and transferred files
+   * fails with `InvalidInput` before changing selection. Multiple files for an input without `multiple` also
+   * fail with `InvalidInput` before selection or events change. An empty list clears the input. Stock WebKit currently appends native paths on
+   * multiple inputs rather than replacing an existing selection. See `FileInput.local` for deployment caveats.
    *
    * **Example** (Uploading a receipt)
    *

@@ -2,10 +2,8 @@
 "@usestrider/browser": minor
 ---
 
-Transfer `FileInput.local` contents from the caller on every connection, including launched browsers. Browser layers using local uploads now require Effect FileSystem and Path services, including for absolute paths. Preserve basenames and infer MIME types from extensions, falling back to application/octet-stream. Locator read failures retain FileUnreadable; chooser preparation failures are reported and cancel the chooser.
+Upload `FileInput.local` contents to attached browsers using scoped open-file reads and sequential acknowledged 64 KiB chunks. Bytes share the chunk transport, avoiding whole-file encoded strings. Preserve transferred basenames, inferred MIME (application/octet-stream fallback), and available stat modification times. No library size cap is added; browser storage and resource limits still apply.
 
-Local files and bytes may now be selected together. Remote paths must be selected separately: mixtures with local files or bytes fail before changing the selection. Empty selections clear through page-side construction so previously transferred files are cleared too. Local chooser uploads, bytes and empty selections require the backend to identify the chooser input; single choosers still require exactly one file.
+Attached Local uploads now require captured Effect FileSystem and Path services and cannot mix with Remote paths; they may mix with Bytes. These compatibility changes require an unstable minor bump. Launched Local uploads retain native paths, previous service requirements and Local/Remote combinations. A container or wrapper launch with separate storage must use Bytes instead. Stock WebKit's existing native-path append limitation remains.
 
-File chooser preparation and transfer share the handler’s original deadline, including time spent in the user handler. Stalled or interrupted reads cancel the chooser without applying files afterward.
-
-Preserve local stat modification times in transferred Files; missing stat times and bytes use page-side creation time. Reject multiple Local/Bytes files on an input without multiple as InvalidInput before selection or events change.
+Validate transferred-file and native locator cardinality before selection changes, and clear empty selections through page-side construction. Transferred chooser selections and empty multiple selections need an identified input. Reads and transfer consume the original handler deadline, including time already spent in the handler; failure or interruption cancels the chooser and releases transfer resources.

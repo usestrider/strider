@@ -324,6 +324,7 @@ export const connect = (
       })
 
     const adapter: Adapter.AdapterConnection = {
+      ownership: "attached",
       info: describe.info,
       capabilities: yield* SubscriptionRef.make(describe.capabilities),
       pauseScope: "browser",

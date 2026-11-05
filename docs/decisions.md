@@ -887,31 +887,43 @@ and visibility filters count the element as hidden. Opacity alone does not make 
   for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
   text fields unusable by fill despite being enabled and editable.
 
-## Caller-local uploads transfer contents
+## Local upload transport follows launch and attach
 
-`FileInput.local` reads files on the caller on every connection, through the captured Effect `FileSystem` and
-`Path` services, then uses the same page-side file construction as `FileInput.bytes`. Connection ownership says
-who closes the browser, not whether it shares storage. A launched-path fast path or new connection classification
-would make the meaning depend on deployment, so neither is used. Basenames are preserved; Effect MIME lookup
-infers types from extensions, with `application/octet-stream` for unknown extensions.
+A connection records only whether Strider launched or attached to the browser. Launched `FileInput.local`
+retains native path upload, including absolute paths without caller services, relative paths resolved through
+captured `Path`, and mixtures with Remote paths. Locator existence checks remain conditional on captured
+`FileSystem`; chooser native paths keep their backend failure contract. Launch ownership is a practical storage
+assumption, not proof: container or wrapper launches with a different filesystem must use `FileInput.bytes`.
+An attached browser may be local, but always transferring there makes remote files work without further
+connection classification. Copying every launched upload was rejected because it adds many commands and browser
+storage to the common native-path case.
 
-`FileInput.remote` alone gives paths to the browser host. Remote paths cannot be combined with local files or
-bytes: path selection and page-side construction each replace the selection, so accepting a mixture would lose
-files. Preparation rejects mixtures before selection changes. Empty lists clear through page-side construction too: Chromium can leave page-created files selected after an empty protocol path selection.
-Missing caller services fail explicitly, locator read failures remain `FileUnreadable`, and chooser preparation
-failures use the existing reported handler failure and cancellation path. No implicit service or shared storage
-is assumed.
+Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
+base64 encoded, sent and acknowledged before the next is read; no complete encoded file or message is constructed.
+A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
+files, clears the collector and releases the handle on success, failure or interruption; remote cleanup has its
+own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
+constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+as new capability and compatibility contracts without an established requirement.
 
-A chooser's user handler, file preparation and staged application run in the registration's scope-owned fiber,
-under one absolute deadline. File reads consume the time left after the user handler. Keeping preparation outside
-that fiber would leave stalled reads beyond both timeout and scope interruption; giving it a fresh budget would
-extend the promised deadline. The existing cancellation policy handles expiration, and preparation cannot apply
-files after its deadline. Decision failures retain their existing reporting, and staged decisions are still counted
-before application.
+Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
+Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
+while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
+files after an empty native-path command. The collector validates live input type and cardinality before transfer
+and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
+files on a single-file input. Detached
+chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
+WebKit currently appends native paths on multiple inputs, an existing replacement limitation.
 
-Local transfer preserves the modification time reported by the caller's file system, alongside the basename,
-contents and inferred MIME type. A failed stat is `FileUnreadable`; an absent timestamp falls back to page-side
-creation time, as bytes do. The made-file setter checks the live input's `multiple` attribute before constructing
-or assigning its `DataTransfer` and before dispatching events, returning a typed `InvalidInput` refusal. Native
-path upload enforces cardinality, but assigning a made `FileList` does not; relying on that assignment would
-allow two files on a single-file input. Local and Bytes share this validation.
+The caller's basename and available open-file stat modification time survive transfer. Effect MIME lookup infers
+MIME from the extension, falling back to `application/octet-stream`. Missing timestamps and Bytes use page-side
+creation time. Local open, stat and read failures retain `FileUnreadable` for locators; chooser failures use the
+existing decision failure report and cancellation policy. Missing caller services fail explicitly.
+
+A chooser's user handler, preparation and staged application run in one registration-scope fiber under the
+original absolute browser-clock deadline. Reads and chunk acknowledgements consume time left after the handler;
+preparation cannot reset its budget or apply after expiry. Decision failures report in the resolving fiber, and
+staged decisions retain their existing count-before-application ordering. Scope interruption cancels stalled work;
+cleanup cannot leave a chooser waiting without a bound.

@@ -157,6 +157,7 @@ export const connect: (
     state.attachedAtConnect = false
 
     const attached = {
+      ownership: "attached" as const,
       info,
       capabilities,
       pauseScope: "browser",
@@ -201,6 +202,7 @@ export const connect: (
     if (options.automation === undefined) return attached
     return {
       ...attached,
+      ownership: "launched",
       createUserContext: (options) => Automation.createUserContextLaunched(state, options),
       removeUserContext: (id) => Automation.removeUserContextLaunched(state, id),
       createPage: (id) => Automation.createPageLaunched(state, id),
