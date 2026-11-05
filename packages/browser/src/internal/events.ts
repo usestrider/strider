@@ -306,9 +306,12 @@ export const next = <A, B, PE, PR, DE = never>(
       commit(exit, false)
       return Scope.close(lifetime, Exit.void)
     }
-    // The deadline can commit while delivery is blocked, just as target end can.
+    // Notify at the deadline, but leave this scope attached until the delivery worker exits.
+    // Closing it here would detach it before its uninterruptible work has stopped.
     yield* record.bound(Effect.never, missed, "waitingForEvent").pipe(
-      Effect.onExit(complete),
+      Effect.onExit((exit) =>
+        Effect.sync(() => commit(exit))
+      ),
       Effect.forkIn(lifetime)
     )
     yield* Effect.raceFirst(work, Deferred.await(deferred)).pipe(
@@ -318,9 +321,7 @@ export const next = <A, B, PE, PR, DE = never>(
     // Registered last: scope cancellation commits before interrupting either worker.
     yield* Scope.addFinalizer(
       lifetime,
-      Effect.withFiber((fiber) =>
-        Effect.sync(() => commit(Exit.interrupt(fiber.id)))
-      )
+      Effect.withFiber((fiber) => Effect.sync(() => commit(Exit.interrupt(fiber.id))))
     )
     // The read side only: an effect that awaits it, which nothing can complete. Awaited inside an operation, the
     // wait is a step of it

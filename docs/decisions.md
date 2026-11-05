@@ -767,8 +767,11 @@ The model's end path only commits immutable terminal data and signals the waiter
 or effectful finalizer. A separate deadline waiter commits independently of blocked delivery on the browser's clock.
 The delivery worker observes the committed outcome and cancels its work through Effect interruption. A user effect
 that is already uninterruptible can finish its own work, but cannot replace the committed result or cause a new
-predicate to start. Closing a scope never drains queued work. A completed one-shot releases its queue, subscriber
-and internal child scope, while the caller can keep the latched result. Streams retain their existing ordered
+predicate to start. Closing a scope never drains queued work. A terminal outcome releases the queue and subscriber immediately; the delivery worker releases its internal child
+scope only when it exits. The acquiring scope therefore keeps owning any still-running delivery or predicate,
+even after Timeout or TargetGone notification. A deadline waiter must not close and detach that child scope while
+its delivery worker is still using caller resources. Prompt terminal notification does not imply that acquiring-scope
+release has finished. The caller can keep the latched result. Streams retain their existing ordered
 buffer-draining contract on normal target end.
 
 Rejected: making target failure depend on worker progress, which can return success after the target has ended
