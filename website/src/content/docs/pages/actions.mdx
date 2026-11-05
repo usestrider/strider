@@ -59,27 +59,11 @@ const acceptTerms = Effect.fn("acceptTerms")(function*(page: Page.Page) {
 })
 ```
 
-The selected element's own checked state takes precedence; otherwise these actions read the nearest DOM label's
-associated control, never the label's own ARIA state. Finding that label does not cross a shadow root. The
-click and any relative position stay on the selected element. An already-correct state
-sends no input; a click that does not change the state fails with `StateUnchanged`.
-
-Descendant fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
-links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video with
-controls, ARIA widget roles (button, checkbox, combobox,
-grid, gridcell, link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio,
-radiogroup, scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
-and treeitem) and editable content.
-Refusal checks the selected node and both its DOM ancestors and the path through assigned slots and shadow
-hosts, stopping before the associated DOM label. Slots can add interactive ancestors to refuse, but cannot supply
-another label or bypass a DOM guard. An interactive ancestor above the associated label is outside this guard.
-Refusal returns `WrongElement` before input even if the associated control already matches. A missing or
-non-checkable association also fails with
-`WrongElement`. Directly selected labels keep their existing behavior.
-Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow root can
-receive input before the action fails with `StateUnchanged`.
-[`isChecked`](/docs/api/browser/Locator#Locator.isChecked) and checked expectations still read only the selected
-element's own state.
+The click stays on the text you selected, and a box already in the right state gets no input. If the text
+sits inside something interactive of its own, such as a link or a button, the action fails with
+`WrongElement` before sending anything. Inside a closed shadow root Strider can't see that control, so the
+click can land on it, and the action then fails with `StateUnchanged`. The full rules are in
+[`check`](/docs/api/browser/Locator#Locator.check)'s reference.
 
 ## Checks
 
