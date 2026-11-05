@@ -304,7 +304,7 @@ try {
               strider: () =>
                 runtime.runPromise(Effect.scoped(Effect.gen(function*() {
                   const page = yield* Browser.newPage(pageOptions)
-                  yield* page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
+                  yield* page.goto(`${site.origin}${entry.fixture ?? "/benchmark"}`, { waitUntil: "load" })
                   const started = yield* Effect.sync(() => performance.now())
                   const value = yield* entry.strider(page, site.origin).pipe(Deadline.within("30 seconds"))
                   const ms = yield* Effect.sync(() => performance.now() - started)
@@ -317,7 +317,7 @@ try {
                   context.setDefaultTimeout(30_000)
                   context.setDefaultNavigationTimeout(30_000)
                   const page = await context.newPage()
-                  await page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
+                  await page.goto(`${site.origin}${entry.fixture ?? "/benchmark"}`, { waitUntil: "load" })
                   const sample = await elapsed(() => entry.playwright(page, site.origin))
                   entry.verify(sample.value)
                   return sample.ms
