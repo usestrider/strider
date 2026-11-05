@@ -209,7 +209,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(url)
             const both = [FileInput.local(import.meta.filename), FileInput.local(import.meta.filename)]
             const exit = yield* page.getByLabel("File").setInputFiles(both).pipe(Effect.exit)
-            const count = yield* page.locator("#out").textContent()
+            const count = yield* page.locator("#out").readText
             assert.isTrue(exit._tag === "Failure", `set ${count} files on a single-file input`)
             assert.strictEqual(count, "none")
           }))

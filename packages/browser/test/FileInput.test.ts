@@ -1,11 +1,13 @@
 /** Caller-local files must cross the connection; browser-host paths must stay paths. */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, FileChooser, FileInput, FilePath, Target } from "@usestrider/browser"
+import { Browser, Deadline, FileChooser, FileInput, FilePath, Page, Target } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -211,7 +213,7 @@ describe("file preparation", () => {
 
 describe("a local read under the deadline", () => {
   // A read that never ends, as a FIFO with no writer or a hung network mount gives
-  const stuck = (page: Browser.Page) =>
+  const stuck = (page: Page.Page) =>
     Effect.sync(() => {
       const runtime = Handles.page(page).runtime
       Object.assign(runtime, {
@@ -250,46 +252,85 @@ describe("a local read under the deadline", () => {
       NodeServices.layer
     ))))
 
-  it.live("FileChooser.choose leaves the chooser to the policy when the read doesn't end", () => {
-    let send!: Adapter.Sink
-    const decisions: Array<Adapter.Decision> = []
-    return Effect.scoped(Effect.gen(function*() {
-      const decided = yield* Deferred.make<void>()
-      const connection = BrowserImpl.layer((sink) => {
-        send = sink
-        return Fake.connect([], {
-          info: new Browser.Info(Fake.info),
-          capabilities: new Browser.CapabilitySet({
-            entries: Fake.capabilities.map((entry) =>
-              entry.name === "fileChooser" ? { ...entry, status: "supported", limitations: [] } : entry
-            )
-          })
-        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
-          ...adapter,
-          resolve: Effect.fnUntraced(function*(_obligation, decision) {
-            decisions.push(decision)
-            yield* Deferred.succeed(decided, undefined)
-          })
-        })))
-      })
-      yield* Effect.gen(function*() {
-        const page = yield* Browser.newPage()
-        yield* stuck(page)
-        yield* FileChooser.handle(page, FileChooser.choose(FileInput.local("/caller/stuck.txt")))
-        yield* send({
-          _tag: "ObligationOpened",
-          obligation: "stuck-chooser" as Adapter.ObligationId,
-          subject: {
-            _tag: "FileChooser",
-            navigable: Handles.page(page).entry.id,
-            multiple: true,
-            element: Option.some(node)
-          }
+  for (const scenario of ["stalled read", "time spent in handler", "scope interruption"] as const) {
+    it.live(`FileChooser.choose cancels after ${scenario} without applying late files`, () => {
+      let send!: Adapter.Sink
+      const decisions: Array<Adapter.Decision> = []
+      const evaluations: Array<Adapter.EvaluationCall> = []
+      return Effect.scoped(Effect.gen(function*() {
+        const decided = yield* Deferred.make<void>()
+        const reading = yield* Deferred.make<void>()
+        const interrupted = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<Uint8Array>()
+        const connection = BrowserImpl.layer((sink) => {
+          send = sink
+          return Fake.connect([], {
+            info: new Browser.Info(Fake.info),
+            capabilities: new Browser.CapabilitySet({
+              entries: Fake.capabilities.map((entry) =>
+                entry.name === "fileChooser" ? { ...entry, status: "supported", limitations: [] } : entry
+              )
+            })
+          })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+            ...adapter,
+            realm: () => Effect.succeed("upload-realm" as Target.RealmId),
+            evaluate: (_realm, call) => {
+              evaluations.push(call)
+              return Effect.succeed({ _tag: "Value", value: { type: "undefined" } })
+            },
+            resolve: Effect.fnUntraced(function*(_obligation, decision) {
+              decisions.push(decision)
+              yield* Deferred.succeed(decided, undefined)
+            })
+          })))
         })
-        const ended = yield* Deferred.await(decided).pipe(Effect.timeoutOption("3 seconds"))
-        assert.isTrue(Option.isSome(ended), "the chooser stayed undecided 3s past the handler's 200ms budget")
-        assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
-      }).pipe(Deadline.withDefaultBudget("200 millis"), Effect.provide(connection))
-    })).pipe(Effect.provide(NodeServices.layer))
-  })
+        yield* Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const runtime = Handles.page(page).runtime
+          Object.assign(runtime, {
+            fileSystem: Option.map(runtime.fileSystem, (fs) => ({
+              ...fs,
+              readFile: () =>
+                Effect.andThen(
+                  Deferred.succeed(reading, undefined),
+                  scenario === "time spent in handler"
+                    ? Effect.as(Effect.sleep("150 millis"), new Uint8Array([1]))
+                    : Deferred.await(release)
+                ).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+            }))
+          })
+          const scope = yield* Scope.fork(yield* Effect.scope)
+          const choose = FileChooser.choose(FileInput.local("/caller/stuck.txt"))
+          const handler = yield* FileChooser.handle(
+            page,
+            (chooser) =>
+              scenario === "time spent in handler"
+                ? Effect.andThen(Effect.sleep("150 millis"), choose(chooser))
+                : choose(chooser)
+          ).pipe(Scope.provide(scope))
+          yield* send({
+            _tag: "ObligationOpened",
+            obligation: "stuck-chooser" as Adapter.ObligationId,
+            subject: {
+              _tag: "FileChooser",
+              navigable: Handles.page(page).entry.id,
+              multiple: true,
+              element: Option.some(node)
+            }
+          })
+          const started = yield* Deferred.await(reading).pipe(Effect.timeoutOption("3 seconds"))
+          assert.isTrue(Option.isSome(started), "file preparation never started")
+          if (scenario === "scope interruption") yield* Scope.close(scope, Exit.void)
+          const ended = yield* Deferred.await(decided).pipe(Effect.timeoutOption("3 seconds"))
+          assert.isTrue(Option.isSome(ended), "the chooser stayed undecided past its budget or scope")
+          assert.deepStrictEqual(decisions, [{ _tag: "Cancel" }])
+          const stopped = yield* Deferred.await(interrupted).pipe(Effect.timeoutOption("3 seconds"))
+          assert.isTrue(Option.isSome(stopped), "the read was left running")
+          yield* Deferred.succeed(release, new Uint8Array([1]))
+          assert.deepStrictEqual(evaluations, [], "canceled reads must never apply files")
+          assert.strictEqual(yield* handler.handled, 0)
+        }).pipe(Deadline.withDefaultBudget("200 millis"), Effect.provide(connection))
+      })).pipe(Effect.provide(NodeServices.layer))
+    })
+  }
 })
