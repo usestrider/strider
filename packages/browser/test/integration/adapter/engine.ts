@@ -588,6 +588,53 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("group"), disabled: false }] })), 1)
           }), timeout)
 
+        it.effect("does not read an option of a disabled select as disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<select multiple disabled><option>One</option></select>`)
+            const check = Effect.fnUntraced(function*(disabled: boolean, expected: number) {
+              const step = { ...role("option", null, true), disabled }
+              assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected, `disabled: ${disabled}`)
+            })
+            yield* check(true, 0)
+            yield* check(false, 1)
+          }), timeout)
+
+        it.effect("reads an optgroup inside a disabled fieldset as disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<fieldset disabled><select multiple><optgroup label="G"><option>In</option></optgroup></select></fieldset>`
+            )
+            const step = { _tag: "Css" as const, selector: "select" }
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [step, { ...role("group", null, true), disabled: true }] })),
+              1
+            )
+          }), timeout)
+
+        it.effect("rejects unsupported role filters in hasNot, and and or branches", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<a href="/">Link</a>`)
+            const invalid = [{ ...role("link"), pressed: false }]
+            const empty = { _tag: "Css" as const, selector: "#missing" }
+            for (
+              const steps of [
+                [empty, {
+                  _tag: "Filter" as const,
+                  hasText: null,
+                  hasNotText: null,
+                  visible: null,
+                  has: null,
+                  hasNot: invalid
+                }],
+                [empty, { _tag: "And" as const, other: invalid }],
+                [empty, { _tag: "Or" as const, other: invalid }]
+              ]
+            ) {
+              assert.strictEqual((yield* send({ op: "count", steps }))._tag, "InvalidSelector")
+            }
+          }), timeout)
+
         it.effect("reads an invalid aria-expanded as false, and an absent one as neither", () =>
           Effect.gen(function*() {
             const { send } = yield* open(

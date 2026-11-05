@@ -94,6 +94,23 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       it.effect(
+        "reports an unsupported role filter in a nested branch beyond a missing frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const outer = page.frame(page.locator("#absent-frame"))
+            const nested = outer.frame(outer.locator("#deeper")).locator("a")
+              .filter({ has: Locator.relative.getByRole("link", { pressed: false }) })
+            const error = yield* nested.count.pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "InvalidInput")
+          })),
+        timeout
+      )
+
+      it.effect(
         "reports unsupported role filters as typed selector errors on use",
         () =>
           Effect.scoped(Effect.gen(function*() {
