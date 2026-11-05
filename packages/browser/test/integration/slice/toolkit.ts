@@ -222,6 +222,43 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
+        "reports validation observed during fresh and repeated refused submit clicks",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
+<label>Choice <select required><option value="">Choose</option></select></label>
+<button>Send</button></form>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const before = yield* call(tools, "snapshot", { page: "p1" })
+              assert.include(before.value.outcome, "[invalid]")
+              const results = []
+              for (const attempt of ["fresh", "repeated"]) {
+                const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Send\"]" })
+                assert.isFalse(result.failed)
+                assert.isUndefined(yield* page.evaluateInMainWorld(() => document.body.dataset.submitted))
+                results.push({ attempt, result })
+              }
+              for (const { attempt, result } of results) {
+                assert.match(
+                  result.value.sinceLast.join("\n"),
+                  /validat/i,
+                  `${attempt} refused submit click must report observed validation even when invalid state is unchanged`
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "redacts custom validation messages through the snapshot tool and keeps full capture",
         () =>
           Effect.gen(function*() {
