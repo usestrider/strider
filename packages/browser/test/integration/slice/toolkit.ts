@@ -4,7 +4,7 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, type Locator, Snapshot } from "@usestrider/browser"
+import { Browser, Deadline, Expect, type Locator, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Deferred from "effect/Deferred"
@@ -291,18 +291,31 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               each.role._tag === "Inferred" && each.role.evidence.includes("password")
             )
             const query = ExportTest.locatorOf("page", Option.getOrThrow(node!.ref), snapshot)
-            // Replayed, the step before this one revealed the field: it arrives just after the query runs
-            yield* page.goto(`${served.origin}/fixture?html=${
-              encodeURIComponent(
-                `<script>setTimeout(() => document.body.insertAdjacentHTML("beforeend", ${
-                  JSON.stringify(field)
-                }), 500)</script>`
-              )
-            }`)
-            const locator = yield* exportedLocator(query, page)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<main>Next step</main>")}`)
+            let first = true
+            const replay = {
+              pipe: (resolve: (page: unknown) => unknown) =>
+                resolve({
+                  locator: page.locator.bind(page),
+                  snapshot: () =>
+                    page.snapshot().pipe(Effect.tap((current) => {
+                      if (!first) return Effect.void
+                      first = false
+                      assert.isFalse([...current.refs.values()].some((each) =>
+                        each.role._tag === "Inferred" && each.role.evidence.includes("password")
+                      ))
+                      // Reveal only after the generated target has observed the field's absence.
+                      return page.evaluateInMainWorld((html) =>
+                        document.body.insertAdjacentHTML("beforeend", html), field)
+                    }))
+                })
+            }
+            const locator = yield* exportedLocator(query, replay)
             yield* locator.fill("private-late")
             assert.strictEqual(
-              yield* page.evaluateInMainWorld(() => document.querySelector("input")!.value),
+              yield* page.evaluateInMainWorld(() =>
+                document.querySelector("input")!.value
+              ),
               "private-late"
             )
           })),
@@ -320,6 +333,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 encodeURIComponent("<iframe srcdoc='<label>Framed secret<input type=password></label>'></iframe>")
               }`
             )
+            yield* Expect.toHaveCount(page.frame(page.locator("iframe")).getByLabel("Framed secret"), 1)
             const snapshot = yield* page.snapshot()
             const [node] = [...snapshot.refs.values()].filter((each) =>
               each.role._tag === "Inferred" && each.role.evidence.includes("password")
