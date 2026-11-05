@@ -391,12 +391,12 @@ for (const mode of ["open", "closed"]) {
               })
               yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
               assert.strictEqual(yield* active, 0)
-              const failed = yield* call(tools, "click", { page: "p1", target: "#missing" }).pipe(
+              const failed = yield* call(tools, "click", { page: "p1", target: "css=#missing" }).pipe(
                 Deadline.within("1 second")
               )
               assert.isTrue(failed.failed)
               assert.strictEqual(yield* active, 0)
-              const pending = yield* call(tools, "click", { page: "p1", target: "#missing" }).pipe(Effect.forkChild)
+              const pending = yield* call(tools, "click", { page: "p1", target: "css=#missing" }).pipe(Effect.forkChild)
               yield* active.pipe(Effect.repeat({ until: (count) => Number(count) > 0 }), Effect.timeout("5 seconds"))
               yield* Fiber.interrupt(pending)
               assert.strictEqual(yield* active, 0)
