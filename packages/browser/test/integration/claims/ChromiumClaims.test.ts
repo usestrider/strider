@@ -366,15 +366,19 @@ describe("Chromium claims", () => {
         Effect.gen(function*() {
           const browser = yield* launch
           const { origin } = yield* serve
+          // Target metadata can lag frame navigation on this separate observer connection.
+          const targets = browser.targets.pipe(
+            Effect.map((infos) => infos.map((info) => ({ ...info, url: "", title: "about:blank" })))
+          )
           yield* Effect.scoped(
             Effect.gen(function*() {
               const context = yield* Browser.newContext()
               const page = yield* context.newPage
               yield* page.goto(`${origin}/ordinary`)
-              assert.isTrue((yield* browser.targets).some((info) => info.url === `${origin}/ordinary`))
+              assert.isTrue((yield* targets).some((info) => info.url === `${origin}/ordinary`))
             })
           ).pipe(Effect.provide(browser.connect))
-          yield* until(browser.targets, (infos) => !infos.some((info) => info.url === `${origin}/ordinary`))
+          yield* until(targets, (infos) => !infos.some((info) => info.url === `${origin}/ordinary`))
         }), 60_000)
 
       it.effect("ordinary contexts still disappear when their client is killed", () =>
