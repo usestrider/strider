@@ -4,13 +4,14 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
@@ -229,7 +230,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
               const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
-<label>Choice <select required><option value="">Choose</option></select></label>
+<label>Choice <select required><option value="">Choose</option><option>Ready</option></select></label>
 <button>Send</button></form>`
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const tools = yield* BrowserToolkit.make({
@@ -247,11 +248,49 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 results.push({ attempt, result })
               }
               for (const { attempt, result } of results) {
-                assert.match(
+                assert.include(
                   result.value.sinceLast.join("\n"),
-                  /validat/i,
+                  "p1 validation observed during click: combobox \"Choice\" validationMessage=",
                   `${attempt} refused submit click must report observed validation even when invalid state is unchanged`
                 )
+              }
+              yield* page.getByRole("combobox").selectOption({ label: "Ready" })
+              const success = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Send\"]" })
+              assert.notInclude(success.value.sinceLast.join("\n"), "validation observed")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.submitted), "yes")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "isolates click validation observation and applies capture policy",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<input id="field" aria-label="private-label" value="private-value">
+<button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.evaluateInMainWorld(() => {
+                ;(document.getElementById("field") as HTMLInputElement).setCustomValidity("private-message")
+              })
+              for (const capture of [CapturePolicy.strict, CapturePolicy.local]) {
+                const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
+                const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Check\"]" })
+                const lines = result.value.sinceLast.filter((line: string) => line.includes("validation observed"))
+                assert.lengthOf(lines, 1)
+                assert.include(lines[0], "validation observed during click: textbox")
+                assert.notInclude(lines[0], "blocked")
+                if (capture.snapshotText === "redacted") assert.notInclude(lines[0], "private")
+                else assert.include(lines[0], "validationMessage=\"private-message\"")
+                // An event outside a click must not be retained by a later observer.
+                yield* page.evaluateInMainWorld(() =>
+                  (document.getElementById("field") as HTMLInputElement).checkValidity()
+                )
+                const quiet = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+                assert.notInclude(quiet.value.sinceLast.join("\n"), "validation observed")
               }
             }))
           }),
@@ -274,6 +313,22 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               }, message)
               const full = yield* page.snapshot()
               assert.include(full.text, `[validationMessage=${JSON.stringify(message)}]`)
+              const nodes: Array<Snapshot.Node> = []
+              const visit = (node: Snapshot.Node) => {
+                nodes.push(node)
+                node.children.forEach(visit)
+              }
+              visit(full.root)
+              const field = nodes.find((node) => node.role.role === "textbox")!
+              assert.isTrue(field.states.has("invalid"))
+              assert.deepEqual(field.validationMessage, Option.some(message))
+              const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.toCodecJson(Snapshot.Node)))(
+                full.root
+              )
+              assert.deepEqual(
+                yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.toCodecJson(Snapshot.Node)))(encoded),
+                full.root
+              )
               for (const capture of [CapturePolicy.strict, CapturePolicy.local]) {
                 const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
                 const result = yield* call(tools, "snapshot", { page: "p1" })
