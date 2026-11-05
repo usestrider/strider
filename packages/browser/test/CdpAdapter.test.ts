@@ -1025,7 +1025,7 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
-  it.effect("does not stop a rejected late start", () =>
+  it.effect("does not add cleanup when an abandoned start is later rejected", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(false, true)
       const page = yield* h.page.control
@@ -1212,8 +1212,7 @@ describe("Chromium screencast renderer readiness", () => {
       yield* Queue.take(h.screenshotWork)
       yield* Queue.take(h.screenshotWork)
       yield* Fiber.interrupt(pending)
-      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
-      yield* TestClock.adjust("1 second")
+      yield* TestClock.adjust("0 millis")
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
