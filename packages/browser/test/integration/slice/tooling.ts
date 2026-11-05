@@ -247,6 +247,31 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
+      it.effect("compares consecutive native uploads before any made files", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(files)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-native-compare-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const first = path.join(directory, "first.txt")
+            const second = path.join(directory, "second.txt")
+            fs.writeFileSync(first, "first")
+            fs.writeFileSync(second, "second")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const input = page.getByLabel("Files")
+            const out = page.locator("#out")
+            // Both calls use the same native operation as pre-transfer absolute Local uploads.
+            yield* input.setInputFiles(FileInput.remote(FilePath.Remote.make(first)))
+            yield* out.pipe(Expect.toHaveText(/^first\.txt:[^:]*:5:first$/))
+            const nativeFirst = yield* out.readText
+            yield* input.setInputFiles(FileInput.remote(FilePath.Remote.make(second)))
+            yield* out.pipe(Expect.toHaveText(/second\.txt:[^:]*:6:second$/))
+            const nativeSecond = yield* out.readText
+            yield* Effect.logInfo({ nativeFirst, nativeSecond })
+          }))
+        }), timeout)
+
       it.effect("compares native path uploads with transferred local files", () =>
         Effect.gen(function*() {
           const url = yield* fixture(files)
