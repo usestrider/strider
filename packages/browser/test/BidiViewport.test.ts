@@ -3,19 +3,28 @@
  * one rejects its command, and a user context whose setup fails doesn't stay behind.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import { TestClock } from "effect/testing"
 import type * as BrowserBidi from "../src/bidi-protocol/Browser.ts"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
+import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Declare from "../src/internal/bidiAdapter/declare.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
-import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Bounded from "../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Operation from "../src/internal/operation.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 
 interface Sent {
@@ -41,7 +50,14 @@ const rejected = (method: string) =>
 /** A state whose session records each command, and rejects those `rejects` picks. */
 const make = Effect.fnUntraced(function*() {
   const sent: Array<Sent> = []
-  const session: { rejects: (entry: Sent) => boolean } = { rejects: () => false }
+  const facts: Array<Adapter.Fact> = []
+  const session: {
+    rejects: (entry: Sent) => boolean
+    around: (
+      entry: Sent,
+      next: Effect.Effect<unknown, Protocol.ProtocolError>
+    ) => Effect.Effect<unknown, Protocol.ProtocolError>
+  } = { rejects: () => false, around: (_, next) => next }
   let contexts = 0
   const root = {
     key: undefined,
@@ -49,13 +65,18 @@ const make = Effect.fnUntraced(function*() {
       Effect.suspend(() => {
         const entry = { method: command.method, params: command.params } as Sent
         sent.push(entry)
-        return session.rejects(entry)
+        const result = session.rejects(entry)
           ? Effect.fail(rejected(command.method))
           : Effect.succeed(command.method === "browser.createUserContext" ? { userContext: `U${++contexts}` } : {})
+        return session.around(entry, result)
       }),
     drainObserved: Effect.void
   } as unknown as ProtocolClient.Session
-  const buffer = yield* Kit.makeFactBuffer(() => Effect.void)
+  const buffer = yield* Kit.makeFactBuffer((fact) =>
+    Effect.sync(() => {
+      facts.push(fact)
+    })
+  )
   buffer.connect(control)
   const state = State.make({
     connect: { sink: () => Effect.void, ownership: "launched" },
@@ -71,7 +92,7 @@ const make = Effect.fnUntraced(function*() {
       originalOpener: null,
       url: "about:blank"
     }, false)!
-  return { state, sent, session, page }
+  return { state, sent, session, page, facts }
 })
 
 const viewport = (width: number): Adapter.Declaration => ({
@@ -143,5 +164,151 @@ describe("BidiAdapter viewports", () => {
       assert.isTrue(Exit.isFailure(exit))
       assert.isTrue(sent.some((entry) => entry.method === "browser.removeUserContext"))
       assert.isFalse([...state.contexts.values()].some((context) => context.bidi === "U1"))
+    }))
+
+  it.effect("rolls back an interrupted viewport seed with detached cleanup and matching model facts", () =>
+    Effect.gen(function*() {
+      const { session, state, facts, page } = yield* make()
+      const started = yield* Deferred.make<void>()
+      let cleanupDetached = false
+      session.around = (entry, next) => {
+        if (entry.method === "browsingContext.setViewport") {
+          page("P1", "U1" as BrowserBidi.UserContext)
+          return Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        }
+        if (entry.method === "browser.removeUserContext") {
+          return Effect.gen(function*() {
+            cleanupDetached = Option.isNone(yield* Operation.current)
+            return yield* next
+          })
+        }
+        return next
+      }
+      const creating = yield* Contexts.createUserContext(state, options).pipe(
+        Operation.named("Test.createContext"),
+        Effect.forkChild
+      )
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(creating)
+      assert.isTrue(cleanupDetached)
+      assert.isFalse(state.contextsByBidi.has("U1"))
+      assert.isFalse(state.navigables.has("P1"))
+      const added = facts.find((fact) => fact._tag === "UserContextAdded")!
+      assert.deepStrictEqual(facts.filter((fact) => fact._tag === "UserContextRemoved"), [
+        { _tag: "UserContextRemoved", context: added.context }
+      ])
+      const pageEnd = facts.findIndex((fact) => fact._tag === "NavigableRemoved")
+      assert.isAtLeast(pageEnd, 0)
+      assert.isBelow(pageEnd, facts.findIndex((fact) => fact._tag === "UserContextRemoved"))
+    }))
+
+  it.effect("rolls back a viewport command deadline under a fresh cleanup deadline", () =>
+    Effect.gen(function*() {
+      const { session, state, facts } = yield* make()
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const started = yield* Deferred.make<void>()
+      let seedDeadline = 0
+      let cleanupDeadline = 0
+      session.around = Effect.fnUntraced(function*(entry, next) {
+        const deadline = yield* ProtocolClient.CommandDeadline
+        if (entry.method === "browsingContext.setViewport") {
+          assert.isTrue(Option.isSome(deadline))
+          seedDeadline = Option.getOrThrow(deadline)
+          yield* Deferred.succeed(started, undefined)
+          yield* BrowserClock.until(Option.getOrThrow(deadline))(Effect.never)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.NoReply({ method: entry.method, timeout: Duration.millis(10) })
+            })
+          )
+        }
+        if (entry.method === "browser.removeUserContext") cleanupDeadline = Option.getOrThrow(deadline)
+        return yield* next
+      })
+      const adapter = Bounded.make({
+        createUserContext: () => Contexts.createUserContext(state, options),
+        removeUserContext: (id: import("../src/UserContext.ts").Id) => Contexts.removeUserContext(state, id)
+      } as unknown as Adapter.AdapterConnection)
+      yield* Effect.gen(function*() {
+        const creating = yield* adapter.createUserContext(options).pipe(
+          Operation.named("Test.createContext"),
+          Deadline.within("10 millis"),
+          Effect.exit,
+          Effect.forkChild
+        )
+        yield* Deferred.await(started)
+        yield* TestClock.adjust("10 millis")
+        const result = yield* Fiber.join(creating)
+        assert.isTrue(Exit.isFailure(result))
+        if (Exit.isFailure(result)) assert.isTrue(Deadline.isTimeout(Option.getOrThrow(Exit.findErrorOption(result))))
+        yield* state.buffer.waitFor(() => facts.some((fact) => fact._tag === "UserContextRemoved") ? true : undefined)
+        assert.isAbove(cleanupDeadline, seedDeadline)
+        assert.isFalse(state.contextsByBidi.has("U1"))
+      }).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+    }))
+
+  for (const failure of ["reject", "timeout"] as const) {
+    it.effect(`preserves the seed error and known context when rollback ${failure}s`, () =>
+      Effect.gen(function*() {
+        const { session, state, facts } = yield* make()
+        const clock = BrowserClock.fromClock(yield* Clock.Clock)
+        const removing = yield* Deferred.make<void>()
+        session.rejects = (entry) => entry.method === "browsingContext.setViewport"
+        session.around = (entry, next) =>
+          entry.method === "browser.removeUserContext"
+            ? Deferred.succeed(removing, undefined).pipe(Effect.andThen(
+              failure === "timeout" ? Effect.never : Effect.fail(rejected(entry.method))
+            ))
+            : next
+        const creating = yield* Contexts.createUserContext(state, options).pipe(
+          Effect.provideService(BrowserClock.CurrentClock, clock),
+          Effect.exit,
+          Effect.forkChild
+        )
+        yield* Effect.raceFirst(Deferred.await(removing), Fiber.await(creating).pipe(Effect.asVoid))
+        assert.isTrue(yield* Deferred.isDone(removing))
+        if (failure === "timeout") yield* TestClock.adjust("5 seconds")
+        const result = yield* Fiber.join(creating)
+        assert.isTrue(Exit.isFailure(result))
+        if (Exit.isFailure(result)) {
+          const error = Option.getOrThrow(Exit.findErrorOption(result)) as Adapter.AdapterError
+          assert.strictEqual(error.reason._tag, "Protocol")
+          if (error.reason._tag === "Protocol") {
+            assert.strictEqual(error.reason.error.reason._tag, "Rejected")
+            if (error.reason.error.reason._tag === "Rejected") {
+              assert.strictEqual(error.reason.error.reason.method, "browsingContext.setViewport")
+            }
+          }
+        }
+        assert.isTrue(state.contextsByBidi.has("U1"))
+        assert.isFalse(state.contextsByBidi.get("U1")!.removing)
+        assert.lengthOf(facts.filter((fact) => fact._tag === "UserContextRemoved"), 0)
+      }))
+  }
+
+  it.effect("skips removing contexts and their pages when applying a browser viewport", () =>
+    Effect.gen(function*() {
+      const { page, sent, session, state } = yield* make()
+      const context = yield* Contexts.createUserContext(state, options)
+      const closing = page("P1", "U1" as BrowserBidi.UserContext)
+      yield* declare(state, { _tag: "Page", page: closing.id }, 640, yield* Scope.make())
+      state.contexts.get(context)!.removing = true
+      sent.length = 0
+      session.rejects = (entry) => entry.params.context === "P1" || entry.params.userContexts?.includes("U1") === true
+      yield* declare(state, { _tag: "Browser" }, 1000, yield* Scope.make())
+      assert.deepStrictEqual(
+        widthsFor(sent, (params) => params.context === "P1" || params.userContexts?.includes("U1") === true),
+        []
+      )
+    }))
+
+  it.effect("preserves install errors on active contexts", () =>
+    Effect.gen(function*() {
+      const { session, state } = yield* make()
+      session.rejects = (entry) => entry.method === "browsingContext.setViewport"
+      const result = yield* Effect.exit(
+        declare(state, { _tag: "UserContext", context: state.defaultContext }, 1000, yield* Scope.make())
+      )
+      assert.isTrue(Exit.isFailure(result))
     }))
 })
