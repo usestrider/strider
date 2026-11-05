@@ -66,6 +66,8 @@ export interface Release {
   readonly method: string
   readonly param: string
   readonly from: string
+  /** Maps non-overlapping parameter pointers to singular reply pointers, without wildcards. A missing source skips this release. */
+  readonly paramsFrom?: Readonly<Record<string, string>> | undefined
   readonly list?: true | undefined
 }
 

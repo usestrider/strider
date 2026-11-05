@@ -172,7 +172,7 @@ interface Node {
 // and validationMessage (rendered as [validationMessage="…"]); other nodes carry None. Reading never
 // triggers validation or changes focus. Current invalidity does not prove a submission attempt.
 // Diffs include message-only changes as well as invalidity clearing.
-// InteractivityEvidence: "clickListener" | "cursorPointer" | "tabindex" | "contentEditable" | "onclickAttribute"
+// InteractivityEvidence: "clickListener" | "cursorPointer" | "tabindex" | "contentEditable" | "onclickAttribute" | "password"
 // Diff: added, removed (refs), changed, text
 ```
 
@@ -983,8 +983,9 @@ McpServer.toolkit(toolkit)
 
 Snapshots:
 - **Many sites aren't accessible.** Clickable `<div>`s have no role and icon buttons have no name, so the default `snapshot()` adds two kinds of inferred information to the accessibility tree:
-  - *inferred interactivity:* click listeners where the backend can list them, `cursor: pointer`, `tabindex`, `contenteditable`, `onclick`;
+  - *inferred interactivity:* click listeners where the backend can list them, `cursor: pointer`, `tabindex`, `contenteditable`, `onclick`, password inputs;
   - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
+- **Password controls.** Password inputs without an explicit ARIA role appear as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. Their accessible names, including labels, titles and placeholders, are retained; controls with no accessible name stay unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Explicit ARIA roles are preserved. Password values do not contribute to snapshot names or find data, including when another element references the input for its name.
 - **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
 - **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against.
 - **The tree is the engine's,** the one `getByRole` matches, the same on every backend. An element with no role gives its children to its parent; hidden elements are left out; text is a `text` node unless it only repeats its parent's name, so a list item's text is its child, since a list item's name doesn't come from its content; an iframe is an `iframe` node with its frame's tree inside, whose refs are prefixed (`f1e3`). Click listeners aren't inferred on any backend yet (`snapshot.clickListeners`).

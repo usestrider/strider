@@ -1667,7 +1667,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 
 - `const RefId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Snapshot/RefId"))`
 - `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
-- `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
+- `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute", "password"])`
 - `const Role: Schema.Codec<Role>`
 - `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String, from: Schema.optional(Schema.Literal("text")), fieldContent: Schema.optional(Schema.Boolean) }), Schema.TaggedStruct("Inferred"…`
 - `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])`
@@ -2230,6 +2230,7 @@ The raw protocol client: commands and events as data, the session they run on, a
   - `readonly method: string`
   - `readonly param: string`
   - `readonly from: string`
+  - `readonly paramsFrom?: Readonly<Record<string, string>> | undefined`
   - `readonly list?: true | undefined`
 - `interface Command<M extends string, P, A> extends Effect.Effect<A, ProtocolError, ProtocolSession>` (experimental)
   - `readonly method: M`

@@ -6,8 +6,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, ConsoleMessage, Dialog, Expect, Route, Target } from "@usestrider/browser"
+import { Browser, ConsoleMessage, Dialog, Expect, type Page, Route, Target } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -112,48 +113,62 @@ describe("Stock WebKit, attached through its remote inspector", () => {
         }).pipe(Effect.provide(attach(endpoint)))
       }))
 
-    it.effect("navigates by script, and reports how each navigation ended", () =>
+    class NavigationFixture extends Context.Service<NavigationFixture, {
+      readonly origin: string
+      readonly crossSite: string
+      readonly tab: Page.Page
+    }>()("StockWebKit/NavigationFixture") {}
+
+    const navigationFixture = Layer.effect(
+      NavigationFixture,
       Effect.gen(function*() {
         const { origin, crossSite } = yield* site
         const { endpoint } = yield* startMiniBrowser(tabUrl(origin, "Start"))
-        yield* Effect.gen(function*() {
-          const browser = yield* Browser.Browser
-          yield* Effect.scoped(Effect.gen(function*() {
-            const tab = yield* (yield* byTitle(browser, "Start")).control
-            // Another site's page is another web process: a provisional target the page swaps to
-            const committed = yield* tab.goto(`${crossSite}/child`)
-            assert.strictEqual(committed._tag, "Committed")
-            assert.include(yield* tab.locator("p").readText, "child of localhost")
-            const missing = yield* tab.goto(`${origin}/missing`)
-            assert(missing._tag === "Committed" && Option.isSome(missing.response))
-            assert.strictEqual(missing.response.value.status, 404)
-            const landed = yield* tab.goto(`${origin}/redirect`)
-            assert.strictEqual(landed.url, `${origin}/landed`)
-            // The ends stock WebKit reports only through the document's request (Q198)
-            const refused = reasonOf(yield* Effect.exit(tab.goto(`http://127.0.0.1:${yield* closedPort}/`)))
-            assert.strictEqual(refused?.reason?._tag, "NavigationFailed")
-            assert.include(refused?.reason?.netError, "Connection refused")
-            // The browser shows its error page, a navigation of its own (Q199), before it's asked to go on
-            yield* tab.status.waitFor((status) => status._tag === "Open" && status.url === "about:blank")
-            // A port it blocks is refused before any request: the error page is all there is
-            const blocked = reasonOf(yield* Effect.exit(tab.goto("http://127.0.0.1:1/")))
-            assert.strictEqual(blocked?.reason?._tag, "NavigationFailed")
-            assert.include(blocked?.reason?.netError, "error page")
-            yield* tab.goto(`${origin}/landed`)
-            const noContent = reasonOf(yield* Effect.exit(tab.goto(`${origin}/204`)))
-            assert.strictEqual(noContent?.reason?._tag, "NoContent")
-            const download = reasonOf(yield* Effect.exit(tab.goto(`${origin}/download`)))
-            assert.strictEqual(download?.reason?._tag, "BecameDownload")
-            assert.strictEqual(yield* tab.url, `${origin}/landed`)
-            // A fragment of the same document would be a navigation it never reports
-            const fragment = reasonOf(yield* Effect.exit(tab.goto(`${origin}/landed#later`)))
-            assert.strictEqual(fragment?.reason?._tag, "Unsupported")
-            assert.strictEqual(fragment?.reason?.capability, "navigation.sameDocument")
-            const reloaded = yield* tab.reload()
-            assert.strictEqual(reloaded.url, `${origin}/landed`)
-          }))
-        }).pipe(Effect.provide(attach(endpoint)))
-      }))
+        const context = yield* Layer.build(attach(endpoint))
+        const browser = Context.get(context, Browser.Browser)
+        const tab = yield* (yield* byTitle(browser, "Start")).control
+        return { origin, crossSite, tab }
+      }).pipe(Effect.timeout("50 seconds"))
+    )
+
+    // Acquisition and release have hook budgets; only the navigation sequence has the five-second body budget.
+    it.layer(navigationFixture, { timeout })("script navigation", (it) => {
+      it.effect("navigates by script, and reports how each navigation ended", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite, tab } = yield* NavigationFixture
+          // Another site's page is another web process: a provisional target the page swaps to
+          const committed = yield* tab.goto(`${crossSite}/child`)
+          assert.strictEqual(committed._tag, "Committed")
+          assert.include(yield* tab.locator("p").readText, "child of localhost")
+          const missing = yield* tab.goto(`${origin}/missing`)
+          assert(missing._tag === "Committed" && Option.isSome(missing.response))
+          assert.strictEqual(missing.response.value.status, 404)
+          const landed = yield* tab.goto(`${origin}/redirect`)
+          assert.strictEqual(landed.url, `${origin}/landed`)
+          // The ends stock WebKit reports only through the document's request (Q198)
+          const refused = reasonOf(yield* Effect.exit(tab.goto(`http://127.0.0.1:${yield* closedPort}/`)))
+          assert.strictEqual(refused?.reason?._tag, "NavigationFailed")
+          assert.include(refused?.reason?.netError, "Connection refused")
+          // The browser shows its error page, a navigation of its own (Q199), before it's asked to go on
+          yield* tab.status.waitFor((status) => status._tag === "Open" && status.url === "about:blank")
+          // A port it blocks is refused before any request: the error page is all there is
+          const blocked = reasonOf(yield* Effect.exit(tab.goto("http://127.0.0.1:1/")))
+          assert.strictEqual(blocked?.reason?._tag, "NavigationFailed")
+          assert.include(blocked?.reason?.netError, "error page")
+          yield* tab.goto(`${origin}/landed`)
+          const noContent = reasonOf(yield* Effect.exit(tab.goto(`${origin}/204`)))
+          assert.strictEqual(noContent?.reason?._tag, "NoContent")
+          const download = reasonOf(yield* Effect.exit(tab.goto(`${origin}/download`)))
+          assert.strictEqual(download?.reason?._tag, "BecameDownload")
+          assert.strictEqual(yield* tab.url, `${origin}/landed`)
+          // A fragment of the same document would be a navigation it never reports
+          const fragment = reasonOf(yield* Effect.exit(tab.goto(`${origin}/landed#later`)))
+          assert.strictEqual(fragment?.reason?._tag, "Unsupported")
+          assert.strictEqual(fragment?.reason?.capability, "navigation.sameDocument")
+          const reloaded = yield* tab.reload()
+          assert.strictEqual(reloaded.url, `${origin}/landed`)
+        }), 5_000)
+    })
 
     it.effect("reads the console, the network and storage, and runs init scripts in the page's world", () =>
       Effect.gen(function*() {

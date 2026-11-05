@@ -14,7 +14,14 @@ experiments and the human review required for public API or contract changes. Fi
 
 A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same stock Chromium, the one the integration environment pins, and writes what it
-found to [RESULTS.md](RESULTS.md):
+found to [RESULTS.md](RESULTS.md). The captured full run at `c732173` (2026-11-05) records failures for both
+libraries on The Internet's dynamic controls: the preserved `the-internet.har` lacks the
+`https://the-internet.herokuapp.com/dynamic_controls` URL, so replay aborts that navigation. Each library failed its
+initial attempt and all ten timed repetitions. These are stale-recording failures, not established library or browser
+defects. The separate local HAR recording/replay scenario passed in that run; this does not resolve its earlier
+intermittent failure.
+
+The report contains:
 
 - **Scenarios:** API.md's call sites that both libraries can do, each written twice, as each library's own
   documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. The documentation site's
@@ -34,6 +41,20 @@ pnpm scenarios --only login # one scenario, and no measurements, printed: RESULT
 
 `pnpm scenarios` enters the integration environment (`flake.nix`, `devShells.integration`), as
 `pnpm test:integration` does, and fails anywhere else.
+
+## Scenario failures
+
+Each library makes one initial attempt and the scheduled timed repetitions, even when an earlier attempt fails.
+A rejection or unexpected returned text counts as a failure. The runner logs initial failures with the scenario,
+library and `initial outcome: failed:`; timed failures name the scenario, library and repetition number. It continues
+the remaining repetitions and later scenarios without extra attempts.
+
+The report retains initial outcomes separately, lists each timed failure and shows successful/attempted timing counts.
+Failed attempts contribute no timing sample; zero successful samples show no timing statistics. If any scenario attempt
+fails, the command returns a nonzero status after writing the report (or printing it for `--only`).
+
+This failure handling covers scenario attempts only. A failure in the later waiting-expectation, interceptor or page
+probe measurements can still abort the command before report publication.
 
 ## Playwright
 

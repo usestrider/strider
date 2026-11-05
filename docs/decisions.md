@@ -213,6 +213,20 @@ operation, so cleanup happens after a deadline passed). A new method doesn't com
   operations, which cuts a command short of a longer deadline and needs a reason of its own for "no reply"; and
   marking a read as sent, which would tell the caller something may have changed when nothing did.
 
+**Late resources are released.** When a caller stops waiting for a resource-producing protocol command, the
+library uses the protocol client's default late handler to release any resource the reply returns. BiDi script
+success and exception handles are disowned in the realm named by the reply. Consumed successful handles keep their normal
+owner; the adapter releases consumed exception handles that it does not return. L0 callers may supply a custom late handler and choose when to run its release effect.
+Additional release bindings are singular and non-overlapping; unsupported wildcard bindings are rejected during
+code generation. A malformed reply missing a required release binding is skipped, since guessing a realm could
+release the wrong resource. Such a handle may remain until its realm ends. Union paths are validated independently
+against the alternatives, without proving that every binding coexists with each resource path.
+
+- **Why.** An interrupted or timed-out caller cannot receive the resource. Releasing it avoids retaining remote
+  handles until realm teardown and follows the policy of closing late page and context creations.
+- **Rejected:** a general L1 adoption handler, which would retain resources no caller can use and require ownership
+  bookkeeping for abandoned results without improving the caller's recovery.
+
 **A page's release waits once, for the page's end.** When its owner's scope closes, an owned page's close is sent
 in a fiber of the model's scope, and the release waits for the page's end, not for the close's reply first, under a
 budget of its own: `Deadline.DefaultBudget` from when it starts. The close runs to its own end, its reply bounded by
@@ -1042,6 +1056,31 @@ Launched stock WebKit supplies upload-time creation timestamps rather than disk 
 file path. This existing native limitation remains unchanged; transferred files preserve available open-file stat
 times. Native timestamp expectations are explicit in the integration capability table, including exact disk-time
 assertions for Chromium and Firefox and exact transferred-time assertions for attached Chromium.
+
+## Password snapshot designation
+
+Password inputs have no implicit ARIA role, but agents need a ref to fill them. When inferred interactivity is
+enabled, the engine represents a roleless password input as an inferred editable node with password evidence,
+including disabled and read-only controls. The designation describes its kind rather than promising an action
+will succeed. Accessible names remain intact; controls with no accessible name remain unnamed. Password nodes bypass
+inferred names so nearby text cannot become a false label. Their values are absent from snapshot and find data, including embedded-control values used to name other
+elements. Explicit ARIA roles remain intact.
+
+Find matches the literal designation `password` under its existing case and exact rules, separately from the
+accessible name, and filters these nodes as `editable`. Snapshot diffs already compare role evidence.
+Exported named password refs use `Expect.that` to wait for a snapshot containing inferred password controls
+whose computed accessible name matches exactly, then combine their ref locators. This uses the engine's naming precedence without duplicating it
+in generated selectors or inventing a role. A missing name waits under the current deadline and check interval; duplicate names remain ambiguous rather than
+choosing one control. The first matching ref supplies the frame context, so a single framed match is supported;
+combining matches from different frames still requires manual narrowing. Unnamed refs retain a password input selector and can require narrowing.
+
+Rejected: dropping every name, which makes ordinary new/confirm forms ambiguous; treating every name as a label,
+which misses title and placeholder names; and joining label/title/placeholder queries, which can match another
+field's overridden hint even when its accessible name differs. The snapshot reads use the existing expectation wait rather than freezing an empty result before a late field
+appears. Returned refs retain their normal stale-ref guarantees if a field is replaced after resolution.
+
+Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
+"Password", which would replace or invent an accessible name; and including its value, even under local capture.
 
 ## Retain Chromium's startup window by default
 
