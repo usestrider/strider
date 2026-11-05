@@ -209,3 +209,36 @@ describe("route handlers declared for more phases than selected", () => {
     expect(context.route("**", requestOrAuth, { phase: "auth" })).type.not.toRaiseError()
   })
 })
+
+describe("route phase variance", () => {
+  it("maps phases covariantly to intercepted inputs", () => {
+    expect<Route.Intercepted<"request" | "auth">>().type.toBe<Route.RequestPhase | Route.AuthPhase>()
+    expect<Route.Intercepted<Route.Phase>>().type.toBe<Route.RequestPhase | Route.ResponsePhase | Route.AuthPhase>()
+    expect<Route.Intercepted<never>>().type.toBe<never>()
+  })
+  it("accepts broader handlers without accepting narrower handlers", () => {
+    expect<Route.Handler<never, never, Route.Phase>>().type.toBeAssignableTo<Route.Handler<never, never, "request">>()
+    expect<Route.Handler<never, never, "request">>().type.not.toBeAssignableTo<
+      Route.Handler<never, never, Route.Phase>
+    >()
+    expect<Route.Handler<never, never, "auth">>().type.not.toBeAssignableTo<Route.Handler<never, never, "request">>()
+  })
+  it("preserves broader handler requirements", () => {
+    const handler: Route.Handler<"handler failure", Dependency, Route.Phase> = () =>
+      Effect.flatMap(dependency, () => Route.continue)
+    expect(page.route("**", handler)).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
+    expect(context.route("**", handler, { phase: "auth" })).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
+  })
+})

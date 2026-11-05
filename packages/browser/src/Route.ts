@@ -200,14 +200,20 @@ export interface AuthPhase extends Paused {
  * @category models
  * @since 0.1.0
  */
-export type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>
+export type Intercepted<P extends Phase = Phase> = {
+  readonly request: RequestPhase
+  readonly response: ResponsePhase
+  readonly auth: AuthPhase
+}[P]
 
 /**
  * A route handler: decides what happens to each request paused at its phase.
  *
  * **Details**
  *
- * A failure `E` is logged, and the default decision, `continue`, applies.
+ * A failure `E` is logged, and the default decision, `continue`, applies. A handler valid at more phases
+ * can be used where fewer phases are selected: it accepts all of their inputs and returns decisions valid
+ * at every selected phase.
  *
  * @stability unstable
  * @category models

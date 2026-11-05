@@ -1577,7 +1577,7 @@ Routes intercept a page's or context's requests, and a route's handler decides w
 - `interface AuthPhase extends Paused`
   - `readonly phase: "auth"`
   - `readonly challenge: Challenge`
-- `type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>`
+- `type Intercepted<P extends Phase = Phase> = { readonly request: RequestPhase readonly response: ResponsePhase readonly auth: AuthPhase }[P]`
 - `type Handler<E, R, P extends Phase = "request"> = (intercepted: Intercepted<P>) => Effect.Effect<Decision<P>, E, R>`
 - `interface Options<P extends Phase = "request">`
   - `readonly phase?: P | undefined`
