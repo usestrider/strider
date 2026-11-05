@@ -257,7 +257,7 @@ export const history = tool(
 
 export const find = tool(
   "find",
-  "Searches the page's latest snapshot, taking one if there is none, for elements whose name or text contains the query, or equals it with exact; narrows by role. Returns their refs, which are targets, each with its role, name and the named elements it is in.",
+  "Searches the page's latest snapshot, taking one if there is none, for elements whose name, text or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name and the named elements it is in.",
   {
     page: PageName,
     query: Schema.String,

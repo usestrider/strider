@@ -826,12 +826,15 @@ of links before reporting unchanged state, which sends input to a separate contr
 Password inputs have no implicit ARIA role, but agents need a ref to fill them. When inferred interactivity is
 enabled, the engine represents a roleless password input as an inferred editable node with password evidence,
 including disabled and read-only controls. The designation describes its kind rather than promising an action
-will succeed. Real accessible labels remain names; unlabeled controls remain unnamed. Password nodes bypass
-inferred names so nearby text cannot become a false label. Their values are absent from snapshot and find data.
+will succeed. Accessible names remain intact; controls with no accessible name remain unnamed. Password nodes bypass
+inferred names so nearby text cannot become a false label. Their values are absent from snapshot and find data, including embedded-control values used to name other
+elements. Explicit ARIA roles remain intact.
 
 Find matches the literal designation `password` under its existing case and exact rules, separately from the
 accessible name, and filters these nodes as `editable`. Snapshot diffs already compare role evidence.
-Exported refs use a password input selector or the real label.
+Exported refs use a password input selector. Snapshot names do not retain whether their source was a label,
+title or placeholder, so assuming a label query can silently find nothing. A selector may need narrowing when
+several password inputs exist.
 
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.

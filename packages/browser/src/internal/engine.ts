@@ -857,6 +857,7 @@ export function engine(render: (root: SnapNode) => string) {
     role === "slider" || role === "spinbutton"
 
   const embeddedValue = (element: Element, role: string | null): string => {
+    if (element instanceof HTMLInputElement && element.type === "password") return ""
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       if (role === "slider" || role === "spinbutton") {
         return element.getAttribute("aria-valuetext") ?? element.getAttribute("aria-valuenow") ?? element.value

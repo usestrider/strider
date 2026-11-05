@@ -51,7 +51,7 @@ const clickWhatTheModelPicks = Effect.fn("clickWhatTheModelPicks")(
 ## Inferred controls
 
 By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
-`tabindex`, `contenteditable` or `onclick`, and names from text, `title`, `placeholder`, `alt` or a nearby label.
+`tabindex`, `contenteditable`, `onclick` or password inputs, and names from text, `title`, `placeholder`, `alt` or a nearby label.
 Each inference is tagged, as in `- clickable "Save" [ref=e7] [inferred: cursorPointer]`, so you can list the
 controls a screen reader can't reach:
 
@@ -69,6 +69,11 @@ const unreachableControls = Effect.fn("unreachableControls")(
   }
 )
 ```
+
+A password input without an explicit ARIA role appears as `editable [ref=e1] [inferred: password]`.
+Its label, title or placeholder stays its accessible name; without one it stays unnamed, without nearby-label
+inference. Its value is excluded, including when another element references it for a name. Disabled and
+read-only password inputs keep the designation; explicit ARIA roles are preserved.
 
 ## The accessibility tree alone
 
