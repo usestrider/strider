@@ -875,6 +875,10 @@ export interface Page extends ReadonlyPage {
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
    *
+   * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
+   * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
+   * also handle `"request"`; union phases require a handler compatible with every possible phase.
+   *
    * **Example** (Blocking analytics requests)
    *
    * ```ts import.meta.vitest
@@ -892,7 +896,17 @@ export interface Page extends ReadonlyPage {
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, P>,
+    handler: Route.Handler<E, R, NoInfer<P>>,
+    options: Route.Options<P> & { readonly phase: P }
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>,
+    options?: Route.Options | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request">(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**

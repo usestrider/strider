@@ -1,8 +1,10 @@
+import * as assert from "node:assert/strict"
 import { deflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import { chromiumArgs } from "../../browser/src/internal/profiles.ts"
 import { captureCases, cases } from "../src/benchmarks/cases.ts"
 import { compare, measure, options, summarize } from "../src/benchmarks/measure.ts"
+import { responseBody, start } from "../src/site.ts"
 
 describe("benchmark measurements", () => {
   it("discards warmups and alternates paired samples without overlapping work", async () => {
@@ -111,9 +113,16 @@ describe("benchmark measurements", () => {
   })
 
   it("uses the middle pair for an even median and nearest rank for p95", () => {
-    expect(summarize([9, 1, 3, 7])).toEqual({ median: 5, p95: 9, min: 1 })
-    expect(summarize([7, 1, 3])).toEqual({ median: 3, p95: 7, min: 1 })
+    expect(summarize([9, 1, 3, 7])).toMatchObject({ median: 5, mean: 5, p95: 9, min: 1 })
+    expect(summarize([7, 1, 3])).toMatchObject({ median: 3, mean: 11 / 3, p95: 7, min: 1 })
     expect(summarize(Array.from({ length: 20 }, (_, i) => i + 1)).p95).toBe(19)
+  })
+
+  it("retains signed pair differences and sample standard deviation", () => {
+    const result = compare([1, 3, 5], [2, 2, 2], 1.1)
+    expect(result.strider.sd).toBe(2)
+    expect(result.paired).toEqual({ differences: [-1, 1, 3], median: 1, mean: 1, sd: 2, min: -1, p95: 3, max: 3 })
+    expect(compare([1], [2], 1).paired.sd).toBe(0)
   })
 
   it("gates on the per-case median ratio, including the exact boundary", () => {
@@ -156,6 +165,50 @@ describe("benchmark measurements", () => {
       "--enable-features=Other"
     ])
   })
+})
+
+describe("response-body fixtures", () => {
+  for (const [name, size] of [["response-body-small", 4096], ["response-body-large", 4 * 1024 * 1024]] as const) {
+    it(`serves and verifies every byte of ${name} without caching`, async () => {
+      const site = await start()
+      try {
+        const response = await fetch(`${site.origin}/benchmark/body?size=${size}`)
+        expect(response.status).toBe(200)
+        expect(response.headers.get("cache-control")).toBe("no-store")
+        expect(response.headers.get("content-type")).toBe("application/octet-stream")
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        const entry = cases.find((entry) => entry.name === name)!
+        entry.verify(bytes)
+        bytes[size - 1] = bytes[size - 1]! ^ 1
+        expect(() => entry.verify(bytes)).toThrow()
+        expect(() => entry.verify(bytes.subarray(1))).toThrow()
+      } finally {
+        await site.close()
+      }
+    })
+  }
+})
+
+describe("response-body rejection diagnostics", () => {
+  for (const kind of ["corrupt", "truncated"] as const) {
+    it(`rejects a ${kind} 4 MiB body with bounded scalar diagnostics`, () => {
+      const entry = cases.find((entry) => entry.name === "response-body-large")!
+      const bytes = responseBody(4 * 1024 * 1024)
+      if (kind === "corrupt") bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 1
+      const malformed = kind === "corrupt" ? bytes : bytes.subarray(0, -1)
+      let failure: unknown
+      try {
+        entry.verify(malformed)
+      } catch (error) {
+        failure = error
+      }
+      assert.ok(failure instanceof assert.AssertionError)
+      // Node inspects object-valued assertion operands before shortening its message.
+      assert.equal(typeof failure.actual, "boolean")
+      assert.equal(typeof failure.expected, "boolean")
+      assert.ok(failure.message.length < 256)
+    })
+  }
 })
 
 describe("capture benchmark verification", () => {

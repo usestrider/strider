@@ -99,10 +99,11 @@ report may still say `running`; only a completed report can establish a result.
 ## Launch diagnostics
 
 Use the diagnostic loader and runner to timestamp fresh launch through browser availability without changing
-launch flags or resource ownership. Run it under the browser lock in the pinned integration environment:
+launch flags or resource ownership. Run it in the pinned integration environment without overlapping
+other browser runs, suites, checks or builds:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+nix develop .#integration --ignore-environment --keep TERM --command node \
   --import ./packages/scenarios/benchmark/launch-profile-hooks.mjs \
   packages/scenarios/benchmark/launch-profile.ts /absolute/path/launch-profile.json 20
 ```
@@ -124,14 +125,15 @@ Spawn marks end when the process handle returns; they do not isolate shell execu
 which can continue during the first-reply wait.
 These instrumented samples are for attribution, not speed claims; use `pnpm bench` for uninstrumented comparisons.
 Protocol waits may overlap, so their individual durations cannot be summed as elapsed launch time. Exclude runs
-that overlap other suites, checks or builds even when those commands did not acquire the browser lock.
+that overlap other browser runs, suites, checks or builds.
 
-The diagnostic's instrumentation-rejection regressions launch real browsers. The ordinary unit suite discovers
+The diagnostic's instrumentation-rejection regressions launch real browsers; run them without overlapping
+other browser runs. The ordinary unit suite discovers
 `LaunchProfile.test.ts` but skips these cases outside the integration environment; the integration configuration
 does not discover this file. Run it explicitly with the ordinary configuration inside the pinned environment:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command \
+nix develop .#integration --ignore-environment --keep TERM --command \
   pnpm exec vitest --run --config vitest.config.ts packages/scenarios/test/LaunchProfile.test.ts
 ```
 
@@ -360,8 +362,8 @@ nix develop .#integration --ignore-environment --keep TERM --command node \
   packages/scenarios/benchmark/query-replay.ts /absolute/path/instrumented.json /absolute/path/replay.json
 ```
 
-Coordinate these commands and checks with other work on the machine; retain the browser lock for the entire run.
-Flag overlap with an unlocked suite as contaminated. The profiler uses 20 alternating library pairs and three
+Run these commands and checks separately from other browser runs, suites and builds on the machine.
+Treat any overlapping run as contaminated. The profiler uses 20 alternating library pairs and three
 warmups (trace mode uses three pairs and one warmup); a fourth argument overrides the measured count for smoke
 checks. Modes are exactly `plain`, `instrumented`, `trace`, `boundary`, `boundary-trace`, `evaluation` and
 `evaluation-instrumented`; measured counts must be positive safe integers. Invalid arguments are rejected before collection. Instrumented modes require the loader
@@ -467,3 +469,41 @@ instrumented evaluation report can complete. Byte encoding for the report happen
 Compare both first-write and frame-completing-write boundaries when framing spans multiple writes.
 Retain plain/instrumented controls: the extra observers can distort both queue and subsequent wait
 intervals. Measured enqueue-to-write time is not promised savings from removing a queue.
+
+## Response-body transfer
+
+`pnpm bench --only network` selects navigate, resources and both transfer cases.
+Reports retain mean and sample standard deviation, plus signed Strider-minus-Playwright differences for
+each measured pair and their median/mean/SD/range/p95; these describe spread, not a significance test.
+
+`response-body-small` and `response-body-large` fetch 4 KiB and 4 MiB of deterministic binary data from
+`/benchmark/body`. Every byte is checked after timing, including warmups. The server precomputes bodies,
+sends `application/octet-stream` with `Cache-Control: no-store`, and does not compress. Each sample has a
+fresh context/page and no user route or service worker. Strider's default interception remains enabled;
+Playwright's default network observation remains enabled. Neither installs an artificial matching route.
+
+Timing starts before response subscription registration. Strider awaits body-collection acknowledgement
+before starting the fetch; Playwright installs `waitForResponse` before starting it. Timing includes registration,
+fetch dispatch, server/network completion, protocol body retrieval, decoding and delivery of bytes to the caller.
+The page also consumes the fetch body on both sides. Initial navigation, byte verification and context cleanup
+are excluded. Strider closes the collection scope before returning. These are end-to-end collection cases,
+not isolated decoder measurements or streaming/throughput/memory tests. The 4 MiB case stays below Strider's
+default 10 MiB collection limit; Playwright has no equivalent collection-limit contract here.
+
+For separate critical-path diagnostics (never a speed comparison), use the exact-site loader without overlapping
+other browser runs:
+
+```sh
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/body-profile-hooks.mjs \
+  packages/scenarios/src/benchmarks/bin.ts --only response-body-large --runs 20 --warmup 3 \
+  --output /absolute/path/body-diagnostic.json
+```
+
+The adjacent `.phases.json` records sample boundaries, collection acknowledgement, adapter/body-reply,
+decode and public decoder phases plus body character counts and source/loader hashes. It timestamps
+Playwright's body command/reply too. The protocol interval includes scheduling, transport, browser work and
+reply parsing; it does not isolate wire latency. Instrumentation and distinct public result paths can bias both
+libraries differently. Warmups remain in phase logs; discard the first three samples of each library when
+summarizing. Pair order follows the uninstrumented runner. Phase durations partition one sample only where
+boundaries are nested; never add overlapping waits or interpret a host interval as removable savings.

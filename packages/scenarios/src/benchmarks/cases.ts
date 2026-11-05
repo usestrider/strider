@@ -1,8 +1,10 @@
-import { ConsoleMessage, Expect, type Page } from "@usestrider/browser"
+import { ConsoleMessage, Expect, NetworkResponse, type Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import type * as Scope from "effect/Scope"
 import * as assert from "node:assert/strict"
 import { inflateSync } from "node:zlib"
 import type * as Playwright from "playwright-core"
+import { responseBody } from "../site.ts"
 
 export const viewport = { width: 1280, height: 720 }
 
@@ -10,7 +12,7 @@ export interface Case {
   readonly name: string
   readonly description: string
   readonly fixture?: string
-  readonly strider: (page: Page.Page, origin: string) => Effect.Effect<unknown, unknown>
+  readonly strider: (page: Page.Page, origin: string) => Effect.Effect<unknown, unknown, Scope.Scope>
   readonly playwright: (page: Playwright.Page, origin: string) => Promise<unknown>
   readonly prepareStrider?: (page: Page.Page) => Effect.Effect<unknown, unknown>
   readonly preparePlaywright?: (page: Playwright.Page) => Promise<unknown>
@@ -18,6 +20,37 @@ export interface Case {
 }
 
 const equals = (expected: unknown) => (value: unknown) => assert.deepEqual(value, expected)
+
+const bodyCase = (name: string, size: number): Case => {
+  const expected = responseBody(size)
+  return ({
+    name,
+    description:
+      `Collect an uncached ${size}-byte binary fetch, including subscription readiness and transfer; exact verification excluded`,
+    strider: (page, origin) =>
+      Effect.scoped(Effect.gen(function*() {
+        const url = `${origin}/benchmark/body?size=${size}`
+        const next = yield* NetworkResponse.next(page, { url, body: (message) => message.arrayBuffer })
+        yield* page.evaluateInMainWorld((url: string) => {
+          void fetch(url).then((r) => r.arrayBuffer())
+        }, url)
+        const response = yield* next
+        return new Uint8Array(response.body)
+      })),
+    playwright: async (page, origin) => {
+      const url = `${origin}/benchmark/body?size=${size}`
+      const next = page.waitForResponse(url)
+      await page.evaluate((url) => {
+        void fetch(url).then((r) => r.arrayBuffer())
+      }, url)
+      return (await next).body()
+    },
+    verify: (value) => {
+      assert.ok(value instanceof Uint8Array)
+      assert.ok(Buffer.from(value).equals(expected), "Response body bytes or length differ")
+    }
+  })
+}
 
 // One synchronous page-side turn: fields in a row share an observation moment.
 const snapshot = () =>
@@ -44,6 +77,8 @@ const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
 }))
 
 export const cases: ReadonlyArray<Case> = [
+  bodyCase("response-body-small", 4096),
+  bodyCase("response-body-large", 4 * 1024 * 1024),
   {
     name: "navigate",
     description: "Navigate to a local document, wait for load, then read its title",

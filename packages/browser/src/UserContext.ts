@@ -247,6 +247,12 @@ export interface UserContext extends ObservedUserContext {
    * Intercepts requests matching `pattern` from every page and worker of the context, at one phase, while the
    * registration lives. A page's own routes are asked first; otherwise it works as `Page.route` does.
    *
+   * **Details**
+   *
+   * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
+   * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
+   * also handle `"request"`; union phases require a handler compatible with every possible phase.
+   *
    * **Example** (Blocking analytics in every page)
    *
    * ```ts import.meta.vitest
@@ -263,7 +269,17 @@ export interface UserContext extends ObservedUserContext {
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, P>,
+    handler: Route.Handler<E, R, NoInfer<P>>,
+    options: Route.Options<P> & { readonly phase: P }
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>,
+    options?: Route.Options | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request">(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
