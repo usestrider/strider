@@ -155,7 +155,30 @@ An MCP client such as Claude Desktop launches `strider mcp` from its configurati
 }
 ```
 
-With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`, for pages you don't trust: no screenshots, fields' text masked in snapshots and no console text in the digest. The default is `local`, which allows them all.
+With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`. The default is `local`, which retains full capture and search.
+Field editability and field-content name provenance are collected only for redacted capture, including equivalent custom policies.
+Local capture and ordinary library snapshots skip this work and omit that masking metadata.
+
+Strict capture denies screenshots and masks editable content and validation messages as `•••` in snapshots and
+find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,
+including `plaintext-only`. Names copied from field content into ancestors or other nodes are masked too,
+including embedded values, referenced controls, nearby fields and image-alt inference. Public labels, roles,
+refs and states remain visible. Provenance follows contributors under native/ARIA fields through shadow hosts
+and assigned slots, including descendants that are not themselves editable. A mixed name containing public
+text and field content is masked in full. Native select and ARIA listbox option text is masked with the field
+subtree. Strict `find` matches only that redacted
+view: a query for hidden content returns no match, while label searches and role filters still work. For example,
+`find "Card" --role textbox` can find a field labeled Card, but guessing its masked value cannot find it.
+
+Strict capture omits console text. Uncaught exceptions in both the digest and `history exception` retain only
+`uncaught exception at <time>`: the occurrence time in monotonic nanoseconds, with no page-supplied error name,
+message, stack or origin text. CLI and MCP apply the same policy.
+
+This is a bounded capture policy, not a secrecy or inference guarantee. Ordinary page text and labels remain
+visible, and URLs, dialogs, network/download metadata, arguments and failures can carry page content too. A page
+can put sensitive text in a label or another unmasked channel. Assertions such as `expect --text` and action
+selectors still match original page content, so they can confirm guesses at masked values. Choose what pages
+and tools to expose.
 
 ```
 clicked button "Add to cart" on shop · 412 ms

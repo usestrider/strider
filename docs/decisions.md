@@ -804,6 +804,61 @@ already have expired; and waiting for that independent cleanup budget inside an 
 Cleanup does not retry, and unexpected defects remain defects.
 
 
+## Strict capture matches the redacted snapshot
+
+Use one structured redacted tree for toolkit snapshot output and find matching, including names and paths.
+Matching hidden content and masking only the response confirms guesses at field values, so strict find must
+search what it can show. Preserve label searches and role filters; keep local capture unchanged.
+
+Carry optional field editability separately from role in engine and public snapshot data. Semantic articles,
+paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
+when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
+can mean that metadata was not collected or that the node is not a field; older snapshot data remains valid. Accessible names derived from editable content carry
+optional text provenance without changing local text rendering. Track field contributions through the chosen
+accessible or inferred name, including ancestor content, embedded values, referenced controls, nearby fields
+and image-alt inference. Optional `fieldContent` on names lets shared redaction mask these copies outside the
+field subtree while retaining genuine public labels. Inspecting only the finished tree loses those origins.
+Labels, semantic roles, states and refs survive.
+
+For non-full console capture, exception digests and history retain a library-authored event marker and monotonic
+occurrence time, with no page-provided name, message, stack or origin text. Error names and origins are no safer
+than messages. Full local capture keeps its previous diagnostics.
+
+Rejected: matching original text while redacting output, which leaks guesses; masking by role alone, which misses
+semantic editables; replacing semantic roles with editable, which loses meaning; mandatory false flags on every
+node, which enlarge every snapshot and reject older data; and masking exception messages alone, which leaves
+other page-controlled exception details visible. Strict remains a bounded capture policy: ordinary page text,
+labels, URLs, dialogs and other metadata remain available, so it is not a secrecy or inference guarantee.
+
+Assertions such as `expect --text` and action selectors continue matching original page content and can confirm
+guesses at masked values. Restricting those operations is a separate contract decision; this change restricts
+snapshot/find capture and does not change assertion or action semantics. Name provenance is limited to field
+contributions during name construction, not general tracking of sensitive data across arbitrary page scripts.
+
+Field-content provenance follows the contributor's flat-tree ancestry through assigned slots and shadow hosts,
+including native/ARIA field ancestors whose descendants do not inherit DOM editability. Keep explicit public
+label precedence; do not infer privacy by checking only the named element or a role-limited descendant walk.
+Mixed names are masked whole, and native select/ARIA listbox options follow field-subtree masking. This
+conservative choice can hide public portions of a derived name or option labels; separate unmasked nodes
+remain searchable. It avoids treating a copied private contribution as a public label.
+
+Memoize field classification, field ancestry and inferred-text provenance only within each tree walk. Cache
+both positive and negative ancestor paths to avoid repeating a full walk per contributor. Clear these caches
+with names, roles and text before every engine request, expectation observation and action revalidation round;
+role changes, slot reassignment and reparenting must be observed by the next walk. Caching across walks would
+retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
+provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
+
+Field editability and name provenance are requested only by redacted snapshot capture, including custom policies with the same masking
+setting. Ordinary library and full/local snapshots omit that masking metadata, skipping field classification,
+field-contribution ancestry and subtree analysis. Ordinary rendering and queries do not consume the editability
+flag. The optional public codec can carry it and diff can compare it when supplied, but neither requires
+automatic collection. The masking request is internal operation context, forwarded to each frame; it is not inferred
+from a preset's identity. Clear naming caches between requests and scope cached toolkit snapshots to their
+policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
+material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
+when requested rather than introducing separate name strings or speculative optimizations.
+
 ## One-shot event waits keep their first terminal outcome
 
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
@@ -936,3 +991,37 @@ and visibility filters count the element as hidden. Opacity alone does not make 
   count unseen elements as seen; requiring callers to disable the visible check, which also drops useful checks
   for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
   text fields unusable by fill despite being enabled and editable.
+
+## Retain Chromium's startup window by default
+
+Keep the initial window in Chromium's automation profile and, by inheritance, concurrent. Skipping it saves
+measurable time, but changes default-context session behavior and the initial tabs exposed by the CLI and tools.
+A saving paid once per browser does not justify those changes. Stock, custom and attach behavior also stays
+unchanged. Callers who choose the trade can already opt in through launch options with
+`args: ["--no-startup-window"]`; no new option or persistence exception is introduced.
+
+On pinned Linux Chromium 155.0.8059.79, Playwright 1.64.1 and Node 24.21.0, two reversed-order sweeps each used
+three warmup and twenty measured alternating Strider/Playwright pairs per variant. Launch and first isolated,
+configured page were timed from the same browser, with validation and cleanup outside timing. Combined Strider
+medians fell from 205.916 to 147.624 ms and from 191.340 to 151.012 ms: savings of 58.292 and 40.328 ms.
+Playwright's combined control medians changed by −0.705 and +3.372 ms. First-page medians rose by 0.808 and
+5.437 ms, so skipping the window did not merely move the launch cost to that page. The control medians support
+the saving, but the reverse sweep's Playwright combined p95 rose from 124.144 to 178.997 ms. These measurements
+do not establish a stable tail improvement, parity, or a headed-launch benefit.
+
+On the same Chromium pin, closing the last page in a windowless default context dropped its session cookie;
+a later page retained a lasting cookie and localStorage. Leaving the ordinary startup page open preserved the
+session cookie, while closing that startup page first exposed the same loss. Isolated contexts retained their
+session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
+a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
+directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
+It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+
+Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
+would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
+the benchmark and explicit-argument windowless tests remain useful without changing the production default.
+
+Rejected: enabling the flag in automation and concurrent for a once-per-browser 40–58 ms median saving while
+silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
+which still changes temporary default contexts; and treating the saving as evidence that the startup page has
+no behavioral role. Caller opt-in keeps that trade explicit.
