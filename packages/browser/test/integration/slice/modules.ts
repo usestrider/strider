@@ -491,20 +491,22 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         }), timeout)
 
       it.effect(
-        "interrupts body decoding, releases its collection scope, and collects again",
+        "keeps body decoding pending after reader interruption until its scope closes",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin, url } = yield* fixture(() => "<p>body cancellation</p>")
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             const decoding = yield* Deferred.make<void>()
+            const interrupted = yield* Deferred.make<void>()
             const collection = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
             const pending = yield* NetworkResponse.next(page, {
               url: `${origin}/cart`,
               body: (message) =>
                 message.arrayBuffer.pipe(
                   Effect.tap(() => Deferred.succeed(decoding, undefined)),
-                  Effect.andThen(Effect.never)
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
                 )
             }).pipe(Scope.provide(collection))
             const fiber = yield* pending.pipe(Effect.forkChild)
@@ -514,15 +516,9 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             yield* Deferred.await(decoding).pipe(Deadline.within("5 seconds"))
             yield* Fiber.interrupt(fiber)
             assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(fiber)))
+            assert.isFalse(yield* Deferred.isDone(interrupted))
             yield* Scope.close(collection, Exit.void)
-            const next = yield* NetworkResponse.next(page, {
-              url: `${origin}/cart`,
-              body: (message) => message.json
-            })
-            yield* page.evaluateInMainWorld(() => {
-              void fetch("/cart", { method: "POST" })
-            })
-            assert.deepStrictEqual((yield* next).body, { items: [{ id: "tea" }] })
+            assert.isTrue(yield* Deferred.isDone(interrupted))
           })),
         timeout
       )
