@@ -204,6 +204,135 @@ describe("CDP combined locale and user-agent declarations", () => {
   }
 })
 
+describe("CDP complete intermediate locale and user-agent payloads", () => {
+  for (const order of ["Locale first", "UserAgent first"] as const) {
+    for (const timing of ["existing target", "new targets"] as const) {
+      it.effect(`omits a replaced platform and preserves every intermediate payload (${order}, ${timing})`, () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Queue.unbounded<Extract<Adapter.Fact, { _tag: "PageReady" }>>()
+          const commands: Array<Sent> = []
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : command.method === "Page.getFrameTree"
+                ? {
+                  frameTree: {
+                    frame: {
+                      id: command.sessionId!.replace("S", "T"),
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : {}
+              yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "attached",
+            sink: (fact) => fact._tag === "PageReady" ? Queue.offer(ready, fact).pipe(Effect.asVoid) : Effect.void
+          })
+          let target = 0
+          const attach = Effect.gen(function*() {
+            const id = ++target
+            yield* browser.receive({
+              method: "Target.attachedToTarget",
+              params: {
+                sessionId: `S${id}`,
+                targetInfo: { targetId: `T${id}`, type: "page", title: "", url: "about:blank", attached: true },
+                waitingForDebugger: false
+              }
+            })
+            return (yield* Queue.take(ready)).page
+          })
+          if (timing === "existing target") yield* attach
+          let cursor = 0
+          const observed: Array<object> = []
+          const expected: Array<object> = []
+          const snapshot = Effect.fnUntraced(
+            function*(step: string, userAgent: string, locale?: string, platform?: string) {
+              if (timing === "new targets") yield* attach
+              const sessionId = timing === "new targets" ? `S${target}` : "S1"
+              const payloads = commands.slice(cursor).filter((command) =>
+                command.sessionId === sessionId && command.method === "Emulation.setUserAgentOverride"
+              )
+              assert.isAbove(payloads.length, 0)
+              cursor = commands.length
+              observed.push({ step, params: payloads.map((command) => command.params) })
+              expected.push({
+                step,
+                params: payloads.map(() => ({
+                  userAgent,
+                  ...(locale === undefined ? {} : { acceptLanguage: locale }),
+                  ...(platform === undefined ? {} : { platform })
+                }))
+              })
+            }
+          )
+          const install = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, override: Adapter.Override) {
+            const lifetime = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(lifetime, Exit.void))
+            yield* adapter.declare(scope, { _tag: "Override", override }).pipe(Scope.provide(lifetime))
+            return Scope.close(lifetime, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+          })
+          const locale = (value: string): Adapter.Override => ({ _tag: "Locale", locale: value })
+          const ua = (value: string): Adapter.Override => ({
+            _tag: "UserAgent",
+            userAgent: `${value} UA`,
+            platform: Option.some(`${value} platform`)
+          })
+          const browserScope: Adapter.DeclarationScope = { _tag: "Browser" }
+          const first = order === "Locale first" ? locale("en-GB") : ua("Browser")
+          const second = order === "Locale first" ? ua("Browser") : locale("en-GB")
+          const releaseFirst = yield* install(browserScope, first)
+          yield* snapshot(
+            "first kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          const releaseSecond = yield* install(browserScope, second)
+          yield* snapshot("both browser kinds", "Browser UA", "en-GB", "Browser platform")
+          const releaseReplacement = yield* install(browserScope, {
+            _tag: "UserAgent",
+            userAgent: "Replacement UA",
+            platform: Option.none()
+          })
+          yield* snapshot("replace without platform", "Replacement UA", "en-GB")
+          const releaseLocale = yield* install(browserScope, locale("fr-FR"))
+          yield* snapshot("locale with platform absent", "Replacement UA", "fr-FR")
+          yield* releaseLocale
+          yield* snapshot("release locale replacement", "Replacement UA", "en-GB")
+          yield* releaseReplacement
+          yield* snapshot("restore platform", "Browser UA", "en-GB", "Browser platform")
+          yield* releaseSecond
+          yield* snapshot(
+            "release second kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          yield* releaseFirst
+          assert.deepStrictEqual(observed, expected)
+        }))
+    }
+  }
+})
+
 describe("CDP locale declaration release", () => {
   for (const holdLanguageReply of [false, true]) {
     for (const mode of ["reset", "remaining", "replacement"] as const) {
