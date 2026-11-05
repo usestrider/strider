@@ -149,6 +149,27 @@ describe("BoundedAdapter", () => {
       assert.deepStrictEqual(timeout.diagnostics.progress.map((step) => step.state), ["ok", "uncertain"])
     }))
 
+  it.effect("does not let one write's reply confirm another still in flight", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => real(10) })
+      const timeout = yield* Effect.all([adapter.clearCookies(context), adapter.setCookies(context, [])], {
+        concurrency: "unbounded"
+      }).pipe(Operation.named("cookies"), Deadline.within("100 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  it.effect("does not let a concurrent step's reply confirm another still in flight", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => real(10) })
+      const timeout = yield* Effect.all([
+        adapter.clearCookies(context).pipe(Operation.named("unanswered")),
+        adapter.setCookies(context, []).pipe(Operation.named("answered"))
+      ], { concurrency: "unbounded" }).pipe(Operation.named("cookies"), Deadline.within("100 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
