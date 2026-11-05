@@ -32,6 +32,18 @@ describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
+        "connects Chromium with no startup page",
+        () =>
+          Effect.gen(function*() {
+            const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+            const cdp = yield* CdpConnection.make(transport)
+            const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(cdp.browser))
+            assert.deepStrictEqual(targetInfos.filter((target) => target.type === "page"), [])
+          }),
+        timeout
+      )
+
+      it.effect(
         "attributes a route-fulfilled redirect to the route and its final response to the network",
         () =>
           Effect.gen(function*() {
