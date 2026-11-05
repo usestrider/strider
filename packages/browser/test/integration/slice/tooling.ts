@@ -38,6 +38,24 @@ const fixture = Effect.fnUntraced(function*(html: string) {
 
 const text = (value: string) => new TextEncoder().encode(value)
 
+// Diagnostic Linux process-tree RSS, with shared pages counted in each process. It is not an allocator measurement.
+const descendantRss = (root = process.pid): number => {
+  let total = 0
+  let children: string
+  try {
+    children = fs.readFileSync(`/proc/${root}/task/${root}/children`, "utf8")
+  } catch {
+    return total
+  }
+  for (const child of children.trim().split(/\s+/).filter(Boolean)) {
+    try {
+      total += Number(/^VmRSS:\s+(\d+)/m.exec(fs.readFileSync(`/proc/${child}/status`, "utf8"))?.[1] ?? 0) * 1024
+    } catch { /* The child ended between reads. */ }
+    total += descendantRss(Number(child))
+  }
+  return total
+}
+
 // Writes each chosen file's name, type, size and text
 const files = `<input type="file" id="files" multiple aria-label="Files"><button>Choose</button><p id="out">none</p>
 <script>
@@ -122,13 +140,17 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
                   yield* page.getByRole("button", { name: "Choose" }).click()
                   yield* page.getByText(
-                    /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
+                    attached
+                      ? "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                      : /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                   ).pipe(Expect.toBeVisible)
                   assert.strictEqual(yield* handler.handled, 1)
                   yield* handler.remove
                 } else yield* page.getByLabel("Files").setInputFiles(inputs)
                 yield* page.getByText(
-                  /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
+                  attached
+                    ? "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                    : /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                 ).pipe(Expect.toBeVisible)
                 // A refused mixture must preserve the existing selection.
                 const failure = yield* page.getByLabel("Files").setInputFiles([
@@ -137,7 +159,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 ]).pipe(Effect.flip)
                 assert.strictEqual(failure._tag, "LocatorError")
                 yield* page.getByText(
-                  /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
+                  attached
+                    ? "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                    : /^caller\.txt:[^:]*:14:caller content\|unknown\.strider-unknown:[^:]*:3:raw\|b\.csv:[^:]*:3:x,y$/
                 ).pipe(Expect.toBeVisible)
                 if (chooser) {
                   const clear = yield* FileChooser.handle(page, FileChooser.choose([]))
@@ -227,10 +251,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 : made
               const failure = yield* input.setInputFiles(both).pipe(Effect.flip)
               assert(Locator.isLocatorError(failure), String(failure))
-              assert.include(
-                source === "bytes" || attached ? ["InvalidInput"] : ["InvalidInput", "BackendFailure"],
-                failure.reason._tag
-              )
+              assert.strictEqual(failure.reason._tag, "InvalidInput")
               yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
               yield* page.getByRole("button", { name: "Inspect" }).click()
               yield* page.locator("#selected").pipe(Expect.toHaveText("a.txt"))
@@ -409,12 +430,15 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* page.goto(url)
               const baseline = process.memoryUsage()
               const peak = { ...baseline }
+              const descendantBaselineRss = descendantRss()
+              let descendantPeakRss = descendantBaselineRss
               const sampling = setInterval(() => {
                 const current = process.memoryUsage()
+                descendantPeakRss = Math.max(descendantPeakRss, descendantRss())
                 for (const key of ["rss", "heapUsed", "external", "arrayBuffers"] as const) {
                   peak[key] = Math.max(peak[key], current[key])
                 }
-              }, 25)
+              }, 100)
               yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(sampling)))
               const started = performance.now()
               yield* page.getByLabel("File").setInputFiles(FileInput.local(file))
@@ -430,7 +454,10 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 elapsedMillis: performance.now() - started,
                 baseline,
                 peak,
-                callerMemoryOnly: true
+                descendantBaselineRss,
+                descendantPeakRss,
+                memorySampleMillis: 100,
+                descendantRssIncludesSharedPages: true
               })
             })).pipe(Deadline.withDefaultBudget("300 seconds"))
           }), 400_000)
