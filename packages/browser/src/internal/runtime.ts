@@ -621,6 +621,23 @@ export const sendToDocument = (
     promptBlocked(page)
   )
 
+/**
+ * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
+ * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
+ * caller's uninterruptible finalizer. A gone document needs no release.
+ */
+export const releaseInDocument = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "disarm" }>,
+  id: Diagnostics.OperationId
+): Effect.Effect<void, SendFailure> =>
+  Effect.suspend(() =>
+    Option.isSome(runtime.model.document(document))
+      ? Effect.asVoid(callEngine(runtime, document, Engine.run, JSON.stringify(request), id))
+      : Effect.void
+  )
+
 /** The one match, by its node binding and where it is, or the engine's answer for why there is none. */
 export type Found =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding; readonly routed: Routed }

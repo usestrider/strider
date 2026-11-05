@@ -7,13 +7,14 @@
  *   query; a bad one fails at once.
  * - **The digest.** The context's and each page's event channels are recorded from the start, and each result
  *   takes what they recorded since the previous call: navigations, popups, dialogs and who decided them,
- *   downloads, uncaught exceptions, console errors and failed requests. No tool waits after it acts.
+ *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks.
+ *   No tool waits for later page events after it acts.
  * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
  *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
  *   URL's `%C3%`, is sent as written.
- * - **Capture.** The policy decides whether screenshots are sent and how much console text the digest carries.
- *   Redacted snapshots mask editable fields' text and all validation messages, keeping invalid state and refs;
- *   full snapshots retain that text and those messages. `CapturePolicy.strict` uses redacted snapshots.
+ * - **Capture.** The policy controls screenshots and console/exception details. One redacted tree supplies
+ *   snapshot output and find matching, masking editable content and validation messages while keeping labels,
+ *   roles, states and refs. Non-full console capture sends exception markers and occurrence times only.
  */
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
@@ -51,7 +52,9 @@ import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Runtime from "./runtime.ts"
 import * as Secrets from "./secrets.ts"
+import * as SnapshotImpl from "./snapshot.ts"
 import * as Tools from "./tools.ts"
 import * as UrlPattern from "./urlPattern.ts"
 
@@ -113,33 +116,21 @@ export const toFailure = (error: unknown): Tools.ToolFailure => {
   )
 }
 
-const editable = new Set(["textbox", "searchbox", "combobox", "spinbutton", "editable"])
+/** The same redacted tree supplies snapshot text and find matching, names and paths. */
+export const redacted = (node: Snapshot.Node, inside = false): Snapshot.Node => ({
+  ...node,
+  name: node.name._tag !== "None" &&
+      (inside || node.name.fieldContent === true ||
+        (node.editable === true && "from" in node.name && node.name.from === "text"))
+    ? { ...node.name, value: "•••" }
+    : node.name,
+  validationMessage: Option.map(node.validationMessage, () => "•••"),
+  children: node.children.map((child) => redacted(child, inside || node.editable === true))
+})
 
-/** Fields keep their labels; their descendants and text-derived editable names are field content. */
-const privateName = (role: string, fromText: boolean, inside: boolean) => inside || (role === "editable" && fromText)
-
-// Consume quoted names and text too, so only tokens outside JSON strings are masked.
-const snapshotToken = /\[validationMessage=("(?:[^"\\]|\\.)*")\]|"(?:[^"\\]|\\.)*"/g
-
-/** Redacted snapshots mask every validation message and editable fields' own text; full capture keeps both. */
-export const masked = (text: string): string => {
-  const lines = text.replace(
-    snapshotToken,
-    (token, message: string | undefined) => message === undefined ? token : "[validationMessage=\"•••\"]"
-  ).split("\n")
-  let inside: number | undefined = undefined
-  return lines.map((line) => {
-    const indent = line.length - line.trimStart().length
-    if (inside !== undefined && indent <= inside) inside = undefined
-    // Consume the complete JSON name before inspecting metadata, so a label cannot forge its origin.
-    const node = /^(\s*- ([a-z]+):?)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/.exec(line)
-    if (node === null) return line
-    const [, prefix, role, name, metadata] = node
-    const hidden = privateName(role!, metadata!.includes("[name from: text]"), inside !== undefined)
-    if (inside === undefined && editable.has(role!) && line.endsWith(":")) inside = indent
-    return hidden && name !== undefined ? `${prefix} "•••"${metadata}` : line
-  }).join("\n")
-}
+/** Exception details include page-controlled names and origins; redaction emits only library text and time. */
+export const exceptionLine = (exception: UncaughtException.UncaughtException, hide: boolean): string =>
+  hide ? `uncaught exception at ${exception.at}` : `${exception.name}: ${exception.message}`
 
 const isRef = Schema.is(Tools.Ref)
 
@@ -240,6 +231,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     readonly entry: Model.ContextEntry
   }
   const capture = options.capture
+  const takeSnapshot = (page: Page.Page) =>
+    page.snapshot().pipe(
+      Effect.provideService(SnapshotImpl.NameProvenance, capture.snapshotText === "redacted")
+    )
   const secrets = Object.entries(options.secrets).map(([name, value]) => ({ name, value: Redacted.value(value) }))
 
   // ── Secrets ──
@@ -463,7 +458,12 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     }, within)
     yield* drain(
       events.exception,
-      (exception) => note(`uncaught ${exception.name}: ${exception.message} on ${originName(exception.origin)}`),
+      (exception) =>
+        note(
+          capture.consoleText === "full"
+            ? `uncaught ${exceptionLine(exception, false)} on ${originName(exception.origin)}`
+            : exceptionLine(exception, true)
+        ),
       within
     )
     yield* drain(
@@ -649,16 +649,16 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       ),
     snapshot: ({ page: name }) =>
       onPage(name, (page) =>
-        Effect.map(page.snapshot(), (snapshot) => {
+        Effect.map(takeSnapshot(page), (snapshot) => {
           if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
-          return capture.snapshotText === "full" ? snapshot.text : masked(snapshot.text)
+          return capture.snapshotText === "full" ? snapshot.text : SnapshotImpl.render(redacted(snapshot.root))
         })),
     find: ({ page: name, query, role, exact }) =>
       onPage(name, (page) =>
         Effect.gen(function*() {
           let snapshot = snapshots.get(name)
           if (snapshot === undefined) {
-            snapshot = yield* page.snapshot()
+            snapshot = yield* takeSnapshot(page)
             if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           }
           const wanted = exact === true ? query : query.toLowerCase()
@@ -669,15 +669,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           const visit = (
             node: Snapshot.Node,
             path: ReadonlyArray<string>,
-            owner: { readonly node: Snapshot.Node; readonly name: string } | undefined,
-            inside: boolean
+            owner: { readonly node: Snapshot.Node; readonly name: string } | undefined
           ) => {
             const nodeName = node.name._tag === "None" ? "" : node.name.value
             const nodeRole = String(node.role.role)
-            const hidden = capture.snapshotText !== "full" &&
-              privateName(nodeRole, node.name._tag === "Inferred" && node.name.from === "text", inside)
-            const shown = hidden && node.name._tag !== "None" ? "•••" : nodeName
-            const holder = Option.isSome(node.ref) ? { node, name: shown } : owner
+            const holder = Option.isSome(node.ref) ? { node, name: nodeName } : owner
             if (
               holder !== undefined && Option.isSome(holder.node.ref) &&
               (matches(nodeName) ||
@@ -695,12 +691,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                 })
               }
             }
-            const label = shown === "" ? nodeRole : `${nodeRole} "${shown}"`
+            const label = nodeName === "" ? nodeRole : `${nodeRole} "${nodeName}"`
             const next = Option.isSome(node.ref) && nodeRole !== "text" ? [...path, label] : path
-            for (const child of node.children) visit(child, next, holder, inside || editable.has(nodeRole))
+            for (const child of node.children) visit(child, next, holder)
           }
-          // Matching retains the original names; only displayed names and paths follow capture policy.
-          visit(snapshot.root, [], undefined, false)
+          visit(capture.snapshotText === "full" ? snapshot.root : redacted(snapshot.root), [], undefined)
           return found
         })),
     screenshot: ({ page: name }) =>
@@ -712,7 +707,50 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       acting(
         name,
         (page) =>
-          Effect.as(Effect.flatMap(targeted(page, name, target), (locator) => locator.click()), `clicked ${target}`)
+          Effect.gen(function*() {
+            const locator = yield* targeted(page, name, target)
+            const { runtime, entry } = Handles.page(page)
+            const record = yield* Operation.record
+            const token = String(record.id)
+            let stopped = false
+            yield* Effect.acquireUseRelease(
+              runtime.model.documentOf(entry.id),
+              (document) =>
+                Effect.gen(function*() {
+                  if (Option.isSome(document)) {
+                    yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                      op: "validationStart",
+                      token,
+                      full: capture.snapshotText === "full"
+                    }, record.id).pipe(Effect.catchCause(() => Effect.succeedNone))
+                  }
+                  yield* locator.click()
+                  // Optional feedback shares the click's deadline and interruption. Only this fiber may
+                  // publish it; a late cleanup response must never enter a later call's digest.
+                  if (Option.isNone(document)) return
+                  const response = yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                    op: "validationStop",
+                    token
+                  }, record.id).pipe(Effect.catchCause(() => Effect.succeedNone))
+                  if (Option.isSome(response) && response.value._tag === "Validation") {
+                    stopped = true
+                    for (const line of response.value.lines) note(`${name} validation observed during click: ${line}`)
+                  }
+                }),
+              (document) =>
+                Option.isNone(document) || stopped ? Effect.void : Effect.gen(function*() {
+                  const cleanup = yield* Operation.record
+                  yield* Runtime.releaseInDocument(runtime, document.value, { op: "validationStop", token }, cleanup.id)
+                }).pipe(
+                  Operation.named("Toolkit.click.validationCleanup", { attributes: { "browser.page.id": entry.id } }),
+                  Operation.detached,
+                  Effect.catchCause(() => Effect.void),
+                  Effect.forkIn(scope, { startImmediately: true }),
+                  Effect.asVoid
+                )
+            )
+            return `clicked ${target}`
+          }).pipe(Operation.named("Toolkit.click", { attributes: { "browser.page.id": page.id } }))
       ),
     fill: ({ page: name, target, value }) =>
       acting(name, (page) =>
@@ -893,7 +931,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           case "exception":
             return Effect.map(
               UncaughtException.history(page),
-              (history) => history.entries.map((exception) => `${exception.name}: ${exception.message}`)
+              (history) => history.entries.map((exception) => exceptionLine(exception, capture.consoleText !== "full"))
             )
         }
       }),

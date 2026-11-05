@@ -753,6 +753,114 @@ unstable breaks the same version signal; treating every pre-1.0 change as a patc
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
 
+
+## Strict capture matches the redacted snapshot
+
+Use one structured redacted tree for toolkit snapshot output and find matching, including names and paths.
+Matching hidden content and masking only the response confirms guesses at field values, so strict find must
+search what it can show. Preserve label searches and role filters; keep local capture unchanged.
+
+Carry optional field editability separately from role in engine and public snapshot data. Semantic articles,
+paragraphs and headings can be contenteditable, including plaintext-only. Native and ARIA fields count even
+when disabled or read-only: capture concerns their data, not whether an action may edit them. Absent editability
+can mean that metadata was not collected or that the node is not a field; older snapshot data remains valid. Accessible names derived from editable content carry
+optional text provenance without changing local text rendering. Track field contributions through the chosen
+accessible or inferred name, including ancestor content, embedded values, referenced controls, nearby fields
+and image-alt inference. Optional `fieldContent` on names lets shared redaction mask these copies outside the
+field subtree while retaining genuine public labels. Inspecting only the finished tree loses those origins.
+Labels, semantic roles, states and refs survive.
+
+For non-full console capture, exception digests and history retain a library-authored event marker and monotonic
+occurrence time, with no page-provided name, message, stack or origin text. Error names and origins are no safer
+than messages. Full local capture keeps its previous diagnostics.
+
+Rejected: matching original text while redacting output, which leaks guesses; masking by role alone, which misses
+semantic editables; replacing semantic roles with editable, which loses meaning; mandatory false flags on every
+node, which enlarge every snapshot and reject older data; and masking exception messages alone, which leaves
+other page-controlled exception details visible. Strict remains a bounded capture policy: ordinary page text,
+labels, URLs, dialogs and other metadata remain available, so it is not a secrecy or inference guarantee.
+
+Assertions such as `expect --text` and action selectors continue matching original page content and can confirm
+guesses at masked values. Restricting those operations is a separate contract decision; this change restricts
+snapshot/find capture and does not change assertion or action semantics. Name provenance is limited to field
+contributions during name construction, not general tracking of sensitive data across arbitrary page scripts.
+
+Field-content provenance follows the contributor's flat-tree ancestry through assigned slots and shadow hosts,
+including native/ARIA field ancestors whose descendants do not inherit DOM editability. Keep explicit public
+label precedence; do not infer privacy by checking only the named element or a role-limited descendant walk.
+Mixed names are masked whole, and native select/ARIA listbox options follow field-subtree masking. This
+conservative choice can hide public portions of a derived name or option labels; separate unmasked nodes
+remain searchable. It avoids treating a copied private contribution as a public label.
+
+Memoize field classification, field ancestry and inferred-text provenance only within each tree walk. Cache
+both positive and negative ancestor paths to avoid repeating a full walk per contributor. Clear these caches
+with names, roles and text before every engine request, expectation observation and action revalidation round;
+role changes, slot reassignment and reparenting must be observed by the next walk. Caching across walks would
+retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
+provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
+
+Field editability and name provenance are requested only by redacted snapshot capture, including custom policies with the same masking
+setting. Ordinary library and full/local snapshots omit that masking metadata, skipping field classification,
+field-contribution ancestry and subtree analysis. Ordinary rendering and queries do not consume the editability
+flag. The optional public codec can carry it and diff can compare it when supplied, but neither requires
+automatic collection. The masking request is internal operation context, forwarded to each frame; it is not inferred
+from a preset's identity. Clear naming caches between requests and scope cached toolkit snapshots to their
+policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
+material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
+when requested rather than introducing separate name strings or speculative optimizations.
+
+## One-shot event waits keep their first terminal outcome
+
+An event being published is not a completed match: delivery can load and decode a response body or wait for a
+navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
+completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
+end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
+for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+Scope cancellation commits before stopping workers; completed results, errors and timeouts remain latched.
+
+The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate
+or effectful finalizer. A separate deadline waiter commits independently of blocked delivery on the browser's clock.
+The delivery worker observes the committed outcome and cancels its work through Effect interruption. A user effect
+that is already uninterruptible can finish its own work, but cannot replace the committed result or cause a new
+predicate to start. Closing a scope never drains queued work. A terminal outcome releases the queue and subscriber immediately; the delivery worker releases its internal child
+scope only when it exits. The acquiring scope therefore keeps owning any still-running delivery or predicate,
+even after Timeout or TargetGone notification. A deadline waiter must not close and detach that child scope while
+its delivery worker is still using caller resources. Prompt terminal notification does not imply that acquiring-scope
+release has finished. The caller can keep the latched result. Streams retain their existing ordered
+buffer-draining contract on normal target end.
+
+Rejected: making target failure depend on worker progress, which can return success after the target has ended
+and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
+work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
+unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
+
+## Validation observation during toolkit clicks
+
+Keep snapshot invalidity as current state, including before interaction. Observe native invalid events only
+over the toolkit click operation and report “validation observed during click”, rather than claiming a refused
+submission. Trusted invalid events also arise from scripted validity checks, and user-invalid state cannot
+identify repeated attempts or attribute a change to a click. Neither is submission-specific evidence.
+
+Use the existing per-document engine lifecycle, with a token per observation. Collect optional feedback in the
+click's interruptible use phase under its existing deadline. Awaiting a detached stop in an uninterruptible release
+would extend that deadline when the page is busy, so a release finalizer only starts idempotent cleanup in the
+toolkit's scope, apart from the caller. Cleanup bypasses the read's dialog refusal, allowing a queued stop to
+execute when the dialog closes. It never publishes feedback. A busy document may retain listeners until its
+queued release executes or the document ends; neither the caller's return nor interruption waits for that reply.
+The cleanup fiber uses the ordinary operation budget, with no retry or extra grace period. Deduplicate controls
+within one observation only.
+Read current messages without invoking validation methods, changing focus, cancelling events, patching page
+functions or waiting for later timers. Cleanup addresses the original document, never its replacement; document
+loss, an open dialog or expiration of the click's deadline may lose observations, and cleanup errors must not
+replace click errors. Late cleanup replies are discarded, so they cannot enter another call's digest.
+
+The bounded scope is the top document and existing open shadow roots, tested on the pinned Chromium, Firefox
+and stock WebKit. Child frames, closed roots and newly created roots are excluded. Expanding scope would need
+explicit lifecycle and target-routing work; a public event API is unnecessary for this digest. Strict capture
+omits all control names and masks messages because accessible names may themselves contain editable values;
+local capture includes the engine's accessible name and current message.
+
 ## Chromium captures use a new surface in automation and concurrent
 
 The shared Chromium automation arguments enable `CDPScreenshotNewSurface`; concurrent inherits the same setting
@@ -844,3 +952,15 @@ test resolves a named password target, and its returned refs retain their normal
 
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.
+
+**Actions accept transparent controls; visible means a person can see it.** Action readiness ignores opacity on the
+element and its ancestors and requires the other action checks. Styled controls commonly put a transparent real input over
+their decoration. Pointer reception establishes whether pointer input can reach them. Non-pointer actions such as
+fill also accept transparency and require enabled, editable and not inert, without a hit test.
+With `opacity: 0` on an element or any ancestor, `isVisible` returns false, `Expect.toBeVisible` waits,
+and visibility filters count the element as hidden. Opacity alone does not make an action wait for a fade-in.
+
+- **Rejected:** ignoring opacity in the shared visibility observation, which would make assertions and filters
+  count unseen elements as seen; requiring callers to disable the visible check, which also drops useful checks
+  for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
+  text fields unusable by fill despite being enabled and editable.
