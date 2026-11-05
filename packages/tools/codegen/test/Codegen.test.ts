@@ -195,7 +195,13 @@ describe("overlays", () => {
         "Card#connect.Params": { ...params, members: { ...params.members, other: params.members["id"]! } }
       }
     }
-    const release = (entry: object) =>
+    const release = (entry: {
+      readonly method: string
+      readonly param: string
+      readonly from: string
+      readonly list?: true
+      readonly paramsFrom: Readonly<Record<string, string>>
+    }) =>
       applyOverlays(wider, [["resources.json", {
         reason: "fixture",
         annotate: [{ target: "Net#getCookies", traits: { createsResource: true, release: [entry] } }]

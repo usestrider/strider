@@ -1611,7 +1611,10 @@ describe("BidiAdapter state", () => {
       const result = yield* Fiber.join(evaluation)
       assert.strictEqual(result._tag, "Exception")
       // The caller gets no handle for the exception, so nothing else can ever release it.
-      assert.strictEqual(result._tag === "Exception" ? result.exception.handle : undefined, undefined)
+      assert.deepStrictEqual(result._tag === "Exception" ? result.exception : undefined, {
+        type: "error",
+        handle: undefined
+      })
       const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 200))
       assert(Option.isSome(cleanup), "a root-owned exception nobody can reach must be disowned")
       assert.strictEqual(cleanup.value.method, "script.disown")
