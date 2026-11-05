@@ -69,7 +69,8 @@ export interface FileInput {
  *
  * A browser Strider launched receives the path directly. Absolute paths need no caller services; relative
  * paths require Effect's `Path` service when building the browser layer. Launching through a container or wrapper
- * with a different file system requires `bytes` instead.
+ * with a different file system requires `bytes` instead. Launched stock WebKit uses upload-time creation
+ * timestamps instead of preserving disk modification times; attached transfers preserve available stat times.
  *
  * An attached browser receives caller-side contents, read with the captured Effect `FileSystem` and `Path`
  * services. Relative paths resolve against the caller's working directory. The basename and available open-file

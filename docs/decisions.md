@@ -933,3 +933,8 @@ its own scope spanning preparation and staged assignment, so failed reads or ack
 while a prepared decision is counted before its final application as before. The user handler retains its
 registration scope; introducing a temporary scope around that user callback would close resources the handler
 intends to keep. The collector is released even if the deadline expires between preparation and application.
+
+Launched stock WebKit supplies upload-time creation timestamps rather than disk modification times on its native
+file path. This existing native limitation remains unchanged; transferred files preserve available open-file stat
+times. Native timestamp expectations are explicit in the integration capability table, including exact disk-time
+assertions for Chromium and Firefox and exact transferred-time assertions for attached Chromium.
