@@ -67,11 +67,57 @@ const listen = Effect.fnUntraced(function*(server: Server, port: number) {
   })
 })
 
+/**
+ * Other sockets on ports the launcher can choose, as a full run's own connections can be, and a generator whose
+ * choices land on them: for each entry of `taken`, one of those ports if true, otherwise the generator's own.
+ */
+const choosingTakenPorts = Effect.fnUntraced(function*(taken: ReadonlyArray<boolean>) {
+  const random = yield* Random.Random
+  const ports: Array<number | undefined> = []
+  for (const isTaken of taken) {
+    if (!isTaken) {
+      ports.push(undefined)
+      continue
+    }
+    const server = createServer()
+    ports.push(
+      yield* Effect.suspend(() => Random.nextIntBetween(49152, 65535)).pipe(
+        Effect.tap((port) => listen(server, port)),
+        // A port that is taken already is as good, but then this server has no port to name.
+        Effect.retry({ times: 8 })
+      )
+    )
+  }
+  let choice = 0
+  return {
+    nextIntUnsafe: () => random.nextIntUnsafe(),
+    nextDoubleUnsafe: () => {
+      const port = ports[choice++]
+      return port === undefined ? random.nextDoubleUnsafe() : (port - 49152 + 0.5) / (65536 - 49152)
+    }
+  }
+})
+
+const silentListenerCases: ReadonlyArray<
+  { readonly name: string; readonly collisions: number; readonly taken: ReadonlyArray<boolean> }
+> = [
+  { name: "sends 1 real silent listeners nothing", collisions: 1, taken: [] },
+  { name: "sends 2 real silent listeners nothing", collisions: 2, taken: [] },
+  // The launcher moves on from a port another socket has, so the test must too when it chooses one first.
+  { name: "sends 1 real silent listeners nothing, its first choice already taken", collisions: 1, taken: [true] },
+  // Two listeners and two other sockets are four collisions, which the launcher's five attempts survive.
+  {
+    name: "sends 2 real silent listeners nothing, with two other ports taken after them",
+    collisions: 2,
+    taken: [false, false, true, true]
+  }
+]
+
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
-    for (const collisions of [1, 2]) {
+    for (const { collisions, name, taken } of silentListenerCases) {
       it.effect(
-        `sends ${collisions} real silent listeners nothing, and starts the real MiniBrowser owned on another port`,
+        `${name}, and starts the real MiniBrowser owned on another port`,
         () =>
           Effect.gen(function*() {
             yield* useXvfb()
@@ -81,7 +127,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             const ports: Array<number> = []
             const held = new Set<number>()
             const listenersScope = yield* Scope.Scope
-            const random = yield* Random.Random
+            const random = yield* choosingTakenPorts(taken)
             let first: number | undefined
             let choices = 0
             const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
