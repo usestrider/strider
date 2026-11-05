@@ -4,14 +4,19 @@
  * the previous call, waits across calls, declared routes and dialog decisions, and failures returned as data.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, Deadline, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Handles from "../../../src/internal/handles.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -222,6 +227,359 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
+        "reports validation observed during fresh and repeated refused submit clicks",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
+<label>Choice <select required><option value="">Choose</option><option>Ready</option></select></label>
+<button>Send</button></form>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const before = yield* call(tools, "snapshot", { page: "p1" })
+              assert.include(before.value.outcome, "[invalid]")
+              const results = []
+              for (const attempt of ["fresh", "repeated"]) {
+                const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Send\"]" })
+                assert.isFalse(result.failed)
+                assert.isUndefined(yield* page.evaluateInMainWorld(() => document.body.dataset.submitted))
+                results.push({ attempt, result })
+              }
+              for (const { attempt, result } of results) {
+                assert.include(
+                  result.value.sinceLast.join("\n"),
+                  "p1 validation observed during click: combobox \"Choice\" validationMessage=",
+                  `${attempt} refused submit click must report observed validation even when invalid state is unchanged`
+                )
+              }
+              yield* page.getByRole("combobox").selectOption({ label: "Ready" })
+              const success = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Send\"]" })
+              assert.notInclude(success.value.sinceLast.join("\n"), "validation observed")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.submitted), "yes")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "isolates click validation observation and applies capture policy",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<input id="field" aria-label="private-label" value="private-value">
+<button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.evaluateInMainWorld(() => {
+                ;(document.getElementById("field") as HTMLInputElement).setCustomValidity("private-message")
+              })
+              for (const capture of [CapturePolicy.strict, CapturePolicy.local]) {
+                const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
+                const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Check\"]" })
+                const lines = result.value.sinceLast.filter((line: string) => line.includes("validation observed"))
+                assert.lengthOf(lines, 1)
+                assert.include(lines[0], "validation observed during click: textbox")
+                assert.notInclude(lines[0], "blocked")
+                assert.strictEqual(
+                  lines[0],
+                  capture.snapshotText === "redacted"
+                    ? "p1 validation observed during click: textbox validationMessage=\"•••\""
+                    : "p1 validation observed during click: textbox \"private-label\" validationMessage=\"private-message\""
+                )
+                if (capture.snapshotText === "redacted") assert.notInclude(lines[0], "private")
+                else assert.include(lines[0], "validationMessage=\"private-message\"")
+                // An event outside a click must not be retained by a later observer.
+                yield* page.evaluateInMainWorld(() =>
+                  (document.getElementById("field") as HTMLInputElement).checkValidity()
+                )
+                const quiet = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+                assert.notInclude(quiet.value.sinceLast.join("\n"), "validation observed")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "observes existing open shadow roots but excludes closed roots and child frames",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<div id="open"></div><div id="closed"></div><iframe srcdoc='<input required aria-label="Frame">'></iframe>
+<button onclick="openField.checkValidity();closedField.checkValidity();document.querySelector('iframe').contentDocument.querySelector('input').checkValidity()">Check</button>
+<script>
+for (const mode of ["open", "closed"]) {
+  const root = document.getElementById(mode).attachShadow({ mode })
+  root.innerHTML = '<input required aria-label="' + mode + '">'
+  window[mode + "Field"] = root.querySelector("input")
+}
+</script>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.evaluateInMainWorld(async () => {
+                const frame = document.querySelector("iframe")!
+                if (frame.contentDocument?.querySelector("input") === null) {
+                  await new Promise<void>((resolve) => frame.addEventListener("load", () => resolve(), { once: true }))
+                }
+              })
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const result = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Check\"]" })
+              const lines = result.value.sinceLast.filter((line: string) => line.includes("validation observed"))
+              assert.lengthOf(lines, 1)
+              assert.include(lines[0], "validation observed during click: textbox \"open\"")
+              assert.notInclude(lines[0], "closed")
+              assert.notInclude(lines[0], "Frame")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "removes click validation listeners on success failure and interruption",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button>Quiet</button>")}`)
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const evaluate = (functionDeclaration: string) =>
+                runtime.model.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const active = Effect.gen(function*() {
+                const result = yield* evaluate("() => globalThis.activeValidationListeners.size")
+                assert(result._tag === "Value" && result.value.type === "number")
+                return result.value.value
+              })
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+              assert.strictEqual(yield* active, 0)
+              const failed = yield* call(tools, "click", { page: "p1", target: "css=#missing" }).pipe(
+                Deadline.within("1 second")
+              )
+              assert.isTrue(failed.failed)
+              assert.strictEqual(yield* active, 0)
+              const pending = yield* call(tools, "click", { page: "p1", target: "css=#missing" }).pipe(Effect.forkChild)
+              yield* active.pipe(Effect.repeat({ until: (count) => Number(count) > 0 }), Effect.timeout("5 seconds"))
+              yield* Fiber.interrupt(pending)
+              assert.strictEqual(yield* active, 0)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "interrupts optional validation collection promptly and releases listeners after the page responds",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const own = yield* Effect.scope
+              const page = yield* Browser.newPage()
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent("<input id=\"field\" required><button>Quiet</button>")
+                }`
+              )
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const original = runtime.model.adapter.evaluate
+              const evaluate = (functionDeclaration: string) =>
+                original(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const mutable = runtime.model.adapter as { evaluate: typeof original }
+              const stopping = yield* Deferred.make<void>()
+              const busyDone = yield* Deferred.make<void>()
+              let armed = true
+              mutable.evaluate = Effect.fnUntraced(
+                function*(target: Parameters<typeof original>[0], options: Parameters<typeof original>[1]) {
+                  const first = options.arguments[0]
+                  if (
+                    armed && first?._tag === "Value" && first.value.type === "string" &&
+                    first.value.value.includes("\"op\":\"validationStop\"")
+                  ) {
+                    armed = false
+                    // Queue a busy evaluation before the stop on the same realm. This makes interruption
+                    // exercise a pending collection on Chromium too, independent of timer scheduling.
+                    yield* evaluate(`() => {
+                  const end = Date.now() + 8000
+                  while (Date.now() < end);
+                  document.getElementById("field").checkValidity()
+                }`).pipe(
+                      Effect.ensuring(Deferred.succeed(busyDone, undefined)),
+                      Effect.forkIn(own, { startImmediately: true })
+                    )
+                    yield* Deferred.succeed(stopping, undefined)
+                  }
+                  return yield* original(target, options)
+                }
+              )
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  mutable.evaluate = original
+                })
+              )
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const pending = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" }).pipe(
+                Effect.forkChild
+              )
+              yield* Deferred.await(stopping).pipe(Effect.timeout("5 seconds"))
+              const started = Date.now()
+              yield* Fiber.interrupt(pending)
+              assert.isBelow(Date.now() - started, 4000, "interrupt must not wait for the page's busy loop")
+              yield* Deferred.await(busyDone).pipe(Effect.timeout("10 seconds"))
+              const active = yield* evaluate("() => globalThis.activeValidationListeners.size")
+              assert(active._tag === "Value" && active.value.type === "number")
+              assert.strictEqual(active.value.value, 0)
+              const quiet = yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Quiet\"]" })
+              assert.notInclude(quiet.value.sinceLast.join("\n"), "validation observed")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps a click within its deadline when the page turns busy after the click",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button onclick="setTimeout(() => { const end = Date.now() + 8000; while (Date.now() < end); })">Busy</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              const started = Date.now()
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Busy\"]" }).pipe(
+                Deadline.within("1 second")
+              )
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 4000, "the page's busy loop must not hold the click past its 1 second deadline")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "removes click validation listeners after a click that opens a dialog nothing has decided",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html = `<button onclick="alert('Stop')">Ask</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const { runtime, entry } = Handles.page(page)
+              const document = yield* runtime.model.documentOf(entry.id)
+              assert(Option.isSome(document))
+              const realm = yield* runtime.model.adapter.realm(document.value, yield* Runtime.engineWorld(runtime))
+              const evaluate = (functionDeclaration: string) =>
+                runtime.model.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              yield* evaluate(`() => {
+              globalThis.activeValidationListeners = new Set()
+              const add = EventTarget.prototype.addEventListener
+              const remove = EventTarget.prototype.removeEventListener
+              EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.add(listener)
+                return add.call(this, type, listener, options)
+              }
+              EventTarget.prototype.removeEventListener = function(type, listener, options) {
+                if (type === "invalid") globalThis.activeValidationListeners.delete(listener)
+                return remove.call(this, type, listener, options)
+              }
+            }`)
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "click", { page: "p1", target: "role=button[name=\"Ask\"]" }).pipe(
+                Deadline.within("3 seconds")
+              )
+              yield* call(tools, "dialog", { page: "p1", decision: "dismiss" })
+              const result = yield* evaluate("() => globalThis.activeValidationListeners.size").pipe(
+                Deadline.within("5 seconds")
+              )
+              assert(result._tag === "Value" && result.value.type === "number")
+              assert.strictEqual(result.value.value, 0, "the observer's listeners outlive the click")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "redacts custom validation messages through the snapshot tool and keeps full capture",
         () =>
           Effect.gen(function*() {
@@ -237,6 +595,22 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               }, message)
               const full = yield* page.snapshot()
               assert.include(full.text, `[validationMessage=${JSON.stringify(message)}]`)
+              const nodes: Array<Snapshot.Node> = []
+              const visit = (node: Snapshot.Node) => {
+                nodes.push(node)
+                node.children.forEach(visit)
+              }
+              visit(full.root)
+              const field = nodes.find((node) => node.role.role === "textbox")!
+              assert.isTrue(field.states.has("invalid"))
+              assert.deepEqual(field.validationMessage, Option.some(message))
+              const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.toCodecJson(Snapshot.Node)))(
+                full.root
+              )
+              assert.deepEqual(
+                yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.toCodecJson(Snapshot.Node)))(encoded),
+                full.root
+              )
               for (const capture of [CapturePolicy.strict, CapturePolicy.local]) {
                 const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
                 const result = yield* call(tools, "snapshot", { page: "p1" })

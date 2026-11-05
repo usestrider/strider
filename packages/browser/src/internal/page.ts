@@ -456,7 +456,7 @@ export const make = (owner: PageOwner): Page.Page => {
       conflicting: () =>
         Clock.isInstalled(runtime.timelines, entry.contextEntry) ? Option.some("UserContext.clock") : Option.none()
     }, entry),
-    route: <E, R, P extends Route.Phase = "request">(
+    route: (<E, R, P extends Route.Phase = "request">(
       pattern: Url.Pattern | string,
       handler: Route.Handler<E, R, P>,
       options?: Route.Options<P>
@@ -472,7 +472,7 @@ export const make = (owner: PageOwner): Page.Page => {
         pattern,
         handler,
         (options?.phase ?? "request") as P
-      ),
+      )) as Page.Page["route"],
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),

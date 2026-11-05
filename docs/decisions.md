@@ -809,6 +809,94 @@ policy, so switching modes cannot reuse an unannotated tree for masking. Always 
 material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm
 when requested rather than introducing separate name strings or speculative optimizations.
 
+## One-shot event waits keep their first terminal outcome
+
+An event being published is not a completed match: delivery can load and decode a response body or wait for a
+navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
+completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
+end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
+for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+Scope cancellation commits before stopping workers; completed results, errors and timeouts remain latched.
+
+The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate
+or effectful finalizer. A separate deadline waiter commits independently of blocked delivery on the browser's clock.
+The delivery worker observes the committed outcome and cancels its work through Effect interruption. A user effect
+that is already uninterruptible can finish its own work, but cannot replace the committed result or cause a new
+predicate to start. Closing a scope never drains queued work. A terminal outcome releases the queue and subscriber immediately; the delivery worker releases its internal child
+scope only when it exits. The acquiring scope therefore keeps owning any still-running delivery or predicate,
+even after Timeout or TargetGone notification. A deadline waiter must not close and detach that child scope while
+its delivery worker is still using caller resources. Prompt terminal notification does not imply that acquiring-scope
+release has finished. The caller can keep the latched result. Streams retain their existing ordered
+buffer-draining contract on normal target end.
+
+Rejected: making target failure depend on worker progress, which can return success after the target has ended
+and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
+work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
+unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
+
+## Validation observation during toolkit clicks
+
+Keep snapshot invalidity as current state, including before interaction. Observe native invalid events only
+over the toolkit click operation and report “validation observed during click”, rather than claiming a refused
+submission. Trusted invalid events also arise from scripted validity checks, and user-invalid state cannot
+identify repeated attempts or attribute a change to a click. Neither is submission-specific evidence.
+
+Use the existing per-document engine lifecycle, with a token per observation. Collect optional feedback in the
+click's interruptible use phase under its existing deadline. Awaiting a detached stop in an uninterruptible release
+would extend that deadline when the page is busy, so a release finalizer only starts idempotent cleanup in the
+toolkit's scope, apart from the caller. Cleanup bypasses the read's dialog refusal, allowing a queued stop to
+execute when the dialog closes. It never publishes feedback. A busy document may retain listeners until its
+queued release executes or the document ends; neither the caller's return nor interruption waits for that reply.
+The cleanup fiber uses the ordinary operation budget, with no retry or extra grace period. Deduplicate controls
+within one observation only.
+Read current messages without invoking validation methods, changing focus, cancelling events, patching page
+functions or waiting for later timers. Cleanup addresses the original document, never its replacement; document
+loss, an open dialog or expiration of the click's deadline may lose observations, and cleanup errors must not
+replace click errors. Late cleanup replies are discarded, so they cannot enter another call's digest.
+
+The bounded scope is the top document and existing open shadow roots, tested on the pinned Chromium, Firefox
+and stock WebKit. Child frames, closed roots and newly created roots are excluded. Expanding scope would need
+explicit lifecycle and target-routing work; a public event API is unnecessary for this digest. Strict capture
+omits all control names and masks messages because accessible names may themselves contain editable values;
+local capture includes the engine's accessible name and current message.
+
+## Chromium captures use a new surface in automation and concurrent
+
+The shared Chromium automation arguments enable `CDPScreenshotNewSurface`; concurrent inherits the same setting
+and adds its three throttling switches. On Chromium 155.0.8059.79, paired off/on runs in both variant orders
+suppressed the slow viewport mode: order-stratified p95 fell from 58–71 ms to 37–41 ms. Repeated five-capture
+batches approached Playwright's two observed modes, with p95 falling from 255–265 ms to about 170 ms. These
+mixed distributions support lower tails, not a fixed median saving, parity, a general element benefit or a dense
+image improvement. Renderer, encoding and transfer costs remain unsplit.
+
+Pinned Playwright 1.64.1's `playwright-core/lib/coreBundle.js`, in `chromiumSwitches`, includes
+`process.env.PLAYWRIGHT_LEGACY_SCREENSHOT ? "" : "--enable-features=CDPScreenshotNewSurface"` in its default
+switches. The surrounding switch array filters empty entries and also disables background timer, occluded-window
+and renderer throttling. Thus setting its legacy opt-out omits the enable switch; it does not explicitly disable
+the feature. This is prior art for the path, not proof of compatibility or a reason to copy its other defaults.
+Strider uses its own measured scope and retains every capture guard and required layout-metrics read.
+
+Captures can drive rendering and are not promised to be unobservable. With both paths, genuinely minimized
+windows under private Xvfb/Openbox remained natively minimized while capture transiently emitted visible/hidden
+page events and animation callbacks; matched no-capture controls emitted neither. All bounded captures returned
+exact interior pixels within ten seconds with live connections. The new path changed observed duration and
+callback counts; those observations do not isolate a new scheduling rule. Only Chromium 155.0.8059.79 on Linux
+was validated; other Chrome/Edge builds and desktop configurations remain unverified. Browser rolls must recheck
+capture, navigation and genuine minimization, as the browser-pin notes require.
+
+Stock, independently constructed custom profiles and attached browsers keep their behavior. Caller arguments
+remain verbatim after preset arguments. Chromium replaces repeated feature lists: a later enable list omitting
+the surface feature selects the older path on the tested build, and the effective disable list wins. Callers can
+retain the feature by including it in their own enable list, or explicitly disable it. Strider does not merge lists.
+
+Rejected: keeping the legacy default and requiring raw opt-in, given the repeatable tail improvement and bounded
+compatibility checks; enabling automation alone, which contradicts concurrent's inheritance; rewriting caller
+feature lists, which changes raw argument semantics; removing navigation synchronization, adding retries or
+repairing native screenshot pixels, none of which this launch setting justifies. No runtime version gate or
+assumed fallback for unknown feature names is introduced. The changed unstable default and narrowed previous
+observability contract require a minor release under the release policy, including the CLI launches using it.
+
 ## Checked actions on ordinary label descendants
 
 Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
@@ -840,3 +928,16 @@ following labels for public state reads, which expands an unrelated contract; us
 choose the label, which would create associations across shadow roots; replacing
 DOM guards with slot traversal, which can skip DOM ancestors; and copying Playwright's activation
 of links before reporting unchanged state, which sends input to a separate control unnecessarily.
+
+
+**Actions accept transparent controls; visible means a person can see it.** Action readiness ignores opacity on the
+element and its ancestors and requires the other action checks. Styled controls commonly put a transparent real input over
+their decoration. Pointer reception establishes whether pointer input can reach them. Non-pointer actions such as
+fill also accept transparency and require enabled, editable and not inert, without a hit test.
+With `opacity: 0` on an element or any ancestor, `isVisible` returns false, `Expect.toBeVisible` waits,
+and visibility filters count the element as hidden. Opacity alone does not make an action wait for a fade-in.
+
+- **Rejected:** ignoring opacity in the shared visibility observation, which would make assertions and filters
+  count unseen elements as seen; requiring callers to disable the visible check, which also drops useful checks
+  for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
+  text fields unusable by fill despite being enabled and editable.

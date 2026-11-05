@@ -124,9 +124,12 @@ export interface MakeOptions {
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
  * - Each result is the call's outcome and `sinceLast`: navigations, popups, dialogs and who decided them,
- *   downloads, uncaught exceptions, console errors and failed requests since the previous call. The capture
+ *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. The capture
  *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
  *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.
+ *   Validation feedback is temporal, not proof of a blocked submission. It covers the top document and existing
+ *   open shadow roots. Strict capture omits control names and masks messages. Dialogs, navigation, document loss
+ *   or the click's deadline can discard feedback; release never delays the caller or reports into a later call.
  * - A `%name%` in a parameter becomes the secret's value as the call runs, and results show the value as `%name%`
  *   again. Other text between `%` signs, such as `%C3%` in a URL, is sent as written.
  * - Waits, routes and dialog handlers end with the scope.

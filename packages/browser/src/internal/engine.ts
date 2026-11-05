@@ -240,6 +240,8 @@ export type Clip = typeof Clip.Type
 
 /** A request to the engine. */
 export type Request =
+  | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
+  | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
@@ -312,6 +314,7 @@ const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number })
  * WebKit, a page's script can answer in its place, so nothing it says is taken on trust.
  */
 export const Response = Schema.Union([
+  Schema.TaggedStruct("Validation", { lines: Schema.Array(Schema.String) }),
   Schema.TaggedStruct("Count", { count: Schema.Number }),
   Schema.TaggedStruct("Visible", { count: Schema.Number, visible: Schema.Boolean }),
   Schema.TaggedStruct("Ready", {
@@ -845,17 +848,19 @@ export function engine(render: (root: SnapNode) => string) {
     return !element.checkVisibility({ visibilityProperty: true })
   }
 
-  /** CONCEPTS.md §8, Visible. */
-  const visible = (element: Element): boolean => {
+  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some(visible)
+      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
     }
-    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) {
+    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
     }
     const rect = element.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0
   }
+
+  const visible = (element: Element): boolean => rendered(element, true)
 
   // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
 
@@ -1678,7 +1683,7 @@ export function engine(render: (root: SnapNode) => string) {
       previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
@@ -2517,11 +2522,55 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
   }
 
+  // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
+  // without probing validity or changing page behavior. Each call owns its listeners and deduplication.
+  const validationObservers = new Map<string, () => Array<string>>()
+  const observeValidation = (token: string, full: boolean) => {
+    validationObservers.get(token)?.()
+    const roots: Array<Document | ShadowRoot> = [document]
+    for (const element of elementsUnder(document)) {
+      if (element.shadowRoot !== null) roots.push(element.shadowRoot)
+    }
+    const found = new Map<Element, string>()
+    const listener = (event: Event) => {
+      const element = event.target
+      if (!(element instanceof Element) || found.has(element)) return
+      const message = validationMessageOf(element)
+      if (message === null) return
+      rawText.clear()
+      roleCache.clear()
+      nameCache.clear()
+      const name = full ? accessibleName(element, true) : ""
+      found.set(
+        element,
+        `${roleOf(element)}${name === "" ? "" : ` ${JSON.stringify(name)}`} validationMessage=${
+          JSON.stringify(full ? message : "•••")
+        }`
+      )
+    }
+    for (const root of roots) root.addEventListener("invalid", listener, true)
+    validationObservers.set(token, () => {
+      for (const root of roots) root.removeEventListener("invalid", listener, true)
+      validationObservers.delete(token)
+      return Array.from(found.values())
+    })
+  }
+
   const run = async (text: string): Promise<string> => {
     const request = JSON.parse(text) as Request
     clearTreeCaches()
     try {
       switch (request.op) {
+        case "validationStart":
+          observeValidation(request.token, request.full)
+          return JSON.stringify({ _tag: "Validation", lines: [] } satisfies Response)
+        case "validationStop":
+          return JSON.stringify(
+            {
+              _tag: "Validation",
+              lines: validationObservers.get(request.token)?.() ?? []
+            } satisfies Response
+          )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
         case "visible": {

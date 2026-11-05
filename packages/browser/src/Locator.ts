@@ -260,6 +260,11 @@ export interface FilterOptions {
   readonly hasNotText?: string | RegExp | undefined
   /**
    * Keep only visible elements, or only hidden ones.
+   *
+   * **Details**
+   *
+   * An element with `opacity: 0` on itself or any ancestor counts as hidden: `visible: true` excludes it,
+   * and `visible: false` includes it.
    */
   readonly visible?: boolean | undefined
 }
@@ -507,7 +512,8 @@ export interface ReadonlyLocator
    */
   readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Whether the one match is visible now; `false` when nothing matches.
+   * Whether the one match is visible now; `false` when nothing matches or the element has `opacity: 0` on
+   * itself or any ancestor.
    *
    * **Example** (Dismissing a banner only when it shows)
    *
@@ -628,6 +634,16 @@ export interface ReadonlyLocator
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many.
+ *
+ * An action needs its element reachable; visible means a person can see it. Actions accept `opacity: 0` on
+ * the element or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits,
+ * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
+ * not make an action wait for a fade-in.
+ *
+ * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
+ * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
+ * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
+ * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
  *
