@@ -94,62 +94,6 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       for (const ancestor of [false, true]) {
-        const wrap = (inner: (o: number) => string) =>
-          `<!doctype html><div style="opacity:${ancestor ? 0 : 1}">${inner(ancestor ? 1 : 0)}</div><output id="out"></output><script>const log=(e)=>{document.querySelector('#out').textContent+=e.type+' '};</script>`
-        const cases: ReadonlyArray<readonly [string, (o: number) => string, (t: LocatorImpl | any, page: any) => Effect.Effect<any, any, any>, string]> = [
-          ["dblclick", (o) => `<button id="t" style="opacity:${o}" ondblclick="log(event)">b</button>`, (t) => t.dblclick(), "dblclick "],
-          ["hover", (o) => `<button id="t" style="opacity:${o}" onmouseenter="log(event)">b</button>`, (t) => t.hover(), "mouseenter "],
-          ["tap", (o) => `<button id="t" style="opacity:${o}" onclick="log(event)">b</button>`, (t) => t.tap(), ""],
-          ["uncheck", (o) => `<input id="t" type="checkbox" checked style="opacity:${o}" onclick="log(event)">`, (t) => t.uncheck(), "click "],
-          ["clear", (o) => `<input id="t" value="x" style="opacity:${o}" oninput="log(event)">`, (t) => t.clear(), "input "],
-          ["focus", (o) => `<input id="t" style="opacity:${o}" onfocus="log(event)">`, (t) => t.focus(), "focus "],
-          ["press", (o) => `<input id="t" style="opacity:${o}" onkeydown="log(event)">`, (t) => t.press("a"), "keydown "],
-          ["pressSequentially", (o) => `<input id="t" style="opacity:${o}" onkeydown="log(event)">`, (t) => t.pressSequentially("a"), "keydown "],
-          ["selectOption", (o) => `<select id="t" style="opacity:${o}" onchange="log(event)"><option>a</option><option>b</option></select>`, (t) => t.selectOption({ label: "b" }), "change "],
-          ["scrollIntoView", (o) => `<div style="height:3000px"></div><input id="t" style="opacity:${o}">`, (t) => t.scrollIntoView, ""],
-          ["contents", (o) => `<span id="t" style="display:contents"><button style="opacity:${o}" onclick="log(event)">b</button></span>`, (t) => t.click(), "click "],
-          ["contenteditable", (o) => `<div id="t" contenteditable style="opacity:${o};width:50px;height:20px" oninput="log(event)"></div>`, (t) => t.fill("a"), "input "],
-          ["dragTo", (o) => `<div id="t" style="opacity:${o};width:30px;height:30px" onmousedown="log(event)"></div><div id="end" style="opacity:${o};width:30px;height:30px" onmouseup="log(event)"></div>`, (t, page) => t.dragTo(page.locator("#end")), "mousedown mouseup "]
-        ]
-        for (const [label, html, act, expected] of cases) {
-          it.effect(`reviewscratch ${ancestor ? "ancestor" : "own"} ${label}`, () =>
-            Effect.gen(function*() {
-              const { url } = yield* fixture(() => wrap(html))
-              yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
-                yield* page.goto(url)
-                yield* act(page.locator("#t"), page).pipe(Deadline.within("3 seconds"))
-                if (expected !== "") yield* page.locator("#out").pipe(Expect.toHaveText(expected))
-              }))
-            }), timeout)
-        }
-      }
-      for (const [label, html, act] of [
-        ["label z-index:-1 check input", `<label style="position:relative;display:block;padding:10px"><input id="t" type="checkbox" style="position:absolute;opacity:0;z-index:-1">x</label>`, (t: any) => t.check()],
-        ["label over for= check input", `<input id="t" type="checkbox" style="position:absolute;opacity:0"><label for="t" style="position:relative;display:block;padding:10px">x</label>`, (t: any) => t.check()],
-        ["display click", `<input id="t" style="opacity:0;display:none">`, (t: any) => t.click()],
-        ["visibility click", `<input id="t" style="opacity:0;visibility:hidden">`, (t: any) => t.click()],
-        ["visibility fill", `<input id="t" style="opacity:0;visibility:hidden">`, (t: any) => t.fill("a")],
-        ["disabled click", `<input id="t" style="opacity:0" disabled>`, (t: any) => t.click()],
-        ["inert fill", `<input id="t" style="opacity:0" inert>`, (t: any) => t.fill("a")],
-        ["readonly fill", `<input id="t" style="opacity:0" readonly>`, (t: any) => t.fill("a")],
-        ["covered click", `<input id="t" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`, (t: any) => t.click()],
-        ["covered fill", `<input id="t" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`, (t: any) => t.fill("a")]
-      ] as const) {
-        it.effect(`reviewscratch reason ${label}`, () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() => `<!doctype html>${html}`)
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
-              const exit = yield* act(page.locator("#t")).pipe(Deadline.within("500 millis"), Effect.exit)
-              const e: any = exit._tag === "Failure" ? Cause.squash(exit.cause) : null
-              console.log(`REVIEW|${name}|${label}|${exit._tag}|${e?._tag}|${e === null ? "" : String(Option.getOrUndefined(e.hint))}|value=${yield* page.locator("#t").inputValue.pipe(Effect.orElseSucceed(() => "?"))}`)
-            }))
-          }), timeout)
-      }
-
-      for (const ancestor of [false, true]) {
         for (const action of ["click", "check", "fill"] as const) {
           it.effect(
             `acts on transparent controls with ${ancestor ? "ancestor" : "own"} opacity using ${action}`,
@@ -186,6 +130,68 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }
       }
 
+      for (const ancestor of [false, true]) {
+        for (
+          const action of ["clear", "focus", "press", "pressSequentially", "selectOption", "scrollIntoView"] as const
+        ) {
+          it.effect(
+            `runs ${action} on transparent controls with ${ancestor ? "ancestor" : "own"} opacity`,
+            () =>
+              Effect.gen(function*() {
+                const opacity = ancestor ? 1 : 0
+                const control = action === "selectOption"
+                  ? `<select id="target" style="opacity:${opacity}"><option>a</option><option>b</option></select>`
+                  : `<input id="target" value="${action === "clear" ? "x" : ""}" style="opacity:${opacity}">`
+                const { url } = yield* fixture(() =>
+                  `<!doctype html>${
+                    action === "scrollIntoView" ? "<div style=\"height:3000px\"></div>" : ""
+                  }<div style="opacity:${ancestor ? 0 : 1}">${control}</div>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const target = page.locator("#target")
+                  const within = Deadline.within("3 seconds")
+                  if (action === "clear") {
+                    yield* target.clear().pipe(within)
+                    yield* target.pipe(Expect.toHaveValue(""))
+                  } else if (action === "focus") {
+                    yield* target.focus().pipe(within)
+                    yield* target.pipe(Expect.toBeFocused)
+                  } else if (action === "press") {
+                    yield* target.press("a").pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("a"))
+                  } else if (action === "pressSequentially") {
+                    yield* target.pressSequentially("a").pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("a"))
+                  } else if (action === "selectOption") {
+                    yield* target.selectOption({ label: "b" }).pipe(within)
+                    yield* target.pipe(Expect.toHaveValue("b"))
+                  } else {
+                    yield* target.scrollIntoView().pipe(within)
+                    assert.isAbove(yield* page.evaluate(() => globalThis.scrollY), 0)
+                  }
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><input id="target" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const target = page.locator("#target")
+            yield* target.fill("Ada").pipe(Deadline.within("3 seconds"))
+            yield* target.pipe(Expect.toHaveValue("Ada"))
+          }))
+        }), timeout)
+
       for (const state of ["covered", "display", "visibility", "disabled", "readonly", "inert"] as const) {
         for (const action of ["click", "fill"] as const) {
           if (state === "covered" && action === "fill" || state === "readonly" && action === "click") continue
@@ -205,10 +211,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 yield* page.goto(url)
                 const target = page.locator("#target")
                 const error = yield* (action === "fill" ? target.fill("Ada") : target.click()).pipe(
-                  Deadline.within("300 millis"),
+                  Deadline.within("1 second"),
                   Effect.flip
                 )
                 assert.strictEqual(error._tag, "Timeout")
+                assert.include(
+                  String((error as Deadline.Timeout).hint.pipe(Option.getOrUndefined)),
+                  {
+                    covered: "covers the element's action point",
+                    display: "isn't visible",
+                    visibility: "isn't visible",
+                    disabled: "disabled",
+                    readonly: "read-only",
+                    inert: "inert"
+                  }[state]
+                )
                 yield* target.pipe(Expect.toHaveValue(""))
                 yield* page.locator("#out").pipe(Expect.toHaveText(""))
               }))
