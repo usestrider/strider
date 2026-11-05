@@ -154,6 +154,41 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         )
       }
 
+      for (
+        const [source, fixture] of [
+          [
+            "labels",
+            "<label>New secret<input type=\"password\"></label><label>Confirm secret<input type=\"password\"></label>"
+          ],
+          [
+            "placeholders",
+            "<input type=\"password\" placeholder=\"New secret\"><input type=\"password\" placeholder=\"Confirm secret\">"
+          ]
+        ] as const
+      ) {
+        it.effect(
+          `exports a query for each of two password inputs named by ${source}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const served = yield* site
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              const snapshot = yield* page.snapshot()
+              const fields = [...snapshot.refs.values()].filter((node) =>
+                node.role._tag === "Inferred" && node.role.evidence.includes("password")
+              )
+              assert.lengthOf(fields, 2)
+              for (const field of fields) {
+                const query = ExportTest.queryOf(Option.getOrThrow(field.ref), snapshot)
+                // The exported test puts the page's variable before the query
+                const locator = new Function("page", `return page.${query}`)(page) as Locator.Locator
+                assert.strictEqual(yield* locator.count, 1, query)
+              }
+            })),
+          timeout
+        )
+      }
+
       it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
         () =>
