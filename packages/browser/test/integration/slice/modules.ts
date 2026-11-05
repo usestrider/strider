@@ -27,6 +27,8 @@ import {
   UncaughtException,
   Watchable
 } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -268,6 +270,49 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect(
+        "keeps ready console subscriptions across document replacement and releases their scope",
+        () =>
+          Effect.gen(function*() {
+            const { url, origin } = yield* fixture(() => `<p>Old document</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const closed = yield* Effect.scoped(Effect.gen(function*() {
+                const pending = yield* ConsoleMessage.next(page, { text: "never" }).pipe(
+                  Deadline.within("100 millis")
+                )
+                const expired = yield* pending.pipe(Effect.flip)
+                assert(Deadline.isTimeout(expired), String(expired))
+                const owned = yield* ConsoleMessage.next(page, { text: "never either" })
+                const interrupted = yield* owned.pipe(Effect.forkChild)
+                yield* Fiber.interrupt(interrupted)
+                return owned
+              }))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const waits = yield* Effect.forEach(
+                  Array.from({ length: 20 }),
+                  () => ConsoleMessage.next(page, { text: "new document ready" })
+                )
+                yield* page.goto(fixtureUrl(origin, `<script>console.log("new document ready")</script>`))
+                const messages = yield* Effect.all(waits)
+                assert.deepStrictEqual(
+                  messages.map((message) => message.text),
+                  Array.from({ length: 20 }, () => "new document ready")
+                )
+              }))
+              const fresh = yield* ConsoleMessage.next(page, { text: "after release" })
+              yield* page.evaluateInMainWorld(() => console.log("after release"))
+              assert.strictEqual((yield* fresh).text, "after release")
+              const closedResult = yield* Effect.exit(closed).pipe(Effect.timeoutOption("1 second"))
+              assert(Option.isSome(closedResult), "closing the subscription scope must complete its returned wait")
+              const closedExit = closedResult.value
+              assert(Exit.isFailure(closedExit) && closedExit.cause.reasons.some(Cause.isInterruptReason))
+            }))
+          }),
+        timeout
+      )
+
       it.effect("formats a console call's text from its arguments", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -488,6 +533,39 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             )
           }))
         }), timeout)
+
+      it.effect(
+        "keeps body decoding pending after reader interruption until its scope closes",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<p>body cancellation</p>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const decoding = yield* Deferred.make<void>()
+            const interrupted = yield* Deferred.make<void>()
+            const collection = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const pending = yield* NetworkResponse.next(page, {
+              url: `${origin}/cart`,
+              body: (message) =>
+                message.arrayBuffer.pipe(
+                  Effect.tap(() => Deferred.succeed(decoding, undefined)),
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+                )
+            }).pipe(Scope.provide(collection))
+            const fiber = yield* pending.pipe(Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/cart", { method: "POST" })
+            })
+            yield* Deferred.await(decoding).pipe(Deadline.within("5 seconds"))
+            yield* Fiber.interrupt(fiber)
+            assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(fiber)))
+            assert.isFalse(yield* Deferred.isDone(interrupted))
+            yield* Scope.close(collection, Exit.void)
+            assert.isTrue(yield* Deferred.isDone(interrupted))
+          })),
+        timeout
+      )
 
       it.effect("says a redirect hop has no body, and filters responses by status", () =>
         Effect.gen(function*() {

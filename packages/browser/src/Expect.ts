@@ -54,6 +54,10 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
 /**
  * Expects the one match to be visible.
  *
+ * **Details**
+ *
+ * An element with `opacity: 0` on itself or any ancestor counts as hidden, so this waits for it to become visible.
+ *
  * **Example** (Waiting for a welcome message)
  *
  * ```ts import.meta.vitest

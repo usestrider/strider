@@ -38,7 +38,7 @@ interface CommandResult {                                 // a Schema: text by d
   readonly elapsed: Duration
   readonly acquired: ReadonlyArray<Handle>
   readonly sinceLast: ReadonlyArray<DigestEntry>          // navigations, popups, dialogs and who decided them, downloads,
-                                                          // uncaught exceptions, console errors, failed requests, crashes, latched waits
+                                                          // uncaught exceptions, console errors, failed requests, validation observed during clicks, crashes, latched waits
   readonly files: ReadonlyArray<FilePath.Local>           // screenshots, snapshots, traces: written to artifacts/, only the path printed
 }
 
@@ -155,7 +155,30 @@ An MCP client such as Claude Desktop launches `strider mcp` from its configurati
 }
 ```
 
-With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`, for pages you don't trust: no screenshots, fields' text masked in snapshots and no console text in the digest. The default is `local`, which allows them all.
+With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`. The default is `local`, which retains full capture and search.
+Field editability and field-content name provenance are collected only for redacted capture, including equivalent custom policies.
+Local capture and ordinary library snapshots skip this work and omit that masking metadata.
+
+Strict capture denies screenshots and masks editable content and validation messages as `•••` in snapshots and
+find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,
+including `plaintext-only`. Names copied from field content into ancestors or other nodes are masked too,
+including embedded values, referenced controls, nearby fields and image-alt inference. Public labels, roles,
+refs and states remain visible. Provenance follows contributors under native/ARIA fields through shadow hosts
+and assigned slots, including descendants that are not themselves editable. A mixed name containing public
+text and field content is masked in full. Native select and ARIA listbox option text is masked with the field
+subtree. Strict `find` matches only that redacted
+view: a query for hidden content returns no match, while label searches and role filters still work. For example,
+`find "Card" --role textbox` can find a field labeled Card, but guessing its masked value cannot find it.
+
+Strict capture omits console text. Uncaught exceptions in both the digest and `history exception` retain only
+`uncaught exception at <time>`: the occurrence time in monotonic nanoseconds, with no page-supplied error name,
+message, stack or origin text. CLI and MCP apply the same policy.
+
+This is a bounded capture policy, not a secrecy or inference guarantee. Ordinary page text and labels remain
+visible, and URLs, dialogs, network/download metadata, arguments and failures can carry page content too. A page
+can put sensitive text in a label or another unmasked channel. Assertions such as `expect --text` and action
+selectors still match original page content, so they can confirm guesses at masked values. Choose what pages
+and tools to expose.
 
 ```
 clicked button "Add to cart" on shop · 412 ms
@@ -215,6 +238,20 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `strider next` subscribes in the session's scope and prints a wait handle, and `strider await` collects it. The wait's deadline starts at `next` (`--within`, or the default budget), so a wait an agent leaves too long reports `Timeout` when collected. The since-last digest is `history`, read from where the previous command stopped.
 - **A failed request in the digest** got no response (a network, DNS or TLS error, or blocked by CORS, CSP or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `strider history network --failed`".
+- **Validation during a click.** A click's digest reports `validation observed during click` once per affected control when an `invalid`
+  event occurs during that click operation. This is temporal evidence only: page handlers can call
+  `checkValidity()` or `reportValidity()` on unrelated controls, so it does not prove a submission was attempted
+  or blocked. Repeated clicks can each report validation even when snapshot invalidity is unchanged. Observation
+  does not call validity methods, change focus, cancel events or wait for later timers.
+
+  Observation covers the top document and open shadow roots present when observation starts. It excludes child
+  frames, closed shadow roots and roots created later. Navigation, document loss or an open dialog can discard observations;
+  the original click error is preserved. Strict capture shows the control's role and a masked message, without
+  its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
+  current validity independently of clicks. Feedback collection shares the click's deadline and interruption.
+  If collection cannot finish, observer release runs separately and never adds feedback to a later result.
+  A busy document may retain listeners until it executes the queued release or ends; the caller does not wait for it.
+
 - **Nothing changes implicitly.** A popup is announced in the digest and gets a handle, but nothing follows it. Attaching to your own browser lists no pages until you take control of a tab: use an id from `strider tabs`, for example `strider control N4`.
 - **Failures say what happened:** the error's tag, its hint and the dispatch evidence ("the click may have reached the page"), with an exit code per module error. Interrupting a command (Ctrl-C) interrupts that command, never the session.
 

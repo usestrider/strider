@@ -90,6 +90,20 @@ const testRun: TestRun.TestRun = {
  * The browser starts where the layer is built: given to `@effect/vitest`'s `layer`, once for the block, whose tests
  * share it; provided to one effect, as below, once for that effect.
  *
+ * Vitest's default `testTimeout` is five seconds for the whole test, shorter than Strider's thirty-second budget
+ * per operation, so a slow step can end with Vitest's generic timeout before Strider reports its failure.
+ * Raise `testTimeout` in your Vitest config to allow time for all the test's operations:
+ *
+ * **Example** (Allowing time for browser operations)
+ *
+ * ```ts import.meta.vitest
+ * import { defineConfig } from "vitest/config"
+ *
+ * export default defineConfig({
+ *   test: { testTimeout: 60_000 }
+ * })
+ * ```
+ *
  * **Example** (Providing a browser to a test)
  *
  * ```ts import.meta.vitest

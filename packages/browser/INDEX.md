@@ -1379,7 +1379,9 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly keyboard: Keyboard.Keyboard`
   - `readonly mouse: Mouse.Mouse`
   - `readonly clock: PageClock.PageClock`
-  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly …`
+  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect.Effect<Route.Registration, Route.RouteErr…`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> …`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1575,7 +1577,7 @@ Routes intercept a page's or context's requests, and a route's handler decides w
 - `interface AuthPhase extends Paused`
   - `readonly phase: "auth"`
   - `readonly challenge: Challenge`
-- `type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>`
+- `type Intercepted<P extends Phase = Phase> = { readonly request: RequestPhase readonly response: ResponsePhase readonly auth: AuthPhase }[P]`
 - `type Handler<E, R, P extends Phase = "request"> = (intercepted: Intercepted<P>) => Effect.Effect<Decision<P>, E, R>`
 - `interface Options<P extends Phase = "request">`
   - `readonly phase?: P | undefined`
@@ -1632,6 +1634,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
   - `readonly role: Role`
   - `readonly name: Name`
   - `readonly states: ReadonlySet<State>`
+  - `readonly editable?: boolean | undefined`
   - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<Node>`
 - `interface NodeEncoded`
@@ -1639,6 +1642,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
   - `readonly role: Node["role"]`
   - `readonly name: Node["name"]`
   - `readonly states: Node["states"]`
+  - `readonly editable?: boolean | undefined`
   - `readonly validationMessage: Option.Option<string>`
   - `readonly children: ReadonlyArray<NodeEncoded>`
 - `class Data: Schema.Class { document, generation, root, text }`
@@ -1659,7 +1663,7 @@ Accessibility snapshots of a page, for agents and for checking a page's structur
 - `const Generation = Schema.Number.pipe(Schema.brand("~@usestrider/browser/Snapshot/Generation"))`
 - `const InteractivityEvidence = Schema.Literals(["clickListener", "cursorPointer", "tabindex", "contentEditable", "onclickAttribute"])`
 - `const Role: Schema.Codec<Role>`
-- `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String }), Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.Literals(["text", "title", "placeholder", "alt", "nearb…`
+- `const Name = Schema.Union([Schema.TaggedStruct("Accessible", { value: Schema.String, from: Schema.optional(Schema.Literal("text")), fieldContent: Schema.optional(Schema.Boolean) }), Schema.TaggedStruct("Inferred"…`
 - `const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])`
 - `const Node: Schema.Codec<Node, NodeEncoded>`
 
@@ -1883,7 +1887,9 @@ User contexts: isolated browser sessions, at two access levels.
   - `readonly cookies: CookieJar.CookieJar`
   - `readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError | Target.TargetGone>`
   - `readonly clock: PageClock.PageClock`
-  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, P>, options?: Route.Options<P> | undefined): Effect.…`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly …`
+  - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect.Effect<Route.Registration, Route.RouteErr…`
+  - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> …`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`

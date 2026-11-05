@@ -20,7 +20,8 @@ import { compare, elapsed, measure, options } from "./measure.ts"
 const cases = [...ordinaryCases, ...captureCases]
 const config = options(process.argv.slice(2))
 const lifecycleNames = ["launch-first-page", "launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
-const names = ["lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
+const networkNames = ["navigate", "resources", "response-body-small", "response-body-large"]
+const names = ["network", "lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
 if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
   --runs N          measured pairs per case (default 20)
@@ -136,7 +137,8 @@ const save = () => {
 }
 
 const chosen = (name: string) =>
-  config.only === undefined || config.only === name || (config.only === "lifecycle" && lifecycleNames.includes(name))
+  config.only === undefined || config.only === name || (config.only === "lifecycle" && lifecycleNames.includes(name)) ||
+  (config.only === "network" && networkNames.includes(name))
 const record = async (
   name: string,
   description: string,

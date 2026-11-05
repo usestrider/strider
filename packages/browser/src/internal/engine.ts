@@ -177,10 +177,21 @@ export interface SnapNode {
       readonly evidence: ReadonlyArray<string>
     }
   readonly name:
-    | { readonly _tag: "Accessible"; readonly value: string }
-    | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
+    | {
+      readonly _tag: "Accessible"
+      readonly value: string
+      readonly from?: "text" | undefined
+      readonly fieldContent?: boolean | undefined
+    }
+    | {
+      readonly _tag: "Inferred"
+      readonly value: string
+      readonly from: string
+      readonly fieldContent?: boolean | undefined
+    }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
   /** An iframe, whose frame's tree L1 stitches in. */
@@ -197,11 +208,20 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     })
   ]),
   name: Schema.Union([
-    Schema.TaggedStruct("Accessible", { value: Schema.String }),
-    Schema.TaggedStruct("Inferred", { value: Schema.String, from: Schema.String }),
+    Schema.TaggedStruct("Accessible", {
+      value: Schema.String,
+      from: Schema.optional(Schema.Literal("text")),
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
+    Schema.TaggedStruct("Inferred", {
+      value: Schema.String,
+      from: Schema.String,
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
   frame: Schema.Boolean
@@ -220,6 +240,8 @@ export type Clip = typeof Clip.Type
 
 /** A request to the engine. */
 export type Request =
+  | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
+  | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
@@ -271,6 +293,7 @@ export type Request =
     readonly op: "snapshot"
     readonly steps: ReadonlyArray<Step> | null
     readonly interactivity: boolean
+    readonly provenance?: boolean | undefined
     readonly depth: number | null
   }
   /** Why a locator matches nothing: the nearest match of its steps, and close names. */
@@ -291,6 +314,7 @@ const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number })
  * WebKit, a page's script can answer in its place, so nothing it says is taken on trust.
  */
 export const Response = Schema.Union([
+  Schema.TaggedStruct("Validation", { lines: Schema.Array(Schema.String) }),
   Schema.TaggedStruct("Count", { count: Schema.Number }),
   Schema.TaggedStruct("Visible", { count: Schema.Number, visible: Schema.Boolean }),
   Schema.TaggedStruct("Ready", {
@@ -824,17 +848,19 @@ export function engine(render: (root: SnapNode) => string) {
     return !element.checkVisibility({ visibilityProperty: true })
   }
 
-  /** CONCEPTS.md §8, Visible. */
-  const visible = (element: Element): boolean => {
+  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some(visible)
+      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
     }
-    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) {
+    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
     }
     const rect = element.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0
   }
+
+  const visible = (element: Element): boolean => rendered(element, true)
 
   // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
 
@@ -845,6 +871,7 @@ export function engine(render: (root: SnapNode) => string) {
     /** Computing another element's name, not the root's. */
     readonly traversal: boolean
     readonly includeHidden: boolean
+    readonly contribution: { fieldContent: boolean }
   }
 
   const byId = (element: Element, id: string): Element | null => {
@@ -881,12 +908,26 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? ""
+    if (node.nodeType === Node.TEXT_NODE) {
+      const value = node.nodeValue ?? ""
+      if (value !== "" && inField(node)) context.contribution.fieldContent = true
+      return value
+    }
     if (!(node instanceof Element)) return ""
     return nameOfElement(node, context)
   }
 
+  // Propagate only the chosen, nonempty name. Failed naming alternatives must not taint a public label.
   const nameOfElement = (element: Element, context: NameContext): string => {
+    if (!provenance) return nameOfElementValue(element, context)
+    const previous = context.contribution.fieldContent
+    context.contribution.fieldContent = false
+    const value = nameOfElementValue(element, context)
+    context.contribution.fieldContent = previous || (context.contribution.fieldContent && value.trim() !== "")
+    return value
+  }
+
+  const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     context.visited.add(element)
     // 2A: hidden, unless referenced or asked for
@@ -905,7 +946,11 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     // 2E: an embedded control inside another element's name contributes its value
-    if (context.traversal && embeddedControlRole(role)) return embeddedValue(element, role)
+    if (context.traversal && embeddedControlRole(role)) {
+      const value = embeddedValue(element, role)
+      if (value.trim() !== "") context.contribution.fieldContent = true
+      return value
+    }
     // 2C: aria-label
     const label = element.getAttribute("aria-label") ?? ""
     if (label.trim() !== "") return label
@@ -924,7 +969,11 @@ export function engine(render: (root: SnapNode) => string) {
         content += inline ? name : ` ${name} `
       }
       content += pseudoContent(element, "::after")
-      if (content.trim() !== "") return content
+      if (content.trim() !== "") {
+        if (provenance && !context.traversal && !context.labelledBy) namesFromContent.add(element)
+        if (inField(element)) context.contribution.fieldContent = true
+        return content
+      }
     }
     // 2I: the tooltip, then a placeholder (HTML-AAM)
     const title = element.getAttribute("title") ?? ""
@@ -939,18 +988,30 @@ export function engine(render: (root: SnapNode) => string) {
   const nativeName = (element: Element, context: NameContext): string => {
     if (element instanceof HTMLInputElement) {
       if (element.type === "submit" || element.type === "reset" || element.type === "button") {
-        return element.value !== "" ? element.value : element.type === "submit" ? "Submit" : element.type === "reset"
+        const value = element.value !== "" ?
+          element.value :
+          element.type === "submit" ?
+          "Submit" :
+          element.type === "reset"
           ? "Reset"
           : ""
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
       }
-      if (element.type === "image") return element.alt !== "" ? element.alt : element.value
+      if (element.type === "image") {
+        const value = element.alt !== "" ? element.alt : element.value
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
+      }
     }
     const labels = labelsOf(element)
     if (labels.length > 0) {
       return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
-      return element.getAttribute("alt") ?? ""
+      const alt = element.getAttribute("alt") ?? ""
+      if (alt.trim() !== "" && inField(element)) context.contribution.fieldContent = true
+      return alt
     }
     const first = (selector: string) => Array.from(element.children).find((child) => child.matches(selector))
     if (element instanceof HTMLFieldSetElement) {
@@ -967,18 +1028,25 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (element instanceof SVGSVGElement) {
       const title = first("title")
-      return title === undefined ? "" : title.textContent ?? ""
+      if (title === undefined) return ""
+      if (textContainsField(title)) context.contribution.fieldContent = true
+      return title.textContent ?? ""
     }
     return ""
   }
 
+  let provenance = false
+  const namesFromFields = new Set<Element>()
+  const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
+    const contribution = { fieldContent: false }
     const name = collapse(
-      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden })
+      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
+    if (provenance && contribution.fieldContent) namesFromFields.add(element)
     nameCache.set(element, name)
     return name
   }
@@ -1577,9 +1645,7 @@ export function engine(render: (root: SnapNode) => string) {
         frames++
       }
       sampled = true
-      rawText.clear()
-      roleCache.clear()
-      nameCache.clear()
+      clearTreeCaches()
       const found = resolve(request.steps)
       if (found.length > 1) return strict(found)
       const element = found[0]
@@ -1617,7 +1683,7 @@ export function engine(render: (root: SnapNode) => string) {
       previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
@@ -1810,9 +1876,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     if (expectation._tag === "Title") {
       const title = collapse(document.title)
       return { passed: expected(expectation.expected, title), observed: title }
@@ -2026,12 +2090,94 @@ export function engine(render: (root: SnapNode) => string) {
 
   const clip = (text: string) => text.length > 80 ? `${text.slice(0, 80)}…` : text
 
+  const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "listbox", "slider", "spinbutton", "editable"])
+  const fieldKinds = new Map<Element, boolean>()
+  const fieldOf = (element: Element): boolean => {
+    const cached = fieldKinds.get(element)
+    if (cached !== undefined) return cached
+    const field = FIELD_ROLES.has(roleOf(element) ?? "") || element instanceof HTMLSelectElement ||
+      typed(element) || settable(element) || contentEditable(element)
+    fieldKinds.set(element, field)
+    return field
+  }
+
+  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  const fieldParent = (node: Node): Node | null => {
+    if ((node instanceof Element || node instanceof Text) && node.assignedSlot !== null) return node.assignedSlot
+    return node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+  }
+
+  const fieldAncestry = new Map<Node, boolean>()
+  const inField = (node: Node): boolean => {
+    if (!provenance) return false
+    const cached = fieldAncestry.get(node)
+    if (cached !== undefined) return cached
+    const path: Array<Node> = []
+    let field = false
+    for (let current: Node | null = node; current !== null; current = fieldParent(current)) {
+      const known = fieldAncestry.get(current)
+      if (known !== undefined) {
+        field = known
+        break
+      }
+      path.push(current)
+      if (current instanceof Element && fieldOf(current)) {
+        field = true
+        break
+      }
+    }
+    // Cache negative paths too: nested clickables must not repeat a full ancestor walk per contributor.
+    for (const ancestor of path) fieldAncestry.set(ancestor, field)
+    return field
+  }
+
+  const fieldText = new Map<Element, boolean>()
+  // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
+  const textContainsField = (element: Element): boolean => {
+    if (!provenance) return false
+    const cached = fieldText.get(element)
+    if (cached !== undefined) return cached
+    const field = textOfNode(element).trim() !== "" && (inField(element) ||
+      flatChildNodes(element).some((child) =>
+        child instanceof Element
+          ? textContainsField(child)
+          : child.nodeType === Node.TEXT_NODE && (child.nodeValue ?? "").trim() !== "" && inField(child)
+      ))
+    fieldText.set(element, field)
+    return field
+  }
+
+  const clearTreeCaches = (): void => {
+    rawText.clear()
+    roleCache.clear()
+    nameCache.clear()
+    namesFromContent.clear()
+    namesFromFields.clear()
+    provenance = false
+    fieldKinds.clear()
+    fieldAncestry.clear()
+    fieldText.clear()
+  }
+
   /** An inferred node's name: its accessible name, or where one can be read from. */
   const inferredName = (element: Element): SnapNode["name"] => {
     const accessible = accessibleName(element, false)
-    if (accessible !== "") return { _tag: "Accessible", value: accessible }
+    if (accessible !== "") {
+      return {
+        _tag: "Accessible",
+        value: accessible,
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
+      }
+    }
     const text = textOf(element)
-    if (text !== "") return { _tag: "Inferred", value: clip(text), from: "text" }
+    if (text !== "") {
+      return {
+        _tag: "Inferred",
+        value: clip(text),
+        from: "text",
+        ...(textContainsField(element) ? { fieldContent: true } : {})
+      }
+    }
     const title = collapse(element.getAttribute("title") ?? "")
     if (title !== "") return { _tag: "Inferred", value: title, from: "title" }
     const placeholder = collapse(
@@ -2041,10 +2187,24 @@ export function engine(render: (root: SnapNode) => string) {
     if (placeholder !== "") return { _tag: "Inferred", value: placeholder, from: "placeholder" }
     const image = element.querySelector("img[alt]")
     const alt = collapse(image?.getAttribute("alt") ?? "")
-    if (alt !== "") return { _tag: "Inferred", value: alt, from: "alt" }
+    if (alt !== "") {
+      return {
+        _tag: "Inferred",
+        value: alt,
+        from: "alt",
+        ...(image !== null && inField(image) ? { fieldContent: true } : {})
+      }
+    }
     const previous = element.previousElementSibling
     const nearby = previous === null ? "" : textOf(previous)
-    if (nearby !== "" && nearby.length <= 40) return { _tag: "Inferred", value: nearby, from: "nearbyLabel" }
+    if (nearby !== "" && nearby.length <= 40) {
+      return {
+        _tag: "Inferred",
+        value: nearby,
+        from: "nearbyLabel",
+        ...(previous !== null && textContainsField(previous) ? { fieldContent: true } : {})
+      }
+    }
     return { _tag: "None" }
   }
 
@@ -2123,11 +2283,17 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
+    const field = provenance && fieldOf(element)
     const name: SnapNode["name"] = role._tag === "Inferred"
       ? inferredName(element)
       : accessible === ""
       ? { _tag: "None" }
-      : { _tag: "Accessible", value: accessible }
+      : {
+        _tag: "Accessible",
+        value: accessible,
+        ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
+      }
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -2139,6 +2305,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
       frame
@@ -2166,6 +2333,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const snapshot = (request: Extract<Request, { op: "snapshot" }>): Response => {
+    provenance = request.provenance === true
     const walk: Walk = { interactivity: request.interactivity, depth: request.depth }
     if (request.steps === null) return { _tag: "Snapshot", root: documentNode(walk), generation }
     const found = resolve(request.steps)
@@ -2289,9 +2457,7 @@ export function engine(render: (root: SnapNode) => string) {
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
     }
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     let found: Array<Element>
     try {
       found = resolve(request.steps)
@@ -2356,13 +2522,55 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
   }
 
+  // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
+  // without probing validity or changing page behavior. Each call owns its listeners and deduplication.
+  const validationObservers = new Map<string, () => Array<string>>()
+  const observeValidation = (token: string, full: boolean) => {
+    validationObservers.get(token)?.()
+    const roots: Array<Document | ShadowRoot> = [document]
+    for (const element of elementsUnder(document)) {
+      if (element.shadowRoot !== null) roots.push(element.shadowRoot)
+    }
+    const found = new Map<Element, string>()
+    const listener = (event: Event) => {
+      const element = event.target
+      if (!(element instanceof Element) || found.has(element)) return
+      const message = validationMessageOf(element)
+      if (message === null) return
+      rawText.clear()
+      roleCache.clear()
+      nameCache.clear()
+      const name = full ? accessibleName(element, true) : ""
+      found.set(
+        element,
+        `${roleOf(element)}${name === "" ? "" : ` ${JSON.stringify(name)}`} validationMessage=${
+          JSON.stringify(full ? message : "•••")
+        }`
+      )
+    }
+    for (const root of roots) root.addEventListener("invalid", listener, true)
+    validationObservers.set(token, () => {
+      for (const root of roots) root.removeEventListener("invalid", listener, true)
+      validationObservers.delete(token)
+      return Array.from(found.values())
+    })
+  }
+
   const run = async (text: string): Promise<string> => {
     const request = JSON.parse(text) as Request
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     try {
       switch (request.op) {
+        case "validationStart":
+          observeValidation(request.token, request.full)
+          return JSON.stringify({ _tag: "Validation", lines: [] } satisfies Response)
+        case "validationStop":
+          return JSON.stringify(
+            {
+              _tag: "Validation",
+              lines: validationObservers.get(request.token)?.() ?? []
+            } satisfies Response
+          )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
         case "visible": {
