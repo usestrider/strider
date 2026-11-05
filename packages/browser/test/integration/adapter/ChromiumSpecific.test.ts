@@ -58,7 +58,7 @@ describe("Chromium adapter, CDP only", () => {
               }`,
               () =>
                 Effect.gen(function*() {
-                  if (!headless) yield* useXvfb()
+                  if (!headless && process.platform === "linux") yield* useXvfb()
                   const fs = yield* FileSystem.FileSystem
                   const items = new Set<string>()
                   const result = yield* Effect.scoped(
