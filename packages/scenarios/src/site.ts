@@ -56,6 +56,11 @@ window.tells = (async () => {
 })()
 </script>`
 
+export const responseBody = (size: number): Buffer =>
+  Buffer.from(Uint8Array.from({ length: size }, (_, i) => (i * 31 + (i >>> 8)) & 255))
+
+const bodies = new Map([4096, 4 * 1024 * 1024].map((size) => [size, responseBody(size)]))
+
 const routes: Record<
   string,
   (
@@ -63,6 +68,10 @@ const routes: Record<
     request: http.IncomingMessage
   ) => { status?: number; type?: string; headers?: Record<string, string>; body: string | Buffer; delay?: number }
 > = {
+  "/benchmark/body": (url) => ({
+    type: "application/octet-stream",
+    body: bodies.get(Number(url.searchParams.get("size"))) ?? Buffer.alloc(0)
+  }),
   "/benchmark": () => ({
     body: page(
       "Benchmark",

@@ -32,7 +32,11 @@ export const summarize = (samples: ReadonlyArray<number>) => {
   const sorted = [...samples].sort((a, b) => a - b)
   const middle = Math.floor(sorted.length / 2)
   const median = sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!
-  return { median, p95: sorted[Math.ceil(sorted.length * 0.95) - 1]!, min: sorted[0]! }
+  const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length
+  const sd = samples.length < 2 ? 0 : Math.sqrt(
+    samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (samples.length - 1)
+  )
+  return { median, mean, sd, p95: sorted[Math.ceil(sorted.length * 0.95) - 1]!, min: sorted[0]! }
 }
 
 export const compare = (strider: ReadonlyArray<number>, playwright: ReadonlyArray<number>, maxRatio: number) => {
@@ -40,7 +44,22 @@ export const compare = (strider: ReadonlyArray<number>, playwright: ReadonlyArra
   const left = summarize(strider)
   const right = summarize(playwright)
   const ratio = left.median / right.median
-  return { strider: left, playwright: right, ratio, passed: ratio <= maxRatio }
+  const differences = strider.map((value, i) => value - playwright[i]!)
+  const mean = differences.reduce((sum, value) => sum + value, 0) / differences.length
+  const sorted = [...differences].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  const paired = {
+    differences,
+    median: sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!,
+    mean,
+    sd: differences.length < 2 ? 0 : Math.sqrt(
+      differences.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (differences.length - 1)
+    ),
+    min: sorted[0]!,
+    p95: sorted[Math.ceil(sorted.length * 0.95) - 1]!,
+    max: sorted[sorted.length - 1]!
+  }
+  return { strider: left, playwright: right, paired, ratio, passed: ratio <= maxRatio }
 }
 
 /** Alternating paired samples, never concurrent; warmups are checked but not retained. */

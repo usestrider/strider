@@ -27,6 +27,7 @@ import {
   UncaughtException,
   Watchable
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -488,6 +489,43 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             )
           }))
         }), timeout)
+
+      it.effect(
+        "interrupts body decoding, releases its collection scope, and collects again",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<p>body cancellation</p>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const decoding = yield* Deferred.make<void>()
+            const collection = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const pending = yield* NetworkResponse.next(page, {
+              url: `${origin}/cart`,
+              body: (message) =>
+                message.arrayBuffer.pipe(
+                  Effect.tap(() => Deferred.succeed(decoding, undefined)),
+                  Effect.andThen(Effect.never)
+                )
+            }).pipe(Scope.provide(collection))
+            const fiber = yield* pending.pipe(Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/cart", { method: "POST" })
+            })
+            yield* Deferred.await(decoding).pipe(Deadline.within("5 seconds"))
+            yield* Fiber.interrupt(fiber)
+            assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(fiber)))
+            yield* Scope.close(collection, Exit.void)
+            const next = yield* NetworkResponse.next(page, {
+              url: `${origin}/cart`,
+              body: (message) => message.json
+            })
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/cart", { method: "POST" })
+            })
+            assert.deepStrictEqual((yield* next).body, { items: [{ id: "tea" }] })
+          })),
+        timeout
+      )
 
       it.effect("says a redirect hop has no body, and filters responses by status", () =>
         Effect.gen(function*() {
