@@ -5,28 +5,13 @@ import { TestRunner } from "vitest"
 import type { RunnerTask, RunnerTestCase, RunnerTestFile, RunnerTestSuite } from "vitest"
 import "./traceProcesses.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
-import { checkpoint } from "./snapshotTrace.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const shared = new TraceBuffer()
-const active = new Map<string, { trace: TraceBuffer; inBody: boolean; snapshot?: string }>()
+const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
 let sharedFile = ""
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
-const captureDirectory = "/home/jpowers/.local/share/clutch/artifacts/ROOK-212/slice-capture"
-Object.assign(globalThis, {
-  __inputProbeSnapshot(label: string) {
-    if (active.size !== 1) throw new Error("Ambiguous diagnostic checkpoint")
-    const running = active.values().next().value!
-    if (running.snapshot !== undefined) throw new Error("Duplicate checkpoint")
-    const file = `${captureDirectory}/${label}-gesture.ndjson`
-    checkpoint(file, running.trace, { label, phase: "after assertions and recipient reads; before native drain" })
-    checkpoint(`${captureDirectory}/${label}-shared-before.ndjson`, shared, { label, phase: "shared before drain" })
-    running.snapshot = label
-    running.trace.clear()
-  }
-})
-
 const serialize = (value: unknown): string =>
   typeof value === "string"
     ? value
@@ -144,28 +129,16 @@ export default class FailureTraceRunner extends TestRunner {
     const running = active.get(task.id)
     if (running === undefined) return
     active.delete(task.id)
-    const file = running.snapshot !== undefined
-      ? `${captureDirectory}/${running.snapshot}-cleanup.ndjson`
-      : task.result?.state === "fail"
-      ? filename(task, "test")
-      : undefined
+    const file = task.result?.state === "fail" ? filename(task, "test") : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
-    if (file !== undefined) {
-      save(file, running.trace, task.name)
-      if (running.snapshot !== undefined) {
-        checkpoint(file + ".bounded.ndjson", running.trace, {
-          phase: "post-checkpoint cleanup",
-          outcome: task.result?.state
-        })
-      }
-    }
+    if (file !== undefined) save(file, running.trace, task.name)
     if (file !== undefined) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
     running.trace.clear()
   }
   override async onAfterRunSuite(suite: RunnerTestSuite) {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
-    if (suite.result?.state === "fail" || suite.name.endsWith("Chromium.slice.test.ts")) {
+    if (suite.result?.state === "fail") {
       save(
         filename(suite, "shared"),
         shared,

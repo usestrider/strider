@@ -25,7 +25,6 @@ import * as Redacted from "effect/Redacted"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import { site } from "../adapter/harness.ts"
-import { beginNative, saveRecipients } from "../nativeInputProbe.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
 
@@ -254,62 +253,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           () =>
             Effect.gen(function*() {
               const { origin, crossSite } = yield* site
-              const recipientProbe = (label: string) =>
-                name !== "Chromium" ?
-                  "" :
-                  `<script>(()=>{
-                const out=document.createElement('pre');out.id='recipient-probe';
-                out.style.display='none';document.documentElement.append(out);
-                const record=(value)=>{out.textContent+=JSON.stringify(value)+'\\n';performance.mark('recipient-probe:'+JSON.stringify(value));};
-                record({label,kind:'installed',time:performance.timeOrigin,ready:document.readyState});
-                for(const type of ['pointerover','pointermove','pointerdown','mousedown','pointerup','mouseup','click'])
-                  window.addEventListener(type,e=>record({label,type,trusted:e.isTrusted,target:e.target.id||e.target.nodeName,x:e.clientX,y:e.clientY,time:e.timeStamp,path:e.composedPath().map(n=>n.id||n.nodeName||'window')}),true);
-                window.addEventListener('pagehide',()=>record({label,kind:'pagehide'}));
-              })()</script>`.replaceAll("{label,", "{label:" + JSON.stringify(label) + ",")
               const leaf =
                 `<!doctype html><style>body{margin:0;font:16px/24px monospace;width:240px}</style><a id="go" href="#">${
                   Array(6).fill("abcdefghij").join(" ")
-                }</a><output id="out"></output>${recordsClick}${recipientProbe("leaf")}`
+                }</a><output id="out"></output>${recordsClick}`
               const cover =
                 `<div id="cover" style="position:absolute;left:0;top:0;width:400px;height:24px;background:white"></div>`
               const middle = `<style>body{margin:0}iframe{width:300px;height:150px;border:0}</style><iframe src="${
                 fixtureUrl(origin, leaf)
-              }"></iframe>${coveredIn === "middle" ? cover : ""}${recipientProbe("middle")}`
+              }"></iframe>${coveredIn === "middle" ? cover : ""}`
               const html = `<style>body{margin:0}iframe{width:300px;height:160px;border:0}</style><iframe src="${
                 fixtureUrl(crossSite, middle)
-              }"></iframe>${coveredIn === "outer" ? cover : ""}${recipientProbe("outer")}`
+              }"></iframe>${coveredIn === "outer" ? cover : ""}`
               yield* Effect.scoped(Effect.gen(function*() {
-                const finishNative = name === "Chromium" ? yield* beginNative(`wrapped-${coveredIn}`) : Effect.void
-                yield* Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
-                  yield* page.goto(fixtureUrl(origin, html))
-                  const outer = page.frame(page.locator("iframe"))
-                  const inner = outer.frame(outer.locator("iframe"))
-                  try {
-                    yield* inner.locator("#go").click().pipe(Deadline.within("1 second"))
-                    const event = JSON.parse(yield* inner.locator("#out").readText) as { target: string; y: number }
-                    assert.strictEqual(event.target, "go")
-                    assert.isAtLeast(event.y, 24)
-                    assert.isBelow(event.y, 48)
-                  } finally {
-                    if (name === "Chromium") {
-                      saveRecipients(
-                        `wrapped-${coveredIn}`,
-                        {
-                          outer: yield* page.locator("#recipient-probe").readText.pipe(
-                            Effect.catchCause((cause) => Effect.succeed({ probeError: String(cause) }))
-                          ),
-                          middle: yield* outer.locator("#recipient-probe").readText.pipe(
-                            Effect.catchCause((cause) => Effect.succeed({ probeError: String(cause) }))
-                          ),
-                          leaf: yield* inner.locator("#recipient-probe").readText.pipe(
-                            Effect.catchCause((cause) => Effect.succeed({ probeError: String(cause) }))
-                          )
-                        }
-                      )
-                    }
-                  }
-                }).pipe(Effect.ensuring(Effect.orDie(finishNative)))
+                const page = yield* Browser.newPage()
+                yield* page.goto(fixtureUrl(origin, html))
+                const outer = page.frame(page.locator("iframe"))
+                const inner = outer.frame(outer.locator("iframe"))
+                yield* inner.locator("#go").click().pipe(Deadline.within("1 second"))
+                const event = JSON.parse(yield* inner.locator("#out").readText) as { target: string; y: number }
+                assert.strictEqual(event.target, "go")
+                assert.isAtLeast(event.y, 24)
+                assert.isBelow(event.y, 48)
               }))
             }),
           timeout

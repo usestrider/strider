@@ -29,7 +29,6 @@ import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
-import { beginNative, recipientProbe, saveRecipients } from "../nativeInputProbe.ts"
 import { fullySupports, supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -408,48 +407,20 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const finishNative = name === "Chromium" ? yield* beginNative("nested-counter") : Effect.void
-            const probe = (label: string) =>
-              name === "Chromium" ? recipientProbe(label) : ""
             const page = yield* Browser.newPage()
-            const inner = fixtureUrl(origin, counter("Inner") + probe("leaf"))
+            const inner = fixtureUrl(origin, counter("Inner"))
             const middle = fixtureUrl(
               crossSite,
-              `<body style="margin:0"><p>middle</p><iframe id="inner" style="margin:15px;width:260px;height:150px" src="${inner}"></iframe></body>${
-                probe("middle")
-              }`
+              `<body style="margin:0"><p>middle</p><iframe id="inner" style="margin:15px;width:260px;height:150px" src="${inner}"></iframe></body>`
             )
             yield* page.goto(fixtureUrl(
               origin,
-              `<body style="margin:0"><div style="height:30px"></div><iframe id="outer" style="width:400px;height:300px" src="${middle}"></iframe></body>${
-                probe("outer")
-              }`
+              `<body style="margin:0"><div style="height:30px"></div><iframe id="outer" style="width:400px;height:300px" src="${middle}"></iframe></body>`
             ))
             const outer = page.frame(page.locator("#outer"))
             const nested = outer.frame(outer.locator("#inner"))
-            yield* Effect.gen(function*() {
-              try {
-                yield* nested.getByRole("button", { name: "Add" }).click()
-                yield* nested.locator("#count").pipe(Expect.toHaveText("1"))
-              } finally {
-                if (name === "Chromium") {
-                  saveRecipients(
-                    "nested-counter",
-                    {
-                      outer: yield* page.locator("#recipient-probe").readText.pipe(Effect.catchCause((cause) =>
-                        Effect.succeed({ probeError: String(cause) })
-                      )),
-                      middle: yield* outer.locator("#recipient-probe").readText.pipe(Effect.catchCause((cause) =>
-                        Effect.succeed({ probeError: String(cause) })
-                      )),
-                      leaf: yield* nested.locator("#recipient-probe").readText.pipe(Effect.catchCause((cause) =>
-                        Effect.succeed({ probeError: String(cause) })
-                      ))
-                    }
-                  )
-                }
-              }
-            }).pipe(Effect.ensuring(Effect.orDie(finishNative)))
+            yield* nested.getByRole("button", { name: "Add" }).click()
+            yield* nested.locator("#count").pipe(Expect.toHaveText("1"))
             // The frame navigates: the locator follows it
             yield* page.evaluateInMainWorld(() => {
               ;(document.getElementById("outer") as HTMLIFrameElement).src = "/fixture?html=" +
@@ -725,15 +696,12 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const finishNative = name === "Chromium" ? yield* beginNative("snapshot-counter") : Effect.void
-            const probe = (label: string) =>
-              name === "Chromium" ? recipientProbe(label) : ""
             const page = yield* Browser.newPage()
             yield* page.goto(fixtureUrl(
               origin,
               `<h1>Outer</h1><iframe id="cross" title="Payment" src="${
-                fixtureUrl(crossSite, counter("Inner") + probe("leaf"))
-              }"></iframe>${probe("outer")}`
+                fixtureUrl(crossSite, counter("Inner"))
+              }"></iframe>`
             ))
             yield* page.frame(page.locator("#cross")).getByRole("heading").pipe(Expect.toHaveText("Inner"))
             const snapshot = yield* page.snapshot()
@@ -744,26 +712,8 @@ export const contents = (
             const add = [...snapshot.refs].find(([ref, node]) =>
               ref.startsWith("f1") && node.role.role === "button"
             )!
-            yield* Effect.gen(function*() {
-              try {
-                yield* snapshot.ref(add[0]).click()
-                yield* page.frame(page.locator("#cross")).locator("#count").pipe(Expect.toHaveText("1"))
-              } finally {
-                if (name === "Chromium") {
-                  saveRecipients(
-                    "snapshot-counter",
-                    {
-                      outer: yield* page.locator("#recipient-probe").readText.pipe(Effect.catchCause((cause) =>
-                        Effect.succeed({ probeError: String(cause) })
-                      )),
-                      leaf: yield* page.frame(page.locator("#cross")).locator("#recipient-probe").readText.pipe(
-                        Effect.catchCause((cause) => Effect.succeed({ probeError: String(cause) }))
-                      )
-                    }
-                  )
-                }
-              }
-            }).pipe(Effect.ensuring(Effect.orDie(finishNative)))
+            yield* snapshot.ref(add[0]).click()
+            yield* page.frame(page.locator("#cross")).locator("#count").pipe(Expect.toHaveText("1"))
           }))
         }), timeout)
 
@@ -1113,7 +1063,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
