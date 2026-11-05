@@ -226,6 +226,40 @@ describe("Chromium adapter, CDP only", () => {
       }
 
       it.effect(
+        "keeps a supplied profile's session cookie when the default context's last opened page closes",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-session-cookie-test-" })
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({
+                executablePath: executable,
+                userDataDir: directory
+              })
+              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+            }))
+            yield* Effect.scoped(
+              Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const context = yield* browser.defaultContext.control
+                yield* context.cookies.set({
+                  name: "session",
+                  value: "1",
+                  scope: { _tag: "Url", url: served.origin }
+                })
+                const opened = yield* context.newPage
+                yield* opened.close()
+                const page = yield* context.newPage
+                yield* page.goto(`${served.origin}/hello`)
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.cookie), "session=1")
+              }).pipe(Effect.provide(backend))
+            )
+          }),
+        timeout
+      )
+
+      it.effect(
         "attributes a route-fulfilled redirect to the route and its final response to the network",
         () =>
           Effect.gen(function*() {
