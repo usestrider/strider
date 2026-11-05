@@ -192,7 +192,8 @@ describe("overlays", () => {
       ...model,
       shapes: {
         ...model.shapes,
-        "Card#connect.Params": { ...params, members: { ...params.members, other: params.members["id"]! } }
+        "Card#connect.Params": { ...params, members: { ...params.members, other: params.members["id"]!, target: { ...params.members["id"]!, type: { _tag: "Ref" as const, shape: "Extra" } } } },
+        Extra: { ...params, members: { realm: params.members["id"]! } }
       }
     }
     const release = (entry: {
@@ -223,6 +224,10 @@ describe("overlays", () => {
         }),
       /paramsFrom|\*/
     )
+    for (const paramsFrom of [
+      { "/target": "/cookies", "/target/realm": "/cookies" },
+      { "/target/realm": "/cookies", "/target": "/cookies" }
+    ]) assert.throws(() => release({ ...valid, paramsFrom }), /paramsFrom|overlap/)
     release({ ...valid, paramsFrom: { "/other": "/cookies" } })
   })
 
