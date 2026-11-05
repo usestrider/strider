@@ -278,11 +278,14 @@ export interface UserContext extends ObservedUserContext {
     handler: Route.Handler<E, R>,
     options?: Route.Options | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
-  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = Route.Phase>(
+  route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler:
-      & ((intercepted: Route.Intercepted<NoInfer<P> | "request">) => Effect.Effect<Route.Decision<D>, E, R>)
-      & RoutePhaseDiagnostic.DefaultPhaseDiagnostic<D, NoInfer<P> | "request">,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
+    options?: Route.Options<P> | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(
+    pattern: Url.Pattern | string,
+    handler: RoutePhaseDiagnostic.Handler<E, R, NoInfer<P> | "request", D>,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
