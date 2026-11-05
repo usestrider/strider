@@ -181,6 +181,13 @@ in `docs/decisions.md`; what was found wrong along the way stays in the commits 
 Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 
+`docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
+later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
+for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
+edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
+the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+fix, a test, or a change that follows an existing decision needs no entry.
+
 ## Issues
 
 Work that isn't done in the change at hand goes in an issue, never into a Markdown file: a bug you found, a browser
