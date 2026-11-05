@@ -103,13 +103,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             // Construction remains lazy, including under a scope that matches nothing.
             const invalid = page.getByRole("link", { pressed: false })
             const empty = page.locator("#missing").getByRole("link", { pressed: false })
+            const missingFrame = page.frame(page.locator("#absent-frame")).getByRole("link", { pressed: false })
             for (
               const operation of [
                 invalid.count,
                 empty.count,
                 invalid.readText,
                 invalid.click(),
-                invalid.evaluate(() => true)
+                invalid.evaluate(() => true),
+                missingFrame.count,
+                missingFrame.readText,
+                missingFrame.click(),
+                missingFrame.evaluate(() => true)
               ]
             ) {
               const error = yield* operation.pipe(Effect.flip)
