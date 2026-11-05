@@ -13,6 +13,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
@@ -336,6 +337,13 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
   })).pipe(Effect.mapError(Kit.realmFailure(id, () => realm.ended)))
   if (reply.type === "exception") {
     const details = reply.exceptionDetails
+    if (keep && "handle" in details.exception && details.exception.handle !== undefined) {
+      // The exception is returned by value: its root handle has no caller to release it.
+      state.buffer.start(Operation.detached(state.send(Script.disown({
+        handles: [details.exception.handle],
+        target: { realm: reply.realm }
+      }))))
+    }
     return {
       _tag: "Exception",
       text: details.text,
