@@ -44,7 +44,7 @@ const bodyCase = (name: string, size: number): Case => {
     },
     verify: (value) => {
       assert.ok(value instanceof Uint8Array)
-      assert.deepEqual(Buffer.from(value), expected)
+      assert.ok(Buffer.from(value).equals(expected), "Response body bytes or length differ")
     }
   })
 }
