@@ -753,6 +753,33 @@ unstable breaks the same version signal; treating every pre-1.0 change as a patc
 inferring CLI stability from its implementation's location under `internal/`, which says nothing about its public
 contract.
 
+
+## Validation observation during toolkit clicks
+
+Keep snapshot invalidity as current state, including before interaction. Observe native invalid events only
+over the toolkit click operation and report “validation observed during click”, rather than claiming a refused
+submission. Trusted invalid events also arise from scripted validity checks, and user-invalid state cannot
+identify repeated attempts or attribute a change to a click. Neither is submission-specific evidence.
+
+Use the existing per-document engine lifecycle, with a token per observation. Collect optional feedback in the
+click's interruptible use phase under its existing deadline. Awaiting a detached stop in an uninterruptible release
+would extend that deadline when the page is busy, so a release finalizer only starts idempotent cleanup in the
+toolkit's scope, apart from the caller. Cleanup bypasses the read's dialog refusal, allowing a queued stop to
+execute when the dialog closes. It never publishes feedback. A busy document may retain listeners until its
+queued release executes or the document ends; neither the caller's return nor interruption waits for that reply.
+The cleanup fiber uses the ordinary operation budget, with no retry or extra grace period. Deduplicate controls
+within one observation only.
+Read current messages without invoking validation methods, changing focus, cancelling events, patching page
+functions or waiting for later timers. Cleanup addresses the original document, never its replacement; document
+loss, an open dialog or expiration of the click's deadline may lose observations, and cleanup errors must not
+replace click errors. Late cleanup replies are discarded, so they cannot enter another call's digest.
+
+The bounded scope is the top document and existing open shadow roots, tested on the pinned Chromium, Firefox
+and stock WebKit. Child frames, closed roots and newly created roots are excluded. Expanding scope would need
+explicit lifecycle and target-routing work; a public event API is unnecessary for this digest. Strict capture
+omits all control names and masks messages because accessible names may themselves contain editable values;
+local capture includes the engine's accessible name and current message.
+
 ## Chromium captures use a new surface in automation and concurrent
 
 The shared Chromium automation arguments enable `CDPScreenshotNewSurface`; concurrent inherits the same setting

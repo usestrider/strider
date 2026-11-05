@@ -7,7 +7,8 @@
  *   query; a bad one fails at once.
  * - **The digest.** The context's and each page's event channels are recorded from the start, and each result
  *   takes what they recorded since the previous call: navigations, popups, dialogs and who decided them,
- *   downloads, uncaught exceptions, console errors and failed requests. No tool waits after it acts.
+ *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks.
+ *   No tool waits for later page events after it acts.
  * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
  *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
  *   URL's `%C3%`, is sent as written.
@@ -51,6 +52,7 @@ import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Runtime from "./runtime.ts"
 import * as Secrets from "./secrets.ts"
 import * as Tools from "./tools.ts"
 import * as UrlPattern from "./urlPattern.ts"
@@ -708,7 +710,50 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       acting(
         name,
         (page) =>
-          Effect.as(Effect.flatMap(targeted(page, name, target), (locator) => locator.click()), `clicked ${target}`)
+          Effect.gen(function*() {
+            const locator = yield* targeted(page, name, target)
+            const { runtime, entry } = Handles.page(page)
+            const record = yield* Operation.record
+            const token = String(record.id)
+            let stopped = false
+            yield* Effect.acquireUseRelease(
+              runtime.model.documentOf(entry.id),
+              (document) =>
+                Effect.gen(function*() {
+                  if (Option.isSome(document)) {
+                    yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                      op: "validationStart",
+                      token,
+                      full: capture.snapshotText === "full"
+                    }, record.id).pipe(Effect.catchCause(() => Effect.succeedNone))
+                  }
+                  yield* locator.click()
+                  // Optional feedback shares the click's deadline and interruption. Only this fiber may
+                  // publish it; a late cleanup response must never enter a later call's digest.
+                  if (Option.isNone(document)) return
+                  const response = yield* Runtime.sendToDocument(runtime, entry, document.value, {
+                    op: "validationStop",
+                    token
+                  }, record.id).pipe(Effect.catchCause(() => Effect.succeedNone))
+                  if (Option.isSome(response) && response.value._tag === "Validation") {
+                    stopped = true
+                    for (const line of response.value.lines) note(`${name} validation observed during click: ${line}`)
+                  }
+                }),
+              (document) =>
+                Option.isNone(document) || stopped ? Effect.void : Effect.gen(function*() {
+                  const cleanup = yield* Operation.record
+                  yield* Runtime.releaseInDocument(runtime, document.value, { op: "validationStop", token }, cleanup.id)
+                }).pipe(
+                  Operation.named("Toolkit.click.validationCleanup", { attributes: { "browser.page.id": entry.id } }),
+                  Operation.detached,
+                  Effect.catchCause(() => Effect.void),
+                  Effect.forkIn(scope, { startImmediately: true }),
+                  Effect.asVoid
+                )
+            )
+            return `clicked ${target}`
+          }).pipe(Operation.named("Toolkit.click", { attributes: { "browser.page.id": page.id } }))
       ),
     fill: ({ page: name, target, value }) =>
       acting(name, (page) =>
