@@ -1051,6 +1051,62 @@ describe("Chromium screencast renderer readiness", () => {
       assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
     }).pipe(onTestClock))
 
+  // Page.stopScreencast is parameterless and session-wide, so a stop for one acquisition also ends another's frames.
+  it.effect("keeps a newer acquisition streaming when an abandoned start succeeds late", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(false, true)
+      const page = yield* h.page.control
+      const abandoned = yield* Effect.forkScoped(page.capability(Capability.Screencast))
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+      const first = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(first.method, "Page.startScreencast")
+      yield* Fiber.interrupt(abandoned)
+
+      const scope = yield* Scope.make()
+      const retry = yield* Effect.forkScoped(
+        page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, scope))
+      )
+      assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
+      const second = yield* Queue.take(h.screenshotWork)
+      assert.strictEqual(second.method, "Page.startScreencast")
+
+      // Chromium replies in order: the abandoned start first, once the retry's start is already sent
+      yield* h.browser.receive({ id: first.id, sessionId: first.sessionId, result: {} })
+      yield* h.browser.receive({ id: second.id, sessionId: second.sessionId, result: {} })
+      yield* h.browser.delivered
+      yield* Fiber.join(retry)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+        0,
+        "the retry's scope is open, so nothing may stop the session's screencast"
+      )
+
+      yield* Scope.close(scope, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
+  it.effect("keeps a second acquisition streaming when the first one's scope closes", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const first = yield* Scope.make()
+      const second = yield* Scope.make()
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, first))
+      yield* page.capability(Capability.Screencast).pipe(Effect.provideService(Scope.Scope, second))
+      yield* Scope.close(first, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.stopScreencast").length,
+        0,
+        "the second scope is open, so nothing may stop the session's screencast"
+      )
+      yield* Scope.close(second, Exit.void)
+      yield* TestClock.adjust("0 millis")
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+    }).pipe(onTestClock))
+
   it.effect("settles a dispatched start on session loss and closes its scope", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(false, true)
