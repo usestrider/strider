@@ -80,6 +80,34 @@ const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
 Text is text content with whitespace collapsed, through open shadow roots, not `innerText`. `getByText` finds the
 smallest element that has it: `"1 item"` finds the `<p>` in `<p>1 <b>item</b></p>`.
 
+## Role states
+
+When several elements share a role and name, state filters select the one in the state you need. Combine filters
+with a name; omitted filters accept every state.
+
+```ts
+import { Page } from "@usestrider/browser"
+
+declare const page: Page.Page
+
+const heading = page.getByRole("heading", { level: 2 })
+const checked = page.getByRole("checkbox", { checked: true })
+const toggle = page.getByRole("button", { name: "Mute", pressed: true })
+const collapsed = page.getByRole("button", { expanded: false })
+const selected = page.getByRole("tab", { selected: true })
+const enabled = page.getByRole("button", { name: "Save", disabled: false })
+```
+
+Native controls use their native states; ARIA controls use the corresponding ARIA attributes. Disabled state is
+inherited, including disabled fieldsets. Options inherit native disabled state from optgroups and fieldsets,
+but not selects. For options and optgroups, these filters can differ from enabled reads and action checks,
+which retain the browser's native behavior. Mixed checked or pressed states match neither boolean. Missing expanded
+state also matches neither boolean; present expanded values other than case-insensitive `"true"` match false.
+Missing pressed or selected state matches false. Unsupported role/filter combinations fail when used, even
+with an empty scope or a missing frame: locator operations return `LocatorError` with an `InvalidInput` reason, and expectations
+return `ExpectationFailed`. See
+[`RoleOptions`](/docs/api/browser/Locator#roleoptions) for the supported roles and state-reading details.
+
 ## Narrowing
 
 A query over the whole page can match the same link in the header and the footer, and acting on it fails with

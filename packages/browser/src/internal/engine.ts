@@ -37,6 +37,12 @@ export type Step =
     readonly role: string
     readonly name: TextMatcher | null
     readonly includeHidden: boolean
+    readonly level?: number | undefined
+    readonly checked?: boolean | undefined
+    readonly pressed?: boolean | undefined
+    readonly expanded?: boolean | undefined
+    readonly selected?: boolean | undefined
+    readonly disabled?: boolean | undefined
   }
   | { readonly _tag: "Text"; readonly matcher: TextMatcher }
   | { readonly _tag: "Label"; readonly matcher: TextMatcher }
@@ -60,7 +66,7 @@ export type Step =
   | { readonly _tag: "Or"; readonly other: ReadonlyArray<Step> }
   /**
    * A frame boundary: the steps before it find an iframe, and those after it resolve in
-   * the iframe's document. L1 splits a locator's steps at each one, so the engine never sees it.
+   * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
   /**
@@ -356,7 +362,11 @@ export const Response = Schema.Union([
     changed: Schema.Boolean
   }),
   Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
-  Schema.TaggedStruct("InvalidSelector", { selector: Schema.String, message: Schema.String }),
+  Schema.TaggedStruct("InvalidSelector", {
+    selector: Schema.String,
+    message: Schema.String,
+    kind: Schema.optionalKey(Schema.Literal("role"))
+  }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
     roles: Schema.Array(Schema.Struct({ role: Schema.NullOr(Schema.String), name: Schema.String }))
@@ -1056,6 +1066,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   interface InvalidSelector {
     readonly invalidSelector: true
+    readonly kind?: "role" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1153,7 +1164,13 @@ export function engine(render: (root: SnapNode) => string) {
       case "Role":
         return under.filter((element) =>
           roleOf(element) === step.role && (step.includeHidden || !hiddenFromAccessibility(element)) &&
-          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden)))
+          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden))) &&
+          (step.level === undefined || levelOf(element) === step.level) &&
+          (step.checked === undefined || checkedState(element).state === step.checked) &&
+          (step.pressed === undefined || pressedOf(element) === step.pressed) &&
+          (step.expanded === undefined || expandedOf(element) === step.expanded) &&
+          (step.selected === undefined || selectedOf(element) === step.selected) &&
+          (step.disabled === undefined || disabledOf(element) === step.disabled)
         )
       case "Label":
         return under.filter((element) =>
@@ -1185,11 +1202,49 @@ export function engine(render: (root: SnapNode) => string) {
     return elementsUnder(document).filter((element) => set.has(element))
   }
 
+  /** Validate the whole query before searching, including branches whose scope may be empty. */
+  const validateSteps = (steps: ReadonlyArray<Step>): void => {
+    for (const step of steps) {
+      switch (step._tag) {
+        case "Role": {
+          const supported = {
+            level: LEVEL_ROLES,
+            checked: CHECKABLE_ROLES,
+            pressed: PRESSED_ROLES,
+            expanded: EXPANDED_ROLES,
+            selected: SELECTED_ROLES
+          }
+          for (const key of ["level", "checked", "pressed", "expanded", "selected"] as const) {
+            const roles = supported[key]
+            if (step[key] !== undefined && !roles.has(step.role)) {
+              throw {
+                invalidSelector: true,
+                kind: "role",
+                selector: `getByRole(${JSON.stringify(step.role)}, { ${key}: ${step[key]} })`,
+                message: `"${key}" is only supported for roles: ${Array.from(roles).sort().join(", ")}`
+              } satisfies InvalidSelector
+            }
+          }
+          break
+        }
+        case "Filter":
+          if (step.has !== null) validateSteps(step.has)
+          if (step.hasNot !== null) validateSteps(step.hasNot)
+          break
+        case "And":
+        case "Or":
+          validateSteps(step.other)
+          break
+      }
+    }
+  }
+
   /** The matches of a locator's steps, from the document. */
   const resolve = (
     steps: ReadonlyArray<Step>,
     from: ReadonlyArray<Document | Element> = [document]
   ): Array<Element> => {
+    validateSteps(steps)
     let current: ReadonlyArray<Document | Element> = from
     for (const step of steps) {
       switch (step._tag) {
@@ -1248,12 +1303,32 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  const ariaDisabled = (element: Element): boolean => {
+    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+      if (current.getAttribute("aria-disabled") === "true") return true
+    }
+    return false
+  }
+
   const enabled = (element: Element): boolean => {
     if (element.matches(":disabled")) return false
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.getAttribute("aria-disabled") === "true") return false
-    }
-    return true
+    return !ariaDisabled(element)
+  }
+
+  const disabledOf = (element: Element): boolean => {
+    if (ariaDisabled(element)) return true
+    const native = element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLOptionElement || element instanceof HTMLOptGroupElement ||
+      element instanceof HTMLFieldSetElement
+    if (!native) return false
+    if (element.hasAttribute("disabled")) return true
+    if (element instanceof HTMLOptionElement && element.closest("optgroup[disabled]") !== null) return true
+    // Role filters use explicit native rules: :disabled differs between browsers for options and optgroups.
+    const fieldset = element.closest("fieldset[disabled]")
+    if (fieldset === null) return false
+    const legend = Array.from(fieldset.children).find((child) => child instanceof HTMLLegendElement)
+    return legend === undefined || !legend.contains(element)
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
@@ -1309,18 +1384,71 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
-  /** Whether it is checked, or `null` when it isn't a checkbox, a radio or an ARIA checkable. */
-  const checkedOf = (element: Element): boolean | null => {
+  /** One read for queries and actions; actions retain their boolean view of mixed state. */
+  const checkedState = (element: Element): {
+    readonly state: boolean | "mixed" | null
+    readonly checked: boolean | null
+  } => {
     if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
-      return element.checked
+      return { state: element.indeterminate ? "mixed" : element.checked, checked: element.checked }
     }
     const role = roleOf(element)
-    if (role === null || !CHECKABLE_ROLES.has(role)) return null
+    if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
     const state = element.getAttribute("aria-checked")
     if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
-      return null
+      return { state: null, checked: null }
     }
-    return state === "true"
+    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+  }
+
+  const checkedOf = (element: Element): boolean | null => checkedState(element).checked
+
+  const PRESSED_ROLES = new Set(["button"])
+  const LEVEL_ROLES = new Set(["heading", "listitem", "row", "treeitem"])
+  const SELECTED_ROLES = new Set(["gridcell", "option", "row", "tab", "rowheader", "columnheader", "treeitem"])
+  const EXPANDED_ROLES = new Set([
+    "application",
+    "button",
+    "checkbox",
+    "combobox",
+    "gridcell",
+    "link",
+    "listbox",
+    "menuitem",
+    "row",
+    "rowheader",
+    "tab",
+    "treeitem",
+    "columnheader",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "switch"
+  ])
+
+  const levelOf = (element: Element): number => {
+    if (/^h[1-6]$/.test(element.localName)) return Number(element.localName.slice(1))
+    if (!LEVEL_ROLES.has(roleOf(element) ?? "")) return 0
+    const value = Number(element.getAttribute("aria-level"))
+    return Number.isInteger(value) && value >= 1 ? value : 0
+  }
+
+  const pressedOf = (element: Element): boolean | "mixed" => {
+    if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
+    const value = element.getAttribute("aria-pressed")?.toLowerCase()
+    return value === "mixed" ? "mixed" : value === "true"
+  }
+
+  const expandedOf = (element: Element): boolean | undefined => {
+    if (element instanceof HTMLDetailsElement) return element.open
+    if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
+    const value = element.getAttribute("aria-expanded")?.toLowerCase()
+    return value === undefined ? undefined : value === "true"
+  }
+
+  const selectedOf = (element: Element): boolean => {
+    if (element instanceof HTMLOptionElement) return element.selected
+    return SELECTED_ROLES.has(roleOf(element) ?? "") &&
+      element.getAttribute("aria-selected")?.toLowerCase() === "true"
   }
 
   const LABEL_WIDGET_ROLES = new Set([
@@ -2455,6 +2583,8 @@ export function engine(render: (root: SnapNode) => string) {
   const element = (text: string): Element | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
+      /** The complete query, before frame routing splits it. */
+      readonly validationSteps?: ReadonlyArray<Step>
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
@@ -2462,11 +2592,17 @@ export function engine(render: (root: SnapNode) => string) {
     clearTreeCaches()
     let found: Array<Element>
     try {
+      if (request.validationSteps !== undefined) validateSteps(request.validationSteps)
       found = resolve(request.steps)
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
@@ -2620,7 +2756,12 @@ export function engine(render: (root: SnapNode) => string) {
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)

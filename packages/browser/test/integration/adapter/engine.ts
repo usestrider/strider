@@ -68,7 +68,11 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeI
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
-const role = (name: string, accessibleName: Engine.TextMatcher | null = null, includeHidden = false): Engine.Step => ({
+const role = (
+  name: string,
+  accessibleName: Engine.TextMatcher | null = null,
+  includeHidden = false
+): Extract<Engine.Step, { readonly _tag: "Role" }> => ({
   _tag: "Role",
   role: name,
   name: accessibleName,
@@ -740,6 +744,323 @@ export const engine = (backend: Backend) =>
             const response = yield* send({ ...point(2), cap: 100 })
             assert(response._tag === "NotReady", JSON.stringify(response))
             assert.strictEqual(response.reason._tag, "NoRenderingOpportunity")
+          }), timeout)
+
+        it.effect("filters role queries by native and ARIA states", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<h2>Title</h2><h3>Other</h3>
+<div role="heading" aria-level="2">ARIA</div>
+<input type="checkbox" checked><input type="checkbox">
+<div role="checkbox" aria-checked="true"></div><div role="checkbox" aria-checked="false"></div>
+<div role="checkbox" aria-checked="mixed"></div><div role="checkbox"></div>
+<button aria-pressed="true">Toggle</button><button aria-pressed="false">Toggle</button>
+<button aria-pressed="mixed">Toggle</button><button>Toggle</button>
+<button aria-expanded="true">Open</button><button aria-expanded="false">Open</button>
+<select multiple><option selected>One</option><option>Two</option></select>
+<div role="tab" aria-selected="true">Tab</div><div role="tab">Tab</div>
+<fieldset disabled><legend><button>Legend</button></legend><button>Blocked</button></fieldset>
+<div aria-disabled="true"><button>Inherited</button></div>`
+            )
+            const check = Effect.fnUntraced(function*(name: string, options: object, expected: number) {
+              const step = { ...role(name), ...options }
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [step] })),
+                expected,
+                `${name} ${JSON.stringify(options)}`
+              )
+            })
+            yield* check("heading", { level: 2 }, 2)
+            yield* check("checkbox", { checked: true }, 2)
+            yield* check("checkbox", { checked: false }, 3)
+            yield* check("checkbox", {}, 6)
+            yield* check("button", { pressed: true }, 1)
+            yield* check("button", { pressed: false, name: text("Toggle") }, 2)
+            yield* check("button", { expanded: true }, 1)
+            yield* check("button", { expanded: false }, 1)
+            yield* check("option", { selected: true, includeHidden: true }, 1)
+            yield* check("option", { selected: false, includeHidden: true }, 1)
+            yield* check("tab", { selected: false }, 1)
+            yield* check("button", { disabled: true }, 2)
+            yield* check("button", { pressed: false, disabled: false, name: text("Toggle", true) }, 2)
+          }), timeout)
+
+        it.effect("distinguishes mixed, absent and malformed checked role states", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<input id="mixed" type="checkbox" checked>
+<div role="checkbox" aria-checked="TRUE"></div>
+<div role="checkbox" aria-checked="bogus"></div>
+<div role="checkbox" aria-checked=""></div>
+<div role="checkbox" aria-checked="undefined"></div>
+<div role="option"></div><div role="option" aria-checked=""></div>
+<div role="option" aria-checked="undefined"></div>
+<div role="option" aria-checked="bogus"></div>
+<div role="treeitem" aria-checked="mixed"></div>`,
+              "() => { document.querySelector(\"#mixed\").indeterminate = true }"
+            )
+            const check = Effect.fnUntraced(function*(name: string, checked: boolean, expected: number) {
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ ...role(name), checked }]
+                  })
+                ),
+                expected
+              )
+            })
+            yield* check("checkbox", true, 0)
+            yield* check("checkbox", false, 4)
+            yield* check("option", true, 0)
+            yield* check("option", false, 1)
+            yield* check("treeitem", false, 0)
+            const read = yield* send({
+              op: "read",
+              steps: [{ _tag: "Css", selector: "#mixed" }],
+              read: { _tag: "Checked", followLabel: false }
+            })
+            assert(read._tag === "Read")
+            assert.strictEqual(read.value, true)
+          }), timeout)
+
+        it.effect("combines role filters with scope, names and hidden options", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<section>
+<h2 aria-level="3">Native</h2><div role="treeitem" aria-level="3">Tree</div>
+<input type="radio" checked><input type="radio">
+<details role="button" open><summary>Open</summary></details><details role="button"><summary>Closed</summary></details>
+<div role="tab" aria-selected="false">Off</div><div role="tab" aria-selected="TRUE">On</div>
+<div role="button" aria-pressed="TRUE" aria-expanded="TRUE">Case</div>
+<div role="button" aria-pressed="mixed" aria-expanded="bogus">Mixed</div>
+<button hidden aria-pressed="true">Hidden</button>
+<div aria-disabled="true"><button aria-disabled="false">Inherited</button></div>
+<select multiple><optgroup disabled><option>Blocked</option></optgroup></select>
+</section>`
+            )
+            const check = Effect.fnUntraced(function*(name: string, options: object, expected: number) {
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ _tag: "Css", selector: "section" }, { ...role(name), ...options }]
+                  })
+                ),
+                expected
+              )
+            })
+            yield* check("heading", { level: 2 }, 1)
+            yield* check("heading", { level: 3 }, 0)
+            yield* check("treeitem", { level: 3 }, 1)
+            yield* check("radio", { checked: true }, 1)
+            yield* check("radio", { checked: false }, 1)
+            yield* check("button", { expanded: true, name: text("Open", true) }, 1)
+            yield* check("button", { expanded: false, name: text("Closed", true) }, 1)
+            yield* check("tab", { selected: false }, 1)
+            yield* check("tab", { selected: true }, 1)
+            yield* check("button", { pressed: true, expanded: true, name: text("Case", true) }, 1)
+            yield* check("button", { pressed: true, name: text("Hidden"), includeHidden: false }, 0)
+            yield* check("button", { pressed: true, name: text("Hidden"), includeHidden: true }, 1)
+            yield* check("button", { disabled: true, name: text("Inherited") }, 1)
+            yield* check("option", { disabled: true, includeHidden: true }, 1)
+          }), timeout)
+
+        it.effect("rejects unsupported role filters before matching candidates", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<a href="/" aria-expanded="false">Link</a><input type="checkbox">`)
+            for (
+              const [name, options] of [
+                ["link", { checked: true }],
+                ["link", { pressed: false }],
+                ["group", { expanded: false }],
+                ["checkbox", { selected: false }],
+                ["link", { level: 2 }]
+              ] as const
+            ) {
+              for (
+                const steps of [
+                  [{ ...role(name), ...options }],
+                  [{ _tag: "Css" as const, selector: "#missing" }, { ...role(name), ...options }],
+                  [{ _tag: "Css" as const, selector: "#missing" }, {
+                    _tag: "Filter" as const,
+                    hasText: null,
+                    hasNotText: null,
+                    visible: null,
+                    has: [{ ...role(name), ...options }],
+                    hasNot: null
+                  }]
+                ]
+              ) {
+                const response = yield* send({ op: "count", steps })
+                assert.strictEqual(response._tag, "InvalidSelector", JSON.stringify({ options, steps, response }))
+                if (response._tag === "InvalidSelector") {
+                  assert.include(response.message, Object.keys(options)[0]!)
+                }
+              }
+            }
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("link"), expanded: false }] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("link")] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("link"), disabled: false }] })), 1)
+          }), timeout)
+
+        it.effect("filters options inside a disabled fieldset as disabled, except in its legend", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<fieldset disabled>
+<legend><select multiple><option>Free</option></select></legend>
+<select multiple><option>Blocked</option></select>
+</fieldset><fieldset></fieldset>`
+            )
+            const check = Effect.fnUntraced(function*(disabled: boolean, expected: number) {
+              const step = { ...role("option", null, true), disabled }
+              assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected, `disabled: ${disabled}`)
+            })
+            yield* check(true, 1)
+            yield* check(false, 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("group"), disabled: true }] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("group"), disabled: false }] })), 1)
+          }), timeout)
+
+        it.effect("does not read an option of a disabled select as disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<select multiple disabled><option>One</option></select>`)
+            const check = Effect.fnUntraced(function*(disabled: boolean, expected: number) {
+              const step = { ...role("option", null, true), disabled }
+              assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected, `disabled: ${disabled}`)
+            })
+            yield* check(true, 0)
+            yield* check(false, 1)
+          }), timeout)
+
+        it.effect("reads an optgroup inside a disabled fieldset as disabled", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<fieldset disabled><select multiple><optgroup label="G"><option>In</option></optgroup></select></fieldset>`
+            )
+            const step = { _tag: "Css" as const, selector: "select" }
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [step, { ...role("group", null, true), disabled: true }] })),
+              1
+            )
+          }), timeout)
+
+        it.effect("preserves browser-native enabled reads for options and optgroups", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(
+              backend,
+              `<select multiple disabled><option id="option">One</option></select>
+<fieldset disabled><select multiple><optgroup id="optgroup" label="G"><option>Two</option></optgroup></select></fieldset>`
+            )
+            for (const id of ["option", "optgroup"]) {
+              const native = yield* call(
+                `(id) => !document.getElementById(id).matches(":disabled")`,
+                [string(id)]
+              )
+              assert(native._tag === "Value" && native.value.type === "boolean")
+              const read = yield* send({
+                op: "read",
+                steps: [{ _tag: "Css", selector: `#${id}` }],
+                read: { _tag: "Enabled" }
+              })
+              assert(read._tag === "Read")
+              assert.strictEqual(read.value, native.value.value, id)
+            }
+          }), timeout)
+
+        it.effect("uses a consistent native disabled matrix for role filters", () =>
+          Effect.gen(function*() {
+            const controls = ["button", "input", "select", "textarea", "option", "optgroup", "fieldset"]
+            const cases = controls.flatMap((tag) => {
+              const control = (attributes = "") =>
+                `<${tag} role="button" ${attributes}></${tag}>`
+              return [
+                { html: control(), disabled: false },
+                { html: control("disabled"), disabled: true },
+                { html: `<fieldset disabled>${control()}</fieldset>`, disabled: true },
+                { html: `<fieldset disabled><legend>${control()}</legend></fieldset>`, disabled: false },
+                {
+                  html: `<fieldset disabled><legend>First</legend><legend>${control()}</legend></fieldset>`,
+                  disabled: true
+                }
+              ]
+            })
+            cases.push(
+              { html: `<select disabled><option role="button">One</option></select>`, disabled: false },
+              {
+                html: `<select><optgroup disabled><option role="button">One</option></optgroup></select>`,
+                disabled: true
+              },
+              { html: `<div disabled role="button">One</div>`, disabled: false },
+              { html: `<fieldset disabled><div role="button">One</div></fieldset>`, disabled: false },
+              { html: `<div aria-disabled="true"><button aria-disabled="false">One</button></div>`, disabled: true },
+              { html: `<button aria-disabled="TRUE">One</button>`, disabled: false }
+            )
+            const { send } = yield* open(
+              backend,
+              cases.map(({ html }, index) =>
+                `<div id="case-${index}">${html}</div>`
+              ).join("")
+            )
+            for (const [index, { html, disabled }] of cases.entries()) {
+              const scope = { _tag: "Css" as const, selector: `#case-${index}` }
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [scope, role("button", null, true)] })),
+                1,
+                html
+              )
+              for (const filter of [true, false]) {
+                assert.strictEqual(
+                  count(
+                    yield* send({ op: "count", steps: [scope, { ...role("button", null, true), disabled: filter }] })
+                  ),
+                  filter === disabled ? 1 : 0,
+                  `${html}: disabled=${filter}`
+                )
+              }
+            }
+          }), timeout)
+
+        it.effect("rejects unsupported role filters in hasNot, and and or branches", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<a href="/">Link</a>`)
+            const invalid = [{ ...role("link"), pressed: false }]
+            const empty = { _tag: "Css" as const, selector: "#missing" }
+            for (
+              const steps of [
+                [empty, {
+                  _tag: "Filter" as const,
+                  hasText: null,
+                  hasNotText: null,
+                  visible: null,
+                  has: null,
+                  hasNot: invalid
+                }],
+                [empty, { _tag: "And" as const, other: invalid }],
+                [empty, { _tag: "Or" as const, other: invalid }]
+              ]
+            ) {
+              assert.strictEqual((yield* send({ op: "count", steps }))._tag, "InvalidSelector")
+            }
+          }), timeout)
+
+        it.effect("reads an invalid aria-expanded as false, and an absent one as neither", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button aria-expanded="bogus">Invalid</button><button>Absent</button>`
+            )
+            const check = Effect.fnUntraced(function*(expanded: boolean, expected: number) {
+              const step = { ...role("button"), expanded }
+              assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected, `expanded: ${expanded}`)
+            })
+            yield* check(false, 1)
+            yield* check(true, 0)
           }), timeout)
 
         it.effect("computes roles and accessible names", () =>

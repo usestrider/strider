@@ -370,14 +370,19 @@ const elementIn = (
   runtime: Runtime,
   document: Target.DocumentId,
   steps: ReadonlyArray<Engine.Step>,
-  frame: { readonly scroll: boolean } | null,
+  frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
   callEngine(
     runtime,
     document,
     Engine.element,
-    JSON.stringify({ steps, frame: frame !== null, scroll: frame?.scroll ?? false }),
+    JSON.stringify({
+      steps,
+      frame: frame !== null,
+      scroll: frame?.scroll ?? false,
+      ...(frame?.validationSteps === undefined ? {} : { validationSteps: frame.validationSteps })
+    }),
     id
   ).pipe(
     Effect.flatMap(Option.match({
@@ -410,7 +415,8 @@ const route = (
   top: Target.DocumentId,
   frames: ReadonlyArray<ReadonlyArray<Engine.Step>>,
   scroll: boolean,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  validationSteps: ReadonlyArray<Engine.Step>
 ): Effect.Effect<Option.Option<Route>, SendFailure> =>
   Effect.gen(function*() {
     let document = top
@@ -420,7 +426,10 @@ const route = (
       if (Option.isSome(stale)) {
         return Option.some<Route>({ _tag: "Answer", routed: { document, hops }, response: stale.value })
       }
-      const found = yield* elementIn(runtime, document, steps, { scroll }, id)
+      const found = yield* elementIn(runtime, document, steps, {
+        scroll,
+        ...(hops.length === 0 ? { validationSteps } : {})
+      }, id)
       if (Option.isNone(found)) {
         return Option.none()
       }
@@ -478,7 +487,7 @@ const routing = <A>(
           onSome: Effect.succeed
         }))
       )
-      const routed = yield* route(runtime, open.document.id, frames, scroll, id)
+      const routed = yield* route(runtime, open.document.id, frames, scroll, id, steps)
       if (Option.isNone(routed)) continue
       const answered = yield* answer(routed.value, last)
       if (Option.isSome(answered)) return answered.value
