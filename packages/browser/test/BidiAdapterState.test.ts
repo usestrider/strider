@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
-import type * as Script from "../src/bidi-protocol/Script.ts"
+import * as Script from "../src/bidi-protocol/Script.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Capture from "../src/internal/bidiAdapter/capture.ts"
@@ -1453,6 +1453,44 @@ describe("BidiAdapter state", () => {
       assert.isFalse(state.realmsById.has(pending.id))
       assert.strictEqual(page.pendingRealms.length, 0)
     }))
+
+  for (const method of ["callFunction", "evaluate"] as const) {
+    for (const kind of ["success", "exception"] as const) {
+      for (const ending of ["interrupt", "timeout"] as const) {
+        for (const ownership of ["root", "none"] as const) {
+          it.effect(`late ${method} ${kind} after ${ending} with ${ownership} ownership`, () =>
+            Effect.gen(function*() {
+              const browser = yield* makeBrowser
+              const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+              const common = { target: { realm: "REQUEST" as Script.Realm }, awaitPromise: false, resultOwnership: ownership }
+              const command = method === "evaluate"
+                ? Script.evaluate({ ...common, expression: "({})" })
+                : Script.callFunction({ ...common, functionDeclaration: "() => ({})" })
+              const fiber = yield* client.root.send(command).pipe(
+                Protocol.withCommandTimeout(ending === "timeout" ? "20 millis" : "30 seconds"),
+                Effect.forkChild
+              )
+              const sent = yield* browser.next
+              if (ending === "interrupt") yield* Fiber.interrupt(fiber)
+              else yield* Fiber.await(fiber)
+              const value = ownership === "root" ? { type: "object", handle: "LATE" } : { type: "undefined" }
+              yield* browser.receive({ type: "success", id: sent.id, result: kind === "success"
+                ? { type: kind, realm: "REPLY", result: value }
+                : { type: kind, realm: "REPLY", exceptionDetails: { exception: value, text: "boom", lineNumber: 0, columnNumber: 0, stackTrace: { callFrames: [] } } } })
+              yield* browser.delivered
+              const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 100))
+              if (ownership === "none") assert.isTrue(Option.isNone(cleanup))
+              else {
+                assert(Option.isSome(cleanup), "late root handle must be disowned")
+                assert.strictEqual(cleanup.value.method, "script.disown")
+                assert.deepStrictEqual(cleanup.value.params, { handles: ["LATE"], target: { realm: "REPLY" } })
+                yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+              }
+            }))
+        }
+      }
+    }
+  }
 
   it.effect("disowns a root-owned handle returned after evaluation was interrupted", () =>
     Effect.gen(function*() {
