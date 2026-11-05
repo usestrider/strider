@@ -258,7 +258,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
-        "keeps library and local snapshots free of provenance while custom masking captures it",
+        "keeps library and local snapshots free of field metadata while custom masking captures it",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
@@ -284,6 +284,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             ) {
               const ordinary = yield* page.snapshot()
               assert.notInclude(JSON.stringify(ordinary.root), "\"fieldContent\":true")
+              assert.notInclude(JSON.stringify(ordinary.root), "\"editable\":true")
               const tools = yield* BrowserToolkit.make({ context: page.context, secrets: {}, capture })
               // find before snapshot must collect its own policy's metadata, including in child frames.
               const found = yield* call(tools, "find", { page: "p1", query: "private-mode" })

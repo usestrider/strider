@@ -149,13 +149,17 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
-        it.effect("collects provenance only for masking snapshots and clears it across mode switches", () =>
+        it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
               backend,
               `<h2><span contenteditable>private</span></h2><div onclick="void 0"><div role="textbox"><span>nested</span></div></div>`,
               `() => {
                 globalThis.fieldReads = 0
+                globalThis.editabilityReads = 0
+                const heading = document.querySelector("h2")
+                const editable = heading.isContentEditable
+                Object.defineProperty(heading, "isContentEditable", { get() { globalThis.editabilityReads++; return editable } })
                 const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "assignedSlot")
                 Object.defineProperty(Element.prototype, "assignedSlot", {
                   ...descriptor, get() { globalThis.fieldReads++; return descriptor.get.call(this) }
@@ -163,7 +167,7 @@ export const engine = (backend: Backend) =>
               }`
             )
             for (const provenance of [false, true, false, true]) {
-              yield* call(`() => { globalThis.fieldReads = 0 }`, [])
+              yield* call(`() => { globalThis.fieldReads = 0; globalThis.editabilityReads = 0 }`, [])
               const response = yield* send(
                 { op: "snapshot", steps: null, interactivity: true, depth: null, provenance } as Engine.Request
               )
@@ -172,12 +176,16 @@ export const engine = (backend: Backend) =>
                 return
               }
               assert.strictEqual(JSON.stringify(response.root).includes("\"fieldContent\":true"), provenance)
-              assert.include(JSON.stringify(response.root), "\"editable\":true")
+              assert.strictEqual(JSON.stringify(response.root).includes("\"editable\":true"), provenance)
               const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
               assert(reads._tag === "Value" && reads.value.type === "string")
               if (provenance) {
                 assert.isAbove(Number(reads.value.value), 0)
               } else assert.strictEqual(Number(reads.value.value), 0)
+              const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
+              assert(classifications._tag === "Value" && classifications.value.type === "string")
+              if (provenance) assert.isAbove(Number(classifications.value.value), 0)
+              else assert.strictEqual(Number(classifications.value.value), 0)
             }
           }), timeout)
 
