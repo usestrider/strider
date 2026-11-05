@@ -359,7 +359,8 @@ describe("BidiAdapter viewports", () => {
       yield* Deferred.await(removing)
       yield* Scope.close(lifetime, Exit.void)
       sent.length = 0
-      const result = yield* Fiber.interrupt(removal)
+      yield* Fiber.interrupt(removal)
+      const result = yield* Fiber.await(removal)
       assert.isTrue(Exit.hasInterrupts(result))
       assert.isFalse(state.contexts.get(context)!.removing)
       assert.deepStrictEqual(widthsFor(sent, (params) => params.userContexts?.includes("U1") === true), [null])
