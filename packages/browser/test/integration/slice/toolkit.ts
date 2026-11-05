@@ -224,7 +224,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // A lower-priority hint on the other field must not become a replacement target.
               const first = fields[0]!
               const query = ExportTest.locatorOf("page", Option.getOrThrow(first.ref), snapshot)
-              yield* snapshot.ref(Option.getOrThrow(first.ref)).evaluate((element) => element.remove())
+              yield* page.evaluateInMainWorld(() => document.querySelector("input[type=\"password\"]")!.remove())
               const missing = yield* new Function(
                 "page",
                 "Effect",
