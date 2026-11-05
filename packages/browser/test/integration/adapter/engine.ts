@@ -404,6 +404,39 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(response.reason._tag, "NoRenderingOpportunity")
           }), timeout)
 
+        it.effect("filters role queries by native and ARIA states", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<h2>Title</h2><h3>Other</h3>
+<div role="heading" aria-level="2">ARIA</div>
+<input type="checkbox" checked><input type="checkbox">
+<div role="checkbox" aria-checked="true"></div><div role="checkbox" aria-checked="false"></div>
+<div role="checkbox" aria-checked="mixed"></div><div role="checkbox"></div>
+<button aria-pressed="true">Toggle</button><button aria-pressed="false">Toggle</button>
+<button aria-pressed="mixed">Toggle</button><button>Toggle</button>
+<button aria-expanded="true">Open</button><button aria-expanded="false">Open</button>
+<select multiple><option selected>One</option><option>Two</option></select>
+<div role="tab" aria-selected="true">Tab</div><div role="tab">Tab</div>
+<fieldset disabled><legend><button>Legend</button></legend><button>Blocked</button></fieldset>
+<div aria-disabled="true"><button>Inherited</button></div>`)
+            const check = Effect.fnUntraced(function*(name: string, options: object, expected: number) {
+              const step = { ...role(name), ...options }
+              assert.strictEqual(count(yield* send({ op: "count", steps: [step] })), expected)
+            })
+            yield* check("heading", { level: 2 }, 2)
+            yield* check("checkbox", { checked: true }, 2)
+            yield* check("checkbox", { checked: false }, 3)
+            yield* check("checkbox", {}, 6)
+            yield* check("button", { pressed: true }, 1)
+            yield* check("button", { pressed: false, name: text("Toggle") }, 2)
+            yield* check("button", { expanded: true }, 1)
+            yield* check("button", { expanded: false }, 1)
+            yield* check("option", { selected: true }, 1)
+            yield* check("option", { selected: false }, 1)
+            yield* check("tab", { selected: false }, 1)
+            yield* check("button", { disabled: true }, 2)
+            yield* check("button", { pressed: false, disabled: false, name: text("Toggle", true) }, 2)
+          }), timeout)
+
         it.effect("computes roles and accessible names", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
