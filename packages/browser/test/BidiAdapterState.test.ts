@@ -10,6 +10,7 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import type * as Script from "../src/bidi-protocol/Script.ts"
+import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Capture from "../src/internal/bidiAdapter/capture.ts"
@@ -20,11 +21,15 @@ import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
+import * as BidiWire from "../src/internal/bidiWire.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
-import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import type * as MonotonicInstant from "../src/MonotonicInstant.ts"
 import type * as PageNavigation from "../src/PageNavigation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -38,11 +43,13 @@ const session = (
   failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
 ) => {
   const sent: Array<string> = []
+  const commands: Array<{ readonly method: string; readonly params: unknown }> = []
   const root = {
     key: undefined,
     send: (command: Protocol.Command<string, unknown, unknown>) =>
       Effect.suspend(() => {
         sent.push(command.method)
+        commands.push(command)
         const failure = failures[command.method]
         const reply = replies[command.method]
         return failure === undefined
@@ -51,24 +58,25 @@ const session = (
       }),
     drainObserved: Effect.void
   } as unknown as ProtocolClient.Session
-  return { root, sent }
+  return { root, sent, commands }
 }
 
 /** A state with one page in the default context, its document, and the document's main realm. */
 const withPage = Effect.fnUntraced(function*(
   replies: Readonly<Record<string, unknown>> = {},
-  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+  failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {},
+  protocolRoot?: ProtocolClient.Session
 ) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
-  const { root, sent } = session(replies, failures)
+  const { root, sent, commands } = session(replies, failures)
   const state = State.make({
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
     buffer,
     control,
-    root: () => root
+    root: () => protocolRoot ?? root
   })
   const page = Tree.addNavigable(state, {
     context: "C1" as BrowsingContext.BrowsingContext,
@@ -90,7 +98,7 @@ const withPage = Effect.fnUntraced(function*(
   state.realms.set(realm.bidi, realm)
   state.realmsById.set(realm.id, realm)
   Tree.addWindowRealm(state, realm, document)
-  return { state, page, document, realm, sent, facts }
+  return { state, page, document, realm, sent, facts, commands }
 })
 
 /** Attribution may arrive with the outcome, or separately when the outcome was already published. */
@@ -1449,6 +1457,125 @@ describe("BidiAdapter state", () => {
       assert.isFalse(state.realmsById.has(pending.id))
       assert.strictEqual(page.pendingRealms.length, 0)
     }))
+
+  it.effect("disowns the root-owned exception of a call whose reply it consumed", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+      const { realm, state } = yield* withPage({}, {}, client.root)
+      const evaluation = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => { throw new Error('boom') }",
+        arguments: [],
+        awaitPromise: false,
+        result: "handle",
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.params?.resultOwnership, "root")
+      yield* browser.receive({
+        type: "success",
+        id: sent.id,
+        result: {
+          type: "exception",
+          realm: realm.bidi,
+          exceptionDetails: {
+            exception: { type: "error", handle: "E1" },
+            text: "Error: boom",
+            lineNumber: 0,
+            columnNumber: 0,
+            stackTrace: { callFrames: [] }
+          }
+        }
+      })
+      yield* browser.delivered
+      const result = yield* Fiber.join(evaluation)
+      assert.strictEqual(result._tag, "Exception")
+      // The caller gets no handle for the exception, so nothing else can ever release it.
+      assert.deepStrictEqual(result._tag === "Exception" ? result.exception : undefined, {
+        type: "error",
+        handle: undefined
+      })
+      const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 200))
+      assert(Option.isSome(cleanup), "a root-owned exception nobody can reach must be disowned")
+      assert.strictEqual(cleanup.value.method, "script.disown")
+      assert.deepStrictEqual(cleanup.value.params, { handles: ["E1"], target: { realm: realm.bidi } })
+      yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+    }))
+
+  for (const kind of ["success", "none", "handleless", "release", "failure", "interruption"] as const) {
+    it.effect(`preserves evaluation ownership with ${kind} cleanup`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const interrupted = yield* Deferred.make<void>()
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const cleanup = Effect.gen(function*() {
+              assert.deepStrictEqual(yield* Effect.service(Deadline.CurrentDeadline), Option.none())
+              yield* Deferred.succeed(entered, undefined)
+              if (kind === "interruption") {
+                return yield* Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+              }
+            })
+            const { realm, sent, state, commands } = yield* withPage(
+              {
+                "script.callFunction": kind === "success"
+                  ? { type: "success", realm: "R2", result: { type: "object", handle: "H1" } }
+                  : {
+                    type: "exception",
+                    realm: "R2",
+                    exceptionDetails: {
+                      text: "Error: boom",
+                      exception: kind === "handleless" ? { type: "error" } : { type: "error", handle: "E1" }
+                    }
+                  },
+                "script.disown": cleanup
+              },
+              kind === "failure"
+                ? {
+                  "script.disown": () =>
+                    new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+                }
+                : {}
+            )
+            const result = yield* Evaluation.evaluate(state, realm.id, {
+              functionDeclaration: "() => { throw new Error('boom') }",
+              arguments: [],
+              awaitPromise: false,
+              result: kind === "none" ? "value" : "handle",
+              userActivation: false
+            })
+            if (kind === "success") {
+              assert.strictEqual(result._tag, "Value")
+              assert.strictEqual(state.handles.size, 1)
+              assert.strictEqual([...state.handles.values()][0]?.handle, "H1")
+            } else {
+              assert.deepStrictEqual(result, {
+                _tag: "Exception",
+                text: "Error: boom",
+                exception: { type: "error", handle: undefined },
+                stack: Option.none()
+              })
+              assert.strictEqual(state.handles.size, 0)
+            }
+            if (kind === "interruption") yield* Deferred.await(entered)
+            yield* Effect.yieldNow
+            if (kind === "release" || kind === "failure" || kind === "interruption") {
+              assert.deepStrictEqual(commands[1]?.params, { handles: ["E1"], target: { realm: "R2" } })
+            }
+            assert.deepStrictEqual(
+              sent,
+              kind === "release" || kind === "failure" || kind === "interruption"
+                ? ["script.callFunction", "script.disown"]
+                : ["script.callFunction"]
+            )
+          }).pipe(Effect.provideService(
+            Deadline.CurrentDeadline,
+            Option.some(0 as MonotonicInstant.MonotonicInstant)
+          ))
+        )
+        if (kind === "interruption") yield* Deferred.await(interrupted)
+      }))
+  }
 
   it.effect("fails a handle it doesn't hold as Gone, and sends nothing", () =>
     Effect.gen(function*() {
