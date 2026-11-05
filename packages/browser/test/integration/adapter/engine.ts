@@ -612,6 +612,29 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("preserves browser-native enabled reads for options and optgroups", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(
+              backend,
+              `<select multiple disabled><option id="option">One</option></select>
+<fieldset disabled><select multiple><optgroup id="optgroup" label="G"><option>Two</option></optgroup></select></fieldset>`
+            )
+            for (const id of ["option", "optgroup"]) {
+              const native = yield* call(
+                `(id) => !document.getElementById(id).matches(":disabled")`,
+                [string(id)]
+              )
+              assert(native._tag === "Value" && native.value.type === "boolean")
+              const read = yield* send({
+                op: "read",
+                steps: [{ _tag: "Css", selector: `#${id}` }],
+                read: { _tag: "Enabled" }
+              })
+              assert(read._tag === "Read")
+              assert.strictEqual(read.value, native.value.value, id)
+            }
+          }), timeout)
+
         it.effect("uses a consistent native disabled matrix for role filters", () =>
           Effect.gen(function*() {
             const controls = ["button", "input", "select", "textarea", "option", "optgroup", "fieldset"]
