@@ -495,7 +495,7 @@ export const engine = (backend: Backend) =>
               `<section>
 <h2 aria-level="3">Native</h2><div role="treeitem" aria-level="3">Tree</div>
 <input type="radio" checked><input type="radio">
-<details open><summary>Open</summary></details><details><summary>Closed</summary></details>
+<details role="button" open><summary>Open</summary></details><details role="button"><summary>Closed</summary></details>
 <div role="tab" aria-selected="false">Off</div><div role="tab" aria-selected="TRUE">On</div>
 <div role="button" aria-pressed="TRUE" aria-expanded="TRUE">Case</div>
 <div role="button" aria-pressed="mixed" aria-expanded="bogus">Mixed</div>
@@ -520,8 +520,8 @@ export const engine = (backend: Backend) =>
             yield* check("treeitem", { level: 3 }, 1)
             yield* check("radio", { checked: true }, 1)
             yield* check("radio", { checked: false }, 1)
-            yield* check("group", { expanded: true }, 1)
-            yield* check("group", { expanded: false }, 1)
+            yield* check("button", { expanded: true, name: text("Open", true) }, 1)
+            yield* check("button", { expanded: false, name: text("Closed", true) }, 1)
             yield* check("tab", { selected: false }, 1)
             yield* check("tab", { selected: true }, 1)
             yield* check("button", { pressed: true, expanded: true, name: text("Case", true) }, 1)
@@ -533,22 +533,26 @@ export const engine = (backend: Backend) =>
 
         it.effect("rejects unsupported role filters before matching candidates", () =>
           Effect.gen(function*() {
-            const { send } = yield* open(backend, "<a href=\"/\">Link</a><input type=\"checkbox\">")
+            const { send } = yield* open(backend, `<a href="/" aria-expanded="false">Link</a><input type="checkbox">`)
             for (
-              const options of [{ checked: true }, { pressed: false }, { expanded: false }, { selected: false }, {
-                level: 2
-              }]
+              const [name, options] of [
+                ["link", { checked: true }],
+                ["link", { pressed: false }],
+                ["group", { expanded: false }],
+                ["checkbox", { selected: false }],
+                ["link", { level: 2 }]
+              ] as const
             ) {
               for (
                 const steps of [
-                  [{ ...role("link"), ...options }],
-                  [{ _tag: "Css" as const, selector: "#missing" }, { ...role("link"), ...options }],
+                  [{ ...role(name), ...options }],
+                  [{ _tag: "Css" as const, selector: "#missing" }, { ...role(name), ...options }],
                   [{ _tag: "Css" as const, selector: "#missing" }, {
                     _tag: "Filter" as const,
                     hasText: null,
                     hasNotText: null,
                     visible: null,
-                    has: [{ ...role("link"), ...options }],
+                    has: [{ ...role(name), ...options }],
                     hasNot: null
                   }]
                 ]
@@ -560,6 +564,7 @@ export const engine = (backend: Backend) =>
                 }
               }
             }
+            assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("link"), expanded: false }] })), 1)
             assert.strictEqual(count(yield* send({ op: "count", steps: [role("link")] })), 1)
             assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role("link"), disabled: false }] })), 1)
           }), timeout)
