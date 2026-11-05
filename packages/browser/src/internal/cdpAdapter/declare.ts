@@ -308,13 +308,24 @@ const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
     }).pipe(Protocol.on(target.session))
 }
 
+// Read the registry only after acquiring the target's permit, and retain it across every command.
+// Release can then confirm restoration only after earlier configuration has finished writing.
+const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E, R>) => {
+  const lock = target.overrideLock ??= Semaphore.makeUnsafe(1)
+  return lock.withPermits(1)(effect)
+}
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  const overrides = state.registry.overrides(placement(page))
-  yield* Effect.forEach(overrides, ([kind]) => applyOverride(state, target, kind, overrides), {
-    concurrency: "unbounded",
-    discard: true
-  })
+  yield* withOverrides(
+    target,
+    Effect.suspend(() => {
+      const overrides = state.registry.overrides(placement(page))
+      return Effect.forEach(overrides, ([kind]) => applyOverride(state, target, kind, overrides), {
+        discard: true
+      })
+    })
+  )
   yield* applyScripts(state, target, page)
   yield* applyIntercepts(state, target, page)
   yield* keepBodies(state, target, page)
@@ -338,7 +349,12 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
-      return applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+      return withOverrides(
+        target,
+        Effect.suspend(() =>
+          applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+        )
+      )
     case "FileChooser":
       return target.kind === "page"
         ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
