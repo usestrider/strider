@@ -27,6 +27,7 @@ import {
   UncaughtException,
   Watchable
 } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -263,6 +264,49 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
                 (encoded as { entries: ReadonlyArray<{ text: string }> }).entries.map((each) => each.text),
                 ["bad thing", "from the worker"]
               )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps ready console subscriptions across document replacement and releases their scope",
+        () =>
+          Effect.gen(function*() {
+            const { url, origin } = yield* fixture(() => `<p>Old document</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const closed = yield* Effect.scoped(Effect.gen(function*() {
+                const pending = yield* ConsoleMessage.next(page, { text: "never" }).pipe(
+                  Deadline.within("100 millis")
+                )
+                const expired = yield* pending.pipe(Effect.flip)
+                assert(Deadline.isTimeout(expired), String(expired))
+                const owned = yield* ConsoleMessage.next(page, { text: "never either" })
+                const interrupted = yield* owned.pipe(Effect.forkChild)
+                yield* Fiber.interrupt(interrupted)
+                return owned
+              }))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const waits = yield* Effect.forEach(
+                  Array.from({ length: 20 }),
+                  () => ConsoleMessage.next(page, { text: "new document ready" })
+                )
+                yield* page.goto(fixtureUrl(origin, `<script>console.log("new document ready")</script>`))
+                const messages = yield* Effect.all(waits)
+                assert.deepStrictEqual(
+                  messages.map((message) => message.text),
+                  Array.from({ length: 20 }, () => "new document ready")
+                )
+              }))
+              const fresh = yield* ConsoleMessage.next(page, { text: "after release" })
+              yield* page.evaluateInMainWorld(() => console.log("after release"))
+              assert.strictEqual((yield* fresh).text, "after release")
+              const closedResult = yield* Effect.exit(closed).pipe(Effect.timeoutOption("1 second"))
+              assert(Option.isSome(closedResult), "closing the subscription scope must complete its returned wait")
+              const closedExit = closedResult.value
+              assert(Exit.isFailure(closedExit) && closedExit.cause.reasons.some(Cause.isInterruptReason))
             }))
           }),
         timeout

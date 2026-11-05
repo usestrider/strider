@@ -1937,6 +1937,37 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect(
+        "starts fresh observations after timeout, interruption and document replacement",
+        () =>
+          Effect.gen(function*() {
+            const { url, origin } = yield* fixture(() => `<p id="ready" hidden>Old</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const expired = yield* page.locator("#ready").pipe(
+                Expect.toBeVisible,
+                Deadline.within("100 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(expired), String(expired))
+              const interrupted = yield* page.locator("#ready").pipe(Expect.toBeVisible, Effect.forkChild)
+              yield* Fiber.interrupt(interrupted)
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#ready")!.outerHTML = "<p id=\"ready\">Replacement</p>"
+              })
+              yield* page.locator("#ready").pipe(Expect.toHaveText("Replacement"))
+              yield* page.goto(fixtureUrl(origin, `<p id="ready">New document</p>`))
+              yield* Effect.forEach(
+                Array.from({ length: 20 }),
+                () => page.locator("#ready").pipe(Expect.toHaveText("New document")),
+                { concurrency: "unbounded" }
+              )
+            }))
+          }),
+        timeout
+      )
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
