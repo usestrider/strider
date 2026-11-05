@@ -1,7 +1,8 @@
+import * as assert from "node:assert/strict"
 import { describe, expect, it } from "vitest"
 import { cases } from "../src/benchmarks/cases.ts"
 import { compare, measure, options, summarize } from "../src/benchmarks/measure.ts"
-import { start } from "../src/site.ts"
+import { responseBody, start } from "../src/site.ts"
 
 describe("benchmark measurements", () => {
   it("discards warmups and alternates paired samples without overlapping work", async () => {
@@ -103,6 +104,28 @@ describe("response-body fixtures", () => {
       } finally {
         await site.close()
       }
+    })
+  }
+})
+
+describe("response-body rejection diagnostics", () => {
+  for (const kind of ["corrupt", "truncated"] as const) {
+    it(`rejects a ${kind} 4 MiB body with bounded scalar diagnostics`, () => {
+      const entry = cases.find((entry) => entry.name === "response-body-large")!
+      const bytes = responseBody(4 * 1024 * 1024)
+      if (kind === "corrupt") bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 1
+      const malformed = kind === "corrupt" ? bytes : bytes.subarray(0, -1)
+      let failure: unknown
+      try {
+        entry.verify(malformed)
+      } catch (error) {
+        failure = error
+      }
+      assert.ok(failure instanceof assert.AssertionError)
+      // Node inspects object-valued assertion operands before shortening its message.
+      assert.equal(typeof failure.actual, "boolean")
+      assert.equal(typeof failure.expected, "boolean")
+      assert.ok(failure.message.length < 256)
     })
   }
 })
