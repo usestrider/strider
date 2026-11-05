@@ -5,6 +5,7 @@
  */
 import { assert, describe, layer } from "@effect/vitest"
 import {
+  AutoResolution,
   Browser,
   Capability,
   Deadline,
@@ -12,6 +13,7 @@ import {
   Expect,
   FileChooser,
   FileInput,
+  FilePath,
   Locator,
   PageNavigation
 } from "@usestrider/browser"
@@ -21,6 +23,8 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
 import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -64,8 +68,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(url)
             yield* page.getByLabel("Files").setInputFiles(made)
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
-            // Paths and made files can't be mixed: each would replace the other's
-            const mixed = yield* page.getByLabel("Files").setInputFiles([made[0]!, FileInput.local("/etc/hosts")]).pipe(
+            // Browser-host paths cannot be combined with caller-side files
+            const mixed = yield* page.getByLabel("Files").setInputFiles([
+              made[0]!,
+              FileInput.remote(FilePath.Remote.make("/etc/hosts"))
+            ]).pipe(
               Effect.flip
             )
             assert(Locator.isLocatorError(mixed), String(mixed))
@@ -86,6 +93,82 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
             // The handler is counted as it decides, before the page sets the files (QUIRKS.md, Q152)
             assert.strictEqual(yield* handler.handled, 1)
+          }))
+        }), timeout)
+
+      for (const chooser of [false, true]) {
+        it.effect(
+          `transfers local content and metadata${chooser ? " through a chooser" : " through a locator"}`,
+          () =>
+            Effect.gen(function*() {
+              if (chooser && !(yield* supports("fileChooser"))) return
+              const url = yield* fixture(files)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-local-upload-"))
+                yield* Effect.addFinalizer(() =>
+                  Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
+                )
+                fs.writeFileSync(path.join(directory, "caller.txt"), "caller content")
+                fs.writeFileSync(path.join(directory, "unknown.strider-unknown"), "raw")
+                const inputs = [
+                  FileInput.local(path.relative(process.cwd(), path.join(directory, "caller.txt"))),
+                  FileInput.local(path.join(directory, "unknown.strider-unknown")),
+                  made[1]!
+                ]
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                if (chooser) {
+                  const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
+                  yield* page.getByRole("button", { name: "Choose" }).click()
+                  assert.strictEqual(yield* handler.handled, 1)
+                  yield* handler.remove
+                } else yield* page.getByLabel("Files").setInputFiles(inputs)
+                yield* page.getByText(
+                  "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                ).pipe(Expect.toBeVisible)
+                // A refused mixture must preserve the existing selection.
+                const failure = yield* page.getByLabel("Files").setInputFiles([
+                  inputs[0]!,
+                  FileInput.remote(FilePath.Remote.make("/remote/file"))
+                ]).pipe(Effect.flip)
+                assert.strictEqual(failure._tag, "LocatorError")
+                yield* page.getByText(
+                  "caller.txt:text/plain:14:caller content|unknown.strider-unknown:application/octet-stream:3:raw|b.csv:text/csv:3:x,y"
+                ).pipe(Expect.toBeVisible)
+                yield* page.getByLabel("Files").setInputFiles([])
+                assert.strictEqual(
+                  yield* page.getByLabel("Files").evaluate((input) => (input as HTMLInputElement).files!.length),
+                  0
+                )
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect("cancels failed chooser preparation and allows the next chooser", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("fileChooser"))) return
+          const url = yield* fixture(files)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            for (
+              const inputs of [
+                [FileInput.local("/nowhere/upload.txt")],
+                [made[0]!, FileInput.remote(FilePath.Remote.make("/remote/file"))]
+              ]
+            ) {
+              const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
+              const resolution = yield* AutoResolution.next(page, { subject: "FileChooser" })
+              yield* page.getByRole("button", { name: "Choose" }).click()
+              assert.strictEqual((yield* resolution).decision, "cancel")
+              assert.strictEqual(yield* handler.handled, 0)
+              yield* handler.remove
+            }
+            yield* FileChooser.handle(page, FileChooser.choose(made))
+            yield* page.getByRole("button", { name: "Choose" }).click()
+            yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
           }))
         }), timeout)
 
