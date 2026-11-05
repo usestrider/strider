@@ -156,8 +156,8 @@ An MCP client such as Claude Desktop launches `strider mcp` from its configurati
 ```
 
 With `["mcp", "--start", "--chromium", "/usr/bin/chromium"]` instead, it starts a session of its own, which ends when the client stops it, unless `--keep`. `--capture strict`, on `strider start` or `strider mcp --start`, gives the session `CapturePolicy.strict`. The default is `local`, which retains full capture and search.
-Field-content name provenance is collected only for redacted capture, including equivalent custom policies.
-Local capture and ordinary library snapshots skip this work; every snapshot still carries independent editability.
+Field editability and field-content name provenance are collected only for redacted capture, including equivalent custom policies.
+Local capture and ordinary library snapshots skip this work and omit that masking metadata.
 
 Strict capture denies screenshots and masks editable content and validation messages as `•••` in snapshots and
 find results. This includes native fields, ARIA fields and contenteditable elements regardless of semantic role,

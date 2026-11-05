@@ -798,9 +798,11 @@ role changes, slot reassignment and reparenting must be observed by the next wal
 retain stale privacy decisions; DOM-only closest checks miss slot/shadow ancestry. This bounds the additional
 provenance traversal, not the existing cost of constructing all nested accessible or inferred name strings.
 
-Name provenance is requested only by redacted snapshot capture, including custom policies with the same masking
-setting. Ordinary library and full/local snapshots retain editability but skip field-contribution ancestry and
-subtree analysis. The masking request is internal operation context, forwarded to each frame; it is not inferred
+Field editability and name provenance are requested only by redacted snapshot capture, including custom policies with the same masking
+setting. Ordinary library and full/local snapshots omit that masking metadata, skipping field classification,
+field-contribution ancestry and subtree analysis. Ordinary rendering and queries do not consume the editability
+flag. The optional public codec can carry it and diff can compare it when supplied, but neither requires
+automatic collection. The masking request is internal operation context, forwarded to each frame; it is not inferred
 from a preset's identity. Clear naming caches between requests and scope cached toolkit snapshots to their
 policy, so switching modes cannot reuse an unannotated tree for masking. Always computing provenance imposed
 material cost on ordinary snapshots without benefiting their output. Keep the same precise naming algorithm

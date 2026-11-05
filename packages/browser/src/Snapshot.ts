@@ -181,8 +181,9 @@ export type State = typeof State.Type
  * tree. An `Inferred` role carries its `evidence`, and an `Inferred` name says what it came `from`.
  *
  * Optional `editable` records native or ARIA field kinds and DOM contenteditability independently of role,
- * including plaintext-only contenteditables. It remains true for disabled and read-only fields. Absence means
- * false; older snapshot nodes without this property still decode. Text rendering does not print this signal.
+ * including plaintext-only contenteditables. It remains true for disabled and read-only fields. Redacted capture
+ * collects it; ordinary library and full capture omit it. Older snapshot nodes without this property still decode.
+ * Text rendering does not print this signal.
  *
  * Native controls that participate in constraint validation carry `invalid` and their browser-provided
  * `validationMessage` when invalid. Other nodes carry `None`. Inspection reads current state without
@@ -197,7 +198,7 @@ export interface Node {
   readonly role: Role
   readonly name: Name
   readonly states: ReadonlySet<State>
-  /** Whether this node takes field input, independent of role and read-only or disabled state. Absent means false. */
+  /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
   readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<Node>
@@ -215,7 +216,7 @@ export interface NodeEncoded {
   readonly role: Node["role"]
   readonly name: Node["name"]
   readonly states: Node["states"]
-  /** Whether this node takes field input, independent of role and read-only or disabled state. Absent means false. */
+  /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
   readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<NodeEncoded>

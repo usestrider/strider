@@ -540,15 +540,14 @@ A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) 
 
 ### Snapshot editability and capture
 
-Snapshot nodes carry optional `editable` independently of semantic role: true for native field kinds, ARIA field
+Redacted capture collects optional `editable` on snapshot nodes independently of semantic role: true for native field kinds, ARIA field
 roles and contenteditable elements, including inherited and plaintext-only editability. Read-only and disabled
-fields retain the signal because they still contain field data. Absence means false; older serialized snapshot
-nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
+fields retain the signal because they still contain field data. Ordinary library and full capture omit this metadata; absence does not prove a node is not a field. Older
+serialized snapshot nodes remain decodable. An accessible editable name derived from its own content carries optional `from: "text"`;
 labels retain their existing names. Optional `fieldContent` on accessible and inferred names records that the
 chosen name contains field content, including content copied into an ancestor or another node's name. Absent
 provenance is not evidence of absence: ordinary library snapshots and full capture omit name provenance.
-Only redacted capture requests collect it, including equivalent custom policies; independent editability remains
-available in every snapshot. These additions do not change local snapshot text or semantic roles.
+Only redacted capture requests collect field editability and name provenance, including equivalent custom policies. These additions do not change local snapshot text or semantic roles.
 
 The toolkit derives one redacted tree for snapshot rendering and find matching, names and paths. It masks field
 content and validation messages, including names that contain field content contributed by descendants,

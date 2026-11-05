@@ -26,7 +26,7 @@ import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 
-/** Internal capture request; ordinary library snapshots do not analyze field-content names. @default false */
+/** Internal masking-metadata request; ordinary library snapshots omit field editability and name provenance. @default false */
 export const NameProvenance = Context.Reference<boolean>("@usestrider/browser/internal/snapshot/NameProvenance", {
   defaultValue: () => false
 })

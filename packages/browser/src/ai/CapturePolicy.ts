@@ -23,8 +23,8 @@ import * as Schema from "effect/Schema"
  *   with the field subtree. Public labels, roles, refs and states remain visible; validation messages become
  *   `•••`. Both snapshot output and `find` use this redacted tree, so hidden content cannot match a query.
  *   `"full"` keeps content, validation messages and matching against them.
- *   Field-content name provenance is collected only for `"redacted"` capture, including custom policies.
- *   Ordinary library snapshots and `"full"` capture skip that work; editability remains available in every snapshot.
+ *   Field editability and field-content name provenance are collected only for `"redacted"` capture, including custom policies.
+ *   Ordinary library snapshots and `"full"` capture omit this masking metadata and skip its collection.
  * - `consoleText`: `"full"` sends console text and exception names/messages; `"redacted"` says a message
  *   was logged without its text; `"omitted"` also leaves console errors out of `sinceLast`. Both non-full
  *   modes replace exception details in digests and history with `uncaught exception at <time>`, retaining

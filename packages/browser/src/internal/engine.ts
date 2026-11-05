@@ -965,7 +965,7 @@ export function engine(render: (root: SnapNode) => string) {
       }
       content += pseudoContent(element, "::after")
       if (content.trim() !== "") {
-        if (!context.traversal && !context.labelledBy) namesFromContent.add(element)
+        if (provenance && !context.traversal && !context.labelledBy) namesFromContent.add(element)
         if (inField(element)) context.contribution.fieldContent = true
         return content
       }
@@ -2218,7 +2218,7 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
-    const field = fieldOf(element)
+    const field = provenance && fieldOf(element)
     const name: SnapNode["name"] = role._tag === "Inferred"
       ? inferredName(element)
       : accessible === ""
