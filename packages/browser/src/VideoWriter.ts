@@ -21,7 +21,8 @@ import * as Reason from "./Reason.ts"
 
 /**
  * An image at a timestamp in nanoseconds relative to the recording start. Each image is shown until the next
- * timestamp; the final image repeats the last picture at the recording end time.
+ * timestamp; the final image repeats the last picture at the recording end time. Timestamps never decrease:
+ * a source time before its predecessor is held at the preceding timestamp.
  *
  * @stability unstable
  * @category schemas
@@ -37,7 +38,7 @@ export const Frame = Schema.Struct({
 
 /**
  * One image at nanoseconds relative to recording start, shown until the next timestamp.
- * The final image marks recording end.
+ * Times never decrease, and the final image marks recording end.
  *
  * @stability unstable
  * @category models

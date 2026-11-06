@@ -12,9 +12,15 @@ import * as WebKit from "../src/internal/webkitAdapter/capabilities.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
 
 describe("VideoWriter", () => {
-  it("converts Chromium epoch seconds to the live monotonic clock without receipt-time pacing", () => {
-    assert.strictEqual(Capture.screencastTime(1700000000.237, 1700000000000), 237e6)
-    assert.strictEqual(Capture.screencastTime(1700000002.391, 1700000000000), 2391e6)
+  it("anchors each screencast clock once and preserves source deltas across delayed receipts", () => {
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(undefined, 100e6), 100e6)
+    assert.strictEqual(time(4000000000, 200e6), 200e6)
+    assert.closeTo(time(4000000000.237, 900e6), 437e6, 1000)
+    assert.strictEqual(time(undefined, 1000e6), 1000e6)
+    assert.closeTo(time(4000000000.391, 1100e6), 591e6, 1000)
+    const next = Capture.makeScreencastClock()
+    assert.strictEqual(next(1000, 1200e6), 1200e6)
   })
 
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {

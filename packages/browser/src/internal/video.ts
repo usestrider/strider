@@ -65,7 +65,7 @@ export const record = Effect.fnUntraced(function*(
     Stream.runForEach((delivery) =>
       Effect.gen(function*() {
         const accepted = Deferred.makeUnsafe<void>()
-        latest = { ...delivery.frame, at: Math.max(0, delivery.frame.at - started) }
+        latest = { ...delivery.frame, at: Math.max(latest?.at ?? 0, delivery.frame.at - started) }
         yield* Queue.offer(input, {
           frame: latest,
           accept: delivery.take.pipe(Effect.andThen(Deferred.succeed(accepted, undefined)), Effect.asVoid)
