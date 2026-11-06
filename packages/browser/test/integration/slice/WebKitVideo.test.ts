@@ -264,6 +264,73 @@ describe("WebKit polled video", () => {
     60_000
   )
 
+  for (const capture of ["size query", "snapshot"] as const) {
+    for (const end of ["page", "connection"] as const) {
+      it.live(`handles ${end} closure with a video ${capture} still pending`, () =>
+        run(Effect.gen(function*() {
+          yield* useXvfb()
+          const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped()
+          const first = yield* Deferred.make<void>()
+          const pending = yield* Deferred.make<void>()
+          let hold = false
+          let group!: WebKitAutomation.Group
+          const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+            group = yield* WebKitAutomation.start({ executablePath: webkitgtk.executable })
+            const real = yield* VideoWriter.VideoWriter
+            return yield* WebKitAdapter.connect({
+              ...group.transport,
+              send: Effect.fnUntraced(function*(message: string) {
+                const addressed = Envelope.unwrap(message)
+                if (hold && addressed !== undefined) {
+                  const outer = JSON.parse(addressed.message)
+                  if (outer.method === "Target.sendMessageToTarget") {
+                    const inner = JSON.parse(outer.params.message)
+                    if (
+                      capture === "snapshot"
+                        ? inner.method === "Page.snapshotRect"
+                        : inner.method === "Runtime.evaluate" && inner.params.expression === "[innerWidth, innerHeight]"
+                    ) {
+                      // Leave a real protocol command pending until page teardown rejects it.
+                      // This selects the close-before-reply ordering without timing or load.
+                      yield* Deferred.succeed(pending, undefined)
+                      return
+                    }
+                  }
+                }
+                yield* group.transport.send(message)
+              })
+            }, { sink, ownership: "launched", automation: group, video: { polled: 100, directory } }).pipe(
+              Effect.provideService(VideoWriter.VideoWriter, {
+                write: (frames, destination) =>
+                  real.write(frames.pipe(Stream.tap(() => Deferred.succeed(first, undefined))), destination)
+              })
+            )
+          })).pipe(
+            Layer.provide(
+              Layer.mergeAll(NodeServices.layer, socketConnector, encoder.pipe(Layer.provide(NodeServices.layer)))
+            )
+          )
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const video = yield* page.capability(Capability.Video)
+            yield* Deferred.await(first)
+            hold = true
+            yield* Deferred.await(pending)
+            if (end === "page") {
+              yield* page.close()
+              assert.isAtLeast(Number(probe(yield* video.file).streams[0].nb_read_frames), 1)
+            } else {
+              yield* group.first.close
+              const error = yield* Effect.flip(video.file)
+              assert(Capability.isCapabilityError(error))
+              assert.strictEqual(error.reason._tag, "BackendFailure")
+              assert.match(error.message, /connectionLost/)
+            }
+          }).pipe(Effect.provide(backend))
+        })), 60_000)
+    }
+  }
+
   for (const end of ["page", "context"] as const) {
     it.live(
       `finishes on ${end} closure with the recording scope still open`,

@@ -2,6 +2,7 @@
  * Captures on stock WebKit: a screenshot, of the viewport, the page, or a rectangle of it. Its inspector has no
  * print-to-PDF, no accessibility tree to read whole, and no screencast.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -82,15 +83,16 @@ export const video = Effect.fnUntraced(function*(
   const page = yield* pageOf(state, id)
   const clock = yield* BrowserClock.CurrentClock
   let next = clock.now()
+  const termination = page.session.ended.pipe(
+    Effect.flatMap((reason) =>
+      reason.why === "connectionLost" || reason.why === "modelUnavailable"
+        ? Effect.fail(Kit.protocolError(new Protocol.ProtocolError({ reason })))
+        : Effect.void
+    )
+  )
   return yield* Video.record(
     Effect.succeed({
-      ended: page.session.ended.pipe(
-        Effect.flatMap((reason) =>
-          reason.why === "connectionLost" || reason.why === "modelUnavailable"
-            ? Effect.fail(Kit.protocolError(new Protocol.ProtocolError({ reason })))
-            : Effect.void
-        )
-      ),
+      ended: termination,
       frames: Stream.fromEffectRepeat(Effect.gen(function*() {
         const left = (next - clock.now()) / 1e6
         if (left > 0) {
@@ -106,7 +108,19 @@ export const video = Effect.fnUntraced(function*(
               clip: Option.none(),
               scale: "device",
               omitBackground: false
-            }).pipe(Effect.catch((error) => {
+            }).pipe(Effect.catch(Effect.fnUntraced(function*(error) {
+              // Pending commands fail before the fold publishes session termination. Only wait for
+              // the page's reason when its proxy session has already been removed, not for a target
+              // lost during navigation. A normal page end finishes the frame stream cleanly.
+              if (
+                error.reason._tag === "Protocol" && error.reason.error.reason._tag === "SessionEnded" &&
+                error.reason.error.reason.why !== "connectionLost" &&
+                error.reason.error.reason.why !== "modelUnavailable" &&
+                page.session.key !== undefined && state.control.session(page.session.key) === undefined
+              ) {
+                yield* termination
+                return yield* Cause.done()
+              }
               // A dispatched image belongs to the old process. Omit it only when a replacement is known;
               // the next configured poll resolves the new target. Other capture errors remain failures.
               if (
@@ -114,10 +128,10 @@ export const video = Effect.fnUntraced(function*(
                 (page.target !== target || page.provisional !== undefined) &&
                 error.reason._tag === "Protocol" && error.reason.error.reason._tag === "SessionEnded"
               ) {
-                return Effect.succeed(undefined)
+                return undefined
               }
-              return Effect.fail(error)
-            }))
+              return yield* Effect.fail(error)
+            })))
             if (image !== undefined) {
               next = (clock.now() + options.polled * 1e6) as typeof next
               const size = Adapter.pngSize(image)
