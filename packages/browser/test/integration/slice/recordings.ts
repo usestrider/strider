@@ -210,7 +210,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
           ["url", "effect map"],
           ["title", "effect map"],
           ["url", "reconstruction"],
-          ["title", "reconstruction"]
+          ["title", "reconstruction"],
+          ["url", "live"],
+          ["title", "live"]
         ] as const
       ) {
         it.effect(
@@ -226,6 +228,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               const actual = yield* page[source]
               assert.include(actual, source === "url" ? "generic-url-secret" : title)
               assert.notStrictEqual(page.title, page.title)
+              const live = boundary === "live" ? yield* Trace.record(page) : undefined
               const direct = boundary === "guarded" ? (yield* page.inspect)[source] : page[source]
               const subject = boundary === "watchable map" ?
                 page.url.map((value) => value)
@@ -242,7 +245,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.include(JSON.stringify(error.history), actual)
-              const trace = yield* Trace.record(page)
+              const trace = live ?? (yield* Trace.record(page))
               const exported = boundary === "reconstruction" ? new Expect.ExpectationFailed({ ...error }) : error
               const rethrown = yield* Effect.fail(exported).pipe(
                 Operation.named(`rethrow generic ${source}`, { attributes: { "browser.page.id": page.id } }),
@@ -259,7 +262,8 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 const failures = lines(new TextEncoder().encode(content)).filter((event) =>
                   event.type === "after" && event.error?.name === "ExpectationFailed"
                 )
-                assert.strictEqual(failures.length, 1)
+                if (live === undefined) assert.strictEqual(failures.length, 1)
+                else assert.isAtLeast(failures.length, 2)
                 for (const event of failures) {
                   assert.include(event.error.message, "to satisfy an always-false condition")
                   assert.notInclude(event.error.message, "to have the URL")
@@ -267,7 +271,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                   assert.include(event.error.message, "Last observed:")
                   assert.include(event.error.message, "History:")
                   for (const secret of source === "url" ? ["generic-url-secret", "generic-fragment-secret"] : [title]) {
-                    if ((boundary === "direct" || boundary === "guarded") && preset === "strict") {
+                    if (
+                      (boundary === "direct" || boundary === "guarded" || boundary === "live") && preset === "strict"
+                    ) {
                       assert.notInclude(event.error.message, secret)
                     } else assert.include(event.error.message, secret)
                   }
