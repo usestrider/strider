@@ -179,12 +179,11 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * **Details**
  *
- * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Recording lasts
- * while the capability's scope lives, into the directory the page's context
- * downloads to. Chromium records at 25fps, holding the latest frame while idle and scaling and padding viewport
- * changes to the initial size. Ending its scope waits up to five seconds on the browser clock for the writer.
- * So the file is removed with the context's temporary downloads, unless
- * `UserContext.Options.downloads` names a directory of yours.
+ * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Both write into
+ * the context's downloads directory until the capability's scope closes. Temporary downloads are removed with
+ * the context; set `UserContext.Options.downloads` to keep the file in a directory of yours.
+ * Chromium records at 25fps, holding the latest frame while idle and scaling and padding viewport changes to
+ * the initial size. Closing its scope waits up to five seconds on the browser clock for the writer.
  *
  * **Gotchas**
  *
