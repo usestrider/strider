@@ -543,7 +543,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {
-    const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
+    const value = Redacted.isRedacted(text) ? Redacted.value(text) : text
+    if (typeof value !== "string") {
+      return Effect.fail(this.error(
+        "Locator.pressSequentially",
+        new Reason.InvalidInput({
+          input: "text",
+          expected: "a string or Redacted string",
+          hint: "PressSequentially requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
+    const characters = Array.from(value)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
     return this.act(
       "Locator.pressSequentially",
