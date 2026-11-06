@@ -816,7 +816,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Locator.WrongElement({
             expected: final.expected,
             element: final.element,
-            hint: "The locator found an element of another kind; narrow it to the one meant"
+            hint: final.hint ?? "The locator found an element of another kind; narrow it to the one meant"
           }),
           id
         )
@@ -1016,7 +1016,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
+      const read = this.readOne(
+        operation,
+        { _tag: "Checked", followLabel: true, uncheck: !checked },
+        (value) => value as boolean
+      )
       const now = yield* read.pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
