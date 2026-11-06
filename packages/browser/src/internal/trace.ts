@@ -102,8 +102,51 @@ interface Video {
   readonly at: MonotonicInstant.MonotonicInstant
   readonly scope: Scope.Closeable
   readonly recording: Capability.VideoRecording
+  finished: boolean
   read: Option.Option<{ readonly bytes: Uint8Array; readonly width: number; readonly height: number }>
 }
+
+/** Kept as a cause until export, so each export applies its own diagnostics preset. */
+interface VideoFailure {
+  readonly page: Target.NavigableId
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly stage: "acquisition" | "stop" | "file-read"
+  readonly cause: Cause.Cause<unknown>
+}
+
+/** Console errors are displayed by the reader, including their page and the complete underlying cause. */
+const videoFailureEvent = (failure: VideoFailure, preset: Diagnostics.Preset): Record<string, unknown> => {
+  let detail: string
+  try {
+    detail = Cause.pretty(failure.cause)
+  } catch {
+    detail = "[Unprintable video failure]"
+  }
+  if (preset === "strict") {
+    detail = detail.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/g, (url) => Spans.redactUrl(url, preset))
+  }
+  return {
+    type: "console",
+    time: Recordings.millis(failure.at),
+    pageId: failure.page,
+    messageType: "error",
+    text: `Native video for page ${failure.page} failed during ${failure.stage}:\n${detail}`,
+    location: { url: "", lineNumber: 0, columnNumber: 0 }
+  }
+}
+
+/** A snapshot of incomplete acquisition, not a terminal recording failure. */
+const pendingVideoEvent = (
+  page: Target.NavigableId,
+  at: MonotonicInstant.MonotonicInstant
+): Record<string, unknown> => ({
+  type: "console",
+  time: Recordings.millis(at),
+  pageId: page,
+  messageType: "error",
+  text: `Native video for page ${page}: acquisition is still pending at export; no video is available in this export.`,
+  location: { url: "", lineNumber: 0, columnNumber: 0 }
+})
 
 interface Frame {
   readonly page: Target.NavigableId
@@ -315,6 +358,23 @@ export const start = Effect.fnUntraced(function*(
   const exceptions: Array<UncaughtException.UncaughtException> = []
   const snapshots: Array<Snapshot> = []
   const videos: Array<Video> = []
+  const pendingVideos = new Set<Target.NavigableId>()
+  const videoFailures: Array<VideoFailure> = []
+  const retainVideoFailure = (failure: VideoFailure) => Effect.sync(() => void videoFailures.push(failure))
+  const observeVideo = <A, E, R>(
+    page: Target.NavigableId,
+    stage: VideoFailure["stage"],
+    effect: Effect.Effect<A, E, R>
+  ) =>
+    effect.pipe(
+      Effect.map(Option.some),
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause)
+          // Preserve cancellation rather than turning an interrupted export into a successful archive.
+          ? Effect.failCause(cause as Cause.Cause<never>)
+          : retainVideoFailure({ page, stage, at: Adapter.now(), cause }).pipe(Effect.as(Option.none<A>()))
+      )
+    )
   // The recording's captures in each document are one stream, numbered apart from any other recording's
   const stream = `trace-${crypto.randomUUID()}`
   const failedCaptures = new Set<Target.DocumentId>()
@@ -457,15 +517,29 @@ export const start = Effect.fnUntraced(function*(
     const seen = new Set<Target.NavigableId>()
     const record = Effect.fnUntraced(function*(page: Model.PageEntry) {
       const scope = yield* Scope.fork(own)
-      const recording = yield* Capabilities.acquire(runtime, page, Capability.Video).pipe(
-        Scope.provide(scope),
-        Effect.onError(() => Scope.close(scope, Exit.void))
+      const recording = yield* observeVideo(
+        page.id,
+        "acquisition",
+        Capabilities.acquire(runtime, page, Capability.Video).pipe(
+          Scope.provide(scope),
+          Effect.onError(() => Scope.close(scope, Exit.void))
+        )
       )
-      videos.push({ page: page.id, at: Adapter.now(), scope, recording, read: Option.none() })
+      if (Option.isSome(recording)) {
+        videos.push({
+          page: page.id,
+          at: Adapter.now(),
+          scope,
+          recording: recording.value,
+          finished: false,
+          read: Option.none()
+        })
+        pendingVideos.delete(page.id)
+      }
     })
     const cast = (page: Model.PageEntry) =>
       video
-        ? record(page)
+        ? record(page).pipe(Effect.ensuring(Effect.sync(() => void pendingVideos.delete(page.id))))
         : screencast === "native"
         ? Capabilities.acquire(runtime, page, Capability.Screencast).pipe(
           Effect.flatMap((control) =>
@@ -503,6 +577,7 @@ export const start = Effect.fnUntraced(function*(
       Effect.suspend(() => {
         if (seen.has(page.id)) return Effect.void
         seen.add(page.id)
+        if (video) pendingVideos.add(page.id)
         return cast(page).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own), Effect.asVoid)
       })
     if (target._tag === "Page") yield* follow(target.entry)
@@ -531,6 +606,9 @@ export const start = Effect.fnUntraced(function*(
   const exportTrace = Effect.fnUntraced(function*(path: FilePath.Local | string) {
     const preset = yield* Diagnostics.CurrentPreset
     const exported = Adapter.now()
+    // Snapshot acquisition before yielding: an acquisition settling during export belongs to the next export.
+    const pendingAtExport = new Set(pendingVideos)
+    const videosAtExport = videos.slice()
     const info = runtime.model.adapter.info
     const events: Array<{ readonly time: number; readonly event: Record<string, unknown> }> = []
     // A caller's span spans the operations recorded inside it
@@ -705,14 +783,27 @@ export const start = Effect.fnUntraced(function*(
       }
     }
     // Videos end here, the first time, and their files are read
-    for (const video of videos) {
-      if (Option.isNone(video.read)) {
-        yield* Scope.close(video.scope, Exit.void)
-        const file = yield* video.recording.file.pipe(Effect.option)
-        const bytes = Option.isSome(file) && Option.isSome(runtime.fileSystem)
-          ? yield* runtime.fileSystem.value.readFile(file.value).pipe(Effect.option)
-          : Option.none<Uint8Array>()
-        if (Option.isSome(bytes)) video.read = Option.some({ bytes: bytes.value, ...webmSize(bytes.value) })
+    for (const video of videosAtExport) {
+      if (!video.finished) {
+        const file = yield* observeVideo(
+          video.page,
+          "stop",
+          Scope.close(video.scope, Exit.void).pipe(
+            Effect.andThen(video.recording.file)
+          )
+        )
+        if (Option.isSome(file)) {
+          const bytes = yield* observeVideo(
+            video.page,
+            "file-read",
+            Option.match(runtime.fileSystem, {
+              onNone: () => Effect.die(new Error("The browser's layer was built without Effect's FileSystem")),
+              onSome: (fs) => fs.readFile(file.value)
+            })
+          )
+          if (Option.isSome(bytes)) video.read = Option.some({ bytes: bytes.value, ...webmSize(bytes.value) })
+        }
+        video.finished = true
       }
       if (Option.isNone(video.read)) continue
       const read = video.read.value
@@ -729,6 +820,14 @@ export const start = Effect.fnUntraced(function*(
           timestamp: Recordings.millis(video.at)
         }
       })
+    }
+    for (const page of pendingAtExport) {
+      const pendingEvent = pendingVideoEvent(page, exported)
+      events.push({ time: exported, event: pendingEvent })
+    }
+    for (const failure of videoFailures) {
+      if (failure.stage === "acquisition" && pendingAtExport.has(failure.page)) continue
+      events.push({ time: failure.at, event: videoFailureEvent(failure, preset) })
     }
     events.sort((a, b) => a.time - b.time)
     const header = {

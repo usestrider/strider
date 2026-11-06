@@ -6,7 +6,8 @@ export const instrument = (source: string, id: string) => {
   const file = id.split("?")[0]!
   const transport = file.endsWith("/src/protocol/Transport.ts")
   const inspector = file.endsWith("/src/internal/webkitInspectorSocket.ts")
-  if (!transport && !inspector) return
+  const trace = file.endsWith("/src/internal/trace.ts")
+  if (!transport && !inspector && !trace) return
   const replace = (from: string, to: string, count: number) => {
     if (source.split(from).length - 1 !== count) {
       throw new Error(`Failure trace instrumentation no longer matches ${file}: ${from}`)
@@ -15,6 +16,25 @@ export const instrument = (source: string, id: string) => {
   }
   const helper = path.join(import.meta.dirname, "failureTrace.ts")
   source = `import { connection as __failureConnection } from ${JSON.stringify(helper)};${source}`
+  if (trace) {
+    replace(
+      "const videoFailures: Array<VideoFailure> = []",
+      "const videoFailures: Array<VideoFailure> = []; const __nativeVideoTrace = __failureConnection(\"native-video\")",
+      1
+    )
+    replace(
+      "videoFailures.push(failure)",
+      "(__nativeVideoTrace(\"native-video-failure\", videoFailureEvent(failure, \"strict\")), videoFailures.push(failure))",
+      1
+    )
+  }
+  if (trace) {
+    replace(
+      "const pendingEvent = pendingVideoEvent(page, exported)",
+      "const pendingEvent = pendingVideoEvent(page, exported); __nativeVideoTrace(\"native-video-pending\", pendingEvent)",
+      1
+    )
+  }
   if (transport || inspector) {
     replace(
       "const link = yield* Link.make",

@@ -312,3 +312,34 @@ describe("run-time skip bookkeeping", () => {
     for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
+
+describe("native video failure artifacts", () => {
+  it("retains the page, stage and underlying error in the actual failed-test file", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "video.fixture.ts"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8"
+    })
+    expect(run.status).toBe(1)
+    const paths = [...run.stderr.matchAll(/Integration failure trace: (.+video\.fixture\.ts.+-test\.ndjson)/g)]
+    expect(paths.length).toBeGreaterThan(0)
+    const content = paths.map((match) => fs.readFileSync(match[1]!, "utf8")).join("\n")
+    expect(content).toContain("native-video-failure")
+    expect(content).toContain("native-video-pending")
+    expect(content).toContain("acquisition is still pending at export")
+    expect(content).toContain("video-page")
+    expect(content).toContain("acquisition")
+    expect(content).toContain("ACQUISITION_REASON")
+    expect(content).toContain("STOP_REASON")
+    expect(content).toContain("READ_REASON")
+    expect(content).not.toContain("token=secret")
+    expect(content).not.toContain("user:pass")
+  })
+})
