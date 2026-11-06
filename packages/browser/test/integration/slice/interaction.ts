@@ -1764,6 +1764,50 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const selector of ["#radio", "#label", "#descendant"]) {
+        for (const checked of [true, false]) {
+          it.effect(
+            `native radio uncheck ${selector} initially checked ${checked} delivers no click`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<input id="radio" type="radio" ${
+                    checked ? "checked" : ""
+                  }><label id="label" for="radio"><span id="descendant">Choice</span></label><p id="clicks">0</p><script>document.addEventListener("click", () => document.getElementById("clicks").textContent = String(Number(document.getElementById("clicks").textContent) + 1))</script>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator(selector).uncheck().pipe(Effect.exit)
+                  assert.strictEqual(yield* page.locator("#radio").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#clicks").readText, "0")
+                  if (checked) assert.strictEqual(result._tag, "Failure")
+                  else yield* result
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect(
+        "native radio uncheck control allows a page-managed ARIA radio to uncheck",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="radio" role="radio" aria-checked="true" onclick="this.setAttribute('aria-checked', 'false'); document.getElementById('clicks').textContent = '1'">Choice</div><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#radio").uncheck()
+              assert.isFalse(yield* page.locator("#radio").isChecked)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+            }))
+          }),
+        timeout
+      )
+
       for (const checked of [true, false]) {
         for (const association of ["explicit", "wrapping"] as const) {
           for (
