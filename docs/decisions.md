@@ -1260,3 +1260,13 @@ gesture. In enclosing records, an overlap consisting only of guarded child sends
 evidence, so the evidence from before that overlap survives. A completed or unanswered unrelated write in the
 overlap still takes precedence. Rejected: forwarding a child's cancellation as replacement of an enclosing
 operation's prior evidence, which could claim safe retry after an earlier write had reached the browser.
+
+
+Generic expectations classify observations from the exact library-produced `page.url` Watchable and `page.title`
+effect by source identity, including each fresh title getter and library access guards. Both watching and polling
+attach this metadata to the failure when it is created; it follows rethrows of that same object, and each trace
+export applies its chosen diagnostics preset. Dedicated matchers retain their expected-value redaction; generic
+condition descriptions remain user-authored text. User transformations, including `Watchable.map` and `Effect.map`,
+and reconstructed failures do not inherit source classification, because arbitrary transformations can change both
+type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
+and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.

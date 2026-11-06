@@ -195,16 +195,19 @@ const observedText = (value: unknown): string => {
 /** Keep the evidence in the message: existing trace viewers display only name and message. */
 const expectationMessage = (error: Expect.ExpectationFailed, preset: Diagnostics.Preset): string => {
   const kind = ExpectImpl.evidenceKind(error)
-  const url = kind === "URL"
+  const url = kind === "URL" || kind === "SourceURL"
   // Form values are classified typed text in both presets; titles are hidden only under strict.
-  const hidden = kind === "Value" || kind === "Title" && preset === "strict"
+  const hidden = kind === "Value" || (kind === "Title" || kind === "SourceTitle") && preset === "strict"
   const valueText = (value: unknown) =>
     hidden
       ? "REDACTED"
       : observedText(url && typeof value === "string" ? Spans.redactUrl(value, preset) : value)
   let condition = error.condition
-  if (hidden) condition = kind === "Value" ? "to have the value REDACTED" : "to have the title REDACTED"
-  else if (url && preset === "strict") {
+  if (hidden && kind !== "SourceTitle") {
+    condition = kind === "Value"
+      ? "to have the value REDACTED"
+      : "to have the title REDACTED"
+  } else if (kind === "URL" && preset === "strict") {
     // String matchers are JSON-quoted by the expectation. A regexp isn't a URL and can't be safely parsed.
     let expected = "REDACTED"
     try {

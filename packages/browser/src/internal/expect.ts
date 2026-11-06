@@ -21,6 +21,7 @@ import * as AriaPatterns from "./ariaPattern.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as ConditionImpl from "./condition.ts"
 import type * as Engine from "./engine.ts"
+import * as Sources from "./expectSource.ts"
 import * as Handles from "./handles.ts"
 import type { LocatorImpl } from "./locator.ts"
 import type * as Model from "./model.ts"
@@ -38,12 +39,16 @@ export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextM
     : { _tag: "RegExp", source: expected.source, flags: expected.flags }
 
 /** Export classification follows the failure's identity, including catches and rethrows outside its operation. */
-export type EvidenceKind = "URL" | "Title" | "Value" | "Other"
+export type EvidenceKind = "URL" | "Title" | "Value" | "Other" | "SourceURL" | "SourceTitle"
 
 const evidenceKinds = new WeakMap<Expect.ExpectationFailed, EvidenceKind>()
 
 /** First classification wins; recording an enclosing operation can never reclassify its failure. */
-export const classifyFailure = (error: Expect.ExpectationFailed, matcherName: string): Expect.ExpectationFailed => {
+export const classifyFailure = (
+  error: Expect.ExpectationFailed,
+  matcherName: string,
+  source?: object
+): Expect.ExpectationFailed => {
   if (!evidenceKinds.has(error)) {
     evidenceKinds.set(
       error,
@@ -53,7 +58,7 @@ export const classifyFailure = (error: Expect.ExpectationFailed, matcherName: st
         ? "Title"
         : matcherName === "toHaveValue"
         ? "Value"
-        : "Other"
+        : Sources.kind(source) ?? "Other"
     )
   }
   return error
@@ -72,7 +77,8 @@ const failure = (
   checks: number,
   triggers: ReadonlySet<"initial" | "change" | "interval">,
   explained: Explained = { nearest: Option.none(), suggestions: [] },
-  matcherName: string = "that"
+  matcherName: string = "that",
+  source?: object
 ) =>
   classifyFailure(
     new Expect.ExpectationFailed({
@@ -86,7 +92,8 @@ const failure = (
       suggestions: explained.suggestions,
       diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
     }),
-    matcherName
+    matcherName,
+    source
   )
 
 /** What a failed expectation says when nothing matched its locator. */
@@ -276,7 +283,7 @@ export const watching = <A>(
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
     return yield* Effect.fail(
-      failure(id, description, condition, started, history, checks, triggers, undefined, matcherName)
+      failure(id, description, condition, started, history, checks, triggers, undefined, matcherName, subject)
     )
   }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
@@ -296,7 +303,18 @@ export const polling = Operation.fn("Expect.that")(
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
     const failed = () =>
-      failure(id, "the subject", ConditionImpl.describe(condition), started, history, checks, triggers)
+      failure(
+        id,
+        "the subject",
+        ConditionImpl.describe(condition),
+        started,
+        history,
+        checks,
+        triggers,
+        undefined,
+        "that",
+        subject
+      )
     while (true) {
       checks++
       const checked = yield* Operation.under(subject, budget.at).pipe(
