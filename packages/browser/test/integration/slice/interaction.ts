@@ -1295,6 +1295,46 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const change of ["replace", "detach", "hide", "inert"] as const) {
+        it.effect(
+          `rechecks a top-level design-mode target when blur handlers ${change} it`,
+          () =>
+            Effect.gen(function*() {
+              const mutation = change === "replace"
+                ? "target.outerHTML = \"<p id=target>replacement</p>\""
+                : change === "detach"
+                ? "target.remove()"
+                : change === "hide"
+                ? "target.style.display = \"none\""
+                : "target.inert = true"
+              const { url } = yield* fixture(() =>
+                `<input id="other"><p id="target">old</p><script>
+              document.designMode = "on";
+              other.onblur = () => { ${mutation}; document.body.dataset.blurred = "yes" };
+              </script>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* page.locator("#other").fill("other")
+                if (change === "replace") {
+                  yield* page.locator("#target").fill("new")
+                  assert.strictEqual(yield* page.locator("#target").readText, "new")
+                } else {
+                  const error = yield* page.locator("#target").fill("new").pipe(
+                    Deadline.within("1 second"),
+                    Effect.flip
+                  )
+                  assert(Deadline.isTimeout(error), String(error))
+                }
+                assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.blurred), "yes")
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture((origin) =>
