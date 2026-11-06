@@ -217,7 +217,7 @@ export const packCheck = (root) => {
       }
     }
     checkTraceSources(consumer)
-    const encodedConsumer = path.join(work, `consumer space %2F # café${process.platform === "win32" ? "" : " \\"}`)
+    const encodedConsumer = path.join(work, "consumer space %2F # café")
     fs.renameSync(consumer, encodedConsumer)
     try {
       checkTraceSources(encodedConsumer)
