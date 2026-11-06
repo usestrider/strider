@@ -39,6 +39,7 @@ import * as Automation from "../webkit-automation-protocol/Automation.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Link from "./link.ts"
+import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
@@ -182,9 +183,17 @@ const scopeClosed = () => new Transport.ConnectionLost({ initiator: "local", des
 
 // ── The launcher ──────────────────────────────────────────────────────────────────────────────────────────
 
+const startupStages = {
+  spawned: "spawned",
+  listener: "listener verified",
+  connected: "connected",
+  inspector: "inspector established"
+} as const
+
 /** One bounded record per process; each port attempt replaces the preceding attempt's stages. */
 class Startup {
   readonly began = BrowserClock.now()
+  attempt = 0
   port: number | undefined
   pid: number | undefined
   spawned: number | undefined
@@ -192,7 +201,14 @@ class Startup {
   connected: number | undefined
   inspector: number | undefined
 
+  readonly operation: Operation.Record | undefined
+
+  constructor(operation: Operation.Record | undefined) {
+    this.operation = operation
+  }
+
   reset(port: number): void {
+    this.attempt++
     this.port = port
     this.pid =
       this.spawned =
@@ -200,6 +216,20 @@ class Startup {
       this.connected =
       this.inspector =
         undefined
+  }
+
+  /** One observation per completed stage, with immutable attribution even when another port is tried. */
+  mark(stage: keyof typeof startupStages): void {
+    if (this[stage] !== undefined) return
+    const at = this[stage] = BrowserClock.now()
+    this.operation?.observe({
+      _tag: "WebKitStartup",
+      stage: startupStages[stage],
+      attempt: this.attempt,
+      port: this.port,
+      pid: this.pid,
+      elapsedMillis: (at - this.began) / 1e6
+    })
   }
 
   failure(error: Launch.LaunchError): Launch.LaunchError {
@@ -275,7 +305,7 @@ const spawnProcess = Effect.fnUntraced(function*(
         }
       }).pipe(Scope.provide(own))
       startup.pid = Number(launched.handle.pid)
-      startup.spawned = BrowserClock.now()
+      startup.mark("spawned")
       let unavailable: string | undefined
       const listener = inspectorListener(Number(launched.handle.pid), port).pipe(
         Effect.tapError((error) =>
@@ -291,11 +321,11 @@ const spawnProcess = Effect.fnUntraced(function*(
         Effect.gen(function*() {
           const inode = yield* listener
           if (inode === undefined) return yield* Effect.fail(new ListenerPending())
-          if (startup.listener === undefined) startup.listener = BrowserClock.now()
+          startup.mark("listener")
           const connecting = yield* Scope.fork(own)
           return yield* Effect.gen(function*() {
             const connection = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(connecting))
-            if (startup.connected === undefined) startup.connected = BrowserClock.now()
+            startup.mark("connected")
             const after = yield* listener
             if (after === undefined) {
               unavailable =
@@ -406,7 +436,7 @@ const startProcess = Effect.fnUntraced(function*(
     )
   const { connection, launched } = yield* spawnProcess(settings, index, options, deadline, startup)
   const socket = yield* InspectorSocket.connect(connection)
-  startup.inspector = BrowserClock.now()
+  startup.mark("inspector")
   const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
   const automationReady = yield* Deferred.make<bigint>()
   const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
@@ -586,7 +616,7 @@ export const start: (
   const launch = Effect.fnUntraced(function*(options: ProcessOptions, key?: string) {
     const index = next++
     const own = yield* Scope.fork(scope)
-    const startup = new Startup()
+    const startup = new Startup(Option.getOrUndefined(yield* Operation.current))
     const started = yield* startProcess(settings, key ?? `context-${index}`, index, options, pages, startup).pipe(
       Effect.mapError((error) => startup.failure(error)),
       Scope.provide(own),

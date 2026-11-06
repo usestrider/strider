@@ -813,16 +813,15 @@ describe("WebKit launcher", () => {
                 let caller: Operation.Record | undefined
                 let detached: Operation.Record | undefined
                 const adapter = BoundedAdapter.make({
-                  createUserContext: () =>
-                    Effect.gen(function*() {
-                      detached = Option.getOrUndefined(yield* Operation.current)
-                      return yield* start.pipe(Effect.scoped, Effect.as("created" as UserContext.Id))
-                    }).pipe(Effect.ensuring(Deferred.succeed(finished, undefined))),
+                  createUserContext: Effect.fnUntraced(function*() {
+                    detached = Option.getOrUndefined(yield* Operation.current)
+                    return yield* start.pipe(Effect.scoped, Effect.as("created" as UserContext.Id))
+                  }, Effect.ensuring(Deferred.succeed(finished, undefined))),
                   removeUserContext: () => Effect.die("A failed creation must not release a context that doesn't exist")
                 } as unknown as Adapter.AdapterConnection)
                 const exit = yield* Effect.gen(function*() {
                   caller = yield* Operation.record
-                  return yield* adapter.createUserContext({})
+                  return yield* adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false })
                 }).pipe(Operation.named("Browser.newPage"), Deadline.within("100 millis"), Effect.exit)
                 // The detached creation keeps its original launch deadline and owns cleanup after the caller leaves.
                 const endedWithCaller = yield* Deferred.isDone(finished)
@@ -858,7 +857,7 @@ describe("WebKit launcher", () => {
                 return timeout
               })
           )
-          assert(result.exit._tag === "Success")
+          yield* result.exit
           assert.deepStrictEqual(result.stopped, [0])
           assert.deepStrictEqual(result.closed, result.connected)
         }))
