@@ -1176,11 +1176,19 @@ and restarting the native stream for an idle join, which disrupts existing consu
 `VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
 the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
 Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
-PATH. The video consumer paces the latest image at 25fps on the browser clock through idle periods; the writer scales
-and pads to the initial dimensions. Its file lives in the context's downloads directory. Scope closure stops the
-source, ends input, and allows five seconds on the browser clock to finish; a failed or unfinished writer fails
+PATH. The video consumer paces the latest image at 25fps on the browser clock through idle periods. Strider fixes
+the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
+scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
+that policy, pacing, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
+inputs to verify output dimensions and padding. Its file lives in the context's downloads directory. Scope closure
+or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
+even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+retain their errors. A failed or unfinished writer fails
 `file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
 capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
 whole file-writing service `VideoEncoder`, which clashes with the DOM's WebCodecs name; and baking ffmpeg into
 the adapter, which would prevent later WebCodecs, key-frame and PNG/polled-source implementations from using
-the same boundary.
+the same boundary. In-browser preparation is rejected: even an isolated world shares the page's renderer main
+thread, so base64 transfers, decoding, canvas drawing and re-encoding at 25fps compete with the page under test;
+navigation destroys the realm and JPEG re-encoding loses quality. Core fitting in Node would require an additional
+codec dependency; no implicit external image tool is introduced.

@@ -2,9 +2,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, layer } from "@effect/vitest"
 import { VideoWriter } from "@usestrider/browser"
-import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Stream from "effect/Stream"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
@@ -45,32 +45,63 @@ export const writerConformance = (
   writer: Layer.Layer<VideoWriter.VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
-    it.effect(`${name} writer conformance: fits changing odd sizes with centred black padding`, () =>
-      Effect.gen(function*() {
-        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-conformance-"))
-        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-        const encoder = yield* VideoWriter.VideoWriter
-        const file = yield* encoder.write(Stream.make(
-          { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
-          { at: 40e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) }
-        ), { path: path.join(directory, "conformance.webm"), width: 321, height: 243 })
-        const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
-          "-v", "error", "-show_frames", "-of", "json", file
-        ], { encoding: "utf8" }))
-        assert.strictEqual(probe.frames.length, 2)
-        for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
-        const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
-          "-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
-        ], { maxBuffer: 2_000_000 })
-        const frameBytes = 321 * 243 * 3
-        assert.strictEqual(pixels.length, frameBytes * 2)
-        assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
-        assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
-        for (const x of [40, 280]) {
-          for (let channel = 0; channel < 3; channel++) {
-            assert.isBelow(pixels[frameBytes + (121 * 321 + x) * 3 + channel]!, 20, "padding is centred and black")
+    it.effect(
+      `${name} writer conformance: fits changing odd sizes with centred black padding`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-conformance-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const file = yield* encoder.write(
+            Stream.make(
+              { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
+              { at: 40e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
+              { at: 80e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
+            ),
+            { path: path.join(directory, "conformance.webm"), width: 321, height: 243 }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          assert.strictEqual(probe.frames.length, 3)
+          for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
+          const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+            "-v",
+            "error",
+            "-i",
+            file,
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1"
+          ], { maxBuffer: 2_000_000 })
+          const frameBytes = 321 * 243 * 3
+          assert.strictEqual(pixels.length, frameBytes * 3)
+          assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
+          assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
+          assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + 160) * 3 + 1]!, 200, "wide third frame is scaled green")
+          for (const y of [20, 220]) {
+            for (let channel = 0; channel < 3; channel++) {
+              assert.isBelow(
+                pixels[frameBytes * 2 + (y * 321 + 160) * 3 + channel]!,
+                20,
+                "scaled image has centred black padding"
+              )
+            }
           }
-        }
-      }), 60_000)
+          for (const x of [40, 280]) {
+            for (let channel = 0; channel < 3; channel++) {
+              assert.isBelow(pixels[frameBytes + (121 * 321 + x) * 3 + channel]!, 20, "padding is centred and black")
+            }
+          }
+        }),
+      60_000
+    )
   })
 }

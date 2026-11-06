@@ -140,7 +140,7 @@ export interface ScreencastControl {
  */
 export interface VideoRecording {
   /**
-   * The finished file after the recording scope closes. A writer failure fails this effect with `BackendFailure`.
+   * The finished file when recording ends. A writer failure fails this effect with `BackendFailure`.
    */
   readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone | Deadline.Timeout>
 }
@@ -180,10 +180,11 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * **Details**
  *
  * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Both write into
- * the context's downloads directory until the capability's scope closes. Temporary downloads are removed with
+ * the context's downloads directory until recording ends. Temporary downloads are removed with
  * the context; set `UserContext.Options.downloads` to keep the file in a directory of yours.
  * Chromium records at 25fps, holding the latest frame while idle and scaling and padding viewport changes to
- * the initial size. Closing its scope waits up to five seconds on the browser clock for the writer.
+ * the initial size. Closing its scope or ending its page/session closes input and waits up to five seconds on the
+ * browser clock for a started writer. A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**
  *

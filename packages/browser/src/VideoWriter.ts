@@ -42,7 +42,8 @@ export const Frame = Schema.Struct({
 export type Frame = typeof Frame.Type
 
 /**
- * The destination and fixed output size. Writers scale images to fit and pad unused space with black.
+ * The destination and fixed output size. Writers must output every frame at exactly these dimensions,
+ * scaling to fit, centring and padding with black.
  *
  * @stability unstable
  * @category schemas
