@@ -1011,6 +1011,33 @@ describe("WebKit launcher", () => {
 })
 
 describe("Core dumps", () => {
+  // Procfs can be empty during exec; require the waiting executable's complete argv[0].
+  const hasExeced = (line: string) => line.startsWith(`${process.execPath}\0`)
+
+  it("does not accept an empty command line during exec as readiness to inspect core limits", () => {
+    // Observed on a live spawned PID with its inherited unlimited core limit, before the shell lowered it.
+    assert.isFalse(hasExeced(""))
+  })
+
+  it("distinguishes the shell from the waiting executable when their command lines are populated", () => {
+    assert.isFalse(hasExeced("/bin/sh\0-c\0ulimit -c 0; exec \"$@\"\0"))
+    assert.isTrue(hasExeced(`${process.execPath}\0-e\0setTimeout(() => {}, 60000)\0`))
+  })
+
+  it("rejects unrelated executables and misleading command-line prefixes", () => {
+    for (
+      const line of [
+        "/usr/bin/sleep\0--help\0",
+        `/bin/sh\0-c\0exec ${process.execPath}\0`,
+        `${process.execPath}-other\0-e\0setTimeout(() => {}, 60000)\0`,
+        `${process.execPath}/other\0`,
+        process.execPath
+      ]
+    ) {
+      assert.isFalse(hasExeced(line), JSON.stringify(line))
+    }
+  })
+
   it("starts a browser through sh, with the executable and its arguments as parameters, unless dumps are on", () => {
     assert.deepStrictEqual(Launch.command("/opt/b rowser", ["--a", "$(x)"], true), ["/opt/b rowser", ["--a", "$(x)"]])
     assert.deepStrictEqual(Launch.command("/opt/browser", ["--a", "; rm -rf /"], false, "linux"), [
@@ -1035,9 +1062,9 @@ describe("Core dumps", () => {
         coreDumps
       })
       const pid = String(launched.handle.pid)
-      // Until the shell has exec'd, the process is the shell: its command line says so
+      // Wait for the target's argv[0] before inspecting limits, including across empty reads during exec.
       yield* Effect.promise(() => readFile(`/proc/${pid}/cmdline`, "utf8")).pipe(
-        Effect.filterOrFail((line) => !line.startsWith("/bin/sh")),
+        Effect.filterOrFail(hasExeced),
         Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 500 })
       )
       return { launched, pid }
