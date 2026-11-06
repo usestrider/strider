@@ -1854,7 +1854,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
-        let response = ready(element, action, request.apply, scrolled, point)
+        let response = ready(element, action, request.apply, scrolled, point, checks)
         if (response._tag === "Retry") {
           reason = response.reason
         } else {
@@ -1894,7 +1894,8 @@ export function engine(render: (root: SnapNode) => string) {
     action: Action,
     apply: boolean,
     scrolled: boolean,
-    point: { x: number; y: number } | null
+    point: { x: number; y: number } | null,
+    checks: Checks
   ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
@@ -1936,8 +1937,8 @@ export function engine(render: (root: SnapNode) => string) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
-          if (!enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
-          if (readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
+          if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
+          if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
             if (invalidNumberFill(element, action.value)) {
