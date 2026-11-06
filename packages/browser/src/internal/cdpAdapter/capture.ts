@@ -552,13 +552,16 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   return deliveries.pipe(Stream.mapEffect(({ frame, take }) => Effect.as(take, frame)))
 })
 
-/** Anchor each native stream to local receipt time; only differences use the browser's clock. */
+/** Anchor each native stream to local receipt time and cap browser-clock deltas at receipt. */
 export const makeScreencastClock = () => {
   let origin: { readonly seconds: number; readonly received: number } | undefined
   return (seconds: number | undefined, received: number): Adapter.ScreencastFrame["at"] => {
     if (seconds === undefined) return received as Adapter.ScreencastFrame["at"]
     origin ??= { seconds, received }
-    return (origin.received + Math.round((seconds - origin.seconds) * 1e9)) as Adapter.ScreencastFrame["at"]
+    return Math.min(
+      received,
+      origin.received + Math.round((seconds - origin.seconds) * 1e9)
+    ) as Adapter.ScreencastFrame["at"]
   }
 }
 

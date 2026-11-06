@@ -22,7 +22,9 @@ import * as Reason from "./Reason.ts"
 /**
  * An image at a timestamp in nanoseconds relative to the recording start. Each image is shown until the next
  * timestamp; the final image repeats the last picture at the recording end time. Timestamps never decrease:
- * a source time before its predecessor is held at the preceding timestamp.
+ * a source time before its predecessor is held at the preceding timestamp. Chromium maps browser
+ * timestamps from a local receipt anchor and caps them at receipt time. Decreasing delivery latency
+ * can shorten source intervals; backward clock jumps can flatten them until source time catches up.
  *
  * @stability unstable
  * @category schemas
