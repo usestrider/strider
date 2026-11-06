@@ -1086,6 +1086,108 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // Focus can remove editability after the initial actionability check.
+      for (const changesType of [false, true]) {
+        for (const property of ["readOnly", "disabled"] as const) {
+          for (const restores of changesType ? [false] : [false, true]) {
+            it.effect(
+              `focus-time ${property}: ${
+                restores ? "waits until editability returns" : "times out without writing or input/change events"
+              }${changesType ? " after switching to text" : ""}`,
+              () =>
+                Effect.gen(function*() {
+                  const { url } = yield* fixture(() =>
+                    `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; ${
+                      changesType ? "this.type = 'text';" : ""
+                    } this.${property} = true; events.textContent += 'focus;'; ${
+                      restores
+                        ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
+                        : ""
+                    }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const result = yield* page.locator("#field").fill("2020-03-03").pipe(
+                      Deadline.within("1 second"),
+                      Effect.result
+                    )
+                    const events = yield* page.locator("#events").readText
+                    const value = yield* page.locator("#field").readValue
+                    // Stock WebKit can leave date inputs unfocused. This branch covers only that path.
+                    if (name === "WebKit" && !events.startsWith("focus;")) {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "input;change;"
+                      })
+                      return
+                    }
+                    assert.isTrue(events.startsWith("focus;"), "the focus handler ran")
+                    if (restores) {
+                      assert.deepStrictEqual({
+                        result: result._tag,
+                        value,
+                        events,
+                        before: yield* page.locator("#before").readText
+                      }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "focus;editable;input;change;",
+                        before: "2020-03-02|focus;"
+                      })
+                    } else {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Failure",
+                        value: "2020-03-02",
+                        events: "focus;"
+                      })
+                      assert(result._tag === "Failure")
+                      assert(Deadline.isTimeout(result.failure), String(result.failure))
+                      assert(result.failure.history.some((entry) =>
+                        (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
+                      ))
+                    }
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      // Turning a check off skips it after focus too.
+      for (
+        const [property, attribute, check] of [["readOnly", "readonly", "editable"], [
+          "disabled",
+          "disabled",
+          "enabled"
+        ]] as const
+      ) {
+        it.effect(
+          `focus-time ${property}: ${check} check turned off writes the date input`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="date" tabindex="0" value="2020-03-02" ${attribute} onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill("2020-03-03", { checks: { [check]: false } }).pipe(
+                  Deadline.within("1 second"),
+                  Effect.result
+                )
+                assert.deepStrictEqual({
+                  result: result._tag,
+                  value: yield* page.locator("#field").readValue
+                }, { result: "Success", value: "2020-03-03" })
+              }))
+            }),
+          timeout
+        )
+      }
+
       for (const type of ["range", "file", "checkbox"] as const) {
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
@@ -1158,6 +1260,60 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url)
             yield* page.locator("#field").fill("2020-03-03")
             assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
+          }))
+        }), timeout)
+
+      for (
+        const [label, value] of [
+          ["number", 123],
+          ["null", null],
+          ["undefined", undefined],
+          ["boolean", true],
+          ["object", {}],
+          ["array", ["private-caller-value"]],
+          ["Redacted number", Redacted.make(123)],
+          ["Redacted null", Redacted.make(null)],
+          ["Redacted object", Redacted.make({ secret: "private-caller-value" })],
+          ["Redacted array", Redacted.make(["private-caller-value"])]
+        ] as const
+      ) {
+        it.effect(`pressSequentially rejects ${label} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" value="old" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              const result = yield* Effect.suspend(() => field.pressSequentially(value as unknown as string)).pipe(
+                Effect.exit
+              )
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert.deepStrictEqual({
+                value: yield* field.readValue,
+                events: yield* page.locator("#events").readText,
+                reason: Option.isSome(error) && Locator.isLocatorError(error.value)
+                  ? error.value.reason._tag
+                  : result._tag
+              }, { value: "old", events: "", reason: "InvalidInput" })
+              assert.notInclude(JSON.stringify(result), "private-caller-value")
+            }))
+          }), timeout)
+      }
+
+      it.effect("pressSequentially preserves strings and Redacted strings", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            for (const value of ["123", Redacted.make("abc"), "", Redacted.make("")]) {
+              yield* field.clear()
+              yield* field.pressSequentially(value)
+              assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
+            }
           }))
         }), timeout)
 

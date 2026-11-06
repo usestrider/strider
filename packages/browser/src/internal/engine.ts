@@ -1870,28 +1870,32 @@ export function engine(render: (root: SnapNode) => string) {
             continue
           }
         }
-        let response = ready(element, action, request.apply, scrolled, point)
-        if (
-          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-          checks.receivesPointer && request.clip !== undefined && points.length > 1
-        ) {
-          response = { ...response, candidates: points }
-        }
-        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-          const captured = {
-            token: `${generation}:${++stabilitySequence}`,
-            element,
-            rect: rects[rects.length - 1]!,
-            frames: checks.stable
+        let response = ready(element, action, request.apply, scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
           }
-          stability = captured
-          const token = captured.token
-          onFrame(() => {
-            if (stability?.token === token) stability = null
-          })
-          return { ...response, stability: captured.token }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: rects[rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
         }
-        return response
       }
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
@@ -1906,8 +1910,9 @@ export function engine(render: (root: SnapNode) => string) {
     action: Action,
     apply: boolean,
     scrolled: boolean,
-    point: { x: number; y: number } | null
-  ): Response => {
+    point: { x: number; y: number } | null,
+    checks: Checks
+  ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1948,6 +1953,8 @@ export function engine(render: (root: SnapNode) => string) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
+          if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
+          if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
             if (invalidNumberFill(element, action.value)) {

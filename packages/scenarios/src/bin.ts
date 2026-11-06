@@ -8,11 +8,15 @@
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
- * in `.data/scenarios/`, and a run without them fails, saying to record them.
+ * in `.data/scenarios/`, and a run without them fails, saying to record them. A Strider program visits its site as
+ * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
+ * its own.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Browser, Expect, Route } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
+import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
@@ -23,6 +27,7 @@ import * as path from "node:path"
 import { chromium } from "playwright-core"
 import type * as Playwright from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
+import { replaying } from "./replay.ts"
 import { type Measurements, report } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
@@ -129,13 +134,30 @@ const striderPids = browserPids()
 const browser = await chromium.launch({ executablePath })
 const playwrightPid = [...browserPids()].find((pid) => !striderPids.has(pid) && !before.has(pid))
 const playwrightArgs = descendants().find((proc) => proc.pid === playwrightPid)?.args ?? []
-const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>) => runtime.runPromise(Effect.scoped(effect))
+// A scenario that runs on Firefox, such as its video, gets the environment's Firefox, launched once it's needed
+let firefoxRuntime: ManagedRuntime.ManagedRuntime<Browser.Browser | NodeServices.NodeServices, unknown> | undefined
+const firefox = () =>
+  firefoxRuntime ??= ManagedRuntime.make(
+    Firefox.layer({ executablePath: process.env["STRIDER_FIREFOX"] ?? "" }).pipe(
+      Layer.provide(NodeSocket.layerWebSocketConstructor),
+      Layer.provideMerge(NodeServices.layer)
+    )
+  )
+const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox", recording?: string) =>
+  (on === "firefox" ? firefox() : runtime).runPromise(
+    Effect.scoped(recording === undefined ? effect : replaying(effect, files.recording(recording)))
+  )
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
+// A program writes its files beside it, as a reader's would, which here is into `.data/scenarios/`
+process.chdir(recordingsDirectory)
+
 const results = await runScenarios(chosen, runs, (scenario) => ({
-  strider: () => strider(scenario.strider(origin)),
-  playwright: () => scenario.playwright(browser, origin, files)
+  strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
+  playwright: scenario.playwright === undefined
+    ? undefined
+    : () => scenario.playwright!(browser, origin, files)
 }), log)
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
@@ -244,6 +266,7 @@ if (measured) {
 
 await browser.close()
 await runtime.dispose()
+await firefoxRuntime?.dispose()
 await site.close()
 fs.rmSync(temporary, { recursive: true, force: true })
 

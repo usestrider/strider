@@ -1259,6 +1259,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Accepts a string or a `Redacted` string; any other value fails with `InvalidInput` before contacting the browser.
    * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
    * errors.
    *
