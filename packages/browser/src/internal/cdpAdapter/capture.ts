@@ -269,6 +269,13 @@ const frameTree = (
     return root === undefined ? [] : convert(root)
   })
 
+/** A normal target/session end closes input; transport and model failures retain their original errors. */
+const normalSourceEnd = (error: Adapter.AdapterError): boolean => {
+  const reason = error.reason
+  return reason._tag === "Protocol" && reason.error.reason._tag === "SessionEnded" &&
+    reason.error.reason.why !== "connectionLost" && reason.error.reason.why !== "modelUnavailable"
+}
+
 interface Delivery {
   readonly frame: Adapter.ScreencastFrame
   readonly take: Effect.Effect<void>
@@ -281,6 +288,7 @@ interface ScreencastOwner {
   stopAtDispatch: number
 }
 interface ScreencastOwners {
+  readonly termination: Deferred.Deferred<void, Adapter.AdapterError>
   latest: Adapter.ScreencastFrame | undefined
   readonly active: Set<ScreencastOwner>
   /** Starts awaiting an outcome, including abandoned commands retained until reply or session end. */
@@ -309,6 +317,7 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
       )
       const owners: ScreencastOwners = {
+        termination: Deferred.makeUnsafe<void, Adapter.AdapterError>(),
         latest: undefined,
         active: new Set(),
         pending: new Set(),
@@ -360,8 +369,18 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
             yield* ack
           })
         ),
-        Effect.tapError((error) => Effect.forEach([...owners.active], (owner) => Queue.fail(owner.frames, error))),
+        Effect.tapError((error) =>
+          Effect.gen(function*() {
+            if (normalSourceEnd(error)) {
+              yield* Deferred.succeed(owners.termination, undefined)
+            } else {
+              yield* Deferred.fail(owners.termination, error)
+            }
+            yield* Effect.forEach([...owners.active], (owner) => Queue.fail(owner.frames, error))
+          })
+        ),
         Effect.ignore,
+        Effect.ensuring(Deferred.succeed(owners.termination, undefined)),
         Operation.detached,
         Effect.forkIn(state.cleanupScope)
       )
@@ -541,16 +560,20 @@ export const video = Effect.fnUntraced(
       { readonly frame: VideoWriter.Frame; readonly accept: Effect.Effect<void> },
       Cause.Done
     >(1)
-    const first = Deferred.makeUnsafe<Adapter.ScreencastFrame, Adapter.AdapterError>()
-    const ended = Deferred.makeUnsafe<void>()
+    const first = Deferred.makeUnsafe<Adapter.ScreencastFrame | undefined, Adapter.AdapterError>()
+    const ended = Deferred.makeUnsafe<void, Adapter.AdapterError>()
     const result = Deferred.makeUnsafe<string, Adapter.AdapterError>()
     const backendFailure = (hint: string) =>
       new Adapter.AdapterError({
         reason: new Reason.BackendFailure({ kind: "Rejected", method: "VideoWriter.write", hint })
       })
+    const end = Effect.sync(() => {
+      Deferred.doneUnsafe(first, Effect.succeed(undefined))
+      Deferred.doneUnsafe(ended, Effect.void)
+    })
     let latest: Delivery | undefined
     let accepted = Deferred.makeUnsafe<void>()
-    const consuming = yield* frames.pipe(
+    yield* frames.pipe(
       Stream.runForEach((delivery) =>
         Effect.gen(function*() {
           accepted = Deferred.makeUnsafe<void>()
@@ -560,17 +583,36 @@ export const video = Effect.fnUntraced(
         })
       ),
       Effect.catch((error) =>
-        Effect.gen(function*() {
-          yield* Deferred.fail(first, error)
-          yield* Deferred.fail(result, backendFailure(error.message))
-          yield* Deferred.succeed(ended, undefined)
-        })
+        normalSourceEnd(error)
+          ? end
+          : Effect.sync(() => {
+            Deferred.doneUnsafe(first, Effect.fail(error))
+            Deferred.doneUnsafe(ended, Effect.fail(error))
+          })
       ),
+      Effect.ensuring(end),
       Operation.detached,
       Effect.forkIn(sourceScope)
     )
+    // Observe the session separately: a blocked writer may prevent the frame consumer from pulling again.
+    const owners = yield* ownersOf(state, page.target.session)
+    yield* Deferred.await(owners.termination).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          Deferred.doneUnsafe(first, Effect.fail(error))
+          Deferred.doneUnsafe(ended, Effect.fail(error))
+        })
+      ),
+      Effect.andThen(end),
+      Effect.raceFirst(Deferred.await(result).pipe(Effect.ignore)),
+      Operation.detached,
+      Effect.forkIn(scope)
+    )
     const running = yield* Effect.gen(function*() {
       const initial = yield* Deferred.await(first)
+      if (initial === undefined) {
+        return yield* Effect.fail(backendFailure("The recording ended before receiving a frame; no writer was started"))
+      }
       const path = `${directory.value}/strider-${crypto.randomUUID()}.webm`
       const clock = yield* BrowserClock.CurrentClock
       const started = clock.now()
@@ -588,24 +630,36 @@ export const video = Effect.fnUntraced(
             accept: delivery.take.pipe(Effect.andThen(Deferred.succeed(taking, undefined)), Effect.asVoid)
           })
         }
-      }).pipe(Effect.raceFirst(Deferred.await(ended)), Effect.ensuring(Queue.end(input)), Effect.forkScoped)
+      }).pipe(
+        Effect.raceFirst(Deferred.await(ended)),
+        Effect.catch((error) => Deferred.fail(ended, error).pipe(Effect.asVoid)),
+        Effect.ensuring(Queue.end(input)),
+        Effect.forkScoped
+      )
       return yield* Effect.scoped(Effect.gen(function*() {
         yield* pacing
         return yield* writer.value.write(
           Stream.fromEffectRepeat(
-            Queue.take(input).pipe(
-              Effect.flatMap(({ frame, accept }) => Effect.as(accept, frame))
+            Queue.take(input).pipe(Effect.flatMap(({ frame, accept }) => Effect.as(accept, frame)))
+          ),
+          { path, width: initial.width, height: initial.height }
+        ).pipe(
+          Effect.mapError((error) => backendFailure(error.message)),
+          Effect.raceFirst(
+            Deferred.await(ended).pipe(
+              Effect.andThen(clock.sleep(5000)),
+              Effect.andThen(Effect.fail(backendFailure("The writer did not finish within 5 seconds")))
             )
           ),
-          {
-            path,
-            width: initial.width,
-            height: initial.height
-          }
+          Effect.tap(() =>
+            Effect.flatMap(
+              Deferred.poll(ended),
+              (termination) => Option.isSome(termination) ? termination.value : Effect.void
+            )
+          )
         )
       }))
     }).pipe(
-      Effect.mapError((error) => backendFailure(error.message)),
       Effect.ensuring(Scope.close(sourceScope, Exit.void)),
       Effect.exit,
       Effect.flatMap((exit) => Deferred.done(result, exit)),
@@ -615,19 +669,9 @@ export const video = Effect.fnUntraced(
     )
     yield* Effect.addFinalizer(() =>
       Effect.gen(function*() {
-        yield* Fiber.interrupt(consuming)
+        yield* end
         yield* Scope.close(sourceScope, Exit.void)
-        yield* Deferred.succeed(ended, undefined)
-        // A separate finish budget on the browser clock applies after the acquisition operation has ended.
-        yield* Fiber.await(running).pipe(
-          Effect.interruptible,
-          BrowserClock.timeoutOption(5000),
-          Effect.flatMap((finished) =>
-            Option.isSome(finished)
-              ? Effect.void
-              : Deferred.fail(result, backendFailure("The writer did not finish within 5 seconds")).pipe(Effect.asVoid)
-          )
-        )
+        yield* Fiber.await(running)
         yield* Scope.close(scope, Exit.void)
       }).pipe(Operation.detached)
     )
