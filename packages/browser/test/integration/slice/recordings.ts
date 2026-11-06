@@ -9,7 +9,9 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   Browser,
   Capability,
+  Deadline,
   Diagnostics,
+  Expect,
   Har,
   NetworkRequest,
   NetworkResponse,
@@ -134,6 +136,39 @@ interface HarEntry {
 export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} recordings`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "keeps password expectation values out of trace errors under both presets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<input type=\"password\" aria-label=\"Password\">"))
+            yield* page.getByLabel("Password").fill(Redacted.make("typed-password-secret"))
+            const trace = yield* Trace.record(page)
+            const error = yield* page.getByLabel("Password").pipe(
+              Expect.toHaveValue("expected-password-secret"),
+              Deadline.within("300 millis"),
+              Effect.flip
+            )
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.isAbove(error.history.length, 0)
+            for (const preset of ["strict", "local"] as const) {
+              const out = path.join(directory(), `${preset}.zip`)
+              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+              const content = text((yield* unzip(out)).get("trace.trace"))
+              const failure = lines(new TextEncoder().encode(content)).find((event) =>
+                event.type === "after" && event.error
+              )?.error
+              assert.strictEqual(failure.name, "ExpectationFailed")
+              assert.include(failure.message, "Last observed: REDACTED")
+              assert.notInclude(content, "typed-password-secret")
+              assert.notInclude(content, "expected-password-secret")
+            }
+            assert.include(error.message, "expected-password-secret")
+            assert.include(JSON.stringify(error.history), "typed-password-secret")
+          })),
+        timeout
+      )
+
       it.effect(
         "records a HAR with statuses, protocols, bodies and the library's timings, redacted",
         () =>

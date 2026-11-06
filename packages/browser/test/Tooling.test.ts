@@ -324,7 +324,8 @@ describe("Recordings", () => {
             Operation.observed(1n),
             Operation.observed(undefined),
             Operation.observed(circular),
-            Operation.observed(unprintable)
+            Operation.observed(unprintable),
+            Operation.observed(Redacted.make("wrapped-secret"))
           ]
         }),
         new Error("ordinary failure")
@@ -369,7 +370,45 @@ describe("Recordings", () => {
       assert.include(failures[2].message, "undefined")
       assert.include(failures[2].message, "1")
       assert.include(failures[2].message, "[Unprintable observed value]")
+      assert.notInclude(files.get("trace.trace")!, "wrapped-secret")
       assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("strips classified value evidence from exported expectation errors", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "value.zip")
+      const value = Operation.observed("typed-password-secret")
+      const error = new Expect.ExpectationFailed({
+        subject: "getByLabel(\"Password\")",
+        condition: "to have the value \"expected-password-secret\"",
+        last: Option.some(value),
+        history: [value],
+        elapsed: Duration.millis(100),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const result = yield* Recorders.observe(
+          "Expect.toHaveValue",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(result, error)
+        for (const preset of ["strict", "local"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          assert.notInclude(content, "typed-password-secret")
+          assert.notInclude(content, "expected-password-secret")
+          assert.include(content, "Last observed: REDACTED")
+        }
+        assert.include(error.message, "expected-password-secret")
+        assert.deepStrictEqual(error.last, Option.some(value))
+      })).pipe(Effect.provide(Browser.layerTest("")))
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("records a failed URL expectation as a step of the page's trace", () =>
@@ -400,16 +439,20 @@ describe("Recordings", () => {
 
   it.effect("redacts observed URLs in an exported expectation message under the strict preset", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "url-evidence.zip")
-      // What toHaveURL observes: the page's whole URL, query and all
-      const url = Operation.observed("https://shop.example.com/account?token=secret-token")
+      const folder = directory()
+      const actual =
+        "https://observed-user:observed-password@shop.example.com/account?token=secret-token#observed-fragment"
+      const expected =
+        "https://expected-user:expected-password@shop.example.com/done?token=expected-token#expected-fragment"
+      const earlier = Operation.observed("https://shop.example.com/start?token=earlier-token#earlier-fragment")
+      const url = Operation.observed(actual)
       const error = new Expect.ExpectationFailed({
         subject: "page N1",
-        condition: "to have the URL \"https://shop.example.com/done\"",
+        condition: `to have the URL ${JSON.stringify(expected)}`,
         last: Option.some(url),
-        history: [url],
+        history: [earlier, url],
         elapsed: Duration.millis(100),
-        checks: { count: 1, triggeredBy: ["initial"] },
+        checks: { count: 2, triggeredBy: ["initial", "change"] },
         nearest: Option.none(),
         suggestions: [],
         diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
@@ -417,17 +460,47 @@ describe("Recordings", () => {
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const trace = yield* Trace.record(page)
-        yield* Recorders.observe("Expect.toHaveURL", { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(
-          Effect.flip
-        )
-        yield* trace.exportTrace(out)
+        const original = yield* Recorders.observe(
+          "Expect.toHaveURL",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(original, error)
+        for (const [index, preset] of (["strict", "local", "strict"] as const).entries()) {
+          const out = path.join(folder, `${index}.zip`)
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const files = yield* unzip(out)
+          const content = files.get("trace.trace")!
+          const failure = content.trim().split("\n").map((line) => JSON.parse(line))
+            .find((event) => event.type === "after" && event.error)?.error
+          if (preset === "local") {
+            assert.include(failure.message, actual)
+            assert.include(failure.message, expected)
+            assert.include(failure.message, "earlier-token#earlier-fragment")
+          } else {
+            assert.include(failure.message, "https://shop.example.com/account?token=REDACTED")
+            assert.include(failure.message, "https://shop.example.com/done?token=REDACTED")
+            assert.include(failure.message, "https://shop.example.com/start?token=REDACTED")
+            for (
+              const secret of [
+                "secret-token",
+                "expected-token",
+                "earlier-token",
+                "observed-user",
+                "observed-password",
+                "expected-user",
+                "expected-password",
+                "observed-fragment",
+                "expected-fragment",
+                "earlier-fragment"
+              ]
+            ) assert.notInclude(content, secret)
+          }
+        }
+        assert.deepStrictEqual(error.last, Option.some(url))
+        assert.strictEqual(error.condition, `to have the URL ${JSON.stringify(expected)}`)
       })).pipe(Effect.provide(Browser.layerTest("")))
-      const files = yield* unzip(out)
-      const failure = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
-        .find((event) => event.type === "after" && event.error)?.error
-      assert.include(failure.message, "https://shop.example.com/account?token=REDACTED")
-      // Exported params redact URL query values under the default strict preset; the error message must too
-      assert.notInclude(failure.message, "secret-token")
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("records a trace whose steps nest in the caller's spans", () =>
