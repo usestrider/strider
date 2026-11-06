@@ -71,6 +71,7 @@ const scenario = Effect.fnUntraced(function*(replies: ReadonlyArray<{ delay: num
     yield* TestClock.adjust("500 millis")
     const error = yield* Fiber.join(pending)
     assert(Expect.isExpectationFailed(error), String(error))
+    assert.strictEqual(delivered, replies.length - 1)
     const history = structuredClone(error.history)
     const last = error.last
     yield* TestClock.adjust("1000 millis")

@@ -1164,3 +1164,11 @@ start/reply exchanges, which blocks a newer acquisition behind an abandoned star
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
+
+## Expectation observations
+
+Expectation history contains observations received by Strider before the deadline, and `last` is its final entry.
+With no timely observation, history is empty and `last` is absent. Late replies do not update a returned failure.
+A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee an observation.
+Rejected: inventing an observation, which reports evidence Strider never received, and waiting past the deadline
+for a reply, which breaks the caller’s budget. Changing how observations are collected is not required by this contract.
