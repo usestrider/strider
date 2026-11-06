@@ -11,6 +11,7 @@ import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
+import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -109,6 +110,51 @@ describe("WebKit video settings", () => {
 })
 
 describe("Shared video lifetime", () => {
+  for (const ending of ["source", "page", "scope"] as const) {
+    it.effect(`keeps irregular source times and a still tail on ${ending} end`, () =>
+      Effect.gen(function*() {
+        let now = 10e9
+        const clock: BrowserClock.BrowserClock = {
+          now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        }
+        const input = yield* Queue.unbounded<Video.Delivery>()
+        const written = yield* Queue.unbounded<VideoWriter.Frame>()
+        const ended = yield* Deferred.make<void>()
+        const scope = yield* Scope.make()
+        const file = yield* Video.record(
+          Effect.succeed({
+            frames: Stream.fromQueue(input),
+            ended: Deferred.await(ended)
+          }),
+          {
+            write: (frames, destination) =>
+              frames.pipe(
+                Stream.runForEach((frame) => Queue.offer(written, frame)),
+                Effect.as(destination.path)
+              )
+          },
+          "/tmp"
+        ).pipe(Scope.provide(scope), Effect.provideService(BrowserClock.CurrentClock, clock))
+        // An initial image cached before recording starts must begin at zero.
+        yield* Queue.offer(input, { ...image, frame: { ...image.frame, ...{ at: 9e9 } } })
+        assert.strictEqual((yield* Queue.take(written)).at, 0)
+        now = 10.237e9
+        yield* Queue.offer(input, { ...image, frame: { ...image.frame, ...{ at: now } } })
+        assert.strictEqual((yield* Queue.take(written)).at, 237e6)
+        now = 12.391e9
+        if (ending === "source") yield* Queue.end(input)
+        if (ending === "page") yield* Deferred.succeed(ended, undefined)
+        if (ending === "scope") yield* Scope.close(scope, Exit.void)
+        yield* file
+        const tail = yield* Queue.take(written)
+        assert.strictEqual(tail.at, 2391e6)
+        assert.deepStrictEqual(tail.data, image.frame.data)
+        assert.strictEqual(yield* Queue.size(written), 0, "no paced copies during a still period")
+        yield* Scope.close(scope, Exit.void)
+      }))
+  }
+
   it.effect("reports an empty source without starting a writer", () =>
     Effect.gen(function*() {
       let writes = 0

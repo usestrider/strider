@@ -55,8 +55,8 @@ export const writerConformance = (
           const file = yield* encoder.write(
             Stream.make(
               { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
-              { at: 40e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
-              { at: 80e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
+              { at: 237e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
+              { at: 2391e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
             ),
             { path: path.join(directory, "conformance.webm"), width: 321, height: 243 }
           )
@@ -69,12 +69,20 @@ export const writerConformance = (
             file
           ], { encoding: "utf8" }))
           assert.strictEqual(probe.frames.length, 3)
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.237, 2.391]
+          )
           for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
           const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
             "-v",
             "error",
             "-i",
             file,
+            "-fps_mode",
+            "passthrough",
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -86,6 +94,12 @@ export const writerConformance = (
           assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
           assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
           assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + 160) * 3 + 1]!, 200, "wide third frame is scaled green")
+          for (const x of [5, 315]) {
+            assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + x) * 3 + 1]!, 200, "wide image fills fitted width")
+          }
+          for (const y of [65, 177]) {
+            assert.isAbove(pixels[frameBytes * 2 + (y * 321 + 160) * 3 + 1]!, 200, "wide image fills fitted height")
+          }
           for (const y of [20, 220]) {
             for (let channel = 0; channel < 3; channel++) {
               assert.isBelow(
