@@ -1820,6 +1820,29 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       }
 
       it.effect(
+        "native radio uncheck refusal is never reported as unsent after the click",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" checked onclick="this.type = 'radio'; this.checked = true; document.getElementById('clicks').textContent = '1'"><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#box").uncheck().pipe(Effect.exit)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert(Option.isSome(error) && Locator.isLocatorError(error.value))
+              if (Option.isSome(error) && Locator.isLocatorError(error.value)) {
+                assert.strictEqual(error.value.diagnostics.dispatch._tag, "MayHaveBeenSent")
+                assert.strictEqual(error.value.reason._tag, "StateUnchanged")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "native radio uncheck control allows a page-managed ARIA radio to uncheck",
         () =>
           Effect.gen(function*() {
