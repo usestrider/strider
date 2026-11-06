@@ -167,3 +167,32 @@ it.effect("matches enclosing caller spans from inner to outer when names repeat"
     assert.strictEqual(inner.stack[0].line, 20)
     assert.strictEqual(outer.stack[0].line, 10)
   }))
+
+it.effect("keeps an operation's frame separate from a caller span with the same name", () =>
+  Effect.gen(function*() {
+    const { events } = yield* scenario(
+      action().pipe(
+        Effect.withSpan("Page.source", {}, { captureStackTrace: () => `at caller (${file}:40:5)` })
+      )
+    )
+    const group = events.find((event) => event.type === "before" && event.class === "Effect")
+    assert.deepStrictEqual(group.stack, [{ file, line: 40, column: 5, function: "Page.source" }])
+  }))
+
+it.effect("captures a named-only operation inside a caller span with the same name", () =>
+  Effect.gen(function*() {
+    const { events } = yield* scenario(
+      Effect.gen(function*() {
+        yield* Effect.void.pipe(Operation.named("Page.same", { attributes: { "browser.page.id": id } }))
+      }).pipe(Effect.withSpan("Page.same", {}, { captureStackTrace: () => `at caller (${file}:40:5)` }))
+    )
+    const step = events.find((event) => event.type === "before" && event.class === "Page")
+    const lines = readFileSync(file, "utf8").split("\n")
+    const line = lines.findIndex((line) => line.includes("yield* Effect.void.pipe(Operation.named(\"Page.same\""))
+    assert.deepStrictEqual(step.stack[0], {
+      file,
+      line: line + 1,
+      column: lines[line]!.indexOf("Operation.named") + 11,
+      function: "Page.same"
+    })
+  }))
