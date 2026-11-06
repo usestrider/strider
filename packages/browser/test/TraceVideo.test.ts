@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import { scenario } from "./fixtures/traceVideo.ts"
 
 describe("native trace video", () => {
@@ -44,8 +46,20 @@ describe("native trace video", () => {
         const events = new TextDecoder().decode(file.get("trace.trace")).trim().split("\n").map((line) =>
           JSON.parse(line)
         )
-        assert.strictEqual(events.filter((event) => event.type === "video").length, 1)
+        const videos = events.filter((event) => event.type === "video")
+        assert.strictEqual(videos.length, 1)
+        assert.strictEqual(videos[0].width, 32)
+        assert.strictEqual(videos[0].height, 24)
         assert.strictEqual(events.filter((event) => event.type === "console").length, 0)
       }
     })))
 })
+
+for (const stage of ["stop", "file-read"] as const) {
+  it.effect(`preserves export interruption during ${stage}`, () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(Effect.scoped(scenario(undefined, stage)))
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+    }))
+}
