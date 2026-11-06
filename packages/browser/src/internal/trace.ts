@@ -64,6 +64,9 @@ export type Recorded =
   | { readonly _tag: "Page"; readonly entry: Model.PageEntry }
   | { readonly _tag: "UserContext"; readonly entry: Model.ContextEntry }
 
+/** Ordinary errors are already text; expectations retain evidence until the export chooses its preset. */
+type RecordedError = { readonly name: string; readonly message: string } | Expect.ExpectationFailed
+
 interface Step {
   readonly callId: string
   readonly parentId: Option.Option<string>
@@ -71,7 +74,7 @@ interface Step {
   readonly params: Readonly<Record<string, unknown>>
   readonly start: MonotonicInstant.MonotonicInstant
   end: Option.Option<MonotonicInstant.MonotonicInstant>
-  error: Option.Option<{ readonly name: string; readonly message: string }>
+  error: Option.Option<RecordedError>
   /** A span of the caller's, which spans the operations recorded inside it. */
   readonly group: boolean
 }
@@ -146,35 +149,52 @@ const observedText = (value: unknown): string => {
 }
 
 /** Keep the evidence in the message: existing trace viewers display only name and message. */
-const expectationMessage = (error: Expect.ExpectationFailed): string => {
-  const lines = [error.message]
-  if (Option.isSome(error.last)) lines.push(`Last observed: ${observedText(error.last.value.value)}`)
+const expectationMessage = (error: Expect.ExpectationFailed, name: string, preset: Diagnostics.Preset): string => {
+  const url = name === "Expect.toHaveURL"
+  // Form values are classified typed text in both presets; titles are hidden only under strict.
+  const hidden = name === "Expect.toHaveValue" || name === "Expect.toHaveTitle" && preset === "strict"
+  const valueText = (value: unknown) =>
+    hidden
+      ? "REDACTED"
+      : observedText(url && typeof value === "string" ? Spans.redactUrl(value, preset) : value)
+  let condition = error.condition
+  if (hidden) condition = name === "Expect.toHaveValue" ? "to have the value REDACTED" : "to have the title REDACTED"
+  else if (url && preset === "strict") {
+    // String matchers are JSON-quoted by the expectation. A regexp isn't a URL and can't be safely parsed.
+    let expected = "REDACTED"
+    try {
+      const raw: unknown = JSON.parse(condition.slice("to have the URL ".length))
+      if (typeof raw === "string") expected = JSON.stringify(Spans.redactUrl(raw, preset))
+    } catch {
+      // Keep the URL redactor's refusal for input that isn't a whole URL.
+    }
+    condition = `to have the URL ${expected}`
+  }
+  const lines = [`Expected ${error.subject} ${condition}`]
+  if (Option.isSome(error.last)) lines.push(`Last observed: ${valueText(error.last.value.value)}`)
   if (error.history.length > 0) {
-    lines.push("History:", ...error.history.map((entry) => `  ${observedText(entry.value)}`))
+    lines.push("History:", ...error.history.map((entry) => `  ${valueText(entry.value)}`))
   }
   lines.push(
     `Checks: ${error.checks.count}${
       error.checks.triggeredBy.length > 0 ? ` (${error.checks.triggeredBy.join(", ")})` : ""
     }`,
-    `Elapsed: ${Duration.toMillis(error.elapsed)} ms`
+    `Elapsed: ${Math.round(Duration.toMillis(error.elapsed))} ms`
   )
   if (Option.isSome(error.nearest)) lines.push(`Nearest match:\n${error.nearest.value}`)
   if (error.suggestions.length > 0) lines.push(`Suggestions:\n${error.suggestions.join("\n")}`)
   return lines.join("\n")
 }
 
-const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<{ name: string; message: string }> => {
+const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<RecordedError> => {
   if (Exit.isSuccess(exit)) return Option.none()
   const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
   if (failure !== undefined) {
     const error = failure.error as { readonly _tag?: unknown; readonly name?: unknown; readonly message?: unknown }
+    if (Expect.isExpectationFailed(error)) return Option.some(error)
     return Option.some({
       name: typeof error._tag === "string" ? error._tag : typeof error.name === "string" ? error.name : "Error",
-      message: Expect.isExpectationFailed(error)
-        ? expectationMessage(error)
-        : typeof error.message === "string"
-        ? error.message
-        : String(failure.error)
+      message: typeof error.message === "string" ? error.message : String(failure.error)
     })
   }
   return Option.some(
@@ -554,7 +574,13 @@ export const start = Effect.fnUntraced(function*(
           type: "after",
           callId: step.callId,
           endTime: Recordings.millis(end as MonotonicInstant.MonotonicInstant),
-          ...(Option.isSome(step.error) ? { error: step.error.value } : {})
+          ...(Option.isSome(step.error)
+            ? {
+              error: Expect.isExpectationFailed(step.error.value)
+                ? { name: step.error.value._tag, message: expectationMessage(step.error.value, step.name, preset) }
+                : step.error.value
+            }
+            : {})
         }
       })
     }

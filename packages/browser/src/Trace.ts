@@ -168,6 +168,9 @@ export interface Recording extends Declaration.Registration {
  *   `screenshots: "perAction"`.
  * - Failed expectations keep their original message plus the last observation, observation history, check
  *   count and triggers, elapsed time, nearest match and suggestions where available in the viewer's error message.
+ *   Each export applies its diagnostics preset: URL expectations redact query values, credentials and fragments
+ *   under `"strict"`, and keep whole URLs under `"local"`. Expected URL regexps and titles are hidden under
+ *   `"strict"`; form values are hidden under both presets. The original failure returned to the caller is unchanged.
  * - The page's video ends at the first `exportTrace`, which reads its file.
  *
  * **Example** (Exporting a trace when checkout fails)

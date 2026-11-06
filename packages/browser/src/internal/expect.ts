@@ -223,7 +223,8 @@ export const watching = <A>(
   holds: (value: A) => boolean,
   matcherName: string,
   description: string,
-  condition: string
+  condition: string,
+  attributes: Readonly<Record<string, unknown>> = {}
 ): Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone> =>
   Effect.gen(function*() {
     const record = yield* Operation.record
@@ -244,7 +245,7 @@ export const watching = <A>(
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
     return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
+  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
 /**
  * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
@@ -298,7 +299,8 @@ export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
       typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
     "toHaveURL",
     `page ${page.id}`,
-    `to have the URL ${show(expected)}`
+    `to have the URL ${show(expected)}`,
+    { "browser.page.id": page.id }
   )
 
 /** The page's title is expected to match, in the page. */
