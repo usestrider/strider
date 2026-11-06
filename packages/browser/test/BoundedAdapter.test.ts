@@ -328,7 +328,7 @@ describe("BoundedAdapter", () => {
               const after = record.diagnostics()
               if (write !== undefined) yield* Fiber.interrupt(write)
               const afterWrite = record.diagnostics()
-              const expected = pending || mark === "sent"
+              const expected: typeof during.dispatch = pending || mark === "sent"
                 ? { _tag: "MayHaveBeenSent" }
                 : mark === "not sent"
                 ? { _tag: "NotSent" }
