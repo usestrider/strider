@@ -289,6 +289,93 @@ describe("BoundedAdapter", () => {
       }))
   }
 
+  for (const ending of ["complete", "interrupt"] as const) {
+    for (const pending of [false, true]) {
+      for (const mark of ["sent", "not sent", "rejected"] as const) {
+        it.effect(`retains manual ${mark} evidence after a read step ${ending}s with ${pending ? "an unanswered write" : "no write"}`, () =>
+          Effect.gen(function*() {
+            const started = yield* Deferred.make<void>()
+            const stop = yield* Deferred.make<void>()
+            const writeStarted = yield* Deferred.make<void>()
+            const adapter = stub({
+              setCookies: () => Effect.void,
+              clearCookies: () => Deferred.succeed(writeStarted, undefined).pipe(Effect.andThen(Effect.never))
+            })
+            yield* Effect.gen(function*() {
+              const record = yield* Operation.record
+              const watch = yield* Effect.forkChild(
+                Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Deferred.await(stop)),
+                  Operation.named("watch")
+                )
+              )
+              yield* Deferred.await(started)
+              yield* adapter.setCookies(context, [])
+              const write = pending
+                ? yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+                : undefined
+              if (pending) yield* Deferred.await(writeStarted)
+              if (mark === "sent") record.markSent()
+              else if (mark === "not sent") {
+                record.markSent()
+                record.markNotSent()
+              } else record.markConfirmed("rejected")
+              const during = record.diagnostics()
+              if (ending === "complete") {
+                yield* Deferred.succeed(stop, undefined)
+                yield* Fiber.join(watch)
+              } else yield* Fiber.interrupt(watch)
+              const after = record.diagnostics()
+              if (write !== undefined) yield* Fiber.interrupt(write)
+              const afterWrite = record.diagnostics()
+              const expected = pending || mark === "sent"
+                ? { _tag: "MayHaveBeenSent" }
+                : mark === "not sent"
+                ? { _tag: "NotSent" }
+                : { _tag: "Acknowledged", result: "rejected" }
+              assert.deepStrictEqual(during.dispatch, expected)
+              assert.deepStrictEqual(after.dispatch, expected)
+              assert.deepStrictEqual(afterWrite.dispatch, expected)
+            }).pipe(Operation.named("manual evidence"))
+          }))
+      }
+    }
+  }
+
+  it.effect("starts fresh sequential reply evidence while a read-only step stays active", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const adapter = stub({
+        clearCookies: () =>
+          Effect.fail(
+            new Adapter.AdapterError({
+              reason: {
+                _tag: "Protocol",
+                error: new Protocol.ProtocolError({
+                  reason: new Protocol.NoReply({ method: "clearCookies", timeout: Duration.zero })
+                })
+              }
+            })
+          ),
+        setCookies: () => Effect.void
+      })
+      yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        const watch = yield* Effect.forkChild(
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never), Operation.named("watch"))
+        )
+        yield* Deferred.await(started)
+        yield* adapter.clearCookies(context).pipe(Effect.exit)
+        const unanswered = record.diagnostics()
+        yield* adapter.setCookies(context, [])
+        const answered = record.diagnostics()
+        yield* Fiber.interrupt(watch)
+        assert.deepStrictEqual(unanswered.dispatch, { _tag: "MayHaveBeenSent" })
+        assert.deepStrictEqual(answered.dispatch, { _tag: "Acknowledged", result: "ok" })
+        assert.deepStrictEqual(record.diagnostics().dispatch, answered.dispatch)
+      }).pipe(Operation.named("sequential writes"))
+    }))
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
