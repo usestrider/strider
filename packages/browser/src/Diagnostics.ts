@@ -42,6 +42,12 @@ export type OperationId = typeof OperationId.Type
  * it again, since a second click isn't the same as one. `Acknowledged` records a successful adapter write or
  * creation reply, a dispatched evaluation's reply, an engine action's confirmation, or an explicit browser rejection. Local refusal and a missing
  * reply do not prove acknowledgement. A later write starts uncertain again; earlier replies do not confirm it.
+ * Overlapping calls and steps stay uncertain if any write is still unanswered, including one whose wait ended
+ * without a reply or was interrupted. When all writes in that overlap are acknowledged, any browser rejection
+ * makes the result `"rejected"`. A subsequent sequential write starts with evidence of its own.
+ *
+ * Acknowledgement can describe a retried held-key or held-button release. It does not by itself prove that the
+ * requested gesture was sent: recovery can fail, or the gesture can be refused before dispatch after recovery.
  * An adapter method can send several commands, so its reply does not describe each intermediate command.
  *
  * @stability unstable

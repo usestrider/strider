@@ -5,6 +5,7 @@
  * `Operation.Current`, the public module's service, which the library reads where it is optional: an error built
  * inside an operation takes its diagnostics from the record there, and one built outside any has an id of its own.
  */
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
@@ -86,19 +87,35 @@ export const diagnostics = (
   })
 }
 
-/** A reply confirms only this call; arbitrary local or transport failures do not prove a reply. */
+/** A reply confirms only this call; interruption and arbitrary failures leave its delivery uncertain. */
 export const answered = <A, E, R>(record: Record, call: Effect.Effect<A, E, R>) =>
-  call.pipe(
-    Effect.tap(() => Effect.sync(() => record.markConfirmed())),
-    Effect.tapError((error) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => record.beginDispatch()),
+    () => call,
+    (finish, exit) =>
       Effect.sync(() => {
-        if (
+        if (Exit.isSuccess(exit)) return finish({ _tag: "Acknowledged", result: "ok" })
+        const reason = exit.cause.reasons.length === 1 ? exit.cause.reasons[0] : undefined
+        const error = reason !== undefined && Cause.isFailReason(reason) ? reason.error : undefined
+        finish(
           error instanceof AdapterError && error.reason._tag === "Protocol" &&
-          error.reason.error.reason._tag === "Rejected"
-        ) record.markConfirmed("rejected")
+            error.reason.error.reason._tag === "Rejected"
+            ? { _tag: "Acknowledged", result: "rejected" }
+            : { _tag: "MayHaveBeenSent" }
+        )
       })
-    )
   )
+
+/** An unanswered member keeps an overlapping group's delivery uncertain; otherwise retain a known rejection. */
+const combinedDispatch = (
+  left: Diagnostics.DispatchState,
+  right: Diagnostics.DispatchState
+): Diagnostics.DispatchState => {
+  if (left._tag === "MayHaveBeenSent" || right._tag === "MayHaveBeenSent") return { _tag: "MayHaveBeenSent" }
+  if (left._tag === "NotSent") return right
+  if (right._tag === "NotSent") return left
+  return { _tag: "Acknowledged", result: left.result === "rejected" || right.result === "rejected" ? "rejected" : "ok" }
+}
 
 /**
  * A failure an operation reports: the shared reasons, through its module's error, or its target's end or its
@@ -197,7 +214,11 @@ export type Phase = Deadline.Timeout["phase"]
  */
 export class Record implements Operation.Operation {
   readonly "~@usestrider/browser/Operation" = "~@usestrider/browser/Operation" as const
-  dispatch: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private dispatchEvidence: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private readonly dispatches = new Set<{ readonly step: Record | undefined }>()
+  private overlap: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private replyUncertain = false
+
   cleanup: Diagnostics.CleanupState = { _tag: "NotNeeded" }
   readonly history: Array<Diagnostics.ObservedValue> = []
   readonly progress: Array<Diagnostics.StepEvidence> = []
@@ -212,6 +233,39 @@ export class Record implements Operation.Operation {
     this.clock = clock
   }
 
+  /** Evidence for the current overlap, including calls whose wait has already ended without a reply. */
+  get dispatch(): Diagnostics.DispatchState {
+    if (this.dispatches.size === 0) return this.dispatchEvidence
+    let dispatch = this.overlap
+    for (const each of this.dispatches) {
+      dispatch = combinedDispatch(dispatch, each.step?.dispatch ?? { _tag: "MayHaveBeenSent" })
+    }
+    return dispatch._tag === "NotSent" ? this.dispatchEvidence : dispatch
+  }
+
+  set dispatch(dispatch: Diagnostics.DispatchState) {
+    this.dispatchEvidence = dispatch
+  }
+
+  /** Joins an overlapping group; a later group starts fresh once all its members have ended. */
+  beginDispatch(step?: Record): (dispatch: Diagnostics.DispatchState) => void {
+    if (this.dispatches.size === 0) this.overlap = { _tag: "NotSent" }
+    const member = { step }
+    this.dispatches.add(member)
+    if (step === undefined) {
+      if (this.dispatches.size === 1) this.replyUncertain = false
+      this.markSent()
+    }
+    return (dispatch) => {
+      this.dispatches.delete(member)
+      this.overlap = combinedDispatch(this.overlap, dispatch)
+      if (this.overlap._tag !== "NotSent") {
+        this.dispatchEvidence = this.overlap
+        this.replyUncertain = this.overlap._tag === "MayHaveBeenSent"
+      }
+    }
+  }
+
   /** Milliseconds left before the deadline, at least 0. */
   left(): number {
     return BrowserClock.millisLeft(this.clock, this.budget.at)
@@ -224,6 +278,7 @@ export class Record implements Operation.Operation {
 
   /** From here, input or a call may have reached the browser. */
   markSent(): void {
+    if (this.dispatches.size === 0) this.replyUncertain = false
     this.dispatch = { _tag: "MayHaveBeenSent" }
   }
 
@@ -245,13 +300,14 @@ export class Record implements Operation.Operation {
 
   /**
    * Adds `step`, an operation that ran inside this one and has ended, to its steps, and takes its dispatch when
-   * the step sent. A step that succeeded after it sent was confirmed by succeeding. Its state is how far it got:
+   * the step sent. A manually marked send can be confirmed by success; a known missing reply cannot. Its state is how far it got:
    * `ok` once it succeeded or the browser confirmed it, otherwise `unsent` or `uncertain` by whether it sent. A step
    * that repeats the one before it, in name and state, is kept once, as the history keeps observations.
    */
-  addStep(step: Record, succeeded: boolean): void {
+  addStep(step: Record, succeeded: boolean): Diagnostics.DispatchState {
     this.noteCleanup(step.cleanup)
-    const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent"
+    const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent" &&
+        !step.replyUncertain && step.dispatches.size === 0
       ? { _tag: "Acknowledged", result: "ok" }
       : step.dispatch
     if (dispatch._tag !== "NotSent") this.dispatch = dispatch
@@ -263,8 +319,10 @@ export class Record implements Operation.Operation {
       ? "uncertain"
       : dispatch.result
     const previous = this.progress.at(-1)
-    if (previous !== undefined && previous.step === step.name && previous.state === state) return
-    this.progress.push({ step: step.name, state, at: now() })
+    if (previous === undefined || previous.step !== step.name || previous.state !== state) {
+      this.progress.push({ step: step.name, state, at: now() })
+    }
+    return dispatch
   }
 
   /**
@@ -416,7 +474,11 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
   Effect.flatMap(current, (enclosing) =>
     Option.isNone(enclosing) || enclosing.value === record
       ? self
-      : Effect.onExit(self, (exit) => Effect.sync(() => enclosing.value.addStep(record, Exit.isSuccess(exit)))))
+      : Effect.acquireUseRelease(
+        Effect.sync(() => enclosing.value.beginDispatch(record)),
+        () => self,
+        (finish, exit) => Effect.sync(() => finish(enclosing.value.addStep(record, Exit.isSuccess(exit))))
+      ))
 
 /**
  * Runs `self` as an operation: mints its id, reads its deadline once, gives everything inside that deadline and a

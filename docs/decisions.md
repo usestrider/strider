@@ -1132,3 +1132,14 @@ Rejected: waiting past the deadline to obtain a final cleanup answer; transferri
 letting future scope finalizers rewrite earlier errors; treating any adapter failure as a browser rejection;
 and preserving an earlier acknowledgement across a later unanswered write. These would respectively change
 timing, lifetime, snapshot semantics or the evidence available to decide whether repeating an action is safe.
+
+Overlapping calls and steps retain uncertainty until each write has an acknowledgement. Ending a wait without a
+reply, including interruption, leaves that outcome uncertain when another overlapping call replies later. If all
+writes are acknowledged, any rejection takes precedence over successful replies. A later independent write starts
+with fresh evidence. A step that succeeds after handling a known missing reply cannot infer confirmation from its
+success; a manually marked send can still be confirmed by a successful step. Recovery releases are writes too, so
+acknowledgement alone does not prove that the requested gesture was dispatched.
+
+Rejected: counting only calls still running, which loses uncertainty when a wait ends before another reply;
+and allowing one reply or a successful error-handling step to confirm the other writes in its operation. Dispatch
+bookkeeping is acquired and released with interruption-safe finalizers; it adds no wait, deadline or resource owner.
