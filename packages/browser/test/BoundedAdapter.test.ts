@@ -376,6 +376,39 @@ describe("BoundedAdapter", () => {
       }).pipe(Operation.named("sequential writes"))
     }))
 
+  for (const nested of [false, true]) {
+    for (const guarded of [false, true]) {
+      it.effect(`preserves an ended unanswered call when an overlapping ${nested ? "step" : "direct"} manual send is ${guarded ? "guarded" : "confirmed"}`, () =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          const manualStarted = yield* Deferred.make<void>()
+          const finishManual = yield* Deferred.make<void>()
+          const adapter = stub({
+            clearCookies: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+          })
+          yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            const write = yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+            yield* Deferred.await(started)
+            const manual = Effect.gen(function*() {
+              const local = yield* Operation.record
+              local.markSent()
+              yield* Deferred.succeed(manualStarted, undefined)
+              yield* Deferred.await(finishManual)
+              if (guarded) local.markNotSent()
+              else local.markConfirmed()
+            })
+            const gesture = yield* Effect.forkChild(nested ? manual.pipe(Operation.named("manual gesture")) : manual)
+            yield* Deferred.await(manualStarted)
+            yield* Fiber.interrupt(write)
+            yield* Deferred.succeed(finishManual, undefined)
+            yield* Fiber.join(gesture)
+            assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+          }).pipe(Operation.named("overlap with manual gesture"))
+        }))
+    }
+  }
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
