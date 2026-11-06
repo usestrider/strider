@@ -65,12 +65,22 @@ export const startMiniBrowserOnPort = Effect.fnUntraced(function*(
   const browser = yield* Launch.spawn(webkitgtk.executable, args, dir, {
     env: environment(dir, display, { WEBKIT_INSPECTOR_HTTP_SERVER: `127.0.0.1:${port}` })
   })
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const listed = yield* Effect.promise(() => fetch(`${endpoint}/`).then((response) => response.text(), () => ""))
-    if (WebKitStockTransport.pagesOf(listed).length >= urls.length) return { endpoint, process: browser.handle }
-    yield* Effect.sleep("100 millis")
-  }
-  return yield* Effect.die(new Error(`The MiniBrowser's inspector at ${endpoint} listed no page`))
+  const bindFailure = Effect.gen(function*() {
+    const line = yield* browser.stderrLine(/Failed to start remote inspector HTTP server .*address already in use/i)
+    // Ending stderr without a bind error says nothing about HTTP discovery.
+    if (Option.isNone(line)) return yield* Effect.never
+    return yield* Effect.die(new Error(`The MiniBrowser's inspector port ${port}: address already in use`))
+  })
+  const discovery = Effect.gen(function*() {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const listed = yield* Effect.promise(() => fetch(`${endpoint}/`).then((response) => response.text(), () => ""))
+      if (WebKitStockTransport.pagesOf(listed).length >= urls.length) return { endpoint, process: browser.handle }
+      yield* Effect.sleep("100 millis")
+    }
+    return yield* Effect.die(new Error(`The MiniBrowser's inspector at ${endpoint} listed no page`))
+  })
+  // The race interrupts its loser, removing the stderr waiter on success or interruption.
+  return yield* Effect.raceFirst(discovery, bindFailure)
 })
 
 /**
