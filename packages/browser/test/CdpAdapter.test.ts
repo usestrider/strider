@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Deadline, NetworkRequest } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -1030,6 +1030,7 @@ const sentHeaders = Effect.fnUntraced(
         yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
       }
     }).pipe(Effect.forkScoped)
+    let connection!: Adapter.AdapterConnection
     const services = yield* Layer.build(BrowserImpl.layer((sink) =>
       CdpAdapter.connect({
         ...browser.transport,
@@ -1053,7 +1054,11 @@ const sentHeaders = Effect.fnUntraced(
           if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
           if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
         })
-      })
+      }).pipe(Effect.tap((adapter) =>
+        Effect.sync(() => {
+          connection = adapter
+        })
+      ))
     ))
     yield* browser.receive({
       method: "Target.attachedToTarget",
@@ -1090,6 +1095,7 @@ const sentHeaders = Effect.fnUntraced(
     const request = yield* next
     return {
       browser,
+      connection,
       page,
       request,
       send,
@@ -1574,6 +1580,106 @@ describe("Chromium screenshot renderer readiness", () => {
         assert.strictEqual(yield* Queue.size(h.captures), 0, "late readiness must never resume capture")
       }).pipe(onTestClock))
   }
+})
+
+describe("Chromium video writer lifetime", () => {
+  const frame = (
+    h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
+    sessionId: number
+  ) =>
+    h.browser.receive({
+      method: "Page.screencastFrame",
+      sessionId: "S1",
+      params: {
+        data: "/9j/2Q==",
+        sessionId,
+        metadata: {
+          offsetTop: 0,
+          pageScaleFactor: 1,
+          deviceWidth: 800,
+          deviceHeight: 600,
+          scrollOffsetX: 0,
+          scrollOffsetY: 0
+        }
+      }
+    })
+
+  it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const destination = yield* Deferred.make<VideoWriter.Destination>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(frames, target) {
+          yield* Deferred.succeed(destination, target)
+          yield* frames.pipe(Stream.runForEach((image) => Queue.offer(written, image)))
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 51)
+      assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
+      const first = yield* Queue.take(written)
+      yield* TestClock.adjust("120 millis")
+      const second = yield* Queue.take(written)
+      const third = yield* Queue.take(written)
+      assert.strictEqual(second.at - first.at, 40e6)
+      assert.strictEqual(third.at - second.at, 40e6)
+      assert.deepStrictEqual(third.data, first.data)
+      yield* Scope.close(scope, Exit.void)
+      assert.match(yield* video.file, /\.webm$/)
+    }).pipe(onTestClock))
+
+  it.effect("propagates a writer failure before the recording scope closes", () =>
+    Effect.gen(function*() {
+      const failed = new VideoWriter.VideoWriterError({
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "fake writer", hint: "encoder failed" })
+      })
+      const h = yield* sentHeaders().pipe(
+        Effect.provideService(VideoWriter.VideoWriter, { write: () => Effect.fail(failed) })
+      )
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video)
+      yield* frame(h, 52)
+      const error = yield* Effect.flip(video.file)
+      assert(Capability.isCapabilityError(error))
+      assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* frame(h, 53)
+        yield* Deferred.await(started)
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+      })
+    ).pipe(onTestClock))
 })
 
 describe("Chromium screencast renderer readiness", () => {
