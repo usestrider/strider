@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as TestRun from "../src/test/TestRun.ts"
 import { scenario } from "./fixtures/traceVideo.ts"
 
 describe("native trace video", () => {
@@ -113,3 +114,51 @@ for (const stage of ["pending-success", "pending-failure"] as const) {
       assert.strictEqual(reads, stage === "pending-success" ? 1 : 0)
     })))
 }
+
+describe("trace test identity", () => {
+  const info = (attempt: number) =>
+    new TestRun.TestInfo({
+      project: "chromium",
+      file: "/tests/cart.test.ts",
+      id: "cart > pays",
+      attempt,
+      worker: "1",
+      shard: ""
+    })
+  for (const attempt of [0, 1, 2]) {
+    it.effect(`snapshots retry ${attempt} before the current test changes`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        let current = info(attempt)
+        const { files } = yield* scenario(undefined, undefined, () => {
+          current = info(99)
+        }).pipe(
+          Effect.provideService(TestRun.TestRun, {
+            get info() {
+              return current
+            },
+            attach: () => Effect.void
+          })
+        )
+        for (const file of files) {
+          const header = JSON.parse(new TextDecoder().decode(file.get("trace.trace")).split("\n")[0]!)
+          assert.strictEqual(header.title, "cart > pays")
+          assert.deepStrictEqual(header.striderTest, {
+            project: "chromium",
+            file: "/tests/cart.test.ts",
+            id: "cart > pays",
+            attempt
+          })
+          assert.strictEqual(header.origin, "library")
+          assert.strictEqual(header.version, 9)
+          assert.deepStrictEqual(header.options, {})
+        }
+      })))
+  }
+  it.effect("keeps standalone headers free of test metadata", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { files } = yield* scenario()
+      const header = JSON.parse(new TextDecoder().decode(files[0]!.get("trace.trace")).split("\n")[0]!)
+      assert.notProperty(header, "title")
+      assert.notProperty(header, "striderTest")
+    })))
+})
