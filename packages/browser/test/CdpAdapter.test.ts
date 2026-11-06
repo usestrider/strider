@@ -1673,7 +1673,7 @@ describe("Chromium video writer lifetime", () => {
       assert.match(yield* video.file, /\.webm$/)
     }).pipe(onTestClock))
 
-  for (const epoch of [1000, 4000000000]) {
+  for (const epoch of [1000, 4000000000, "local"] as const) {
     for (const missing of [false, true]) {
       it.effect(`maps browser epoch ${epoch} with ${missing ? "missing timestamp transitions" : "backward source times"}`, () =>
         Effect.gen(function*() {
@@ -1691,18 +1691,24 @@ describe("Chromium video writer lifetime", () => {
           })
           const page = yield* h.page.control
           // Reusing the page after a complete stop must establish a new clock mapping.
-          for (const base of [epoch, epoch + 3600]) {
+          for (const shift of [0, 3600]) {
             const scope = yield* Scope.make()
             const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+            const clock = yield* BrowserClock.CurrentClock
+            const base = typeof epoch === "number"
+              ? epoch + shift
+              : (performance.timeOrigin + clock.now() / 1e6) / 1000
             const samples = missing
-              ? [
-                [0, undefined, 0],
-                [10, base, 10],
-                [20, base + 0.005, 15],
-                [30, undefined, 30],
-                [40, base + 0.020, 30],
-                [4100, base + 4, 4010]
-              ] as const
+              ? epoch === "local"
+                ? [[0, base, 0], [100, undefined, 100], [110, base + 0.005, 100], [4100, base + 4, 4000]] as const
+                : [
+                  [0, undefined, 0],
+                  [10, base, 10],
+                  [20, base + 0.005, 15],
+                  [30, undefined, 30],
+                  [40, base + 0.020, 30],
+                  [4100, base + 4, 4010]
+                ] as const
               : [[0, base, 0], [10, base + 0.005, 5], [20, base + 0.003, 5], [4100, base + 4, 4000]] as const
             let previous = 0
             for (const [receipt, timestamp, expected] of samples) {
