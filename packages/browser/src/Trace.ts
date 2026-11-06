@@ -54,7 +54,7 @@ export type Options = CaptureOptions & (NetworkOptions | SnapshotOptions)
  */
 export interface CaptureOptions {
   /**
-   * A screenshot after each action and navigation.
+   * A screenshot after each action, navigation and page-associated expectation, whether it succeeds or fails.
    *
    * @default "off"
    */
@@ -146,7 +146,8 @@ export interface Recording extends Declaration.Registration {
  *   and its error. A span of yours that encloses steps, such as an `Effect.fn`'s, is a step too, so the trace
  *   nests as the program did.
  * - Console messages and uncaught exceptions are always recorded.
- * - `screenshots: "perAction"` adds a screenshot after each action and navigation.
+ * - `screenshots: "perAction"` adds a screenshot after each action, navigation and page-associated expectation,
+ *   whether it succeeds or fails. Value expectations without a page do not capture screenshots.
  * - `screencast` adds frames: the page's video where `Capability.Video` is supported, native frames otherwise
  *   (`Capability.Screencast`) or polled screenshots.
  * - `network` adds the requests a `Har` would record, with their bodies.

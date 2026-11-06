@@ -70,13 +70,17 @@ Each capture is opt-in:
 | Option                       | Adds                                                                  |
 | ---------------------------- | --------------------------------------------------------------------- |
 | none                         | operations, logs, errors and console output                           |
-| `screenshots: "perAction"`   | a screenshot after each action                                        |
+| `screenshots: "perAction"`   | a screenshot after each action, navigation and page-associated expectation, on success or failure |
 | `screencast`                 | frames as the page renders: `"native"`, the browser's own, which selects video on [opted-in WebKit](/docs/browsers/webkit-video) and fails with `Unsupported` on WebKit without video enabled and an attached Firefox; or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
 | `network: true`              | the page's requests and responses                                     |
 | `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
 
 DOM snapshots change nothing in the page. They're taken in an
 [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has none.
+
+Expectation screenshots show the page when the check finishes, including when its deadline expires.
+Value expectations without a page do not capture screenshots. Screenshots are off by default;
+DOM snapshots still surround only actions and navigation.
 
 [`TestRun`](/docs/tools/testing#attaching-files) attaches a trace to the test that made it.
 
