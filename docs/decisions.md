@@ -1180,7 +1180,8 @@ PATH. The video consumer paces the latest image at 25fps on the browser clock th
 the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
 scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
 that policy, pacing, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
-inputs to verify output dimensions and padding. Its file lives in the context's downloads directory. Scope closure
+inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
+or the explicitly named output directory on WebKit. Scope closure
 or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
 even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
 retain their errors. A failed or unfinished writer fails
@@ -1192,3 +1193,11 @@ the same boundary. In-browser preparation is rejected: even an isolated world sh
 thread, so base64 transfers, decoding, canvas drawing and re-encoding at 25fps compete with the page under test;
 navigation destroys the realm and JPEG re-encoding loses quality. Core fitting in Node would require an additional
 codec dependency; no implicit external image tool is introduced.
+
+WebKit reads it only with an explicit polling interval and output directory on its layer; a writer alone
+leaves video unsupported. PNG polling has renderer cost and misses intermediate states, so it is never
+inferred from writer availability. The interval is finite and positive with no hidden default, and an absolute writable directory owned by the caller keeps video independent of unsupported WebKit downloads. The first PNG is
+immediate, subsequent serial captures wait the configured interval after completion and any backpressure, and
+navigation target replacement does not end the page proxy recording. Actual page, context or connection end is
+observed independently of writer reads. Rejected: enabling polling whenever a writer is supplied, claiming
+repeated 25fps output is a native 25fps capture, and enabling downloads merely to supply a video destination.

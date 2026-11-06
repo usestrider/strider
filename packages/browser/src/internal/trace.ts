@@ -110,10 +110,6 @@ interface Frame {
 }
 
 /** A PNG's size, from its header. */
-const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
-}
 
 /** The operations an action screenshot follows: the ones that change the page. */
 const actions = new Set([
@@ -434,7 +430,7 @@ export const start = Effect.fnUntraced(function*(
           while (true) {
             yield* BrowserClock.sleep(Duration.toMillis(Duration.fromInputUnsafe(screencast.polled)))
             const shot = yield* runtime.model.adapter.screenshot(page.id, options)
-            const size = format === "jpeg" ? Adapter.jpegSize(shot) : pngSize(shot)
+            const size = format === "jpeg" ? Adapter.jpegSize(shot) : Adapter.pngSize(shot)
             frames.push({ page: page.id, at: Adapter.now(), ...size, image: shot, format })
           }
         })

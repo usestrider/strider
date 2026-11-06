@@ -1011,3 +1011,9 @@ export interface BackendAdapter {
     options: ConnectOptions
   ) => Effect.Effect<AdapterConnection, Browser.BrowserError, Scope.Scope>
 }
+
+/** PNG dimensions, or zeros for a truncated header. */
+export const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
+}

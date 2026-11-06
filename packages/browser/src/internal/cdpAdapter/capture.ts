@@ -21,14 +21,14 @@ import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as L1Page from "../../Page.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
-import * as Reason from "../../Reason.ts"
 import type * as L1Target from "../../Target.ts"
-import * as VideoWriter from "../../VideoWriter.ts"
+import type * as VideoWriter from "../../VideoWriter.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import * as Video from "../video.ts"
 import { type CaptureGuard, downloadDirectory, pageOf, type State, type TargetEntry } from "./state.ts"
 
 interface Guard {
@@ -554,132 +554,23 @@ export const video = Effect.fnUntraced(
     if (Option.isNone(directory)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "The context must allow downloads to a directory"))
     }
-    const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
-    const sourceScope = yield* Scope.fork(scope)
-    const frames = yield* screencastDeliveries(state, id).pipe(
-      Scope.provide(sourceScope),
-      Effect.onError(() => Scope.close(sourceScope, Exit.void))
-    )
-    const input = yield* Queue.bounded<
-      { readonly frame: VideoWriter.Frame; readonly accept: Effect.Effect<void> },
-      Cause.Done
-    >(1)
-    const first = Deferred.makeUnsafe<Adapter.ScreencastFrame | undefined, Adapter.AdapterError>()
-    const ended = Deferred.makeUnsafe<void, Adapter.AdapterError>()
-    const result = Deferred.makeUnsafe<string, Adapter.AdapterError>()
-    const backendFailure = (hint: string) =>
-      new Adapter.AdapterError({
-        reason: new Reason.BackendFailure({ kind: "Rejected", method: "VideoWriter.write", hint })
-      })
-    const end = Effect.sync(() => {
-      Deferred.doneUnsafe(first, Effect.succeed(undefined))
-      Deferred.doneUnsafe(ended, Effect.void)
-    })
-    let latest: Delivery | undefined
-    let accepted = Deferred.makeUnsafe<void>()
-    yield* frames.pipe(
-      Stream.runForEach((delivery) =>
-        Effect.gen(function*() {
-          accepted = Deferred.makeUnsafe<void>()
-          latest = delivery
-          Deferred.doneUnsafe(first, Effect.succeed(delivery.frame))
-          yield* Deferred.await(accepted)
-        })
-      ),
-      Effect.catch((error) =>
-        normalSourceEnd(error)
-          ? end
-          : Effect.sync(() => {
-            Deferred.doneUnsafe(first, Effect.fail(error))
-            Deferred.doneUnsafe(ended, Effect.fail(error))
-          })
-      ),
-      Effect.ensuring(end),
-      Operation.detached,
-      Effect.forkIn(sourceScope)
-    )
-    // Observe the session separately: a blocked writer may prevent the frame consumer from pulling again.
-    const owners = yield* ownersOf(state, page.target.session)
-    yield* Deferred.await(owners.termination).pipe(
-      Effect.catch((error) =>
-        Effect.sync(() => {
-          Deferred.doneUnsafe(first, Effect.fail(error))
-          Deferred.doneUnsafe(ended, Effect.fail(error))
-        })
-      ),
-      Effect.andThen(end),
-      Effect.raceFirst(Deferred.await(result).pipe(Effect.ignore)),
-      Operation.detached,
-      Effect.forkIn(scope)
-    )
-    const running = yield* Effect.gen(function*() {
-      const initial = yield* Deferred.await(first)
-      if (initial === undefined) {
-        return yield* Effect.fail(backendFailure("The recording ended before receiving a frame; no writer was started"))
-      }
-      const path = `${directory.value}/strider-${crypto.randomUUID()}.webm`
-      const clock = yield* BrowserClock.CurrentClock
-      const started = clock.now()
-      const pacing = Effect.gen(function*() {
-        let index = 0
-        while (true) {
-          const at = started + index++ * 40e6
-          const left = (at - clock.now()) / 1e6
-          if (left > 0) yield* clock.sleep(left)
-          const delivery = latest!
-          const frame = delivery.frame
-          const taking = accepted
-          yield* Queue.offer(input, {
-            frame: { at, format: "jpeg", data: frame.jpeg, width: frame.width, height: frame.height },
-            accept: delivery.take.pipe(Effect.andThen(Deferred.succeed(taking, undefined)), Effect.asVoid)
-          })
-        }
-      }).pipe(
-        Effect.raceFirst(Deferred.await(ended)),
-        Effect.catch((error) => Deferred.fail(ended, error).pipe(Effect.asVoid)),
-        Effect.ensuring(Queue.end(input)),
-        Effect.forkScoped
-      )
-      return yield* Effect.scoped(Effect.gen(function*() {
-        yield* pacing
-        return yield* writer.value.write(
-          Stream.fromEffectRepeat(
-            Queue.take(input).pipe(Effect.flatMap(({ frame, accept }) => Effect.as(accept, frame)))
-          ),
-          { path, width: initial.width, height: initial.height }
-        ).pipe(
-          Effect.mapError((error) => backendFailure(error.message)),
-          Effect.raceFirst(
-            Deferred.await(ended).pipe(
-              Effect.andThen(clock.sleep(5000)),
-              Effect.andThen(Effect.fail(backendFailure("The writer did not finish within 5 seconds")))
-            )
-          ),
-          Effect.tap(() =>
-            Effect.flatMap(
-              Deferred.poll(ended),
-              (termination) => Option.isSome(termination) ? termination.value : Effect.void
-            )
-          )
-        )
-      }))
-    }).pipe(
-      Effect.ensuring(Scope.close(sourceScope, Exit.void)),
-      Effect.exit,
-      Effect.flatMap((exit) => Deferred.done(result, exit)),
-      Operation.detached,
-      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
-      Effect.interruptible,
-      Effect.forkIn(scope)
-    )
-    yield* Effect.addFinalizer(() =>
+    return yield* Video.record(
       Effect.gen(function*() {
-        yield* end
-        yield* Scope.close(sourceScope, Exit.void)
-        yield* Fiber.await(running)
-        yield* Scope.close(scope, Exit.void)
-      }).pipe(Operation.detached)
+        const frames = yield* screencastDeliveries(state, id)
+        const owners = yield* ownersOf(state, page.target.session)
+        return {
+          frames: frames.pipe(
+            Stream.map(({ frame, take }) => ({
+              frame: { format: "jpeg" as const, data: frame.jpeg, width: frame.width, height: frame.height },
+              take
+            })),
+            Stream.catch((error) => normalSourceEnd(error) ? Stream.empty : Stream.fail(error))
+          ),
+          ended: Deferred.await(owners.termination)
+        }
+      }),
+      writer.value,
+      directory.value
     )
-    return Deferred.await(result)
   }
 )

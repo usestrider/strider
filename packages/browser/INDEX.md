@@ -2453,9 +2453,16 @@ The WebKit backend: stock WebKitGTK and WPE, launched in automation mode or atta
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
-- `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+- `const layer: (options: LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
+- `const layerConfig: (options: Config.Wrap<LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
+- `const layerAttach: (endpoint: Url.Url | string, options?: ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+*models*
+
+- `interface LaunchOptions extends Browser.LaunchOptions`
+  - `readonly video?: { readonly polled: Duration.Input; readonly directory: string } | undefined`
+- `interface ConnectOptions extends Browser.ConnectOptions`
+  - `readonly video?: LaunchOptions["video"]`
 
 ## `@usestrider/browser/webkit-automation-protocol`
 
