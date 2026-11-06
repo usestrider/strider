@@ -1278,6 +1278,23 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("fills an input then a paragraph in a top-level design-mode document", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#other").fill("other")
+            yield* page.locator("#target").fill("new")
+            assert.deepStrictEqual({
+              input: yield* page.locator("#other").readValue,
+              paragraph: yield* page.locator("#target").readText
+            }, { input: "other", paragraph: "new" })
+          }))
+        }), timeout)
+
       it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture((origin) =>
