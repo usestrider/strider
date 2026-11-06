@@ -364,9 +364,9 @@ export const start = Effect.fnUntraced(function*(
           if (settings.screenshots !== "perAction" || !screenshot) {
             return
           }
-          // Completion can follow the enclosing operation's deadline; recording must still capture the final page.
+          // Completion can follow the enclosing deadline; capture has a bounded budget of its own.
           const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(
-            Operation.detached,
+            Operation.apart("Trace.screenshot", Duration.millis(1000)),
             Effect.option
           )
           if (Option.isSome(shot)) {

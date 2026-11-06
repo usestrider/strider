@@ -79,6 +79,9 @@ DOM snapshots change nothing in the page. They're taken in an
 [isolated world](/docs/pages/expectations#evaluating-in-the-page), except on WebKit, which has none.
 
 Expectation screenshots show the page when the check finishes, including when its deadline expires.
+Each action, navigation or expectation waits for its screenshot, with a fixed one-second budget on the browser's
+clock independent of the operation's deadline. If capture fails or times out, the trace omits the screenshot
+and the caller receives the original result.
 Value expectations without a page do not capture screenshots. Screenshots are off by default;
 DOM snapshots still surround only actions and navigation.
 
