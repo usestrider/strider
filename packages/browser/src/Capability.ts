@@ -140,7 +140,7 @@ export interface ScreencastControl {
  */
 export interface VideoRecording {
   /**
-   * The file, once the capability's scope has closed and the browser has written it.
+   * The finished file after the recording scope closes. A writer failure fails this effect with `BackendFailure`.
    */
   readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone | Deadline.Timeout>
 }
@@ -164,6 +164,9 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
  * that deadline before the screencast starts, and a metrics error fails acquisition. The browser may
  * hold this read while it processes a navigation. It does not wait for the page to load. Another
  * navigation or a detach can still intervene before start; the read does not guarantee that the page stays active.
+ * Chromium shares the stream with other screencasts and video recordings. Each frame is acknowledged after
+ * all consumers take it or release their scopes. Close the scope when you stop reading, so other consumers
+ * can continue. Joining an idle active stream first receives its latest image.
  *
  * @stability unstable
  * @category constants
@@ -172,17 +175,20 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
 export const Screencast: Capability<ScreencastControl> = make("Screencast")
 
 /**
- * A video file of the page, recorded by Firefox.
+ * A WebM video file of the page.
  *
  * **Details**
  *
- * Firefox writes a WebM file while the capability's scope lives, into the directory the page's context
- * downloads to. So the file is removed with the context's temporary downloads, unless
+ * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Recording lasts
+ * while the capability's scope lives, into the directory the page's context
+ * downloads to. Chromium records at 25fps, holding the latest frame while idle and scaling and padding viewport
+ * changes to the initial size. Ending its scope waits up to five seconds on the browser clock for the writer.
+ * So the file is removed with the context's temporary downloads, unless
  * `UserContext.Options.downloads` names a directory of yours.
  *
  * **Gotchas**
  *
- * It fails with `Unsupported` on Chromium, which streams frames (`Screencast`) instead, and on WebKit. It fails on
+ * It fails with `Unsupported` on Chromium without a `VideoWriter`, and on WebKit. It fails on
  * Firefox too when Strider didn't launch it, or when the page's context denies downloads, because the file would
  * be out of reach.
  *

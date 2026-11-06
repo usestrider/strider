@@ -14,7 +14,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
-import { Browser, Expect, Route } from "@usestrider/browser"
+import { Browser, Expect, Route, VideoWriter } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
@@ -54,7 +54,11 @@ const files: Files = {
   recording: (name) => path.join(recordingsDirectory, `${name}.har`)
 }
 
-const layer = Chromium.layer({ executablePath }).pipe(Layer.provideMerge(NodeServices.layer))
+const ffmpeg = fs.realpathSync(process.env["STRIDER_FFMPEG"]!)
+const layer = Chromium.layer({ executablePath }).pipe(
+  Layer.provide(VideoWriter.layerFfmpeg({ path: ffmpeg })),
+  Layer.provideMerge(NodeServices.layer)
+)
 const browserPids = () =>
   new Set(
     descendants().filter((proc) =>

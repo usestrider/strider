@@ -9,8 +9,8 @@ CLI.md) state the contracts that follow from them.
 **Strider drives stock browsers and depends on nothing but Effect.** A script should run in the browser a site
 expects, not a build made for automation. A patched browser is also a dependency as much as a package is: its protocol
 changes whenever its vendor rolls it, and users can get it only through the vendor's installer. Rejected: Playwright's
-WebKit build as an option, and a patched WebKit of our own. Where a feature would need a dependency, it isn't built.
-Only Firefox records a video file, because turning Chromium's or WebKit's frames into one needs an encoder. A trace's
+WebKit build as an option, and a patched WebKit of our own. Optional services supply external tools when the caller explicitly provides them. Firefox writes video itself;
+Chromium writes it through an optional `VideoWriter`, whose ffmpeg layer takes an explicit executable path. A trace's
 DOM capture is our own code. Playwright's snapshotter is read to learn what the trace viewer expects, never copied or
 shipped, and there is no viewer of our own, since trace.playwright.dev already runs anywhere.
 
@@ -1154,8 +1154,7 @@ waiting for confirmation, runs interruptibly under a fresh one-second browser-cl
 acquisition's protocol deadline. A canceled caller waiting behind stop needs no start cleanup. Cleanup is best
 effort and does not retry a failed stop. A transport that ignores interruption can outlive the budget; bytes already
 accepted by a transport can still reach the browser. Missing confirmation does not prove native release.
-The built-in pipe and WebSocket transports preserve command order on their connection. Consumer frame
-subscriptions and acknowledgments remain independent.
+The built-in pipe and WebSocket transports preserve command order on their connection. Frame delivery and acknowledgements are coordinated across the session's consumers.
 
 Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
 counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
@@ -1164,3 +1163,24 @@ start/reply exchanges, which blocks a newer acquisition behind an abandoned star
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
+
+Video shares this session stream with user screencasts. A frame is acknowledged once after every current consumer
+has taken it, or released its scope; a fast consumer cannot acknowledge for a slower one. The session retains its
+latest image for a consumer joining an idle confirmed stream, without another acknowledgement. An acquired
+consumer that stops reading holds back new frames until its scope closes. This bounds native frame production
+without blocking the page's renderer. Rejected: acknowledging separately per consumer, which bypasses backpressure,
+and restarting the native stream for an idle join, which disrupts existing consumers.
+
+## Video files use an optional writer service
+
+`VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
+the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
+Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
+PATH. The video consumer paces the latest image at 25fps on the browser clock through idle periods; the writer scales
+and pads to the initial dimensions. Its file lives in the context's downloads directory. Scope closure stops the
+source, ends input, and allows five seconds on the browser clock to finish; a failed or unfinished writer fails
+`file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
+capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
+whole file-writing service `VideoEncoder`, which clashes with the DOM's WebCodecs name; and baking ffmpeg into
+the adapter, which would prevent later WebCodecs, key-frame and PNG/polled-source implementations from using
+the same boundary.
