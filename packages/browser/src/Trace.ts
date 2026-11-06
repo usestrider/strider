@@ -181,6 +181,9 @@ export interface Recording extends Declaration.Registration {
  *   stopped or read, export still succeeds. The trace viewer's Console tab shows an error with the page ID,
  *   stage (`acquisition`, `stop` or `file-read`) and underlying cause. Later exports retain that diagnostic;
  *   they do not retry the failed recording. Error URLs follow the diagnostics preset chosen for each export.
+ * - Export does not wait for native video acquisition. If acquisition is still pending when export begins,
+ *   the Console tab explains the missing video as pending, without a browser error. Later exports show the
+ *   actual outcome: the video once acquired, or its failure reason. They do not retain a stale pending message.
  *
  * **Example** (Exporting a trace when checkout fails)
  *

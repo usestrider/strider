@@ -135,6 +135,19 @@ const videoFailureEvent = (failure: VideoFailure, preset: Diagnostics.Preset): R
   }
 }
 
+/** A snapshot of incomplete acquisition, not a terminal recording failure. */
+const pendingVideoEvent = (
+  page: Target.NavigableId,
+  at: MonotonicInstant.MonotonicInstant
+): Record<string, unknown> => ({
+  type: "console",
+  time: Recordings.millis(at),
+  pageId: page,
+  messageType: "error",
+  text: `Native video for page ${page}: acquisition is still pending at export; no video is available in this export.`,
+  location: { url: "", lineNumber: 0, columnNumber: 0 }
+})
+
 interface Frame {
   readonly page: Target.NavigableId
   readonly at: MonotonicInstant.MonotonicInstant
@@ -345,6 +358,7 @@ export const start = Effect.fnUntraced(function*(
   const exceptions: Array<UncaughtException.UncaughtException> = []
   const snapshots: Array<Snapshot> = []
   const videos: Array<Video> = []
+  const pendingVideos = new Set<Target.NavigableId>()
   const videoFailures: Array<VideoFailure> = []
   const retainVideoFailure = (failure: VideoFailure) => Effect.sync(() => void videoFailures.push(failure))
   const observeVideo = <A, E, R>(
@@ -524,7 +538,7 @@ export const start = Effect.fnUntraced(function*(
     })
     const cast = (page: Model.PageEntry) =>
       video
-        ? record(page)
+        ? record(page).pipe(Effect.ensuring(Effect.sync(() => void pendingVideos.delete(page.id))))
         : screencast === "native"
         ? Capabilities.acquire(runtime, page, Capability.Screencast).pipe(
           Effect.flatMap((control) =>
@@ -562,6 +576,7 @@ export const start = Effect.fnUntraced(function*(
       Effect.suspend(() => {
         if (seen.has(page.id)) return Effect.void
         seen.add(page.id)
+        if (video) pendingVideos.add(page.id)
         return cast(page).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own), Effect.asVoid)
       })
     if (target._tag === "Page") yield* follow(target.entry)
@@ -590,6 +605,9 @@ export const start = Effect.fnUntraced(function*(
   const exportTrace = Effect.fnUntraced(function*(path: FilePath.Local | string) {
     const preset = yield* Diagnostics.CurrentPreset
     const exported = Adapter.now()
+    // Snapshot acquisition before yielding: an acquisition settling during export belongs to the next export.
+    const pendingAtExport = new Set(pendingVideos)
+    const videosAtExport = videos.slice()
     const info = runtime.model.adapter.info
     const events: Array<{ readonly time: number; readonly event: Record<string, unknown> }> = []
     // A caller's span spans the operations recorded inside it
@@ -764,7 +782,7 @@ export const start = Effect.fnUntraced(function*(
       }
     }
     // Videos end here, the first time, and their files are read
-    for (const video of videos) {
+    for (const video of videosAtExport) {
       if (!video.finished) {
         const file = yield* observeVideo(
           video.page,
@@ -802,7 +820,12 @@ export const start = Effect.fnUntraced(function*(
         }
       })
     }
+    for (const page of pendingAtExport) {
+      const pendingEvent = pendingVideoEvent(page, exported)
+      events.push({ time: exported, event: pendingEvent })
+    }
     for (const failure of videoFailures) {
+      if (failure.stage === "acquisition" && pendingAtExport.has(failure.page)) continue
       events.push({ time: failure.at, event: videoFailureEvent(failure, preset) })
     }
     events.sort((a, b) => a.time - b.time)

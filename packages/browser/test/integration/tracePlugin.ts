@@ -28,6 +28,13 @@ export const instrument = (source: string, id: string) => {
       1
     )
   }
+  if (trace) {
+    replace(
+      "const pendingEvent = pendingVideoEvent(page, exported)",
+      "const pendingEvent = pendingVideoEvent(page, exported); __nativeVideoTrace(\"native-video-pending\", pendingEvent)",
+      1
+    )
+  }
   if (transport || inspector) {
     replace(
       "const link = yield* Link.make",

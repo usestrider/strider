@@ -9,7 +9,8 @@
  * The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
  *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
- * rendered with strict URL redaction, even if the test never exports its trace archive.
+ * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
+ * acquisition is pending records that observation too; later records can show its eventual failure.
  *
  * Capture covers Strider pipe and WebSocket transports and decoded stock WebKit inspector messages in Vitest,
  * including public-layer slices and the Strider upstream cases selected by the integration configuration.
