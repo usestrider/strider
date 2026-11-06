@@ -1803,11 +1803,16 @@ Recordings of what happened on a page, exported as traces that Playwright's trac
 
 *models*
 
-- `interface Options` (experimental)
+- `type Options = CaptureOptions & (NetworkOptions | SnapshotOptions)` (experimental)
+- `interface CaptureOptions` (experimental)
   - `readonly screenshots?: "perAction" | "off" | undefined`
   - `readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined`
-  - `readonly domSnapshots?: boolean | undefined`
+- `interface NetworkOptions` (experimental)
+  - `readonly domSnapshots?: false | undefined`
   - `readonly network?: boolean | undefined`
+- `interface SnapshotOptions` (experimental)
+  - `readonly domSnapshots: true`
+  - `readonly network: true`
 - `interface Recording extends Declaration.Registration` (experimental)
   - `exportTrace(path: FilePath.Local | string): Effect.Effect<FilePath.Local, TraceError>`
 - `type TraceErrorReason = typeof TraceErrorReason.Type` (experimental)
