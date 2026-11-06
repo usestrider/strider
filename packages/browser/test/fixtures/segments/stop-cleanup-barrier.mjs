@@ -7,6 +7,7 @@ import path from "node:path"
 if (process.argv.includes("__daemon")) {
   const events = process.env.STRIDER_STOP_EVENTS
   const record = (event) => fs.appendFileSync(events, JSON.stringify(event) + "\n")
+  let cleanupBarrier
   const requests = new WeakMap()
   const incoming = new WeakMap()
   const emit = Socket.prototype.emit
@@ -19,6 +20,7 @@ if (process.argv.includes("__daemon")) {
           const message = JSON.parse(line)
           if (message._tag === "Request" && message.tag === "Command" && message.payload.argv.includes("stop")) {
             requests.set(this, String(message.id))
+            cleanupBarrier?.write("caller\n")
           }
         } catch {}
       }
@@ -46,8 +48,12 @@ if (process.argv.includes("__daemon")) {
     if (path.dirname(String(file)) !== path.join(process.env.XDG_STATE_HOME, "strider", "ledger")) {
       return rm.call(this, file, options, callback)
     }
+    if (process.env.STRIDER_STOP_FAILURE) {
+      return callback(Object.assign(new Error("denied ledger removal"), { code: "EACCES" }))
+    }
     record({ event: "ledger-finalizer-entered", exists: fs.existsSync(file) })
     const barrier = connect(process.env.STRIDER_STOP_BARRIER)
+    cleanupBarrier = barrier
     barrier.once("connect", () => barrier.write("entered\n"))
     barrier.once("data", () => {
       rm.call(this, file, options, (error) => {
