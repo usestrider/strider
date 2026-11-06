@@ -48,11 +48,17 @@ const environment = (dir: string, display: string, inspector: Record<string, str
  * The MiniBrowser showing `urls`, a tab each, and its inspector server's endpoint, `http://127.0.0.1:port`, once
  * its list names them all. The process is returned too, for a test that ends it.
  */
-export const startMiniBrowser = Effect.fnUntraced(function*(...urls: ReadonlyArray<string>) {
+export const startMiniBrowser = (...urls: ReadonlyArray<string>) => startMiniBrowserOnPort(undefined, ...urls)
+
+/** The inspector helper with a selected port, for occupied-port regressions. */
+export const startMiniBrowserOnPort = Effect.fnUntraced(function*(
+  selectedPort: number | undefined,
+  ...urls: ReadonlyArray<string>
+) {
   const fs = yield* FileSystem.FileSystem
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-webkitgtk-" })
   const display = yield* startXvfb(dir)
-  const port = yield* freePort
+  const port = selectedPort ?? (yield* freePort)
   const endpoint = `http://127.0.0.1:${port}`
   // Scripts may open windows, so a test can have the browser open a page after the layer attached
   const args = [`--profile-dir=${dir}/profile`, "--javascript-can-open-windows-automatically=true", ...urls]
