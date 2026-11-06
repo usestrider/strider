@@ -7,6 +7,7 @@ import { assert, describe, it } from "@effect/vitest"
 import {
   AriaRole,
   Browser,
+  Deadline,
   Diagnostics,
   Dialog,
   Expect,
@@ -24,6 +25,7 @@ import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
@@ -368,6 +370,64 @@ describe("Recordings", () => {
       assert.include(failures[2].message, "1")
       assert.include(failures[2].message, "[Unprintable observed value]")
       assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("records a failed URL expectation as a step of the page's trace", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "url-expectation.zip")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        yield* page.goto("https://shop.example.com/account?token=secret-token")
+        const pending = yield* page.pipe(
+          Expect.toHaveURL("https://shop.example.com/done"),
+          Deadline.within("100 millis"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("2 seconds")
+        const error = yield* Fiber.join(pending)
+        assert(Expect.isExpectationFailed(error), String(error))
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const failures = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+      // The page's URL expectation is a step of the page's trace, as its locator expectations are
+      const failure = failures.find((error) => error.name === "ExpectationFailed")
+      assert.isDefined(failure, JSON.stringify(failures))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("redacts observed URLs in an exported expectation message under the strict preset", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "url-evidence.zip")
+      // What toHaveURL observes: the page's whole URL, query and all
+      const url = Operation.observed("https://shop.example.com/account?token=secret-token")
+      const error = new Expect.ExpectationFailed({
+        subject: "page N1",
+        condition: "to have the URL \"https://shop.example.com/done\"",
+        last: Option.some(url),
+        history: [url],
+        elapsed: Duration.millis(100),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        yield* Recorders.observe("Expect.toHaveURL", { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(
+          Effect.flip
+        )
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const failure = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+        .find((event) => event.type === "after" && event.error)?.error
+      assert.include(failure.message, "https://shop.example.com/account?token=REDACTED")
+      // Exported params redact URL query values under the default strict preset; the error message must too
+      assert.notInclude(failure.message, "secret-token")
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("records a trace whose steps nest in the caller's spans", () =>
