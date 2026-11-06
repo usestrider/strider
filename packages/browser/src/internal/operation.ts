@@ -527,7 +527,11 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
           })
       ))
 
-const libraryPath = decodeURIComponent(new URL("../", import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, "$1")
+const libraryDirectory = new URL("../", import.meta.url)
+// Source maps can name src/ while this module runs from dist/. Keep both directory boundaries, not the package root.
+const libraryPaths = /\/(?:src|dist)\/$/.test(libraryDirectory.pathname)
+  ? ["../../src/", "../../dist/"].map((directory) => Recorders.filePath(new URL(directory, import.meta.url).href))
+  : [Recorders.filePath(libraryDirectory.href)]
 
 /** Synchronous public wrappers and getters still have their caller when they construct an operation. */
 const namedCaller = (): string | undefined => {
@@ -543,9 +547,11 @@ const namedCaller = (): string | undefined => {
     Error.stackTraceLimit = limit
   }
   for (const line of stack?.split("\n").slice(1) ?? []) {
-    if (line.replaceAll("\\", "/").includes(libraryPath)) continue
+    const location = Recorders.location(line)
+    if (location === undefined) continue
+    if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
     // Once execution has entered Effect, the immediate public call has already returned.
-    if (/[\\/]effect[\\/](?:src|dist)[\\/]/.test(line)) return undefined
+    if (/\/effect\/(?:src|dist)\//.test(location.file)) return undefined
     return line.trim()
   }
   return undefined

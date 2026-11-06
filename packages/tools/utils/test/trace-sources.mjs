@@ -11,7 +11,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
-const file = fileURLToPath(import.meta.url)
+const file = fileURLToPath(import.meta.url).replaceAll("\\", "/")
 const source = fs.readFileSync(file, "utf8")
 const output = path.join(path.dirname(file), "trace.zip")
 

@@ -52,6 +52,30 @@ export const frame = (
 export const isFrame = (frame: References.StackFrame | undefined): boolean =>
   frame !== undefined && operationFrames.has(frame)
 
+/** A stack's file URL or native path in the same form used for source reads and directory comparisons. */
+export const filePath = (file: string): string => {
+  if (file.startsWith("file://")) {
+    const url = new URL(file)
+    file = decodeURIComponent(url.pathname)
+    if (url.hostname !== "" && url.hostname !== "localhost") file = `//${url.hostname}${file}`
+  }
+  // A backslash is a separator in Windows paths, but a literal character in a POSIX filename.
+  return /^\/?[A-Za-z]:[\\/]/.test(file) || file.startsWith("\\\\")
+    ? file.replaceAll("\\", "/").replace(/^\/([A-Za-z]:)/, "$1")
+    : file
+}
+
+/** A local V8 stack location; unavailable and non-file frames have no source to include. */
+export const location = (stack: string): Omit<Location, "function"> | undefined => {
+  const match = stack.match(/(?:\(|at )((?:file:\/\/|\/|[A-Za-z]:[\\/]).*):(\d+):(\d+)\)?$/)
+  if (match === null) return undefined
+  try {
+    return { file: filePath(match[1]!), line: Number(match[2]), column: Number(match[3]) }
+  } catch {
+    return undefined
+  }
+}
+
 /** Available caller frames, without Effect.fn's definition frames. */
 const locations = (frame: References.StackFrame | undefined, name: string) => {
   const result: Array<Location> = []
@@ -61,17 +85,10 @@ const locations = (frame: References.StackFrame | undefined, name: string) => {
     // Stack capture is optional; a custom tracer may supply an unavailable or throwing lazy stack.
     try {
       const stack = frame.stack()
-      const match = stack?.match(/(?:\(|at )((?:file:\/\/|\/|[A-Za-z]:[\\/]).*):(\d+):(\d+)\)?$/)
-      if (match === undefined || match === null) continue
-      let file = match[1]!
-      if (file.startsWith("file://")) {
-        const url = new URL(file)
-        file = decodeURIComponent(url.pathname)
-        if (/^\/[A-Za-z]:/.test(file)) file = file.slice(1)
-        if (url.hostname !== "" && url.hostname !== "localhost") file = `//${url.hostname}${file}`
-      }
+      const parsed = stack === undefined ? undefined : location(stack)
+      if (parsed === undefined) continue
       if (result.length === 0) own = isFrame(frame) && frame.name === name
-      result.push({ file, line: Number(match[2]), column: Number(match[3]), function: frame.name })
+      result.push({ ...parsed, function: frame.name })
     } catch {
       // A missing call site must not prevent the operation from running.
     }
