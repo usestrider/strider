@@ -87,7 +87,7 @@ export interface Checks {
   readonly receivesPointer: boolean
 }
 
-/** Why an element isn't ready, as CONCEPTS.md §8 names it. */
+/** Why a target or its action preparation isn't ready. */
 export const NotReady = Schema.Union([
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("NotVisible", {}),
@@ -101,7 +101,9 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("Covered", { by: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
-  Schema.TaggedStruct("NoSuchOption", { option: Schema.String })
+  Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A different text control held focus before preparing the target for insertion. */
+  Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
 ])
 export type NotReady = typeof NotReady.Type
 
@@ -1858,8 +1860,9 @@ export function engine(render: (root: SnapNode) => string) {
           request.apply && action._tag === "Fill" && document.designMode === "on" &&
           !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         ) {
-          const active = document.activeElement
+          const active = deepActive()
           if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            note({ _tag: "PreparingFocus", from: describe(active) })
             active.blur()
             // Blur handlers can replace the target or change any effective check. Resolve and check again
             // through the ordinary wait loop before selecting a range or allowing native insertion.

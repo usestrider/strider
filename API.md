@@ -545,9 +545,10 @@ optional fractional part (or a leading decimal point and digits), and an optiona
 a leading plus, a trailing decimal point, hexadecimal and non-finite values fail with `InvalidInput` before focus,
 selection or mutation. The input's min, max and step do not restrict fill. Redacted values never appear in diagnostics.
 
-In a design-mode document, filling a non-input target first blurs a different active input or textarea, then
-resolves the target and checks its readiness again before selecting its contents. Blur handlers can therefore
-replace the target or make the action wait. Firefox cannot focus an input inside a top-level design-mode
+In a design-mode document, filling a non-input target first blurs a different active input or textarea, including
+one inside open shadow roots, then resolves the target and checks its readiness again before selecting its contents.
+Blur handlers can therefore replace the target or make the action wait. If refocusing prevents preparation until
+the deadline, the timeout reports focus preparation in its history. Firefox cannot focus an input inside a top-level design-mode
 document, so filling that input is unsupported; text intended for it can reach the document body instead.
 Strider does not change design mode or synthesize input to work around this browser limitation.
 
