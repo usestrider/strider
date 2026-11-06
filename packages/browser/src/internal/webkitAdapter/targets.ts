@@ -62,6 +62,7 @@ const pageProxyCreated = (state: State, params: Envelope.PageProxyCreatedParams)
     context,
     popup: launchedPopup,
     ready: Deferred.makeUnsafe(),
+    retaining: new Set(),
     target: undefined,
     provisional: undefined,
     main: undefined as unknown as FrameEntry,
@@ -139,6 +140,9 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const target = state.targets.get(session)
   if (target !== undefined) {
     target.ended = true
+    for (const request of state.requests.values()) {
+      if (request.session === session) Deferred.doneUnsafe(request.finished, Effect.fail("Target ended"))
+    }
     state.targets.delete(session)
     state.pausedRequests.delete(target)
     for (const realm of Array.from(state.realms.values())) {

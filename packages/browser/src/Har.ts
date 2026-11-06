@@ -170,6 +170,9 @@ export interface Recording extends Declaration.Registration {
  * **Gotchas**
  *
  * - Bodies are collected for the target while it records, up to `NetworkResponse.BodyLimit`.
+ * - On WebKit, navigation and reload wait for the page's document loads and body reads to settle while response
+ *   bodies are collected. This wait uses the navigation's existing deadline and can be interrupted. Navigation
+ *   triggered by page scripts or input is outside this coordination.
  * - `webSocketFrames` is `Unsupported` on WebDriver BiDi.
  * - Chromium keeps only the body a request's last hop sent, so an earlier hop's body that its event didn't carry,
  *   such as a file upload that a 307 redirected, is left out.

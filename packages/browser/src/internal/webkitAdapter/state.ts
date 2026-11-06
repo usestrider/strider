@@ -48,6 +48,8 @@ export interface PageEntry {
   readonly pageProxyId: string
   readonly session: ProtocolClient.Session
   readonly context: ContextEntry
+  /** Document body reads still using this page’s resources, independent of the bounded request history. */
+  readonly retaining: Set<RequestEntry>
   readonly popup: boolean
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   /** The committed target, and the one a cross-site navigation is loading in. */

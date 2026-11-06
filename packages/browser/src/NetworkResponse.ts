@@ -245,6 +245,10 @@ export const withBodyLimit: {
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
+ * While response bodies are collected on WebKit, navigation and reload wait for the page's document loads and
+ * body reads to settle within the navigation's existing deadline. The wait can be interrupted; navigation
+ * triggered by page scripts or input is outside this coordination.
+ *
  * **Example** (Waiting for the cart's response)
  *
  * ```ts import.meta.vitest
