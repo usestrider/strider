@@ -7,10 +7,16 @@ import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Browser from "../src/Browser.ts"
 import * as Cdp from "../src/internal/cdpAdapter.ts"
+import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as WebKit from "../src/internal/webkitAdapter/capabilities.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
 
 describe("VideoWriter", () => {
+  it("converts Chromium epoch seconds to the live monotonic clock without receipt-time pacing", () => {
+    assert.strictEqual(Capture.screencastTime(1700000000.237, 1700000000000), 237e6)
+    assert.strictEqual(Capture.screencastTime(1700000002.391, 1700000000000), 2391e6)
+  })
+
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {
     const info = new Browser.Info({ protocol: "webkit", product: "WebKit", version: "test", revision: "test" })
     for (const capabilities of [WebKit.attachedCapabilities, WebKit.launchedCapabilities]) {

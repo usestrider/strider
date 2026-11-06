@@ -35,7 +35,7 @@ the browser can write one.
 
 | Browser  | Needs                                                               | Frames                                          |
 | -------- | ------------------------------------------------------------------- | ----------------------------------------------- |
-| Chromium | a [`VideoWriter`](/docs/api/browser/VideoWriter) on its layer       | its screencast's, at a fixed 25 a second        |
+| Chromium | a [`VideoWriter`](/docs/api/browser/VideoWriter) on its layer       | its screencast's, as the page paints        |
 | Firefox  | nothing, when the program launched it                               | Firefox's own, as the page paints               |
 | WebKit   | a writer and [polling enabled](/docs/browsers/webkit-video)         | screenshots at the interval you choose          |
 
@@ -69,8 +69,8 @@ option names.
 ## Playback
 
 - **A still page stays on screen for as long as it was still.** Chromium sends a frame only when the page
-  repaints, so the latest one is repeated 25 times a second until the next, or until the recording ends. Firefox
-  stores fewer frames, each with its time. Either way, the file plays back in real time.
+  repaints. The file is variable-rate: each frame keeps its time and stays on screen until the next, as on Firefox.
+  The last picture lasts until recording stops. WebKit keeps each polled sample until the next sample.
 - **A resize is fitted, not followed.** The recording carries on through a resize, but the file keeps the size
   it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
 - **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last

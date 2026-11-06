@@ -16,10 +16,12 @@ import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as Streams from "effect/Stream"
 import * as BrowserClock from "./internal/browserClock.ts"
+import * as VideoContainer from "./internal/videoContainer.ts"
 import * as Reason from "./Reason.ts"
 
 /**
- * An image at a monotonic timestamp in nanoseconds. Video input is paced at 25 frames per second.
+ * An image at a timestamp in nanoseconds relative to the recording start. Each image is shown until the next
+ * timestamp; the final image repeats the last picture at the recording end time.
  *
  * @stability unstable
  * @category schemas
@@ -34,7 +36,8 @@ export const Frame = Schema.Struct({
 })
 
 /**
- * One timestamped image.
+ * One image at nanoseconds relative to recording start, shown until the next timestamp.
+ * The final image marks recording end.
  *
  * @stability unstable
  * @category models
@@ -44,7 +47,8 @@ export type Frame = typeof Frame.Type
 
 /**
  * The destination and fixed output size. Writers must output every frame at exactly these dimensions,
- * scaling to fit, centring and padding with black.
+ * scaling to fit, centring and padding with black. Writers must preserve frame timestamps: the last
+ * picture lasts until the final frame's timestamp, which marks the recording end.
  *
  * @stability unstable
  * @category schemas
@@ -53,7 +57,8 @@ export type Frame = typeof Frame.Type
 export const Destination = Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number })
 
 /**
- * A file and its output dimensions in device pixels.
+ * A file and its fixed output dimensions in device pixels. Writers fit images to this size and preserve
+ * their timestamps through the final recording-end frame.
  *
  * @stability unstable
  * @category models
@@ -85,7 +90,8 @@ export class VideoWriterError extends Schema.TaggedError<VideoWriterError>()("Vi
  */
 export interface VideoWriter {
   /**
-   * Consumes paced images, then completes with the finished file's path. A slow write backpressures the source.
+   * Consumes timestamped images without adding a fixed frame rate, then completes with the finished file's path.
+   * A slow write backpressures the source.
    *
    * **Example** (Writing frames with a provided writer)
    *
@@ -123,8 +129,8 @@ const failure = (hint: string) =>
  *
  * **Details**
  *
- * Requires `ChildProcessSpawner`. The output has no audio and uses 25fps; images are scaled proportionally and
- * padded with black to the recording's original dimensions. Closing the input finishes the file.
+ * Requires `ChildProcessSpawner`. The output has no audio and preserves variable frame times to millisecond
+ * precision; images are scaled proportionally and padded with black to the recording's original dimensions. Closing the input finishes the file.
  *
  * **Example** (Enabling Chromium video)
  *
@@ -159,9 +165,8 @@ export const layerFfmpeg = (
             "-loglevel",
             "error",
             "-f",
-            "image2pipe",
-            "-framerate",
-            "25",
+            "matroska",
+            "-copyts",
             "-i",
             "pipe:0",
             "-vf",
@@ -174,8 +179,10 @@ export const layerFfmpeg = (
             "8",
             "-pix_fmt",
             "yuv420p",
-            "-r",
-            "25",
+            "-fps_mode",
+            "passthrough",
+            "-enc_time_base",
+            "1:1000",
             "-an",
             "-y",
             "-f",
@@ -191,8 +198,18 @@ export const layerFfmpeg = (
             ),
             Effect.forkScoped
           )
+          let initialized = false
           yield* frames.pipe(
-            Streams.map((frame) => frame.data),
+            Streams.map((frame) => {
+              const image = VideoContainer.image(frame)
+              if (initialized) return image
+              initialized = true
+              const header = VideoContainer.header(frame)
+              const bytes = new Uint8Array(header.length + image.length)
+              bytes.set(header)
+              bytes.set(image, header.length)
+              return bytes
+            }),
             Streams.run(process.stdin),
             Effect.mapError((error) => failure(`${error.message}; ${stderr}`))
           )

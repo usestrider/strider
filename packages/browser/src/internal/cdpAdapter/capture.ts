@@ -347,7 +347,13 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Stream.runForEach((event) =>
           Effect.gen(function*() {
             const jpeg = yield* Kit.decodeBase64(event.data, "Page.screencastFrame")
-            const frame = { at: Adapter.now(), ...Adapter.jpegSize(jpeg), jpeg }
+            const frame = {
+              at: event.metadata.timestamp === undefined
+                ? Adapter.now()
+                : screencastTime(event.metadata.timestamp),
+              ...Adapter.jpegSize(jpeg),
+              jpeg
+            }
             owners.latest = frame
             const pending = new Set(owners.active)
             let acked = false
@@ -543,7 +549,11 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   return deliveries.pipe(Stream.mapEffect(({ frame, take }) => Effect.as(take, frame)))
 })
 
-/** Video is another session consumer; pacing and its lifetime are independent of the caller's acquisition deadline. */
+/** CDP screencast timestamps are epoch seconds; our live monotonic clock is performance.now(). */
+export const screencastTime = (seconds: number, timeOrigin = performance.timeOrigin): Adapter.ScreencastFrame["at"] =>
+  Math.round((seconds * 1000 - timeOrigin) * 1e6) as Adapter.ScreencastFrame["at"]
+
+/** Video is another session consumer; timing and its lifetime are independent of the caller's acquisition deadline. */
 export const video = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, writer: Option.Option<VideoWriter.VideoWriter>) {
     if (Option.isNone(writer)) {
@@ -561,7 +571,13 @@ export const video = Effect.fnUntraced(
         return {
           frames: frames.pipe(
             Stream.map(({ frame, take }) => ({
-              frame: { format: "jpeg" as const, data: frame.jpeg, width: frame.width, height: frame.height },
+              frame: {
+                at: frame.at,
+                format: "jpeg" as const,
+                data: frame.jpeg,
+                width: frame.width,
+                height: frame.height
+              },
               take
             })),
             Stream.catch((error) => normalSourceEnd(error) ? Stream.empty : Stream.fail(error))

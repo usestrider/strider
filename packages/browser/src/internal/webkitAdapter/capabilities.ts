@@ -141,7 +141,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "capability.video",
         video ? "supported" : "unsupported",
         video
-          ? ["Explicit PNG polling; 25fps output repeats samples and can miss states between captures"]
+          ? ["Explicit PNG polling; variable-rate output can miss states between captures"]
           : ["Stock WebKit video requires video polling options and a VideoWriter service"]
       )
     ]

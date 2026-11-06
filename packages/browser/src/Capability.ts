@@ -185,8 +185,8 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * WebKit requires explicit layer video options and a writer, and writes into the directory those options name.
  * Its initial PNG is immediate; subsequent captures wait the configured interval after completion. PNG polling
  * can miss short states and adds work to the page. Video does not enable WebKit downloads or native screencasts.
- * Chromium and opted-in WebKit record at 25fps, holding the latest frame while idle and scaling and padding viewport changes to
- * the initial size. Closing its scope or ending its page/session closes input and waits up to five seconds on the
+ * Chromium and opted-in WebKit keep each source frame's time, showing it until the next frame or recording end.
+ * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits up to five seconds on the
  * browser clock for a started writer. A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**

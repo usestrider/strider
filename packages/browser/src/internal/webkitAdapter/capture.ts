@@ -125,7 +125,7 @@ export const video = Effect.fnUntraced(function*(
                 return yield* Effect.fail(Kit.undecodable("Page.snapshotRect", "PNG has no positive dimensions"))
               }
               return {
-                frame: { format: "png" as const, data: image, ...size },
+                frame: { at: clock.now(), format: "png" as const, data: image, ...size },
                 take: Effect.void
               }
             }

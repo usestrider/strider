@@ -46,7 +46,7 @@ export const writerConformance = (
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
     it.effect(
-      `${name} writer conformance: fits changing odd sizes with centred black padding`,
+      `${name} writer conformance: preserves variable frame times and fits changing odd sizes`,
       () =>
         Effect.gen(function*() {
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-conformance-"))
@@ -56,7 +56,8 @@ export const writerConformance = (
             Stream.make(
               { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
               { at: 237e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
-              { at: 2391e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
+              { at: 2391e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) },
+              { at: 4127e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
             ),
             { path: path.join(directory, "conformance.webm"), width: 321, height: 243 }
           )
@@ -64,17 +65,19 @@ export const writerConformance = (
             "-v",
             "error",
             "-show_frames",
+            "-show_format",
             "-of",
             "json",
             file
           ], { encoding: "utf8" }))
-          assert.strictEqual(probe.frames.length, 3)
+          assert.strictEqual(probe.frames.length, 4)
           assert.deepStrictEqual(
             probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
               Number(frame.best_effort_timestamp_time)
             ),
-            [0, 0.237, 2.391]
+            [0, 0.237, 2.391, 4.127]
           )
+          assert.closeTo(Number(probe.format.duration), 4.127, 0.002, "still duration includes the final timestamp")
           for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
           const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
             "-v",
@@ -90,7 +93,7 @@ export const writerConformance = (
             "pipe:1"
           ], { maxBuffer: 2_000_000 })
           const frameBytes = 321 * 243 * 3
-          assert.strictEqual(pixels.length, frameBytes * 3)
+          assert.strictEqual(pixels.length, frameBytes * 4)
           assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
           assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
           assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + 160) * 3 + 1]!, 200, "wide third frame is scaled green")

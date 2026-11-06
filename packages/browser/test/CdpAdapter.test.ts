@@ -1590,7 +1590,8 @@ describe("Chromium screenshot renderer readiness", () => {
 describe("Chromium video writer lifetime", () => {
   const frame = (
     h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
-    sessionId: number
+    sessionId: number,
+    timestamp?: number
   ) =>
     h.browser.receive({
       method: "Page.screencastFrame",
@@ -1599,6 +1600,7 @@ describe("Chromium video writer lifetime", () => {
         data: "/9j/2Q==",
         sessionId,
         metadata: {
+          ...(timestamp === undefined ? {} : { timestamp }),
           offsetTop: 0,
           pageScaleFactor: 1,
           deviceWidth: 800,
@@ -1635,7 +1637,7 @@ describe("Chromium video writer lifetime", () => {
       )
     }).pipe(onTestClock))
 
-  it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
+  it.effect("keeps idle images until the recording scope closes", () =>
     Effect.gen(function*() {
       const written = yield* Queue.unbounded<VideoWriter.Frame>()
       const destination = yield* Deferred.make<VideoWriter.Destination>()
@@ -1652,17 +1654,24 @@ describe("Chromium video writer lifetime", () => {
       })
       const page = yield* h.page.control
       const scope = yield* Scope.make()
+      const clock = yield* BrowserClock.CurrentClock
+      const started = clock.now()
       const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
       yield* frame(h, 51)
       assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
       const first = yield* Queue.take(written)
       yield* TestClock.adjust("120 millis")
-      const second = yield* Queue.take(written)
-      const third = yield* Queue.take(written)
-      assert.strictEqual(second.at - first.at, 40e6)
-      assert.strictEqual(third.at - second.at, 40e6)
-      assert.deepStrictEqual(third.data, first.data)
+      assert.strictEqual(yield* Queue.size(written), 0, "idle periods do not generate copies")
+      yield* TestClock.adjust("380 millis")
+      // The paint happened at 237ms; receiving it at 500ms must not change its timestamp.
+      yield* frame(h, 52, (performance.timeOrigin + (started + 237e6) / 1e6) / 1000)
+      const painted = yield* Queue.take(written)
+      assert.closeTo(painted.at, 237e6, 1000)
+      yield* TestClock.adjust("100 millis")
       yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 600e6)
+      assert.deepStrictEqual(tail.data, first.data)
       assert.match(yield* video.file, /\.webm$/)
     }).pipe(onTestClock))
 
