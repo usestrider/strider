@@ -1192,6 +1192,144 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      // A text input takes the typing path; a focus handler can make it read-only there too.
+      it.effect("focus-time readOnly: a text input times out with ReadOnly, unchanged", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="text" value="old" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("new").pipe(
+              Deadline.within("1 second"),
+              Effect.result
+            )
+            const state = {
+              result: result._tag,
+              timeout: result._tag === "Failure" && Deadline.isTimeout(result.failure) &&
+                result.failure.history.some((entry) => (entry.value as { _tag: string })._tag === "ReadOnly"),
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            // Stock WebKit leaves this input unfocused, so the read-only transition is unexercised.
+            if (name === "WebKit" && !state.events.startsWith("focus;")) {
+              assert.deepStrictEqual(state, {
+                result: "Success",
+                timeout: false,
+                value: "new",
+                events: "input;input;input;"
+              })
+              return
+            }
+            assert.deepStrictEqual(state, { result: "Failure", timeout: true, value: "old", events: "focus;" })
+          }))
+        }), timeout)
+
+      for (const property of ["readOnly", "disabled"] as const) {
+        for (const mode of ["blocked", "restored", "override"] as const) {
+          it.effect(`focus-time ${property}: text fill ${mode}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="text" value="old" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; this.${property} = true; events.textContent += 'focus;'; ${
+                  mode === "restored"
+                    ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
+                    : ""
+                }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill("new", {
+                  checks: mode === "override" ? { [property === "readOnly" ? "editable" : "enabled"]: false } : {}
+                }).pipe(Deadline.within("1 second"), Effect.result)
+                const state = {
+                  result: result._tag,
+                  value: yield* page.locator("#field").readValue,
+                  events: yield* page.locator("#events").readText
+                }
+                // This asserts WebKit's unchanged typing path, not a post-focus transition.
+                if (name === "WebKit" && !state.events.startsWith("focus;")) {
+                  assert.deepStrictEqual(state, { result: "Success", value: "new", events: "input;input;input;" })
+                  return
+                }
+                if (mode === "blocked") {
+                  assert.deepStrictEqual(state, { result: "Failure", value: "old", events: "focus;" })
+                  assert(result._tag === "Failure")
+                  assert(Deadline.isTimeout(result.failure), String(result.failure))
+                  assert(result.failure.history.some((entry) =>
+                    (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
+                  ))
+                } else if (mode === "restored") {
+                  assert.deepStrictEqual(state, {
+                    result: "Success",
+                    value: "new",
+                    events: name === "Chromium" ? "focus;editable;input;" : "focus;editable;input;input;input;"
+                  })
+                  assert.strictEqual(yield* page.locator("#before").readText, "old|focus;")
+                } else {
+                  // Skipping actionability does not bypass the browser's native typing restrictions.
+                  assert.deepStrictEqual(state, { result: "Success", value: "old", events: "focus;" })
+                }
+              }))
+            }), timeout)
+        }
+      }
+
+      // A focus handler can also make the typing target a kind that takes no text at all.
+      for (
+        const [kind, html] of [
+          [
+            "contenteditable off",
+            `<div id="field" contenteditable="true" onfocus="this.contentEditable = 'false'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'">old</div><p id="events"></p>`
+          ],
+          [
+            "type checkbox",
+            `<input id="field" type="text" value="old" onfocus="this.type = 'checkbox'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          ]
+        ] as const
+      ) {
+        for (const editable of [true, false]) {
+          it.effect(
+            `focus-time ${kind}: text fill ${
+              editable ? "fails NotEditable, unchanged" : "skips NotEditable with editable check off"
+            }`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => html)
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator("#field").fill("new", { checks: { editable } }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.result
+                  )
+                  const field = page.locator("#field")
+                  const state = {
+                    notEditable: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                      result.failure.reason._tag === "NotEditable",
+                    value: kind === "type checkbox" ? yield* field.readValue : yield* field.readText,
+                    events: yield* page.locator("#events").readText
+                  }
+                  // Stock WebKit may leave the target unfocused; then the transition is unexercised.
+                  if (name === "WebKit" && !state.events.startsWith("focus;")) {
+                    assert.strictEqual(result._tag, "Success")
+                    assert.deepStrictEqual(state, { notEditable: false, value: "new", events: "input;input;input;" })
+                    return
+                  }
+                  assert.strictEqual(result._tag, editable ? "Failure" : "Success")
+                  assert.deepStrictEqual(
+                    state,
+                    { notEditable: editable, value: "old", events: "focus;" },
+                    String(result)
+                  )
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
       for (const type of ["range", "file", "checkbox"] as const) {
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
