@@ -1278,25 +1278,39 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
-      it.effect("fills an input then a paragraph in a top-level design-mode document", () =>
-        Effect.gen(function*() {
-          const { url } = yield* fixture(() =>
-            "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
-          )
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
-            yield* page.locator("#other").fill("other")
-            yield* page.locator("#target").fill("new")
-            assert.deepStrictEqual({
-              input: yield* page.locator("#other").readValue,
-              paragraph: yield* page.locator("#target").readText
-            }, { input: "other", paragraph: "new" })
-          }))
-        }), timeout)
+      it.effect(
+        "fills an input then a paragraph in a top-level design-mode document",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#other").fill("other")
+              yield* page.locator("#target").fill("new")
+              assert.deepStrictEqual({
+                input: yield* page.locator("#other").readValue,
+                paragraph: yield* page.locator("#target").readText
+              }, { input: "other", paragraph: "new" })
+            }))
+          }),
+        timeout
+      )
 
       for (
-        const change of ["replace", "detach", "hide", "inert", "disable", "disable with checks off", "restore"] as const
+        const change of [
+          "replace",
+          "detach",
+          "hide",
+          "inert",
+          "disable",
+          "disable with checks off",
+          "readonly",
+          "readonly with checks off",
+          "restore"
+        ] as const
       ) {
         it.effect(
           `rechecks a top-level design-mode target when blur handlers ${change} it`,
@@ -1312,6 +1326,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 ? "target.inert = true"
                 : change === "restore"
                 ? "target.style.display = \"none\"; setTimeout(() => target.style.display = \"\", 100)"
+                : change.startsWith("readonly")
+                ? "target.setAttribute(\"aria-readonly\", \"true\")"
                 : "target.setAttribute(\"aria-disabled\", \"true\")"
               const { url } = yield* fixture(() =>
                 `<input id="other"><p id="target">old</p><script>
@@ -1323,9 +1339,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const page = yield* Browser.newPage()
                 yield* page.goto(url)
                 yield* page.locator("#other").fill("other")
-                if (change === "replace" || change === "restore" || change === "disable with checks off") {
+                if (
+                  change === "replace" || change === "restore" || change === "disable with checks off" ||
+                  change === "readonly with checks off"
+                ) {
                   yield* page.locator("#target").fill("new", {
-                    checks: { enabled: change !== "disable with checks off" }
+                    checks: {
+                      enabled: change !== "disable with checks off",
+                      editable: change !== "readonly with checks off"
+                    }
                   }).pipe(Deadline.within("3 seconds"))
                   assert.strictEqual(yield* page.locator("#target").readText, "new")
                 } else {
@@ -1334,8 +1356,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     Effect.flip
                   )
                   assert(Deadline.isTimeout(error), String(error))
-                  const expected =
-                    { detach: "NoMatch", hide: "NotVisible", inert: "Inert", disable: "Disabled" }[change]
+                  const expected = {
+                    detach: "NoMatch",
+                    hide: "NotVisible",
+                    inert: "Inert",
+                    disable: "Disabled",
+                    readonly: "ReadOnly"
+                  }[change]
                   assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === expected))
                   if (change !== "detach") assert.strictEqual(yield* page.locator("#target").readText, "old")
                 }
