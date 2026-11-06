@@ -215,7 +215,9 @@ export type Phase = Deadline.Timeout["phase"]
 export class Record implements Operation.Operation {
   readonly "~@usestrider/browser/Operation" = "~@usestrider/browser/Operation" as const
   private dispatchEvidence: Diagnostics.DispatchState = { _tag: "NotSent" }
-  private readonly dispatches = new Set<{ readonly step: Record | undefined }>()
+  private readonly dispatches = new Set<object>()
+  private readonly parents = new Set<Record>()
+  private readonly manual = new Map<Record, Diagnostics.DispatchState>()
   private overlap: Diagnostics.DispatchState = { _tag: "NotSent" }
   private replyUncertain = false
 
@@ -233,36 +235,67 @@ export class Record implements Operation.Operation {
     this.clock = clock
   }
 
-  /** Evidence for the current overlap, including calls whose wait has already ended without a reply. */
+  /** Active writes have no reply yet; merely running steps do not hold an overlap open. */
   get dispatch(): Diagnostics.DispatchState {
-    if (this.dispatches.size === 0) return this.dispatchEvidence
-    let dispatch = this.overlap
-    for (const each of this.dispatches) {
-      dispatch = combinedDispatch(dispatch, each.step?.dispatch ?? { _tag: "MayHaveBeenSent" })
-    }
-    return dispatch._tag === "NotSent" ? this.dispatchEvidence : dispatch
+    return this.dispatches.size === 0 && this.manual.size === 0 ? this.dispatchEvidence : { _tag: "MayHaveBeenSent" }
   }
 
   set dispatch(dispatch: Diagnostics.DispatchState) {
-    this.dispatchEvidence = dispatch
+    this.mark(dispatch)
   }
 
-  /** Joins an overlapping group; a later group starts fresh once all its members have ended. */
-  beginDispatch(step?: Record): (dispatch: Diagnostics.DispatchState) => void {
-    if (this.dispatches.size === 0) this.overlap = { _tag: "NotSent" }
-    const member = { step }
-    this.dispatches.add(member)
-    if (step === undefined) {
-      if (this.dispatches.size === 1) this.replyUncertain = false
-      this.markSent()
+  private startDispatch(): void {
+    if (this.dispatches.size === 0 && this.manual.size === 0) {
+      this.overlap = { _tag: "NotSent" }
+      this.replyUncertain = false
     }
+  }
+
+  private finishDispatch(dispatch: Diagnostics.DispatchState): void {
+    this.overlap = combinedDispatch(this.overlap, dispatch)
+    this.dispatchEvidence = this.overlap
+    this.replyUncertain = this.overlap._tag === "MayHaveBeenSent"
+  }
+
+  /** Manual sends have a lifetime too: a guard or answer ends only that source's send. */
+  private mark(dispatch: Diagnostics.DispatchState, source: Record = this): void {
+    if (dispatch._tag === "MayHaveBeenSent") {
+      this.startDispatch()
+      this.manual.set(source, dispatch)
+    } else {
+      if (!this.manual.has(source)) this.startDispatch()
+      this.manual.delete(source)
+      this.finishDispatch(dispatch)
+    }
+    for (const parent of this.parents) parent.mark(dispatch, source)
+  }
+
+  /** Only actual writes join an overlap. Their evidence follows the step's enclosing operations. */
+  beginDispatch(source: Record = this): (dispatch: Diagnostics.DispatchState) => void {
+    this.startDispatch()
+    // A tracked call takes over its caller's preparatory manual send annotation.
+    this.manual.delete(source)
+    const member = {}
+    this.dispatches.add(member)
+    const enclosing = Array.from(this.parents, (parent) => parent.beginDispatch(source))
     return (dispatch) => {
       this.dispatches.delete(member)
-      this.overlap = combinedDispatch(this.overlap, dispatch)
-      if (this.overlap._tag !== "NotSent") {
-        this.dispatchEvidence = this.overlap
-        this.replyUncertain = this.overlap._tag === "MayHaveBeenSent"
-      }
+      this.finishDispatch(dispatch)
+      for (const finish of enclosing) finish(dispatch)
+    }
+  }
+
+  /** Ends a failed step's manual send without inferring a reply from its completion. */
+  private endManual(source: Record = this): void {
+    if (this.manual.delete(source)) this.finishDispatch({ _tag: "MayHaveBeenSent" })
+    for (const parent of this.parents) parent.endManual(source)
+  }
+
+  /** Attaches evidence propagation while a step runs; read-only steps contribute no dispatch. */
+  enclose(parent: Record): () => void {
+    this.parents.add(parent)
+    return () => {
+      this.parents.delete(parent)
     }
   }
 
@@ -278,18 +311,17 @@ export class Record implements Operation.Operation {
 
   /** From here, input or a call may have reached the browser. */
   markSent(): void {
-    if (this.dispatches.size === 0) this.replyUncertain = false
-    this.dispatch = { _tag: "MayHaveBeenSent" }
+    this.mark({ _tag: "MayHaveBeenSent" })
   }
 
   /** What was sent never reached the page: a gesture the guard stopped. */
   markNotSent(): void {
-    this.dispatch = { _tag: "NotSent" }
+    this.mark({ _tag: "NotSent" })
   }
 
   /** The browser confirmed what was sent; what the operation waits for now is its outcome. */
   markConfirmed(result: "ok" | "rejected" = "ok"): void {
-    this.dispatch = { _tag: "Acknowledged", result }
+    this.mark({ _tag: "Acknowledged", result })
   }
 
   /** Summarizes cleanup owned by this operation; known failure takes precedence over unfinished work. */
@@ -310,7 +342,9 @@ export class Record implements Operation.Operation {
         !step.replyUncertain && step.dispatches.size === 0
       ? { _tag: "Acknowledged", result: "ok" }
       : step.dispatch
-    if (dispatch._tag !== "NotSent") this.dispatch = dispatch
+    if (dispatch._tag === "Acknowledged" && step.dispatch._tag === "MayHaveBeenSent") {
+      step.markConfirmed(dispatch.result)
+    } else step.endManual()
     const state = succeeded
       ? "ok"
       : dispatch._tag === "NotSent"
@@ -475,9 +509,13 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
     Option.isNone(enclosing) || enclosing.value === record
       ? self
       : Effect.acquireUseRelease(
-        Effect.sync(() => enclosing.value.beginDispatch(record)),
+        Effect.sync(() => record.enclose(enclosing.value)),
         () => self,
-        (finish, exit) => Effect.sync(() => finish(enclosing.value.addStep(record, Exit.isSuccess(exit))))
+        (detach, exit) =>
+          Effect.sync(() => {
+            enclosing.value.addStep(record, Exit.isSuccess(exit))
+            detach()
+          })
       ))
 
 /**

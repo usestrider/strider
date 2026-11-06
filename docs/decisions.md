@@ -1143,3 +1143,12 @@ acknowledgement alone does not prove that the requested gesture was dispatched.
 Rejected: counting only calls still running, which loses uncertainty when a wait ends before another reply;
 and allowing one reply or a successful error-handling step to confirm the other writes in its operation. Dispatch
 bookkeeping is acquired and released with interruption-safe finalizers; it adds no wait, deadline or resource owner.
+
+Dispatch overlap follows writes, not the lifetime of every enclosing step. A read-only step can remain active
+while several independent writes finish; it contributes no dispatch evidence and cannot retain a previous
+acknowledgement or overwrite a later guard result when it finishes. Actual call lifetimes propagate through
+enclosing operations as they start and end. Manual sends participate until their guard, confirmation or step
+completion settles them. A tracked call takes over its caller's preparatory manual send annotation; confirming
+or guarding a different manual send cannot erase a concurrent call's missing reply, even after that call's wait
+has ended. Rejected: using every active step as an overlap member, which lets unrelated read waits hide later
+evidence and keep already finished write groups alive.
