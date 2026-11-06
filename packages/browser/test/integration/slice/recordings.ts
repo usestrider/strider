@@ -205,6 +205,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         const [source, boundary] of [
           ["url", "direct"],
           ["title", "direct"],
+          ["title", "guarded"],
           ["url", "watchable map"],
           ["url", "effect map"],
           ["title", "effect map"],
@@ -225,11 +226,12 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               const actual = yield* page[source]
               assert.include(actual, source === "url" ? "generic-url-secret" : title)
               assert.notStrictEqual(page.title, page.title)
+              const direct = boundary === "guarded" ? (yield* page.inspect)[source] : page[source]
               const subject = boundary === "watchable map" ?
                 page.url.map((value) => value)
                 : boundary === "effect map" ?
-                page[source].pipe(Effect.map((value) => value))
-                : page[source]
+                Effect.map(page[source], (value: string) => value)
+                : direct
               const error = yield* Expect.that(
                 subject,
                 Condition.make<string>("to satisfy an always-false condition", () => false)
@@ -265,8 +267,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                   assert.include(event.error.message, "Last observed:")
                   assert.include(event.error.message, "History:")
                   for (const secret of source === "url" ? ["generic-url-secret", "generic-fragment-secret"] : [title]) {
-                    if (boundary === "direct" && preset === "strict") assert.notInclude(event.error.message, secret)
-                    else assert.include(event.error.message, secret)
+                    if ((boundary === "direct" || boundary === "guarded") && preset === "strict") {
+                      assert.notInclude(event.error.message, secret)
+                    } else assert.include(event.error.message, secret)
                   }
                 }
               }
