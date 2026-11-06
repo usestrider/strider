@@ -71,7 +71,7 @@ Each capture is opt-in:
 | ---------------------------- | --------------------------------------------------------------------- |
 | none                         | operations, logs, errors and console output                           |
 | `screenshots: "perAction"`   | a screenshot after each action                                        |
-| `screencast`                 | frames as the page renders: `"native"`, the browser's own, which fails with `Unsupported` on WebKit and an attached Firefox; or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
+| `screencast`                 | frames as the page renders: `"native"`, the browser's own, which selects video on [opted-in WebKit](/docs/browsers/webkit-video) and fails with `Unsupported` on WebKit without video enabled and an attached Firefox; or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
 | `network: true`              | the page's requests and responses                                     |
 | `domSnapshots: true`         | each frame's DOM before and after every action, which the viewer renders; needs `network` |
 

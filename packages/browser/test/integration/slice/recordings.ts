@@ -484,7 +484,6 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "records screencast frames, the browser's own where it has them, or polled",
         () =>
           Effect.gen(function*() {
-            const { info } = yield* Browser.Browser
             const url = yield* fixture(
               `<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`
             )
@@ -507,7 +506,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               }
               assert(recorded._tag === "Success", String(recorded))
               const files = yield* unzip(out)
-              if (screencast === "native" && info.protocol === "bidi") {
+              if (screencast === "native" && (yield* supports("capability.video"))) {
                 // Firefox's own video of the page, WebM, with its size read from the file
                 const videos = lines(files.get("trace.trace")).filter((event) => event.type === "video")
                 assert.strictEqual(videos.length, 1)

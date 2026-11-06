@@ -15,6 +15,7 @@ import * as Page from "../../webkit-stock-protocol/Page.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Kit from "../adapterKit.ts"
 import { realmFor } from "./evaluation.ts"
+import { beforeNavigation } from "./network.ts"
 import { type Event, frameById, frameKey, loaderKey, pageOf, realmOf, type State, targetOf } from "./state.ts"
 import { addFrame, commit, endNavigation, errorPage, removeFrame, startNavigation, withoutFragment } from "./tree.ts"
 
@@ -99,6 +100,8 @@ export const reload = Effect.fnUntraced(function*(
   options: { readonly ignoreCache: boolean }
 ) {
   const page = yield* pageOf(state, id)
+  const retention = beforeNavigation(state, page)
+  if (retention !== undefined) yield* retention
   const target = yield* targetOf(page)
   const navigation = Kit.expect(state.ids, page.main.expected, page.main.document?.url ?? "", "reload")
   yield* Kit.protocol(Page.reload({ ignoreCache: options.ignoreCache }).pipe(Protocol.on(target.session))).pipe(
@@ -122,6 +125,8 @@ export const navigateByScript = Effect.fnUntraced(function*(
   const frame = yield* frameById(state, navigable)
   // The page's document is known once its first snapshot is in
   yield* Deferred.await(frame.page.ready)
+  const retention = beforeNavigation(state, frame.page)
+  if (retention !== undefined) yield* retention
   if (frame.document === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Frame", id: navigable }, new L1Target.DocumentReplaced({})))
   }

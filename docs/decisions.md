@@ -9,8 +9,8 @@ CLI.md) state the contracts that follow from them.
 **Strider drives stock browsers and depends on nothing but Effect.** A script should run in the browser a site
 expects, not a build made for automation. A patched browser is also a dependency as much as a package is: its protocol
 changes whenever its vendor rolls it, and users can get it only through the vendor's installer. Rejected: Playwright's
-WebKit build as an option, and a patched WebKit of our own. Where a feature would need a dependency, it isn't built.
-Only Firefox records a video file, because turning Chromium's or WebKit's frames into one needs an encoder. A trace's
+WebKit build as an option, and a patched WebKit of our own. Optional services supply external tools when the caller explicitly provides them. Firefox writes video itself;
+Chromium writes it through an optional `VideoWriter`, whose ffmpeg layer takes an explicit executable path. A trace's
 DOM capture is our own code. Playwright's snapshotter is read to learn what the trace viewer expects, never copied or
 shipped, and there is no viewer of our own, since trace.playwright.dev already runs anywhere.
 
@@ -1005,6 +1005,58 @@ and visibility filters count the element as hidden. Opacity alone does not make 
   for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
   text fields unusable by fill despite being enabled and editable.
 
+## Local upload transport follows launch and attach
+
+A connection records only whether Strider launched or attached to the browser. Launched `FileInput.local`
+retains native path upload, including absolute paths without caller services, relative paths resolved through
+captured `Path`, and mixtures with Remote paths. Locator existence checks remain conditional on captured
+`FileSystem`; chooser native paths keep their backend failure contract. Launch ownership is a practical storage
+assumption, not proof: container or wrapper launches with a different filesystem must use `FileInput.bytes`.
+An attached browser may be local, but always transferring there makes remote files work without further
+connection classification. Copying every launched upload was rejected because it adds many commands and browser
+storage to the common native-path case.
+
+Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
+base64 encoded, sent and acknowledged before the next is read; no complete encoded file or message is constructed.
+A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
+files, clears the collector and releases the handle on success, failure or interruption; remote cleanup has its
+own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
+constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+as new capability and compatibility contracts without an established requirement.
+
+Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
+Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
+while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
+files after an empty native-path command. The collector validates live input type and cardinality before transfer
+and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
+files on a single-file input. Detached
+chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
+WebKit currently appends native paths on multiple inputs, an existing replacement limitation.
+
+The caller's basename and available open-file stat modification time survive transfer. Effect MIME lookup infers
+MIME from the extension, falling back to `application/octet-stream`. Missing timestamps and Bytes use page-side
+creation time. Local open, stat and read failures retain `FileUnreadable` for locators; chooser failures use the
+existing decision failure report and cancellation policy. Missing caller services fail explicitly.
+
+A chooser's user handler, preparation and staged application run in one registration-scope fiber under the
+original absolute browser-clock deadline. Reads and chunk acknowledgements consume time left after the handler;
+preparation cannot reset its budget or apply after expiry. Decision failures report in the resolving fiber, and
+staged decisions retain their existing count-before-application ordering. Scope interruption cancels stalled work;
+cleanup cannot leave a chooser waiting without a bound.
+
+Chooser transfer preparation runs before the registration's handled count advances. The internal decision has
+its own scope spanning preparation and staged assignment, so failed reads or acknowledgements stay uncounted,
+while a prepared decision is counted before its final application as before. The user handler retains its
+registration scope; introducing a temporary scope around that user callback would close resources the handler
+intends to keep. The collector is released even if the deadline expires between preparation and application.
+
+Launched stock WebKit supplies upload-time creation timestamps rather than disk modification times on its native
+file path. This existing native limitation remains unchanged; transferred files preserve available open-file stat
+times. Native timestamp expectations are explicit in the integration capability table, including exact disk-time
+assertions for Chromium and Firefox and exact transferred-time assertions for attached Chromium.
+
 ## Password snapshot designation
 
 Password inputs have no implicit ARIA role, but agents need a ref to fill them. When inferred interactivity is
@@ -1102,8 +1154,7 @@ waiting for confirmation, runs interruptibly under a fresh one-second browser-cl
 acquisition's protocol deadline. A canceled caller waiting behind stop needs no start cleanup. Cleanup is best
 effort and does not retry a failed stop. A transport that ignores interruption can outlive the budget; bytes already
 accepted by a transport can still reach the browser. Missing confirmation does not prove native release.
-The built-in pipe and WebSocket transports preserve command order on their connection. Consumer frame
-subscriptions and acknowledgments remain independent.
+The built-in pipe and WebSocket transports preserve command order on their connection. Frame delivery and acknowledgements are coordinated across the session's consumers.
 
 Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
 counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
@@ -1112,6 +1163,57 @@ start/reply exchanges, which blocks a newer acquisition behind an abandoned star
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
+
+
+Video shares this session stream with user screencasts. A frame is acknowledged once after every current consumer
+has taken it, or released its scope; a fast consumer cannot acknowledge for a slower one. The session retains its
+latest image for a consumer joining an idle confirmed stream, without another acknowledgement. An acquired
+consumer that stops reading holds back new frames until its scope closes. This bounds native frame production
+without blocking the page's renderer. Rejected: acknowledging separately per consumer, which bypasses backpressure,
+and restarting the native stream for an idle join, which disrupts existing consumers.
+
+## Video files use an optional writer service
+
+`VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
+the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
+Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
+PATH. The video consumer paces the latest image at 25fps on the browser clock through idle periods. Strider fixes
+the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
+scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
+that policy, pacing, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
+inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
+or the explicitly named output directory on WebKit. Scope closure
+or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
+even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+retain their errors. A failed or unfinished writer fails
+`file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
+capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
+whole file-writing service `VideoEncoder`, which clashes with the DOM's WebCodecs name; and baking ffmpeg into
+the adapter, which would prevent later WebCodecs, key-frame and PNG/polled-source implementations from using
+the same boundary. In-browser preparation is rejected: even an isolated world shares the page's renderer main
+thread, so base64 transfers, decoding, canvas drawing and re-encoding at 25fps compete with the page under test;
+navigation destroys the realm and JPEG re-encoding loses quality. Core fitting in Node would require an additional
+codec dependency; no implicit external image tool is introduced.
+
+WebKit reads it only with an explicit polling interval and output directory on its layer; a writer alone
+leaves video unsupported. PNG polling has renderer cost and misses intermediate states, so it is never
+inferred from writer availability. The interval is finite and positive with no hidden default, and an absolute writable directory owned by the caller keeps video independent of unsupported WebKit downloads. The first PNG is
+immediate, subsequent serial captures wait the configured interval after completion and any backpressure, and
+navigation target replacement does not end the page proxy recording. Actual page, context or connection end is
+observed independently of writer reads. Rejected: enabling polling whenever a writer is supplied, claiming
+repeated 25fps output is a native 25fps capture, and enabling downloads merely to supply a video destination.
+
+## Expectation observations
+
+Expectation history contains observed values and diagnostic error entries, and `last` is its final entry.
+For locator expectations, page values must reach Strider before the deadline; with neither a page value nor a
+diagnostic error recorded, history is empty and `last` is absent. Late replies do not update a returned failure.
+A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee a page value.
+`Expect.that` on an effect records `{ error: "a check was still running at the deadline" }` for an unfinished check,
+even if no check has returned a value. This diagnostic describes the unfinished check rather than a page value.
+Rejected: inventing a page value Strider never received, and waiting past the deadline for a reply, which breaks
+the caller’s budget. Changing how observations are collected is not required by this contract.
+
 
 
 ## Diagnostic evidence at failure

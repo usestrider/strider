@@ -67,9 +67,21 @@ export interface FileInput {
  *
  * **Details**
  *
- * The browser is given the path and reads the file itself, so it must see this machine's files, as a launched
- * browser does; for one that doesn't, use `bytes`. A relative path is resolved against the working directory with
- * Effect's `Path`, so the browser's layer must be built with `Path` to accept one.
+ * A browser Strider launched receives the path directly. Absolute paths need no caller services; relative
+ * paths require Effect's `Path` service when building the browser layer. Launching through a container or wrapper
+ * with a different file system requires `bytes` instead. Launched stock WebKit uses upload-time creation
+ * timestamps instead of preserving disk modification times; attached transfers preserve available stat times.
+ *
+ * An attached browser receives caller-side contents, read with the captured Effect `FileSystem` and `Path`
+ * services. Relative paths resolve against the caller's working directory. The basename and available open-file
+ * stat modification time are preserved; absent times use page-side creation time. MIME comes from the extension,
+ * with `application/octet-stream` as fallback. Reads fail with `FileUnreadable` in locator operations; chooser
+ * failures are reported and cancel the chooser. Transfer uses sequential 64 KiB chunks, with no library size cap;
+ * browser storage grows with the files and browser resource limits still apply.
+ *
+ * Launched local paths may be mixed with `remote`; attached local files may be mixed with `bytes`.
+ * Native paths and transferred files cannot be combined in one selection. Stock WebKit currently appends native
+ * paths to an existing multiple selection instead of replacing it.
  *
  * **Example** (Uploading an avatar)
  *
@@ -95,7 +107,8 @@ export const local = (path: FilePath.Local | string): FileInput => FileInputImpl
  *
  * **Details**
  *
- * The browser is given the path as it is, and reads the file on its own machine.
+ * The browser is given the path as it is, and reads the file on its own machine. The browser supplies its
+ * metadata; the MIME type may be empty.
  *
  * **Example** (Uploading a file already on the grid)
  *
@@ -124,12 +137,14 @@ export const remote = (path: FilePath.Remote): FileInput => FileInputImpl.make({
  *
  * The file is made in the page and set on the input through a `DataTransfer`, with `input` and `change`
  * dispatched as when a user chooses files. It keeps its MIME type and needs no file system shared with the
- * browser, so it works with a browser on another machine too.
+ * browser, so it works with a browser on another machine too. Its modification time is when it is made in the page.
  *
  * **Gotchas**
  *
- * One call takes files that are all bytes or all paths, because each kind replaces the other's; a mix fails with
- * `InvalidInput`.
+ * One call may combine bytes and local files on attached connections. Mixing bytes with launched local paths
+ * or remote paths fails with `InvalidInput`
+ * before the selection changes. Multiple files for an input without `multiple` fail with `InvalidInput`
+ * before changing the selection or dispatching events.
  *
  * **Example** (Uploading a generated report)
  *

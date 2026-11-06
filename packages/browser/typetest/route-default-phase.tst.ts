@@ -242,3 +242,72 @@ describe("route phase variance", () => {
     >()
   })
 })
+
+describe("omitted route phase diagnostics", () => {
+  it("names the phase required by response decisions", () => {
+    expect(page.route("**", response)).type.toRaiseError("Response decisions need { phase: 'response' }")
+    expect(context.route("**", response)).type.toRaiseError("Response decisions need { phase: 'response' }")
+  })
+  it("names the phase required by auth decisions", () => {
+    expect(page.route("**", auth)).type.toRaiseError("Auth decisions need { phase: 'auth' }")
+    expect(context.route("**", auth)).type.toRaiseError("Auth decisions need { phase: 'auth' }")
+  })
+})
+
+describe("route diagnostics preserve optional-phase requirements", () => {
+  const handler: Route.Handler<"handler failure", Dependency, Route.Phase> = () =>
+    Effect.flatMap(dependency, () => Route.continue)
+
+  it("page.route retains the requirements of broader handlers", () => {
+    expect(page.route("**", handler, optionalAuth)).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
+  })
+  it("context.route retains the requirements of broader handlers", () => {
+    expect(context.route("**", handler, optionalAuth)).type.toBe<
+      Effect.Effect<
+        Route.Registration,
+        Route.RouteError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | Dependency
+      >
+    >()
+  })
+})
+
+describe("route diagnostics keep earlier accepted calls", () => {
+  it("accepts explicit phase type arguments with an omitted phase", () => {
+    expect(page.route<never, never, "request">("**", request)).type.not.toRaiseError()
+    expect(context.route<never, never, "request">("**", request)).type.not.toRaiseError()
+  })
+  it("accepts handlers forwarded by a wrapper generic in the phase", () => {
+    expect(<P extends Route.Phase>(h: Route.Handler<never, never, P | "request">, o?: Route.Options<P>) =>
+      page.route("**", h, o)
+    ).type.not.toRaiseError()
+    expect(<P extends Route.Phase>(h: Route.Handler<never, never, P | "request">, o?: Route.Options<P>) =>
+      context.route("**", h, o)
+    ).type.not.toRaiseError()
+  })
+})
+
+describe("route diagnostics keep explicit-phase mismatches readable", () => {
+  it("names the handler a selected response phase needs", () => {
+    expect(page.route("**", request, { phase: "response" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'response' }"
+    )
+    expect(context.route("**", request, { phase: "response" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'response' }"
+    )
+  })
+  it("names the incompatible auth phase for request decisions", () => {
+    expect(page.route("**", request, { phase: "auth" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'auth' }"
+    )
+    expect(context.route("**", request, { phase: "auth" })).type.toRaiseError(
+      "Request decisions cannot run at { phase: 'auth' }"
+    )
+  })
+})

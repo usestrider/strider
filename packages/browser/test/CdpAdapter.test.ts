@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Deadline, NetworkRequest } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -49,6 +49,288 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
       makeDispatcher: () => dispatcher
     })
   )
+})
+
+describe("CDP combined locale and user-agent declarations", () => {
+  for (const order of ["Locale first", "UserAgent first"] as const) {
+    for (const timing of ["existing target", "new targets"] as const) {
+      it.effect(`preserves both fields across precedence, replacement and release (${order}, ${timing})`, () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Queue.unbounded<Extract<Adapter.Fact, { _tag: "PageReady" }>>()
+          const commands: Array<Sent> = []
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : command.method === "Page.getFrameTree"
+                ? {
+                  frameTree: {
+                    frame: {
+                      id: command.sessionId!.replace("S", "T"),
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : {}
+              yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "attached",
+            sink: (fact) => fact._tag === "PageReady" ? Queue.offer(ready, fact).pipe(Effect.asVoid) : Effect.void
+          })
+          let target = 0
+          const attach = Effect.gen(function*() {
+            const id = ++target
+            yield* browser.receive({
+              method: "Target.attachedToTarget",
+              params: {
+                sessionId: `S${id}`,
+                targetInfo: { targetId: `T${id}`, type: "page", title: "", url: "about:blank", attached: true },
+                waitingForDebugger: false
+              }
+            })
+            return (yield* Queue.take(ready)).page
+          })
+          const page = timing === "existing target" ? yield* attach : undefined
+          const observed: Array<object> = []
+          const expected: Array<object> = []
+          const snapshot = Effect.fnUntraced(
+            function*(step: string, userAgent: string, locale?: string, platform?: string) {
+              if (timing === "new targets") yield* attach
+              const sessionId = timing === "new targets" ? `S${target}` : "S1"
+              observed.push({
+                step,
+                params: commands.filter((command) =>
+                  command.sessionId === sessionId && command.method === "Emulation.setUserAgentOverride"
+                ).at(-1)?.params
+              })
+              expected.push({
+                step,
+                params: {
+                  userAgent,
+                  ...(locale === undefined ? {} : { acceptLanguage: locale }),
+                  ...(platform === undefined ? {} : { platform })
+                }
+              })
+            }
+          )
+          const install = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, override: Adapter.Override) {
+            const lifetime = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(lifetime, Exit.void))
+            yield* adapter.declare(scope, { _tag: "Override", override }).pipe(Scope.provide(lifetime))
+            return Scope.close(lifetime, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+          })
+          const locale = (value: string): Adapter.Override => ({ _tag: "Locale", locale: value })
+          const ua = (value: string): Adapter.Override => ({
+            _tag: "UserAgent",
+            userAgent: `${value} UA`,
+            platform: Option.some(`${value} platform`)
+          })
+          const browserScope: Adapter.DeclarationScope = { _tag: "Browser" }
+          const contextScope: Adapter.DeclarationScope = { _tag: "UserContext", context: adapter.defaultContext }
+          const first = order === "Locale first" ? locale("en-GB") : ua("Browser")
+          const second = order === "Locale first" ? ua("Browser") : locale("en-GB")
+          const releaseFirst = yield* install(browserScope, first)
+          yield* snapshot(
+            "first kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          const releaseSecond = yield* install(browserScope, second)
+          yield* snapshot("both browser kinds", "Browser UA", "en-GB", "Browser platform")
+          const releaseContextLocale = yield* install(contextScope, locale("fr-FR"))
+          yield* snapshot("context locale over browser UA", "Browser UA", "fr-FR", "Browser platform")
+          const releaseContextUa = yield* install(contextScope, ua("Context"))
+          yield* snapshot("both context kinds", "Context UA", "fr-FR", "Context platform")
+          // Later browser declarations must not beat the more specific context fields.
+          const releaseBrowserLocale = yield* install(browserScope, locale("de-DE"))
+          const releaseBrowserUa = yield* install(browserScope, ua("Later browser"))
+          yield* snapshot("later browser under context", "Context UA", "fr-FR", "Context platform")
+          if (page !== undefined) {
+            const pageScope: Adapter.DeclarationScope = { _tag: "Page", page }
+            const releasePageLocale = yield* install(pageScope, locale("ja-JP"))
+            yield* snapshot("page locale over context UA", "Context UA", "ja-JP", "Context platform")
+            const releasePageUa = yield* install(pageScope, ua("Page"))
+            yield* snapshot("both page kinds", "Page UA", "ja-JP", "Page platform")
+            yield* releasePageLocale
+            yield* snapshot("release page locale", "Page UA", "fr-FR", "Page platform")
+            yield* releasePageUa
+            yield* snapshot("release page UA", "Context UA", "fr-FR", "Context platform")
+          }
+          const releaseReplacementLocale = yield* install(contextScope, locale("it-IT"))
+          yield* snapshot("replace context locale", "Context UA", "it-IT", "Context platform")
+          const releaseReplacementUa = yield* install(contextScope, ua("Replacement"))
+          yield* snapshot("replace context UA", "Replacement UA", "it-IT", "Replacement platform")
+          yield* releaseReplacementLocale
+          yield* snapshot("release replacement locale", "Replacement UA", "fr-FR", "Replacement platform")
+          yield* releaseReplacementUa
+          yield* snapshot("release replacement UA", "Context UA", "fr-FR", "Context platform")
+          yield* releaseContextLocale
+          yield* snapshot("release context locale", "Context UA", "de-DE", "Context platform")
+          yield* releaseContextUa
+          yield* snapshot("release context UA", "Later browser UA", "de-DE", "Later browser platform")
+          yield* releaseBrowserLocale
+          yield* releaseBrowserUa
+          yield* snapshot("release browser replacements", "Browser UA", "en-GB", "Browser platform")
+          yield* releaseSecond
+          yield* snapshot(
+            "release second kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          // A fresh target with no declarations needs no command; restoration is checked on the existing target.
+          yield* releaseFirst
+          if (timing === "existing target") yield* snapshot("release last kind", "HeadlessChrome")
+          assert.deepStrictEqual(observed, expected)
+        }))
+    }
+  }
+})
+
+describe("CDP complete intermediate locale and user-agent payloads", () => {
+  for (const order of ["Locale first", "UserAgent first"] as const) {
+    for (const timing of ["existing target", "new targets"] as const) {
+      it.effect(`omits a replaced platform and preserves every intermediate payload (${order}, ${timing})`, () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Queue.unbounded<Extract<Adapter.Fact, { _tag: "PageReady" }>>()
+          const commands: Array<Sent> = []
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : command.method === "Page.getFrameTree"
+                ? {
+                  frameTree: {
+                    frame: {
+                      id: command.sessionId!.replace("S", "T"),
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : {}
+              yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "attached",
+            sink: (fact) => fact._tag === "PageReady" ? Queue.offer(ready, fact).pipe(Effect.asVoid) : Effect.void
+          })
+          let target = 0
+          const attach = Effect.gen(function*() {
+            const id = ++target
+            yield* browser.receive({
+              method: "Target.attachedToTarget",
+              params: {
+                sessionId: `S${id}`,
+                targetInfo: { targetId: `T${id}`, type: "page", title: "", url: "about:blank", attached: true },
+                waitingForDebugger: false
+              }
+            })
+            return (yield* Queue.take(ready)).page
+          })
+          if (timing === "existing target") yield* attach
+          let cursor = 0
+          const observed: Array<object> = []
+          const expected: Array<object> = []
+          const snapshot = Effect.fnUntraced(
+            function*(step: string, userAgent: string, locale?: string, platform?: string) {
+              if (timing === "new targets") yield* attach
+              const sessionId = timing === "new targets" ? `S${target}` : "S1"
+              const payloads = commands.slice(cursor).filter((command) =>
+                command.sessionId === sessionId && command.method === "Emulation.setUserAgentOverride"
+              )
+              assert.isAbove(payloads.length, 0)
+              cursor = commands.length
+              observed.push({ step, params: payloads.map((command) => command.params) })
+              expected.push({
+                step,
+                params: payloads.map(() => ({
+                  userAgent,
+                  ...(locale === undefined ? {} : { acceptLanguage: locale }),
+                  ...(platform === undefined ? {} : { platform })
+                }))
+              })
+            }
+          )
+          const install = Effect.fnUntraced(function*(scope: Adapter.DeclarationScope, override: Adapter.Override) {
+            const lifetime = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(lifetime, Exit.void))
+            yield* adapter.declare(scope, { _tag: "Override", override }).pipe(Scope.provide(lifetime))
+            return Scope.close(lifetime, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+          })
+          const locale = (value: string): Adapter.Override => ({ _tag: "Locale", locale: value })
+          const ua = (value: string): Adapter.Override => ({
+            _tag: "UserAgent",
+            userAgent: `${value} UA`,
+            platform: Option.some(`${value} platform`)
+          })
+          const browserScope: Adapter.DeclarationScope = { _tag: "Browser" }
+          const first = order === "Locale first" ? locale("en-GB") : ua("Browser")
+          const second = order === "Locale first" ? ua("Browser") : locale("en-GB")
+          const releaseFirst = yield* install(browserScope, first)
+          yield* snapshot(
+            "first kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          const releaseSecond = yield* install(browserScope, second)
+          yield* snapshot("both browser kinds", "Browser UA", "en-GB", "Browser platform")
+          const releaseReplacement = yield* install(browserScope, {
+            _tag: "UserAgent",
+            userAgent: "Replacement UA",
+            platform: Option.none()
+          })
+          yield* snapshot("replace without platform", "Replacement UA", "en-GB")
+          const releaseLocale = yield* install(browserScope, locale("fr-FR"))
+          yield* snapshot("locale with platform absent", "Replacement UA", "fr-FR")
+          yield* releaseLocale
+          yield* snapshot("release locale replacement", "Replacement UA", "en-GB")
+          yield* releaseReplacement
+          yield* snapshot("restore platform", "Browser UA", "en-GB", "Browser platform")
+          yield* releaseSecond
+          yield* snapshot(
+            "release second kind",
+            order === "Locale first" ? "HeadlessChrome" : "Browser UA",
+            order === "Locale first" ? "en-GB" : undefined,
+            order === "Locale first" ? undefined : "Browser platform"
+          )
+          yield* releaseFirst
+          assert.deepStrictEqual(observed, expected)
+        }))
+    }
+  }
 })
 
 describe("CDP locale declaration release", () => {
@@ -684,6 +966,7 @@ const sentHeaders = Effect.fnUntraced(
     const screenshotWork = yield* Queue.unbounded<Sent>()
     const stops = yield* Queue.unbounded<Sent>()
     const stopDeadlines: Array<Option.Option<number>> = []
+    const ackDeadlines: Array<Option.Option<number>> = []
     const stopWrites = yield* Queue.unbounded<void>()
     const stopWriteGate = yield* Deferred.make<void>()
     const startWrites = yield* Queue.unbounded<void>()
@@ -748,6 +1031,7 @@ const sentHeaders = Effect.fnUntraced(
         yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
       }
     }).pipe(Effect.forkScoped)
+    let connection!: Adapter.AdapterConnection
     const services = yield* Layer.build(BrowserImpl.layer((sink) =>
       CdpAdapter.connect({
         ...browser.transport,
@@ -755,6 +1039,9 @@ const sentHeaders = Effect.fnUntraced(
           if (JSON.parse(message).method === "Page.startScreencast" && blockStart) {
             yield* Queue.offer(startWrites, undefined)
             yield* Deferred.await(startWriteGate)
+          }
+          if (JSON.parse(message).method === "Page.screencastFrameAck") {
+            ackDeadlines.push(yield* ProtocolClient.CommandDeadline)
           }
           if (JSON.parse(message).method === "Page.stopScreencast") {
             stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
@@ -771,7 +1058,11 @@ const sentHeaders = Effect.fnUntraced(
           if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
           if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
         })
-      })
+      }).pipe(Effect.tap((adapter) =>
+        Effect.sync(() => {
+          connection = adapter
+        })
+      ))
     ))
     yield* browser.receive({
       method: "Target.attachedToTarget",
@@ -808,6 +1099,7 @@ const sentHeaders = Effect.fnUntraced(
     const request = yield* next
     return {
       browser,
+      connection,
       page,
       request,
       send,
@@ -815,6 +1107,7 @@ const sentHeaders = Effect.fnUntraced(
       captures,
       stops,
       stopDeadlines,
+      ackDeadlines,
       stopWrites,
       stopWriteGate,
       startWrites,
@@ -1294,7 +1587,359 @@ describe("Chromium screenshot renderer readiness", () => {
   }
 })
 
+describe("Chromium video writer lifetime", () => {
+  const frame = (
+    h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
+    sessionId: number
+  ) =>
+    h.browser.receive({
+      method: "Page.screencastFrame",
+      sessionId: "S1",
+      params: {
+        data: "/9j/2Q==",
+        sessionId,
+        metadata: {
+          offsetTop: 0,
+          pageScaleFactor: 1,
+          deviceWidth: 800,
+          deviceHeight: 600,
+          scrollOffsetX: 0,
+          scrollOffsetY: 0
+        }
+      }
+    })
+
+  it.effect("does not retain the acquisition protocol deadline in recording work", () =>
+    Effect.gen(function*() {
+      const deadline = yield* Deferred.make<Option.Option<number>>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(_frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(deadline, yield* ProtocolClient.CommandDeadline)
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video).pipe(Deadline.within("1 second"))
+      yield* frame(h, 70)
+      const recordedDeadline = yield* Deferred.await(deadline)
+      yield* video.file
+      assert.isTrue(Option.isNone(recordedDeadline), "recording and preparation outlive the acquisition deadline")
+      assert.strictEqual(h.ackDeadlines.length, 1)
+      assert.isTrue(
+        h.ackDeadlines.every(Option.isNone),
+        "releasing a pending frame must also clear the acquisition deadline"
+      )
+    }).pipe(onTestClock))
+
+  it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const destination = yield* Deferred.make<VideoWriter.Destination>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(destination, target)
+          yield* frames.pipe(Stream.runForEach((image) => Queue.offer(written, image)))
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 51)
+      assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
+      const first = yield* Queue.take(written)
+      yield* TestClock.adjust("120 millis")
+      const second = yield* Queue.take(written)
+      const third = yield* Queue.take(written)
+      assert.strictEqual(second.at - first.at, 40e6)
+      assert.strictEqual(third.at - second.at, 40e6)
+      assert.deepStrictEqual(third.data, first.data)
+      yield* Scope.close(scope, Exit.void)
+      assert.match(yield* video.file, /\.webm$/)
+    }).pipe(onTestClock))
+
+  it.effect("propagates a writer failure before the recording scope closes", () =>
+    Effect.gen(function*() {
+      const failed = new VideoWriter.VideoWriterError({
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "fake writer", hint: "encoder failed" })
+      })
+      const h = yield* sentHeaders().pipe(
+        Effect.provideService(VideoWriter.VideoWriter, { write: () => Effect.fail(failed) })
+      )
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video)
+      yield* frame(h, 52)
+      const error = yield* Effect.flip(video.file)
+      assert(Capability.isCapabilityError(error))
+      assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("shares video ownership and holds acknowledgements behind a blocked writer", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const unblock = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: Effect.fnUntraced(
+            function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(unblock)
+              yield* Stream.runDrain(frames)
+              return target.path
+            }
+          )
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const castScope = yield* Scope.make()
+        const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
+        yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
+        const videoScope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+        yield* frame(h, 61)
+        yield* Deferred.await(started)
+        yield* drain
+        yield* frame(h, 62)
+        yield* drain
+        yield* frame(h, 63)
+        yield* TestClock.adjust("80 millis")
+        yield* drain
+        const acks = () =>
+          h.commands.filter((c) => c.method === "Page.screencastFrameAck").map((c) => c.params?.sessionId)
+        assert.deepStrictEqual(acks(), [], "the fast screencast cannot acknowledge the writer's waiting frame")
+        yield* Deferred.succeed(unblock, undefined)
+        yield* TestClock.adjust("120 millis")
+        yield* drain
+        assert.deepStrictEqual(acks(), [61, 62, 63])
+        yield* Scope.close(castScope, Exit.void)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+        yield* Scope.close(videoScope, Exit.void)
+        yield* video.file
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      })
+    ).pipe(onTestClock))
+
+  it.effect("closes a recording that never received a frame without waiting for the finish budget", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        let writes = 0
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: (_frames, target) => Effect.sync(() => writes++).pipe(Effect.as(target.path))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* drain
+        // No Page.screencastFrame arrives before the scope closes, as when the page never paints.
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("1 second")
+        yield* drain
+        const closedPromptly = closing.pollUnsafe() !== undefined
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert.strictEqual(writes, 0)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.notMatch(error.message, /did not finish within 5 seconds/)
+      })
+    ).pipe(onTestClock))
+
+  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure", "connection"] as const) {
+    it.effect(`settles video on ${mode.endsWith("Failure") || mode === "failure" ? `source failure (${mode})` : `session end (${mode})`} while its scope stays open`, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          let writes = 0
+          let released = false
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: Effect.fnUntraced(
+              function*(frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) {
+                writes++
+                yield* Deferred.succeed(started, undefined)
+                return yield* (mode === "blocked"
+                  ? Effect.never
+                  : Stream.runDrain(frames).pipe(Effect.as(destination.path)))
+                  .pipe(Effect.ensuring(Effect.sync(() => {
+                    released = true
+                  })))
+              }
+            )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          const recordingScope = yield* Scope.make()
+          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(recordingScope))
+          const file = yield* Effect.forkScoped(Effect.exit(video.file))
+          if (mode !== "empty") {
+            yield* frame(h, 71)
+            yield* Deferred.await(started)
+          }
+          if (mode === "failure" || mode === "blockedFailure") {
+            yield* h.browser.receive({
+              method: "Page.screencastFrame",
+              sessionId: "S1",
+              params: {
+                data: "!",
+                sessionId: 72,
+                metadata: {
+                  offsetTop: 0,
+                  pageScaleFactor: 1,
+                  deviceWidth: 800,
+                  deviceHeight: 600,
+                  scrollOffsetX: 0,
+                  scrollOffsetY: 0
+                }
+              }
+            })
+          } else if (mode === "connection") {
+            yield* h.browser.lose("video transport lost")
+          } else {
+            yield* h.browser.receive({
+              method: "Target.detachedFromTarget",
+              params: {
+                sessionId: "S1",
+                targetId: "76F3487A52CF4F79FE4AD28961E44D32"
+              }
+            })
+          }
+          yield* drain
+          if (mode === "blocked") {
+            yield* TestClock.adjust("5 seconds")
+            yield* drain
+          }
+          const settled = file.pollUnsafe() !== undefined
+          if (!settled) {
+            // Ensure even the pre-fix regression releases its fibers before asserting.
+            yield* Fiber.interrupt(file)
+          }
+          const releasedAtFile = released
+          const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
+          yield* drain
+          yield* TestClock.adjust("5 seconds")
+          yield* Fiber.join(closing)
+          assert.isTrue(settled, "source termination must settle file without closing the caller scope")
+          const outcome = yield* Fiber.join(file)
+          if (mode === "started") {
+            assert.isTrue(Exit.isSuccess(outcome))
+          } else {
+            const error = yield* Effect.flip(outcome)
+            assert(Capability.isCapabilityError(error))
+            assert.strictEqual(error.reason._tag, "BackendFailure")
+            if ((mode === "failure" || mode === "blockedFailure") && error.reason._tag === "BackendFailure") {
+              assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            }
+            if (mode === "connection" && error.reason._tag === "BackendFailure") {
+              assert.notStrictEqual(error.reason.method, "VideoWriter.write")
+            }
+            if (mode === "empty") {
+              assert.strictEqual(writes, 0)
+              assert.match(error.message, /no frame|before.*frame/i)
+            }
+          }
+          if (mode !== "empty") {
+            assert.isTrue(releasedAtFile, "the writer must release before file settles")
+          }
+        })
+      ).pipe(onTestClock))
+  }
+
+  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* frame(h, 53)
+        yield* Deferred.await(started)
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+      })
+    ).pipe(onTestClock))
+})
+
 describe("Chromium screencast renderer readiness", () => {
+  it.effect("acknowledges each shared frame once after every consumer takes it and replays it to an idle join", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const fast = yield* page.capability(Capability.Screencast)
+      const slow = yield* page.capability(Capability.Screencast)
+      const reading = yield* Effect.forkScoped(fast.frames.pipe(Stream.take(1), Stream.runCollect))
+      yield* h.browser.receive({
+        method: "Page.screencastFrame",
+        sessionId: "S1",
+        params: {
+          data: "/9j/2Q==",
+          sessionId: 37,
+          metadata: {
+            offsetTop: 0,
+            pageScaleFactor: 1,
+            deviceWidth: 800,
+            deviceHeight: 600,
+            scrollOffsetX: 0,
+            scrollOffsetY: 0
+          }
+        }
+      })
+      yield* Fiber.join(reading)
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        0,
+        "a fast consumer must not acknowledge the slow consumer's frame"
+      )
+      yield* slow.frames.pipe(Stream.take(1), Stream.runDrain)
+      yield* h.barrier
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.screencastFrameAck").length, 1)
+      const idle = yield* page.capability(Capability.Screencast)
+      const cached = yield* idle.frames.pipe(Stream.take(1), Stream.runCollect)
+      assert.strictEqual(cached.length, 1, "joining an idle session delivers its last image without a repaint")
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        1,
+        "replaying a cached frame must not acknowledge it twice"
+      )
+    }).pipe(onTestClock))
+
   it.effect("holds start until one valid metrics reply, then acknowledges frames and stops normally", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)

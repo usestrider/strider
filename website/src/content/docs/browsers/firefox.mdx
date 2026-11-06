@@ -184,8 +184,9 @@ Only Firefox is tested:
 
 - The capability list is Firefox's, whatever browser answers.
 - It always starts a new session; an endpoint that hands out an existing session's socket may refuse.
-- A remote browser can't read `FileInput.local` paths: use [`FileInput.bytes`](/docs/pages/actions#files), or
-  [`FileInput.remote`](/docs/api/browser/FileInput#remote).
+- Attached connections copy [`FileInput.local`](/docs/pages/actions#files) contents from the caller, using captured
+  file-system and path [platform services](/docs/installation#platform-services).
+  [`FileInput.remote`](/docs/api/browser/FileInput#remote) instead names a file already on the browser host.
 - Safari Technology Preview's BiDi is partial, and needs a WebDriver capability Strider doesn't set.
 
 ## The raw protocol

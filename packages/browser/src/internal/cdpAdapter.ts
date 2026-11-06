@@ -22,6 +22,7 @@ import * as BrowserCdp from "../cdp/Browser.ts"
 import * as Target from "../cdp/Target.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Capture from "./cdpAdapter/capture.ts"
@@ -50,7 +51,8 @@ import * as ProtocolClient from "./protocolClient.ts"
 export const capabilities = (
   info: Browser.Info,
   ownership: Adapter.ConnectOptions["ownership"],
-  headless: boolean
+  headless: boolean,
+  videoWriter = false
 ) => {
   const evidence = `CDP adapter static profile, ${info.product}`
   const entry = (
@@ -60,6 +62,7 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
@@ -150,7 +153,11 @@ export const capabilities = (
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
-      entry("capability.video", "unsupported", ["Chromium streams frames, and writing a video file needs an encoder"])
+      entry(
+        "capability.video",
+        videoWriter ? "supported" : "unsupported",
+        videoWriter ? [] : ["Chromium video requires a VideoWriter service"]
+      )
     ]
   })
 }
@@ -256,11 +263,13 @@ export const connect: (
     // Targets that existed before are attached by now; from here on, new pages were created
     yield* root.drainObserved
     state.attachedAtConnect = false
+    const writer = yield* Effect.serviceOption(VideoWriter.VideoWriter)
     const capabilitySet = yield* SubscriptionRef.make(
-      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"))
+      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"), Option.isSome(writer))
     )
 
     return {
+      ownership: options.ownership,
       claims: options.browserIdentity === undefined || options.claimClient === undefined
         ? undefined
         : Claims.make(state, options.browserIdentity, options.claimClient),
@@ -292,10 +301,7 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: () =>
-        Effect.fail(
-          Kit.unsupported("capability.video", "Chromium streams frames, and writing a video file needs an encoder")
-        ),
+      video: (page) => Capture.video(state, page, writer),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),

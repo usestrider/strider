@@ -139,6 +139,8 @@ export const fromAdapter = (
   if (Deadline.isTimeout(error)) return { _tag: "Timeout", error }
   const reason = error.reason
   switch (reason._tag) {
+    case "BackendFailure":
+      return { _tag: "Reason", reason }
     case "CaptureInvalidated":
       throw new Error("CaptureInvalidated must be mapped by the capture operation")
     case "ViewportMismatch":

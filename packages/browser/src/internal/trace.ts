@@ -90,7 +90,7 @@ interface Snapshot {
   readonly captures: ReadonlyArray<Capture.FrameCapture>
 }
 
-/** Firefox's video of a page: recording until the first export, which reads its file. */
+/** A video of a page: recording until the first export, which reads its file. */
 interface Video {
   readonly page: Target.NavigableId
   readonly at: MonotonicInstant.MonotonicInstant
@@ -110,10 +110,6 @@ interface Frame {
 }
 
 /** A PNG's size, from its header. */
-const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
-}
 
 /** The operations an action screenshot follows: the ones that change the page. */
 const actions = new Set([
@@ -390,7 +386,7 @@ export const start = Effect.fnUntraced(function*(
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
-  // Firefox has a video of its own where the other backends stream frames
+  // Prefer video when the browser can write it; otherwise use native frames
   const video = screencast === "native" && (yield* Filters.supported(runtime, "capability.video"))
   if (screencast !== "off") {
     const seen = new Set<Target.NavigableId>()
@@ -434,7 +430,7 @@ export const start = Effect.fnUntraced(function*(
           while (true) {
             yield* BrowserClock.sleep(Duration.toMillis(Duration.fromInputUnsafe(screencast.polled)))
             const shot = yield* runtime.model.adapter.screenshot(page.id, options)
-            const size = format === "jpeg" ? Adapter.jpegSize(shot) : pngSize(shot)
+            const size = format === "jpeg" ? Adapter.jpegSize(shot) : Adapter.pngSize(shot)
             frames.push({ page: page.id, at: Adapter.now(), ...size, image: shot, format })
           }
         })
@@ -637,7 +633,7 @@ export const start = Effect.fnUntraced(function*(
         })
       }
     }
-    // Firefox's videos end here, the first time, and their files are read
+    // Videos end here, the first time, and their files are read
     for (const video of videos) {
       if (Option.isNone(video.read)) {
         yield* Scope.close(video.scope, Exit.void)

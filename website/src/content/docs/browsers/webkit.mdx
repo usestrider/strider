@@ -227,6 +227,9 @@ server's `401` page.
 **Storage is keyed by origin.** A cross-site frame's storage is keyed by its page's origin, port included, so a
 [saved storage state](/docs/pages/contexts#logging-in-once) restored at another port isn't found.
 
+For WebM files, [enable PNG-polled video explicitly](/docs/browsers/webkit-video). It uses a supplied writer and
+a caller-owned directory, independently of downloads.
+
 **No downloads, file choosers, PDFs or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 
 ## The raw protocol

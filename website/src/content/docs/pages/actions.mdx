@@ -33,7 +33,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `click()`, [`dblclick()`](/docs/api/browser/Locator#Locator.dblclick) | moves the pointer to the element, presses and releases                     |
 | [`tap()`](/docs/api/browser/Locator#Locator.tap) | a touch start and end; on WebKit, which has no touch, fails with `Unsupported` |
 | [`hover()`](/docs/api/browser/Locator#Locator.hover) | moves the pointer over the element                                         |
-| `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkbox or radio unless it's already in that state, then confirms the change |
+| `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkable unless it's already in that state, then confirms the change |
 | `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
 | `clear()`                     | empties a field                                                            |
 | `press(key)`                  | focuses the element and presses a key                                      |
@@ -43,8 +43,18 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
+In a design-mode document, filling a paragraph blurs a previously focused input or textarea, including one
+inside open shadow roots, and checks the target again after its blur handlers. If refocusing prevents preparation
+until the deadline, the timeout's history reports the focus preparation. Firefox cannot focus inputs in top-level design-mode documents:
+filling one can insert text into the document body instead. This is a known browser limitation of
+[`fill`](/docs/api/browser/Locator#Locator.fill).
+
 An action sends its input at most once. If it fails after the input may have reached the page, the error's
 [`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
+
+Unchecking a checked native radio fails with `WrongElement` before input, including with
+`uncheck({ trial: true })`. Check another radio in the group instead. An already-unchecked native
+radio is a no-op; page-managed ARIA radios can be unchecked.
 
 A text descendant of a label can check or uncheck its associated checkbox. For
 `<input id="terms" type="checkbox"><label for="terms"><span>Accept terms</span></label>`:
@@ -193,8 +203,8 @@ typed the characters before it.
 
 ## Files
 
-`setInputFiles` takes `FileInput`s. `FileInput.local` names a file on this machine; `FileInput.bytes` makes the
-file in the page, so it also works with a browser on another machine:
+`setInputFiles` chooses files without opening the operating system’s picker. `FileInput.local` names a file on
+this machine; `FileInput.bytes` supplies generated contents:
 
 ```ts
 import { FileInput, Page } from "@usestrider/browser"
@@ -213,6 +223,15 @@ const importReport = Effect.fn("importReport")(function*(page: Page.Page, csv: s
   yield* page.getByLabel("Report").setInputFiles(report)
 })
 ```
+
+A launched browser receives local paths directly. Absolute paths need no caller services; relative paths need the
+path [platform service](/docs/installation#platform-services). A launch through a container or wrapper with a
+different file system needs `FileInput.bytes` instead.
+
+Attached connections copy local contents using captured file-system and path
+[platform services](/docs/installation#platform-services), including for absolute paths. Local files can combine
+with bytes on attached connections, or with [remote paths](/docs/api/browser/FileInput#remote) on launched ones.
+A selection cannot combine native paths and transferred contents; it fails before replacing the previous files.
 
 An upload through a file chooser, not an input, is answered with
 [`FileChooser.handle`](/docs/events/kinds#dialogs-and-file-choosers).

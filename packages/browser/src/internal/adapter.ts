@@ -35,6 +35,7 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import type * as CdpConnection from "../protocol/CdpConnection.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import type * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
@@ -759,6 +760,7 @@ export type TargetDescription = Target.Description
 
 /** Why an adapter operation failed, beyond the protocol's own errors. */
 export type AdapterErrorReason =
+  | Reason.BackendFailure
   | Page.CaptureInvalidated
   | {
     readonly _tag: "ViewportMismatch"
@@ -776,6 +778,8 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
+      case "BackendFailure":
+        return reason.message
       case "CaptureInvalidated":
         return reason.message
       case "ViewportMismatch":
@@ -846,6 +850,7 @@ export interface Claims {
 }
 
 export interface AdapterConnection {
+  readonly ownership: "launched" | "attached"
   readonly claims?: Claims | undefined
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
@@ -1005,4 +1010,10 @@ export interface BackendAdapter {
     transport: Transport.Transport,
     options: ConnectOptions
   ) => Effect.Effect<AdapterConnection, Browser.BrowserError, Scope.Scope>
+}
+
+/** PNG dimensions, or zeros for a truncated header. */
+export const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
 }

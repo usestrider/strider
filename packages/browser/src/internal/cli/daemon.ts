@@ -711,7 +711,6 @@ export const commands = (getDaemon: () => Daemon) => {
         )
       }, ({ all, path, sites }) =>
         Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
           const { page } = yield* root
           const { summary, text } = yield* exportState(getDaemon(), {
             page: Option.getOrUndefined(page),
@@ -721,7 +720,7 @@ export const commands = (getDaemon: () => Daemon) => {
             Effect.mapError((failure) => new CommandFailed(failure))
           )
           const resolved = yield* resolvePath(path)
-          yield* fs.writeFileString(resolved, text, { mode: 0o600 }).pipe(Effect.mapError(failedWith))
+          yield* writeUserFile(resolved, text, { mode: 0o600 })
           yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
@@ -730,7 +729,6 @@ export const commands = (getDaemon: () => Daemon) => {
     Command.withSubcommands([
       Command.make("test", { path: Argument.String("path") }, ({ path }) =>
         Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
           const resolved = yield* resolvePath(path)
           const { placeholders, text } = ExportTest.render({
             name: getDaemon().name,
@@ -742,7 +740,7 @@ export const commands = (getDaemon: () => Daemon) => {
             userDataDir: getDaemon().userDataDir,
             steps: getDaemon().recorder.steps
           })
-          yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
+          yield* writeUserFile(resolved, text)
           // The commands it repeats, not what the session saw of its pages
           const commands = getDaemon().recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
           yield* Console.log(`wrote ${commands.length} steps to ${resolved}`)
@@ -807,6 +805,14 @@ const resolvePath = Effect.fnUntraced(function*(path: string) {
   const paths = yield* Path.Path
   const cwd = yield* WorkingDirectory
   return paths.resolve(cwd, path)
+})
+
+/** Writes a file the user named, creating the directories on the way to it. */
+const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, options?: { readonly mode?: number }) {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* Path.Path
+  yield* fs.makeDirectory(paths.dirname(path), { recursive: true }).pipe(Effect.mapError(failedWith))
+  yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
 
 /** A `--site`'s host, with or without a scheme, or nothing if it names none. */

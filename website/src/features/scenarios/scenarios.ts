@@ -10,8 +10,14 @@ export interface Scenario {
   readonly description: string
   /** What the program returns when it passes */
   readonly expected: string
-  /** The public demo site it drives, replayed from a recording; none for the local site */
+  /** The public demo site it drives; none for the local site */
   readonly recording: string | undefined
+  /** A video the program recorded, under public/videos/; none for most */
+  readonly video: string | undefined
+  /** The browser it runs on */
+  readonly browser: "chromium" | "firefox"
+  /** The name of a scenario that does the same on another browser, shown beside it */
+  readonly compare: string | undefined
   /** The program, with the imports it needs */
   readonly code: string
   /** The modules' members it calls, each linked to the API reference */
@@ -21,11 +27,13 @@ export interface Scenario {
 /** The modules the programs import from `@usestrider/browser` */
 const modules = [
   "Browser",
+  "Capability",
   "Dialog",
   "Expect",
   "FileInput",
   "Har",
   "NetworkResponse",
+  "Page",
   "PageNavigation",
   "Popup",
   "Route"
@@ -41,12 +49,14 @@ const property = (entry: string, key: string) => {
 // The program as it runs, named a scenario: in the source its name pairs it with its Playwright twin
 const withImports = (code: string) => {
   const uses = (name: string) => new RegExp(`\\b${name}\\.`).test(code)
-  const effect = ["Effect", "FileSystem", "Schema"].filter(uses)
+  const effect = ["Deferred", "Effect", "FileSystem", "Ref", "Schedule", "Schema", "Stream"].filter(uses)
   const http = ["HttpIncomingMessage"].filter(uses)
+  const process = ["ChildProcess"].filter(uses)
   return [
     `import { ${modules.filter(uses).join(", ")} } from "@usestrider/browser"`,
     `import { ${effect.join(", ")} } from "effect"`,
     ...(http.length === 0 ? [] : [`import { ${http.join(", ")} } from "effect/http"`]),
+    ...(process.length === 0 ? [] : [`import { ${process.join(", ")} } from "effect/process"`]),
     "",
     code.replace(/^const (\w+)Strider = /m, "const $1Scenario = ")
   ].join("\n")
@@ -65,7 +75,8 @@ const usesOf = (code: string) => {
 
 let loaded: ReadonlyArray<Scenario> | undefined
 
-export const scenarios = (): ReadonlyArray<Scenario> => {
+/** Every scenario, those shown only on another's page among them */
+const allScenarios = (): ReadonlyArray<Scenario> => {
   if (loaded !== undefined) return loaded
   const file = process.env["STRIDER_SCENARIOS_SOURCE"]
   if (file === undefined) throw new Error("STRIDER_SCENARIOS_SOURCE isn't set: astro.config.ts sets it")
@@ -95,12 +106,34 @@ export const scenarios = (): ReadonlyArray<Scenario> => {
       description,
       expected,
       recording: property(entry, "recording"),
+      video: property(entry, "video"),
+      browser: property(entry, "browser") === "firefox" ? "firefox" : "chromium",
+      compare: property(entry, "compare"),
       code: withImports(code),
       uses: usesOf(code)
     }
   })
   if (loaded.length === 0) throw new Error(`No scenarios found in ${file}`)
   return loaded
+}
+
+/**
+ * The scenarios with a page of their own: all but those another scenario shows beside it as its `compare`, such as
+ * the video's Firefox counterpart, which is shown only on the video's page
+ */
+export const scenarios = (): ReadonlyArray<Scenario> => {
+  const shownElsewhere = new Set(allScenarios().flatMap((scenario) => scenario.compare ?? []))
+  return allScenarios().filter((scenario) => !shownElsewhere.has(scenario.name))
+}
+
+/** The scenario a page shows beside its own */
+export const comparedWith = (scenario: Scenario): Scenario | undefined => {
+  if (scenario.compare === undefined) return undefined
+  const other = allScenarios().find((candidate) => candidate.name === scenario.compare)
+  if (other === undefined) {
+    throw new Error(`The scenario ${scenario.name} compares itself with ${scenario.compare}, which doesn't exist`)
+  }
+  return other
 }
 
 export const scenarioRoute = (scenario: Scenario) => `/docs/scenarios/${scenario.name}`

@@ -160,16 +160,26 @@ const applyOverride = (
       conditions?._tag === "NetworkConditions" ? conditions : undefined
     )
   }
+  if (kind === "UserAgent" || kind === "Locale") {
+    const userAgent = effective.get("UserAgent")
+    const locale = effective.get("Locale")
+    const combined = Emulation.setUserAgentOverride({
+      userAgent: userAgent?._tag === "UserAgent" ? userAgent.userAgent : state.defaultUserAgent,
+      ...(userAgent?._tag === "UserAgent" && Option.isSome(userAgent.platform)
+        ? { platform: userAgent.platform.value }
+        : {}),
+      ...(locale?._tag === "Locale" ? { acceptLanguage: locale.locale } : {})
+    }).pipe(on)
+    if (kind === "UserAgent") return combined
+    const language = Emulation.setLocaleOverride(locale?._tag === "Locale" ? { locale: locale.locale } : {}).pipe(on)
+    return locale === undefined
+      ? combined.pipe(Effect.andThen(language))
+      : language.pipe(Effect.andThen(combined))
+  }
   if (override === undefined) {
     switch (kind) {
       case "Viewport":
         return viewport(state, target, effective)
-      case "UserAgent":
-      case "Locale":
-        return Emulation.setUserAgentOverride({ userAgent: state.defaultUserAgent }).pipe(
-          on,
-          Effect.andThen(kind === "Locale" ? Emulation.setLocaleOverride({}).pipe(on) : Effect.void)
-        )
       case "TimeZone":
         return Emulation.setTimezoneOverride({ timezoneId: "" }).pipe(on)
       case "Geolocation":
@@ -196,19 +206,9 @@ const applyOverride = (
     case "Viewport":
       return viewport(state, target, effective)
     case "UserAgent":
-      return Emulation.setUserAgentOverride({
-        userAgent: override.userAgent,
-        ...(Option.isSome(override.platform) ? { platform: override.platform.value } : {})
-      }).pipe(on)
     case "Locale":
-      return Emulation.setLocaleOverride({ locale: override.locale }).pipe(
-        on,
-        Effect.andThen(
-          Emulation.setUserAgentOverride({ userAgent: state.defaultUserAgent, acceptLanguage: override.locale }).pipe(
-            on
-          )
-        )
-      )
+      // Applied together, above
+      return Effect.void
     case "TimeZone":
       return Emulation.setTimezoneOverride({ timezoneId: override.timeZone }).pipe(on)
     case "Geolocation":

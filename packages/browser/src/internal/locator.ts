@@ -132,6 +132,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
       return "The element is read-only"
     case "NoSuchOption":
       return `The select has no option with that ${reason.option}`
+    case "PreparingFocus":
+      return `Focus was being moved from ${reason.from} before filling the target`
   }
 }
 
@@ -544,7 +546,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {
-    const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
+    const value = Redacted.isRedacted(text) ? Redacted.value(text) : text
+    if (typeof value !== "string") {
+      return Effect.fail(this.error(
+        "Locator.pressSequentially",
+        new Reason.InvalidInput({
+          input: "text",
+          expected: "a string or Redacted string",
+          hint: "PressSequentially requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
+    const characters = Array.from(value)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
     return this.act(
       "Locator.pressSequentially",
@@ -595,26 +609,24 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       (_ready, _io, record) =>
         Effect.gen({ self: this }, function*() {
           const id = record.id
-          const given = yield* FileInputImpl.partition(list, "files").pipe(
+          const given = yield* FileInputImpl.prepare(owner.runtime, list).pipe(
             Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
           )
-          const paths: Array<string> = []
-          for (const file of given._tag === "Paths" ? given.files : []) {
-            const path = yield* FileInputImpl.path(owner.runtime, file).pipe(
-              Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
-            )
-            const fs = owner.runtime.fileSystem
-            if (FileInputImpl.source(file)._tag === "Local" && Option.isSome(fs)) {
-              const exists = yield* fs.value.exists(path).pipe(Effect.orElseSucceed(() => false))
+          if (given._tag === "Paths" && Option.isSome(owner.runtime.fileSystem)) {
+            for (let index = 0; index < list.length; index++) {
+              if (FileInputImpl.source(list[index]!)._tag !== "Local") continue
+              const path = given.files[index]!
+              const exists = yield* owner.runtime.fileSystem.value.exists(path).pipe(Effect.orElseSucceed(() => false))
               if (!exists) {
-                return yield* Effect.fail(this.error(
-                  "Locator.setInputFiles",
-                  new Locator.FileUnreadable({ path, hint: "No file is at that path on this machine" }),
-                  id
-                ))
+                return yield* Effect.fail(
+                  this.error(
+                    "Locator.setInputFiles",
+                    new Locator.FileUnreadable({ path, hint: "No file is at that path on this machine" }),
+                    id
+                  )
+                )
               }
             }
-            paths.push(path)
           }
           const budget = record.budget
           const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
@@ -640,7 +652,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             ))
             return "done" as const
           }
-          yield* owner.runtime.model.adapter.setInputFiles(found.node, paths).pipe(
+          yield* FileInputImpl.validateCount(owner.runtime, found.node, given.files.length, {
+            page: Option.some(owner.page),
+            at: budget.at,
+            id
+          }).pipe(Effect.mapError((failure) =>
+            failure._tag === "Gone"
+              ? failure.error
+              : failure._tag === "Deadline"
+              ? record.timeout(Option.none())
+              : this.error("Locator.setInputFiles", failure.reason, id)
+          ))
+          yield* owner.runtime.model.adapter.setInputFiles(found.node, given.files).pipe(
             Effect.mapError((error) => this.adapterFailure("Locator.setInputFiles", error, id))
           )
           return "done" as const
@@ -809,7 +832,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Locator.WrongElement({
             expected: final.expected,
             element: final.element,
-            hint: "The locator found an element of another kind; narrow it to the one meant"
+            hint: final.hint ?? "The locator found an element of another kind; narrow it to the one meant"
           }),
           id
         )
@@ -1009,8 +1032,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
-      const now = yield* read.pipe(
+      const now = yield* this.readOne(
+        operation,
+        { _tag: "Checked", followLabel: true, uncheck: !checked },
+        (value) => value as boolean
+      ).pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1023,7 +1049,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
       if (options?.trial === true) return
-      const after = yield* read
+      const after = yield* this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,

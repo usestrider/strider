@@ -14,6 +14,7 @@
  */
 import * as Cache from "effect/Cache"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -21,6 +22,7 @@ import * as Browser from "../Browser.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import type * as L1Target from "../Target.ts"
+import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Launch from "./launch.ts"
@@ -40,6 +42,7 @@ import * as Storage from "./webkitAdapter/storage.ts"
 import * as Targets from "./webkitAdapter/targets.ts"
 import type * as WebKitAutomation from "./webkitAutomation.ts"
 import * as Envelope from "./webkitEnvelope.ts"
+import type * as WebKitVideo from "./webkitVideo.ts"
 import * as WebKitWire from "./webkitWire.ts"
 
 export { attachedCapabilities, launchedCapabilities } from "./webkitAdapter/capabilities.ts"
@@ -73,6 +76,7 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
 // ── Connecting ────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface Options extends Adapter.ConnectOptions {
+  readonly video?: WebKitVideo.Settings | undefined
   /** The browser's version, where the transport knows it: an attached browser's inspector doesn't say. */
   readonly revision?: string | undefined
   /**
@@ -109,10 +113,12 @@ export const connect: (
         protocol: "webkit",
         revision: options.revision ?? "unknown"
       })
+    const writer = yield* Effect.serviceOption(VideoWriter.VideoWriter)
+    const video = options.video !== undefined && Option.isSome(writer)
     const capabilities = yield* SubscriptionRef.make(
       options.automation !== undefined
-        ? Capabilities.launchedCapabilities(info)
-        : Capabilities.attachedCapabilities(info)
+        ? Capabilities.launchedCapabilities(info, video)
+        : Capabilities.attachedCapabilities(info, video)
     )
     const buffer = yield* Kit.makeFactBuffer(options.sink)
     let state!: State.State
@@ -157,6 +163,7 @@ export const connect: (
     state.attachedAtConnect = false
 
     const attached = {
+      ownership: "attached" as const,
       info,
       capabilities,
       pauseScope: "browser",
@@ -183,7 +190,7 @@ export const connect: (
       pdf: refuse("pdf", "WebKit has no print-to-PDF"),
       accessibilityTree: refuse("capability.axTree", "WebKit reads accessibility one node at a time"),
       screencast: refuse("capability.screencast", "stock WebKit's inspector has no Screencast domain"),
-      video: refuse("capability.video", "stock WebKit's inspector has no Screencast domain"),
+      video: (id) => Capture.video(state, id, options.video, writer),
       cookies: (context) => Storage.cookiesAttached(state, context),
       setCookies: (context, list) => Storage.setCookiesAttached(state, context, list),
       clearCookies: (context) => Storage.clearCookiesAttached(state, context),
@@ -201,6 +208,7 @@ export const connect: (
     if (options.automation === undefined) return attached
     return {
       ...attached,
+      ownership: "launched",
       createUserContext: (options) => Automation.createUserContextLaunched(state, options),
       removeUserContext: (id) => Automation.removeUserContextLaunched(state, id),
       createPage: (id) => Automation.createPageLaunched(state, id),

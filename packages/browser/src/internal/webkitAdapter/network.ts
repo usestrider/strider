@@ -20,6 +20,7 @@ import {
   frameKey,
   loaderKey,
   type NavigationEntry,
+  type PageEntry,
   placement,
   type RequestEntry,
   requestKey,
@@ -159,6 +160,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           id,
           session: session,
           requestId: params.requestId,
+          loaderId: loader,
           redirects: 0,
           hop: state.ids.hop(id, 0),
           responded: undefined,
@@ -216,9 +218,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.resourceType === "document" && request.frame !== undefined &&
         Option.isSome(state.registry.bodyLimit(placement(request.frame.page), "response"))
       ) {
+        const page = request.frame.page
         const kept = Deferred.makeUnsafe<Uint8Array, Adapter.AdapterError>()
         request.kept = kept
-        state.buffer.later(Deferred.into(readBody(request), kept))
+        page.retaining.add(request)
+        state.buffer.later(
+          Deferred.into(readBody(request), kept).pipe(
+            Effect.ensuring(state.buffer.run(() => {
+              page.retaining.delete(request)
+            }))
+          )
+        )
       }
       Deferred.doneUnsafe(request.finished, Effect.void)
       state.retire(requestKey(session, params.requestId))
@@ -233,6 +243,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         id,
         session: session,
         requestId: params.requestId,
+        loaderId: undefined,
         redirects: 0,
         hop: state.ids.hop(id, 0),
         responded: undefined,
@@ -377,3 +388,23 @@ export const responseBody = Effect.fnUntraced(function*(state: State, hop: Netwo
   )
   return yield* request.kept === undefined ? readBody(request) : Deferred.await(request.kept)
 })
+
+/** Selects a retention wait in the running navigation; collection off selects no Effect to yield. */
+export const beforeNavigation = (state: State, page: PageEntry) => {
+  if (Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return undefined
+  return state.buffer.waitFor(() => {
+    if (page.ended || Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return true
+    if (page.retaining.size > 0) return undefined
+    const main = page.main
+    const document = main.document
+    if (main.removed || document === undefined) return true
+    for (const request of state.requests.values()) {
+      if (
+        request.resourceType !== "document" || request.frame !== main ||
+        request.loaderId !== document.loaderId || request.responded !== request.hop
+      ) continue
+      if (!Deferred.isDoneUnsafe(request.finished)) return undefined
+    }
+    return true
+  })
+}

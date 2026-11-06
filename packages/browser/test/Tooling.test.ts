@@ -253,7 +253,8 @@ const unzip = (file: string) =>
 describe("Recordings", () => {
   it.effect("records a HAR of the timeline's responses, with the library's timings", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "cart.har")
+      // The directories on the way don't exist yet: the export creates them
+      const out = path.join(directory(), "test-results", "cart", "cart.har")
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const har = yield* Har.record(page, { content: "embed" })
@@ -276,7 +277,7 @@ describe("Recordings", () => {
 
   it.effect("records a trace whose steps nest in the caller's spans", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "trace.zip")
+      const out = path.join(directory(), "test-results", "trace.zip")
       const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
         yield* page.goto("https://example.test/cart")
         yield* Effect.ignore(page.title)
