@@ -821,6 +821,21 @@ describe("WebKit launcher", () => {
         assert.include(printed, String(result.ports[0]))
       }))
 
+    const startupObservation = (value: unknown) => {
+      assert(typeof value === "string")
+      const match =
+        /^WebKit startup (spawned|listener verified|connected|inspector established): attempt (\d+), port (\d+), PID (\d+), (\d+\.\d{3})ms$/
+          .exec(value)
+      assert(match !== null, value)
+      return {
+        stage: match[1],
+        attempt: Number(match[2]),
+        port: Number(match[3]),
+        pid: Number(match[4]),
+        elapsedMillis: Number(match[5])
+      }
+    }
+
     for (
       const [held, pendingConnect, stages] of [
         [false, false, ["spawned"]],
@@ -861,19 +876,9 @@ describe("WebKit launcher", () => {
                 assert.strictEqual(timeout.phase, "dispatchedUnconfirmed")
                 assert.strictEqual(timeout.diagnostics.operationId, caller!.id)
                 assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
-                const observations = timeout.history.map(({ value }) =>
-                  value as {
-                    _tag: string
-                    stage: string
-                    port: number
-                    pid: number
-                    attempt: number
-                    elapsedMillis: number
-                  }
-                )
+                const observations = timeout.history.map(({ value }) => startupObservation(value))
                 assert.deepStrictEqual(observations.map((value) => value.stage), [...stages])
                 for (const [index, value] of observations.entries()) {
-                  assert.strictEqual(value._tag, "WebKitStartup")
                   assert.strictEqual(value.pid, 9100000)
                   assert.strictEqual(value.attempt, 1)
                   assert.isTrue(value.port >= 49152 && value.port <= 65535)
@@ -911,7 +916,7 @@ describe("WebKit launcher", () => {
         assert.strictEqual(result.ports.length, 2)
         assert.deepStrictEqual(
           timeout.history.map(({ value }) => {
-            const stage = value as { stage: string; port: number; pid: number; attempt: number }
+            const stage = startupObservation(value)
             return { stage: stage.stage, port: stage.port, pid: stage.pid, attempt: stage.attempt }
           }),
           result.ports.map((port, index) => ({ stage: "spawned", port, pid: 9100000 + index, attempt: index + 1 }))

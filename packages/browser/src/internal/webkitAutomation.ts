@@ -222,14 +222,11 @@ class Startup {
   mark(stage: keyof typeof startupStages): void {
     if (this[stage] !== undefined) return
     const at = this[stage] = BrowserClock.now()
-    this.operation?.observe({
-      _tag: "WebKitStartup",
-      stage: startupStages[stage],
-      attempt: this.attempt,
-      port: this.port,
-      pid: this.pid,
-      elapsedMillis: (at - this.began) / 1e6
-    })
+    this.operation?.observe(
+      `WebKit startup ${startupStages[stage]}: attempt ${this.attempt}, port ${this.port}, PID ${this.pid}, ${
+        ((at - this.began) / 1e6).toFixed(3)
+      }ms`
+    )
   }
 
   failure(error: Launch.LaunchError): Launch.LaunchError {
