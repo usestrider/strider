@@ -161,6 +161,33 @@ describe("WebKit document body retention before navigation", () => {
       assert.strictEqual(new TextDecoder().decode(yield* Deferred.await(f.request.kept!)), "<title>cookie</title>")
     }).pipe(Effect.scoped))
 
+  it.effect("does not wait for a document request that never received a response", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      yield* f.finish
+      yield* Deferred.await(f.bodyStarted)
+      yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+      // A navigation to a server that never answers: no response, so no body to retain, and the next
+      // navigation is what cancels it
+      const pending = {
+        ...f.request,
+        requestId: "0.13",
+        responded: undefined,
+        finished: Deferred.makeUnsafe<void, string>(),
+        kept: undefined,
+        url: "https://example.test/hung"
+      } as State.RequestEntry
+      f.state.requests.set(State.requestKey(pending.session, pending.requestId), pending)
+      const navigation = yield* f.navigate.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(
+        f.sent,
+        ["Network.getResponseBody", "Automation.navigateBrowsingContext"],
+        "a load with no response must not hold the next navigation until its deadline"
+      )
+      yield* Fiber.interrupt(navigation)
+    }).pipe(Effect.scoped))
+
   it.effect("dispatches without waiting for loadingFinished when collection is disabled", () =>
     Effect.gen(function*() {
       const f = yield* fixture(false)
