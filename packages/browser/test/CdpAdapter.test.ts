@@ -1655,6 +1655,55 @@ describe("Chromium video writer lifetime", () => {
       assert.strictEqual(error.reason._tag, "BackendFailure")
     }).pipe(onTestClock))
 
+  it.effect("shares video ownership and holds acknowledgements behind a blocked writer", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const unblock = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: Effect.fnUntraced(
+            function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(unblock)
+              yield* Stream.runDrain(frames)
+              return target.path
+            }
+          )
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const castScope = yield* Scope.make()
+        const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
+        yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
+        const videoScope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+        yield* frame(h, 61)
+        yield* Deferred.await(started)
+        yield* drain
+        yield* frame(h, 62)
+        yield* drain
+        yield* frame(h, 63)
+        yield* TestClock.adjust("80 millis")
+        yield* drain
+        const acks = () =>
+          h.commands.filter((c) => c.method === "Page.screencastFrameAck").map((c) => c.params?.sessionId)
+        assert.deepStrictEqual(acks(), [], "the fast screencast cannot acknowledge the writer's waiting frame")
+        yield* Deferred.succeed(unblock, undefined)
+        yield* TestClock.adjust("120 millis")
+        yield* drain
+        assert.deepStrictEqual(acks(), [61, 62, 63])
+        yield* Scope.close(castScope, Exit.void)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+        yield* Scope.close(videoScope, Exit.void)
+        yield* video.file
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      })
+    ).pipe(onTestClock))
+
   it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {

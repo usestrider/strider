@@ -3,15 +3,21 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Capability, Trace, VideoWriter } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as BrowserImpl from "../../../src/internal/browser.ts"
+import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
+import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { chromium } from "../browsers.ts"
 import { supports } from "./capabilities.ts"
 
@@ -97,6 +103,103 @@ describe("Chromium video writer", () => {
         }),
       60_000
     )
+
+    it.effect("backpressures native acknowledgements without stopping page timers", () =>
+      Effect.gen(function*() {
+        const blocked = yield* Deferred.make<void>()
+        const unblock = yield* Deferred.make<void>()
+        let acknowledgements = 0
+        let stops = 0
+        const writer: VideoWriter.VideoWriter = {
+          write: Effect.fnUntraced(
+            function*(frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) {
+              yield* Deferred.succeed(blocked, undefined)
+              yield* Deferred.await(unblock)
+              yield* Stream.runDrain(frames)
+              return destination.path
+            }
+          )
+        }
+        const observed = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+          const { transport } = yield* ChromiumLauncher.launch({ executablePath: chromium.executable })
+          return yield* CdpAdapter.connect({
+            ...transport,
+            send: Effect.fnUntraced(function*(message: string) {
+              const command = JSON.parse(message)
+              if (command.method === "Page.screencastFrameAck") acknowledgements++
+              if (command.method === "Page.stopScreencast") stops++
+              yield* transport.send(message)
+            })
+          }, { sink, ownership: "launched" }).pipe(Effect.provideService(VideoWriter.VideoWriter, writer))
+        }))
+        yield* Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.goto(
+            "data:text/html,<body><script>var paints=0;setInterval(()=>document.body.textContent=++paints,20)</script>"
+          )
+          const castScope = yield* Scope.make()
+          const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
+          yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
+          const videoScope = yield* Scope.make()
+          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+          yield* Deferred.await(blocked)
+          yield* Effect.sleep("300 millis")
+          const before = acknowledgements
+          const paints = yield* page.evaluateInMainWorld(() => Number(document.body.textContent))
+          yield* Effect.sleep("200 millis")
+          assert.strictEqual(acknowledgements, before, "the fast screencast must not bypass a blocked writer")
+          assert.isAbove(
+            yield* page.evaluateInMainWorld(() => Number(document.body.textContent)),
+            paints,
+            "the renderer continues painting while native frame delivery is backpressured"
+          )
+          yield* Deferred.succeed(unblock, undefined)
+          yield* Effect.sleep("200 millis")
+          assert.isAbove(acknowledgements, before, "native acknowledgements resume when the writer consumes input")
+          yield* Scope.close(videoScope, Exit.void)
+          yield* video.file
+          assert.strictEqual(stops, 0, "the user screencast still owns the session stream")
+          yield* Scope.close(castScope, Exit.void)
+          assert.strictEqual(stops, 1)
+          console.log(
+            "Chromium shared-stream probe",
+            JSON.stringify({
+              acknowledgementsWhileBlocked: before,
+              acknowledgementsAfterResume: acknowledgements,
+              stops
+            })
+          )
+        }).pipe(Effect.provide(observed))
+      }), 60_000)
+
+    it.effect("accepts PNG input and preserves odd recording dimensions", () =>
+      Effect.gen(function*() {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-png-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+        const page = yield* Browser.newPage({ emulation: { viewport: { width: 321, height: 243 } } })
+        const data = yield* page.screenshot()
+        const file = yield* Effect.gen(function*() {
+          const writer = yield* VideoWriter.VideoWriter
+          return yield* writer.write(
+            Stream.make(
+              { at: 0, format: "png", width: 321, height: 243, data },
+              { at: 40e6, format: "png", width: 321, height: 243, data }
+            ),
+            { path: path.join(directory, "png.webm"), width: 321, height: 243 }
+          )
+        }).pipe(Effect.provide(VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! })))
+        const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+          "-v",
+          "error",
+          "-count_frames",
+          "-show_streams",
+          "-of",
+          "json",
+          file
+        ], { encoding: "utf8" }))
+        assert.deepStrictEqual([probe.streams[0].width, probe.streams[0].height], [321, 243])
+        assert.strictEqual(Number(probe.streams[0].nb_read_frames), 2)
+      }), 60_000)
 
     it.effect("exports native Chromium recording as a trace video event", () =>
       Effect.gen(function*() {
