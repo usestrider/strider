@@ -201,9 +201,19 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         timeout
       )
 
-      for (const source of ["url", "title"] as const) {
+      for (
+        const [source, boundary] of [
+          ["url", "direct"],
+          ["title", "direct"],
+          ["url", "watchable map"],
+          ["url", "effect map"],
+          ["title", "effect map"],
+          ["url", "reconstruction"],
+          ["title", "reconstruction"]
+        ] as const
+      ) {
         it.effect(
-          `redacts generic ${source} expectation evidence under strict export`,
+          `redacts generic ${source} expectation evidence with ${boundary} boundary`,
           () =>
             Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -214,9 +224,14 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               yield* page.goto(requested)
               const actual = yield* page[source]
               assert.include(actual, source === "url" ? "generic-url-secret" : title)
-              const trace = yield* Trace.record(page)
+              assert.notStrictEqual(page.title, page.title)
+              const subject = boundary === "watchable map" ?
+                page.url.map((value) => value)
+                : boundary === "effect map" ?
+                page[source].pipe(Effect.map((value) => value))
+                : page[source]
               const error = yield* Expect.that(
-                page[source],
+                subject,
                 Condition.make<string>("to satisfy an always-false condition", () => false)
               ).pipe(
                 Deadline.within("300 millis"),
@@ -225,21 +240,34 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.include(JSON.stringify(error.history), actual)
+              const trace = yield* Trace.record(page)
+              const exported = boundary === "reconstruction" ? new Expect.ExpectationFailed({ ...error }) : error
+              const rethrown = yield* Effect.fail(exported).pipe(
+                Operation.named(`rethrow generic ${source}`, { attributes: { "browser.page.id": page.id } }),
+                Effect.flip
+              )
+              assert.strictEqual(rethrown, exported)
               const evidence = path.resolve(".data/expect-source-evidence")
               fs.mkdirSync(evidence, { recursive: true })
-              const out = path.join(evidence, `${name}-${source}-strict.zip`)
-              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset("strict"))
-              const content = text((yield* unzip(out)).get("trace.trace"))
-              fs.writeFileSync(path.join(evidence, `${name}-${source}-strict.trace`), content)
-              const failures = lines(new TextEncoder().encode(content)).filter((event) =>
-                event.type === "after" && event.error?.name === "ExpectationFailed"
-              )
-              assert.isAbove(failures.length, 0)
-              for (const event of failures) {
-                assert.include(event.error.message, "Last observed:")
-                assert.include(event.error.message, "History:")
-                for (const secret of source === "url" ? ["generic-url-secret", "generic-fragment-secret"] : [title]) {
-                  assert.notInclude(event.error.message, secret)
+              for (const preset of ["strict", "local", "strict"] as const) {
+                const out = path.join(evidence, `${name}-${source}-${boundary}-${preset}.zip`)
+                yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+                const content = text((yield* unzip(out)).get("trace.trace"))
+                fs.writeFileSync(out.replace(/\.zip$/, ".trace"), content)
+                const failures = lines(new TextEncoder().encode(content)).filter((event) =>
+                  event.type === "after" && event.error?.name === "ExpectationFailed"
+                )
+                assert.strictEqual(failures.length, 1)
+                for (const event of failures) {
+                  assert.include(event.error.message, "to satisfy an always-false condition")
+                  assert.notInclude(event.error.message, "to have the URL")
+                  assert.notInclude(event.error.message, "to have the title")
+                  assert.include(event.error.message, "Last observed:")
+                  assert.include(event.error.message, "History:")
+                  for (const secret of source === "url" ? ["generic-url-secret", "generic-fragment-secret"] : [title]) {
+                    if (boundary === "direct" && preset === "strict") assert.notInclude(event.error.message, secret)
+                    else assert.include(event.error.message, secret)
+                  }
                 }
               }
             })),
