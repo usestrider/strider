@@ -1204,8 +1204,11 @@ repeated 25fps output is a native 25fps capture, and enabling downloads merely t
 
 ## Expectation observations
 
-Expectation history contains observations received by Strider before the deadline, and `last` is its final entry.
-With no timely observation, history is empty and `last` is absent. Late replies do not update a returned failure.
-A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee an observation.
-Rejected: inventing an observation, which reports evidence Strider never received, and waiting past the deadline
-for a reply, which breaks the caller’s budget. Changing how observations are collected is not required by this contract.
+Expectation history contains observed values and diagnostic error entries, and `last` is its final entry.
+For locator expectations, page values must reach Strider before the deadline; with neither a page value nor a
+diagnostic error recorded, history is empty and `last` is absent. Late replies do not update a returned failure.
+A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee a page value.
+`Expect.that` on an effect records `{ error: "a check was still running at the deadline" }` for an unfinished check,
+even if no check has returned a value. This diagnostic describes the unfinished check rather than a page value.
+Rejected: inventing a page value Strider never received, and waiting past the deadline for a reply, which breaks
+the caller’s budget. Changing how observations are collected is not required by this contract.
