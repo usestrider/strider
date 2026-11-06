@@ -1704,6 +1704,37 @@ describe("Chromium video writer lifetime", () => {
       })
     ).pipe(onTestClock))
 
+  it.effect("closes a recording that never received a frame without waiting for the finish budget", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        let writes = 0
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: (_frames, target) => Effect.sync(() => writes++).pipe(Effect.as(target.path))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* drain
+        // No Page.screencastFrame arrives before the scope closes, as when the page never paints.
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("1 second")
+        yield* drain
+        const closedPromptly = closing.pollUnsafe() !== undefined
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert.strictEqual(writes, 0)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.notMatch(error.message, /did not finish within 5 seconds/)
+      })
+    ).pipe(onTestClock))
+
   it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
