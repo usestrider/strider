@@ -191,6 +191,38 @@ describe("WebKit polled video", () => {
     60_000
   )
 
+  for (const kind of ["same-site", "cross-site"] as const) {
+    it.live(`keeps recording across ${kind} navigations that interrupt a capture`, () =>
+      run(Effect.gen(function*() {
+        const writer = Layer.succeed(VideoWriter.VideoWriter, {
+          write: (frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) =>
+            frames.pipe(Stream.runDrain, Effect.as(destination.path))
+        })
+        yield* launched(
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<p>first</p>")}`)
+            const video = yield* Effect.scoped(Effect.gen(function*() {
+              const video = yield* page.capability(Capability.Video)
+              // Same-process navigations keep the target, so a capture they cut short is no SessionEnded;
+              // cross-site ones swap it while a capture may be in flight.
+              for (let i = 0; i < 40; i++) {
+                const base = kind === "cross-site" && i % 2 === 0 ? crossSite : origin
+                yield* page.goto(`${base}/fixture?html=${encodeURIComponent(`<p>document ${i}</p>`)}`)
+              }
+              return video
+            }))
+            const file = yield* Effect.result(video.file)
+            assert.isTrue(Result.isSuccess(file), Result.isFailure(file) ? String(file.failure) : "")
+          }),
+          writer,
+          true,
+          "1 millis"
+        )
+      })), 60_000)
+  }
+
   it.live(
     "selects video for native traces while leaving screencast and downloads unsupported",
     () =>
