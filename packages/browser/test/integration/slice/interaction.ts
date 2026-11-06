@@ -1467,7 +1467,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 assert.strictEqual(error.phase, "waitingForCondition")
                 // The target exists and passes every check. The focus blocker must not erase that evidence.
                 assert(
-                  error.history.some((entry) => (entry.value as { _tag: string })._tag !== "NoMatch"),
+                  error.history.some((entry) => {
+                    const value = entry.value as { _tag: string; from?: string }
+                    return value._tag === "PreparingFocus" && value.from?.includes("#other")
+                  }),
                   JSON.stringify(error.history)
                 )
               }
