@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs"
 import * as Events from "../src/internal/events.ts"
 import type * as Model from "../src/internal/model.ts"
 import * as Operation from "../src/internal/operation.ts"
+import * as Recorders from "../src/internal/recorders.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
 import * as Trace from "../src/internal/trace.ts"
 import * as Tracing from "../src/internal/tracing.ts"
@@ -111,7 +112,7 @@ for (const read of ["missing", "interrupt"] as const) {
 
 it.effect("omits unavailable stacks", () =>
   Effect.gen(function*() {
-    const unavailable = Operation.named("Page.unavailable", { attributes: { "browser.page.id": id } })(Effect.void)
+    const unavailable = Recorders.observe("Page.unavailable", { "browser.page.id": id }, false, Effect.void)
     const { events } = yield* scenario(
       unavailable.pipe(Effect.provideService(References.CurrentStackFrame, {
         name: "Page.unavailable",
@@ -196,3 +197,27 @@ it.effect("captures a named-only operation inside a caller span with the same na
       function: "Page.same"
     })
   }))
+
+for (const disabled of [false, true]) {
+  it.effect(`captures nested same-name operations with tracing disabled: ${disabled}`, () =>
+    Effect.gen(function*() {
+      const { events } = yield* scenario(
+        Effect.gen(function*() {
+          yield* Effect.void.pipe(Operation.named("Page.nested", { attributes: { "browser.page.id": id } }))
+        }).pipe(
+          Operation.named("Page.nested", { attributes: { "browser.page.id": id } }),
+          Effect.provideService(Tracing.TracerDisabledWhen, () => disabled)
+        )
+      )
+      const steps = events.filter((event) => event.type === "before" && event.title === "Page.nested")
+      const inner = steps[1]
+      const lines = readFileSync(file, "utf8").split("\n")
+      const line = lines.findIndex((line) => line.includes("yield* Effect.void.pipe(Operation.named(\"Page.nested\""))
+      assert.deepStrictEqual(inner.stack[0], {
+        file,
+        line: line + 1,
+        column: lines[line]!.indexOf("Operation.named") + 11,
+        function: "Page.nested"
+      })
+    }))
+}
