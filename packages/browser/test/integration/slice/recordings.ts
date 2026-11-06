@@ -9,10 +9,13 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   Browser,
   Capability,
+  Deadline,
   Diagnostics,
+  Expect,
   Har,
   NetworkRequest,
   NetworkResponse,
+  Operation,
   Page,
   Route,
   Trace
@@ -20,6 +23,7 @@ import {
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import type * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
@@ -396,6 +400,157 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               line.snapshot.response.status === 200
             ))
           }),
+        timeout
+      )
+
+      it.effect(
+        "captures completed locator expectations, including their final state after failure",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>initial</p>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction", domSnapshots: true, network: true })
+            yield* page.locator("p").pipe(Expect.toHaveText("initial"))
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                document.querySelector("p")!.textContent = "final"
+              }, 50)
+            })
+            const failure = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Operation.named("check final state"),
+              Deadline.within("300 millis"),
+              Effect.flip
+            )
+            assert.isTrue(Expect.isExpectationFailed(failure))
+            const final = yield* page.screenshot()
+            const out = path.join(directory(), "expectations.zip")
+            yield* trace.exportTrace(out)
+            const files = yield* unzip(out)
+            const events = lines(files.get("trace.trace"))
+            const checks = events.filter((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.lengthOf(checks, 2)
+            const shots = checks.map((check) => {
+              const matching = events.filter((event) => event.type === "screenshot" && event.callId === check.callId)
+              assert.lengthOf(matching, 1)
+              assert.isFalse(
+                events.some((event) => event.type === "frame-snapshot" && event.snapshot.callId === check.callId)
+              )
+              return files.get(matching[0].file)!
+            })
+            assert.deepStrictEqual(shots[1], final)
+            assert.notDeepEqual(shots[0], final)
+            const failed = events.find((event) => event.type === "after" && event.callId === checks[1].callId)
+            assert.include(JSON.stringify(failed.error), "ExpectationFailed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired expectation when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>busy</p>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the check nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the expectation did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) assert.isTrue(Expect.isExpectationFailed(settled.value))
+            const out = path.join(directory(), "hung-expectation.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "ExpectationFailed"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired action when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<button>busy</button>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the action nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("button").click().pipe(
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the action did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) {
+              assert.isTrue(Deadline.isTimeout(settled.value))
+              if (Deadline.isTimeout(settled.value)) assert.strictEqual(settled.value.operation, "Locator.click")
+            }
+            const out = path.join(directory(), "hung-action.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Locator.click")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "Timeout"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps expectation screenshots off by default and when explicitly disabled",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>ready</p>"))
+            for (const options of [undefined, { screenshots: "off" as const }]) {
+              const trace = yield* Trace.record(page, options)
+              yield* page.locator("p").pipe(Expect.toHaveText("ready"))
+              const failure = yield* page.locator("p").pipe(
+                Expect.toHaveText("missing"),
+                Deadline.within("100 millis"),
+                Effect.flip
+              )
+              assert.isTrue(Expect.isExpectationFailed(failure))
+              const out = path.join(directory(), "off.zip")
+              yield* trace.exportTrace(out)
+              const events = lines((yield* unzip(out)).get("trace.trace"))
+              assert.isFalse(events.some((event) => event.type === "screenshot"))
+            }
+          })),
         timeout
       )
 

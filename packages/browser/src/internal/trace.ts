@@ -5,7 +5,7 @@
  * - **Steps.** Each library operation on the target is a step, through the span helper: its name, its
  *   attributes as params, its duration and its error. A span of the caller's that encloses one is a step too, so
  *   the trace nests as the program did; it spans the operations recorded inside it.
- * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action, and
+ * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action and page expectation, and
  *   screencast frames, native or polled, or on Firefox its video of each page.
  * - **DOM snapshots** (`capture.ts`): every frame of the action's page captured before and after each
  *   action, the target, resolved by the action's locator, marked in the one after. A snapshot's secret values
@@ -111,7 +111,7 @@ interface Frame {
 
 /** A PNG's size, from its header. */
 
-/** The operations an action screenshot follows: the ones that change the page. */
+/** The operations whose DOM snapshots surround changes to the page. */
 const actions = new Set([
   "Locator.click",
   "Locator.dblclick",
@@ -337,13 +337,12 @@ export const start = Effect.fnUntraced(function*(
         group: false
       }
       steps.push(step)
-      const page = Option.flatMap(
-        pageOf(started.attributes["browser.page.id"]),
-        (page) => actions.has(started.name) ? Option.some(page) : Option.none()
-      )
+      const page = pageOf(started.attributes["browser.page.id"])
+      const action = actions.has(started.name)
+      const screenshot = action || started.name.startsWith("Expect.")
       // The target is resolved as the action starts, where it is now, and again after it, if it wasn't there yet
       let target = Option.none<Capture.CaptureTarget>()
-      if (settings.domSnapshots && Option.isSome(page)) {
+      if (settings.domSnapshots && action && Option.isSome(page)) {
         yield* snapshot(callId, "before", page.value, Option.none())
         if (Option.isSome(started.subject)) {
           target = yield* targetOf(page.value, started.subject.value)
@@ -356,16 +355,20 @@ export const start = Effect.fnUntraced(function*(
           if (Option.isNone(page)) {
             return
           }
-          if (settings.domSnapshots) {
+          if (settings.domSnapshots && action) {
             if (Option.isNone(target) && Option.isSome(started.subject)) {
               target = yield* targetOf(page.value, started.subject.value)
             }
             yield* snapshot(callId, "after", page.value, target)
           }
-          if (settings.screenshots !== "perAction") {
+          if (settings.screenshots !== "perAction" || !screenshot) {
             return
           }
-          const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(Effect.option)
+          // Completion can follow the enclosing deadline; capture has a bounded budget of its own.
+          const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(
+            Operation.apart("Trace.screenshot", Duration.millis(1000)),
+            Effect.option
+          )
           if (Option.isSome(shot)) {
             shots.push({ callId, page: page.value.id, at: Adapter.now(), png: shot.value })
           }
