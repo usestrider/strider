@@ -1,6 +1,6 @@
 ---
 title: Video
-description: A WebM file of a page while a scope lives, what each browser needs to write one, where the file goes, and what a video leaves out.
+description: A WebM file of a page while a scope lives, what each browser needs to write one, where the file goes, and how it plays back.
 order: 3
 ---
 
@@ -66,12 +66,13 @@ directory, removed when the context closes, so name one, as above, or read the f
 context with `downloads: "deny"` can't record. WebKit has no downloads: its file goes in the directory its `video`
 option names.
 
-## What a video leaves out
+## Playback
 
-- **Stillness costs nothing on Firefox, and repeats on Chromium.** Chromium sends a frame only when the page
-  repaints, so the latest frame is repeated to keep 25 a second, and the file plays in real time.
-- **A resize is fitted, not followed.** On Chromium and WebKit, each frame is scaled to the size the recording
-  started at, centred, with black padding.
+- **A still page stays on screen for as long as it was still.** Chromium sends a frame only when the page
+  repaints, so the latest one is repeated 25 times a second until the next, or until the recording ends. Firefox
+  stores fewer frames, each with its time. Either way, the file plays back in real time.
+- **A resize is fitted, not followed.** The recording carries on through a resize, but the file keeps the size
+  it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
 - **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last
   one.
 - **The recording ends with its page.** Closing the scope, page or context ends it; a writer then has up to five
