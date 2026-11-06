@@ -1609,7 +1609,7 @@ describe("Chromium video writer lifetime", () => {
       const written = yield* Queue.unbounded<VideoWriter.Frame>()
       const destination = yield* Deferred.make<VideoWriter.Destination>()
       const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
-        write: Effect.fnUntraced(function*(frames, target) {
+        write: Effect.fnUntraced(function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
           yield* Deferred.succeed(destination, target)
           yield* frames.pipe(Stream.runForEach((image) => Queue.offer(written, image)))
           return target.path
