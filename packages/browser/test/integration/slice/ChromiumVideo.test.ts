@@ -19,6 +19,7 @@ import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { chromium } from "../browsers.ts"
+import { writerConformance } from "../videoWriterConformance.ts"
 import { supports } from "./capabilities.ts"
 
 const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(
@@ -172,6 +173,42 @@ describe("Chromium video writer", () => {
         }).pipe(Effect.provide(observed))
       }), 60_000)
 
+    it.effect(
+      "finishes a playable file when the page closes while the recording scope stays open",
+      () =>
+        Effect.gen(function*() {
+          const read = yield* Deferred.make<void>()
+          const writer = Layer.effect(VideoWriter.VideoWriter)(Effect.gen(function*() {
+            const encoder = yield* VideoWriter.VideoWriter
+            return {
+              write: (frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) =>
+                encoder.write(frames.pipe(Stream.tap(() => Deferred.succeed(read, undefined))), destination)
+            }
+          })).pipe(Layer.provide(VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! })))
+          const browser = Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(writer))
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage({ emulation: { viewport: { width: 321, height: 243 } } })
+            yield* page.goto("data:text/html,<h1>finished before scope closure</h1>")
+            const recording = yield* page.capability(Capability.Video)
+            yield* Deferred.await(read)
+            yield* page.close()
+            const file = yield* recording.file
+            const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+              "-v",
+              "error",
+              "-count_frames",
+              "-show_streams",
+              "-of",
+              "json",
+              file
+            ], { encoding: "utf8" }))
+            assert.isAtLeast(Number(probe.streams[0].nb_read_frames), 1)
+            execFileSync(process.env["STRIDER_FFMPEG"]!, ["-v", "error", "-i", file, "-f", "null", "-"])
+          }).pipe(Effect.provide(browser))
+        }),
+      60_000
+    )
+
     it.effect("accepts PNG input and preserves odd recording dimensions", () =>
       Effect.gen(function*() {
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-png-"))
@@ -231,3 +268,5 @@ describe("Chromium video writer", () => {
       }), 60_000)
   })
 })
+
+writerConformance("ffmpeg", VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! }))
