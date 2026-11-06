@@ -13,6 +13,7 @@ import * as path from "node:path"
 import { deflateSync } from "node:zlib"
 import * as BrowserClock from "../../src/internal/browserClock.ts"
 import * as Video from "../../src/internal/video.ts"
+import { lastVideoFrame } from "./videoFrames.ts"
 
 const png = (width: number, height: number, color: readonly number[]) => {
   const chunk = (kind: string, data: Buffer) => {
@@ -48,22 +49,23 @@ export const writerConformance = (
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
     it.effect(
-      `${name} decodes the final picture with an end-relative seek after a delayed first capture`,
+      `${name} validates the final picture after a delayed first frame`,
       () =>
         Effect.gen(function*() {
-          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-end-seek-"))
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-delayed-first-frame-"))
           yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
           const encoder = yield* VideoWriter.VideoWriter
-          const data = png(2, 2, [0, 0, 255])
+          const earlier = png(2, 2, [255, 0, 0])
+          const final = png(2, 2, [0, 0, 255])
           const file = yield* encoder.write(
             Stream.fromIterable([127, 237, 391, 412]).pipe(Stream.map((at) => ({
               at: at * 1e6,
               format: "png" as const,
               width: 2,
               height: 2,
-              data
+              data: at === 412 ? final : earlier
             }))),
-            { path: path.join(directory, "end-seek.webm"), width: 2, height: 2 }
+            { path: path.join(directory, "delayed-first-frame.webm"), width: 2, height: 2 }
           )
           const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
             "-v",
@@ -82,23 +84,12 @@ export const writerConformance = (
           )
           assert.strictEqual(Number(probe.format.start_time), 0.127)
           assert.strictEqual(Number(probe.format.duration), 0.413)
-          // Reproduce the WebKit video assertion with deterministic capture times and no browser.
-          const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
-            "-v",
-            "error",
-            "-sseof",
-            "-0.1",
-            "-i",
-            file,
-            "-frames:v",
-            "1",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "pipe:1"
-          ])
+          const pixels = lastVideoFrame(file, probe.frames.length)
           assert.strictEqual(pixels.length, 2 * 2 * 3)
+          for (let offset = 0; offset < pixels.length; offset += 3) {
+            assert.isBelow(pixels[offset]!, 20, "final frame is not an earlier red picture")
+            assert.isAbove(pixels[offset + 2]!, 200, "final frame is blue")
+          }
         }),
       60_000
     )
