@@ -9,6 +9,7 @@ import {
   Browser,
   Diagnostics,
   Dialog,
+  Expect,
   FileInput,
   Har,
   LaunchProfile,
@@ -20,6 +21,7 @@ import {
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import * as Option from "effect/Option"
@@ -35,6 +37,8 @@ import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as CliSession from "../src/internal/cli/session.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Firefox from "../src/internal/firefoxLauncher.ts"
+import * as Operation from "../src/internal/operation.ts"
+import * as Recorders from "../src/internal/recorders.ts"
 import * as Spans from "../src/internal/spans.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
 
@@ -273,6 +277,83 @@ describe("Recordings", () => {
       assert.strictEqual(entry.response.content.text, "")
       assert.isUndefined(entry._incomplete)
       assert.strictEqual(entry._resourceType, "fetch")
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("exports expectation evidence in the viewer's error message", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "expectation.zip")
+      const first = Operation.observed(false)
+      const last = Operation.observed({ text: "Loading", count: 2 })
+      const details = {
+        subject: "cart",
+        condition: "to be visible",
+        last: Option.some(last),
+        history: [first, last],
+        elapsed: Duration.millis(125),
+        checks: { count: 3, triggeredBy: ["initial", "change"] as const },
+        nearest: Option.some("- button \"Cart\""),
+        suggestions: ["getByRole(\"button\", { name: \"Cart\" })"],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      }
+      const circular: { self?: unknown } = {}
+      circular.self = circular
+      const errors = [
+        new Expect.ExpectationFailed(details),
+        new Expect.ExpectationFailed({
+          ...details,
+          last: Option.none(),
+          history: [],
+          nearest: Option.none(),
+          suggestions: [],
+          checks: { count: 0, triggeredBy: [] }
+        }),
+        new Expect.ExpectationFailed({
+          ...details,
+          last: Option.some(Operation.observed(circular)),
+          history: [Operation.observed(1n), Operation.observed(undefined), Operation.observed(circular)]
+        }),
+        new Error("ordinary failure")
+      ]
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        for (const error of errors) {
+          const result = yield* Recorders.observe(
+            "Expect.test",
+            { "browser.page.id": page.id },
+            false,
+            Effect.fail(error)
+          ).pipe(Effect.flip)
+          assert.strictEqual(result, error)
+        }
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const failures = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+      assert.strictEqual(failures.length, 4)
+      assert.strictEqual(failures[0].name, "ExpectationFailed")
+      for (
+        const evidence of [
+          "Expected cart to be visible",
+          "Last observed:",
+          "Loading",
+          "History:",
+          "false",
+          "Checks: 3 (initial, change)",
+          "Elapsed: 125 ms",
+          "Nearest match:\n- button \"Cart\"",
+          "Suggestions:\ngetByRole(\"button\", { name: \"Cart\" })"
+        ]
+      ) assert.include(failures[0].message, evidence)
+      assert.include(failures[1].message, "Checks: 0")
+      for (const absent of ["Last observed:", "History:", "Nearest match:", "Suggestions:"]) {
+        assert.notInclude(failures[1].message, absent)
+      }
+      assert.include(failures[2].message, "History:")
+      assert.include(failures[2].message, "undefined")
+      assert.include(failures[2].message, "1")
+      assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("records a trace whose steps nest in the caller's spans", () =>
