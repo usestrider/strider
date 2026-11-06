@@ -1,7 +1,8 @@
 /**
  * The scenarios, each written twice: with Strider and with Playwright, as each library's own documentation would
  * write it, against the same stock Chromium. One that only shows Strider, such as the video, has no twin. API.md's call sites that both libraries can do, on the local site
- * (`site.ts`), and two public demo sites replayed from recordings, so a run sends nothing to anyone.
+ * (`site.ts`), and a public demo site replayed from a recording, so a run sends nothing to anyone. A Strider program
+ * visits the site live, as a reader would copy it, and the runner replays the recording under it (`replay.ts`).
  *
  * Each implementation sits between `#region <scenario>/<library>` markers, which the report copies into
  * RESULTS.md side by side. Each returns what it read, which the report compares.
@@ -46,7 +47,7 @@ export interface Scenario {
   readonly description: string
   /** The value both implementations must return. */
   readonly expected: string
-  /** A public demo site, replayed from `.data/scenarios/<recording>.har`; none for the local site. */
+  /** A public demo site, replayed from `.data/scenarios/<recording>.har` by the runner; none for the local site. */
   readonly recording?: string
   /** What writing it found, shown under its code. */
   readonly note?: string
@@ -330,13 +331,10 @@ const harPlaywright = async (browser: Playwright.Browser, origin: string, files:
 // #endregion
 
 // #region the-internet/strider
-// The Internet's login, and a recording of it to replay instead of visiting it
 const theInternet = "https://the-internet.herokuapp.com"
-const theInternetRecording = ".data/scenarios/the-internet.har"
 
 const theInternetStrider = Effect.fn("the-internet")(function*() {
   const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(theInternetRecording))
   yield* page.goto(`${theInternet}/login`)
   yield* page.getByLabel("Username").fill("tomsmith")
   yield* page.getByLabel("Password").fill("SuperSecretPassword!")
@@ -365,13 +363,10 @@ const theInternetPlaywright = async (browser: Playwright.Browser, _: string, fil
 // #endregion
 
 // #region controls/strider
-// The page, and a recording of its site to replay instead of visiting it
 const controls = "https://the-internet.herokuapp.com/dynamic_controls"
-const controlsRecording = ".data/scenarios/the-internet.har"
 
 const controlsStrider = Effect.fn("controls")(function*() {
   const page = yield* Browser.newPage()
-  yield* page.route("**/*", yield* Route.fromHar(controlsRecording))
   yield* page.goto(controls)
   yield* page.getByRole("button", { name: "Enable" }).click()
   // A script enables the box three seconds later: fill waits for it
@@ -431,17 +426,15 @@ const recordVideo = Effect.fn("recordVideo")(function*(page: Page.Page, file: st
   )
 })
 
-// The page, a recording of its site to replay instead of visiting it, and the video
+// The page, and where its video goes
 const dynamicControls = "https://the-internet.herokuapp.com/dynamic_controls"
-const dynamicControlsRecording = ".data/scenarios/the-internet.har"
-const videoFile = ".data/scenarios/dynamic-controls.webm"
+const videoFile = "dynamic-controls.webm"
 
 const videoStrider = Effect.fn("video")(function*() {
   const value = yield* Effect.scoped(Effect.gen(function*() {
     const page = yield* Browser.newPage({
       emulation: { viewport: { width: 1280, height: 720 } }
     })
-    yield* page.route("**/*", yield* Route.fromHar(dynamicControlsRecording))
     yield* page.goto(dynamicControls, { waitUntil: "load" })
     yield* recordVideo(page, videoFile)
     yield* page.getByRole("button", { name: "Enable" }).click()
@@ -457,17 +450,15 @@ const videoStrider = Effect.fn("video")(function*() {
 // #endregion
 
 // #region video-firefox/strider
-// The page, a recording of its site to replay instead of visiting it, and the video
+// The page, and where its video goes
 const firefoxControls = "https://the-internet.herokuapp.com/dynamic_controls"
-const firefoxControlsRecording = ".data/scenarios/the-internet.har"
-const firefoxVideoFile = ".data/scenarios/dynamic-controls-firefox.webm"
+const firefoxVideoFile = "dynamic-controls-firefox.webm"
 
 const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
   const fs = yield* FileSystem.FileSystem
   const page = yield* Browser.newPage({
     emulation: { viewport: { width: 1280, height: 720 } }
   })
-  yield* page.route("**/*", yield* Route.fromHar(firefoxControlsRecording))
   yield* page.goto(firefoxControls, { waitUntil: "load" })
   const input = page.getByRole("textbox")
   // Firefox writes the video itself, for as long as the capability's scope lives
@@ -555,8 +546,8 @@ export const scenarios: ReadonlyArray<Scenario> = [
   },
   {
     name: "the-internet",
-    title: "The Internet's login, replayed",
-    description: "Logs in on The Internet's demo login page, against a recording of the site.",
+    title: "The Internet's login",
+    description: "Logs in on The Internet's demo login page.",
     expected: "Secure Area",
     recording: "the-internet",
     strider: theInternetStrider,
@@ -564,7 +555,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
   },
   {
     name: "controls",
-    title: "The Internet's dynamic controls, replayed",
+    title: "The Internet's dynamic controls",
     description: "Enables a text box that a script enables three seconds later, and fills it as soon as it can.",
     expected: "Strider",
     recording: "the-internet",

@@ -10,7 +10,7 @@ export interface Scenario {
   readonly description: string
   /** What the program returns when it passes */
   readonly expected: string
-  /** The public demo site it drives, replayed from a recording; none for the local site */
+  /** The public demo site it drives; none for the local site */
   readonly recording: string | undefined
   /** A video the program recorded, under public/videos/; none for most */
   readonly video: string | undefined

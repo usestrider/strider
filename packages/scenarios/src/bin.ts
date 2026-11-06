@@ -8,7 +8,9 @@
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
- * in `.data/scenarios/`, and a run without them fails, saying to record them.
+ * in `.data/scenarios/`, and a run without them fails, saying to record them. A Strider program visits its site as
+ * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
+ * its own.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -25,6 +27,7 @@ import * as path from "node:path"
 import { chromium } from "playwright-core"
 import type * as Playwright from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
+import { replaying } from "./replay.ts"
 import { type Measurements, report } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
@@ -140,13 +143,18 @@ const firefox = () =>
       Layer.provideMerge(NodeServices.layer)
     )
   )
-const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox") =>
-  (on === "firefox" ? firefox() : runtime).runPromise(Effect.scoped(effect))
+const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox", recording?: string) =>
+  (on === "firefox" ? firefox() : runtime).runPromise(
+    Effect.scoped(recording === undefined ? effect : replaying(effect, files.recording(recording)))
+  )
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
+// A program writes its files beside it, as a reader's would, which here is into `.data/scenarios/`
+process.chdir(recordingsDirectory)
+
 const results = await runScenarios(chosen, runs, (scenario) => ({
-  strider: () => strider(scenario.strider(origin), scenario.browser),
+  strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
   playwright: scenario.playwright === undefined
     ? undefined
     : () => scenario.playwright!(browser, origin, files)
