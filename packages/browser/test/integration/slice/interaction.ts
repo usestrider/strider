@@ -2121,6 +2121,102 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      for (const selector of ["#radio", "#label", "#descendant"]) {
+        for (const [checked, trial] of [[true, false], [false, false], [true, true], [false, true]] as const) {
+          it.effect(
+            `native radio uncheck ${selector} initially checked ${checked} trial ${trial} delivers no input`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<input id="radio" type="radio" ${
+                    checked ? "checked" : ""
+                  }><label id="label" for="radio"><span id="descendant">Choice</span></label><p id="clicks">0</p><script>["pointerdown", "mousedown", "mouseup", "click"].forEach(type => document.addEventListener(type, () => document.getElementById("clicks").textContent = String(Number(document.getElementById("clicks").textContent) + 1)))</script>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator(selector).uncheck({ trial }).pipe(Effect.exit)
+                  assert.strictEqual(yield* page.locator("#radio").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#clicks").readText, "0")
+                  if (checked) {
+                    assert.strictEqual(result._tag, "Failure")
+                    const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+                    assert(
+                      Option.isSome(error) && Locator.isLocatorError(error.value) &&
+                        error.value.reason._tag === "WrongElement"
+                    )
+                    if (
+                      Option.isSome(error) && Locator.isLocatorError(error.value) &&
+                      error.value.reason._tag === "WrongElement"
+                    ) {
+                      assert.include(error.value.reason.hint, "another radio in the group")
+                    }
+                  } else yield* result
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (const selector of ["#label", "#descendant"]) {
+        it.effect(`native radio uncheck control preserves ${selector}'s own ARIA state`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="radio" type="radio" checked><label id="label" for="radio" role="checkbox" aria-checked="false"><span id="descendant" role="checkbox" aria-checked="false">Choice</span></label>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator(selector).uncheck()
+              yield* page.locator(selector).uncheck({ trial: true })
+              assert.strictEqual(yield* page.locator(selector).isChecked, false)
+              assert.strictEqual(yield* page.locator("#radio").isChecked, true)
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "native radio uncheck refusal is never reported as unsent after the click",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" checked onclick="this.type = 'radio'; this.checked = true; document.getElementById('clicks').textContent = '1'"><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#box").uncheck().pipe(Effect.exit)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert(Option.isSome(error) && Locator.isLocatorError(error.value))
+              if (Option.isSome(error) && Locator.isLocatorError(error.value)) {
+                assert.strictEqual(error.value.diagnostics.dispatch._tag, "MayHaveBeenSent")
+                assert.strictEqual(error.value.reason._tag, "StateUnchanged")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "native radio uncheck control allows a page-managed ARIA radio to uncheck",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="radio" role="radio" aria-checked="true" onclick="this.setAttribute('aria-checked', 'false'); document.getElementById('clicks').textContent = '1'">Choice</div><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#radio").uncheck()
+              assert.isFalse(yield* page.locator("#radio").isChecked)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+            }))
+          }),
+        timeout
+      )
+
       for (const checked of [true, false]) {
         for (const association of ["explicit", "wrapping"] as const) {
           for (

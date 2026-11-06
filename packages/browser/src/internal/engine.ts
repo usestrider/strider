@@ -138,7 +138,7 @@ export type Read =
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean; readonly uncheck?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
@@ -237,7 +237,11 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
 
 /** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
 export const Final = Schema.Union([
-  Schema.TaggedStruct("WrongElement", { expected: Schema.String, element: Schema.String }),
+  Schema.TaggedStruct("WrongElement", {
+    expected: Schema.String,
+    element: Schema.String,
+    hint: Schema.optional(Schema.String)
+  }),
   Schema.TaggedStruct("NotEditable", { element: Schema.String }),
   Schema.TaggedStruct("Refused", { element: Schema.String, value: Schema.String })
 ])
@@ -1494,9 +1498,9 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Association stays in the DOM; slots can add refusals without choosing another label. */
-  const checkedForAction = (element: Element): boolean | null => {
+  const checkableForAction = (element: Element): Element | null => {
     const own = checkedOf(element)
-    if (own !== null) return own
+    if (own !== null) return element
     let label: Element | null = element
     while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
     if (label === null || label.control === null) return null
@@ -1514,7 +1518,7 @@ export function engine(render: (root: SnapNode) => string) {
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
-    return checkedOf(label.control)
+    return checkedOf(label.control) === null ? null : label.control
   }
 
   /** The element with focus, through open shadow roots. */
@@ -2015,7 +2019,21 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
+        const control = request.read.followLabel ? checkableForAction(element) : element
+        const checked = control === null ? null : checkedOf(control)
+        if (
+          request.read.uncheck && checked === true && control instanceof HTMLInputElement && control.type === "radio"
+        ) {
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox or a page-managed ARIA checkable to uncheck",
+              element: describe(control),
+              hint: "Check another radio in the group instead"
+            }
+          }
+        }
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }

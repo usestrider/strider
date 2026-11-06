@@ -1110,9 +1110,10 @@ export interface Locator extends ReadonlyLocator {
    * It follows `check`, using the checked state and optional checkability described by `isChecked`. The
    * selected element's own checked state takes precedence. Otherwise a selected label, or an ordinary
    * descendant's nearest DOM label, supplies its associated control. The selected element remains the
-   * click target and position origin. If already unchecked, nothing is sent. Otherwise it clicks and
-   * reads the state again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays
-   * checked.
+   * click target and position origin. If already unchecked, nothing is sent. A checked native radio
+   * fails with `WrongElement` before input, including with `trial: true`; check another radio in its
+   * group instead. Page-managed ARIA radios can be unchecked. Otherwise it clicks and reads the state
+   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
