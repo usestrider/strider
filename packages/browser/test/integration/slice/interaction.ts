@@ -1463,6 +1463,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   0,
                   "the asynchronous handler must run before it can block filling"
                 )
+                // Resolving means the target was never found; this target is waiting on focus preparation.
+                assert.strictEqual(error.phase, "waitingForCondition")
                 // The target exists and passes every check. The focus blocker must not erase that evidence.
                 assert(
                   error.history.some((entry) => (entry.value as { _tag: string })._tag !== "NoMatch"),
