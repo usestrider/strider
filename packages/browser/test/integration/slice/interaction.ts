@@ -1295,7 +1295,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
-      for (const change of ["replace", "detach", "hide", "inert"] as const) {
+      for (
+        const change of ["replace", "detach", "hide", "inert", "disable", "disable with checks off", "restore"] as const
+      ) {
         it.effect(
           `rechecks a top-level design-mode target when blur handlers ${change} it`,
           () =>
@@ -1306,7 +1308,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 ? "target.remove()"
                 : change === "hide"
                 ? "target.style.display = \"none\""
-                : "target.inert = true"
+                : change === "inert"
+                ? "target.inert = true"
+                : change === "restore"
+                ? "target.style.display = \"none\"; setTimeout(() => target.style.display = \"\", 100)"
+                : "target.setAttribute(\"aria-disabled\", \"true\")"
               const { url } = yield* fixture(() =>
                 `<input id="other"><p id="target">old</p><script>
               document.designMode = "on";
@@ -1317,8 +1323,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const page = yield* Browser.newPage()
                 yield* page.goto(url)
                 yield* page.locator("#other").fill("other")
-                if (change === "replace") {
-                  yield* page.locator("#target").fill("new")
+                if (change === "replace" || change === "restore" || change === "disable with checks off") {
+                  yield* page.locator("#target").fill("new", {
+                    checks: { enabled: change !== "disable with checks off" }
+                  }).pipe(Deadline.within("3 seconds"))
                   assert.strictEqual(yield* page.locator("#target").readText, "new")
                 } else {
                   const error = yield* page.locator("#target").fill("new").pipe(
@@ -1326,6 +1334,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     Effect.flip
                   )
                   assert(Deadline.isTimeout(error), String(error))
+                  const expected =
+                    { detach: "NoMatch", hide: "NotVisible", inert: "Inert", disable: "Disabled" }[change]
+                  assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === expected))
+                  if (change !== "detach") assert.strictEqual(yield* page.locator("#target").readText, "old")
                 }
                 assert.strictEqual(yield* page.locator("#other").readValue, "other")
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.blurred), "yes")
