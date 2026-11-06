@@ -39,11 +39,11 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
-import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
 
 const timeout = 60_000
 
@@ -415,29 +415,20 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       )
 
       it.effect("fails a navigation's wait with the reason goto gives", () =>
-        Effect.gen(function*() {
-          // A port nothing listens on, and that browsers don't refuse outright as they do 9 or 1
-          const port = yield* Effect.promise(() =>
-            new Promise<number>((resolve) => {
-              const server = net.createServer()
-              server.listen(0, "127.0.0.1", () => {
-                const { port } = server.address() as net.AddressInfo
-                server.close(() => resolve(port))
-              })
-            })
-          )
-          const { url } = yield* fixture(() => `<a href="http://127.0.0.1:${port}/nowhere">Broken</a>`)
+        Effect.scoped(Effect.gen(function*() {
+          const origin = yield* navigationFailure
+          const { url } = yield* fixture(() => `<a href="${origin}/nowhere">Broken</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const broken = yield* PageNavigation.next(page, { url: `http://127.0.0.1:${port}/*` })
+            const broken = yield* PageNavigation.next(page, { url: `${origin}/*` })
             yield* page.getByRole("link", { name: "Broken" }).click()
             const error = yield* broken.pipe(Effect.flip)
             assert(Page.isPageError(error), String(error))
             assert.strictEqual(error.reason._tag, "NavigationFailed")
             assert.strictEqual(error.operation, "PageNavigation.next")
           }))
-        }), timeout)
+        })), timeout)
 
       it.effect("reports a frame's own navigations when asked, each naming its frame", () =>
         Effect.gen(function*() {
