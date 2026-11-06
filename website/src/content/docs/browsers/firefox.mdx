@@ -146,7 +146,9 @@ it. A drag between documents goes to the first one alone.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
 directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
-[`screencast: "native"`](/docs/tools/recordings#traces) uses the video. To record one around a step, take the capability for that scope with `page.capability`:
+[`screencast: "native"`](/docs/tools/recordings#traces) uses the video. Firefox needs no
+[`VideoWriter`](/docs/tools/video#what-each-browser-needs), unlike Chromium. To record one around a step, take the
+capability for that scope with `page.capability`:
 
 ```ts
 import { Capability, Page } from "@usestrider/browser"
