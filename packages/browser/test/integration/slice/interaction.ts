@@ -1192,6 +1192,30 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      // A text input takes the typing path; a focus handler can make it read-only there too.
+      it.effect("focus-time readOnly: a text input times out with ReadOnly, unchanged", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="text" value="old" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("new").pipe(
+              Deadline.within("1 second"),
+              Effect.result
+            )
+            const state = {
+              result: result._tag,
+              timeout: result._tag === "Failure" && Deadline.isTimeout(result.failure) &&
+                result.failure.history.some((entry) => (entry.value as { _tag: string })._tag === "ReadOnly"),
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            assert.deepStrictEqual(state, { result: "Failure", timeout: true, value: "old", events: "focus;" })
+          }))
+        }), timeout)
+
       for (const type of ["range", "file", "checkbox"] as const) {
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
