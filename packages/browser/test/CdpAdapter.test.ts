@@ -1604,6 +1604,27 @@ describe("Chromium video writer lifetime", () => {
       }
     })
 
+  it.effect("does not retain the acquisition protocol deadline in recording work", () =>
+    Effect.gen(function*() {
+      const deadline = yield* Deferred.make<Option.Option<number>>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(_frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(deadline, yield* ProtocolClient.CommandDeadline)
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video).pipe(Deadline.within("1 second"))
+      yield* frame(h, 70)
+      const recordedDeadline = yield* Deferred.await(deadline)
+      yield* video.file
+      assert.isTrue(Option.isNone(recordedDeadline), "recording and preparation outlive the acquisition deadline")
+    }).pipe(onTestClock))
+
   it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
     Effect.gen(function*() {
       const written = yield* Queue.unbounded<VideoWriter.Frame>()
