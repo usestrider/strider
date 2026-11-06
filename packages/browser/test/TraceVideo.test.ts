@@ -36,6 +36,22 @@ describe("native trace video", () => {
         }
       })))
   }
+  it.effect("explains a video whose acquisition has not finished when the trace is exported", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { files, stops, reads } = yield* scenario("pending")
+      assert.strictEqual(stops, 0)
+      assert.strictEqual(reads, 0)
+      for (const file of files) {
+        const events = new TextDecoder().decode(file.get("trace.trace")).trim().split("\n").map((line) =>
+          JSON.parse(line)
+        )
+        assert.isFalse(events.some((event) => event.type === "video"))
+        const errors = events.filter((event) => event.type === "console" && event.messageType === "error")
+        assert.strictEqual(errors.length, 1)
+        assert.strictEqual(errors[0].pageId, "video-page")
+        assert.include(errors[0].text, "acquisition")
+      }
+    })))
   it.effect("keeps successful video bytes and reads them only on the first export", () =>
     Effect.scoped(Effect.gen(function*() {
       const { files, reads, stops, bytes } = yield* scenario()

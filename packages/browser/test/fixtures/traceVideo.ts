@@ -21,7 +21,10 @@ vi.mock("../../src/internal/capabilities.ts", () => ({ acquire: vi.fn() }))
 class RecordingFailure extends Data.TaggedError("RecordingFailure")<{ readonly message: string }> {}
 
 export const scenario = Effect.fnUntraced(
-  function*(stage?: "acquisition" | "stop" | "file-read", interruptAt?: "stop" | "file-read") {
+  function*(
+    stage?: "acquisition" | "pending" | "stop" | "file-read",
+    interruptAt?: "stop" | "file-read"
+  ) {
     let acquisitions = 0
     let reads = 0
     let stops = 0
@@ -30,6 +33,8 @@ export const scenario = Effect.fnUntraced(
     vi.mocked(Capabilities.acquire).mockImplementation(() =>
       Effect.suspend(() => {
         acquisitions++
+        // Still starting the browser's recorder when the trace is exported
+        if (stage === "pending") return Effect.never as never
         if (stage === "acquisition") {
           return Effect.fail(
             new RecordingFailure({
