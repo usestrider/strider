@@ -1735,8 +1735,8 @@ describe("Chromium video writer lifetime", () => {
       })
     ).pipe(onTestClock))
 
-  for (const mode of ["empty", "started", "blocked", "failure"] as const) {
-    it.effect(`settles video on ${mode === "failure" ? "source failure" : `session end (${mode})`} while its scope stays open`, () =>
+  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure"] as const) {
+    it.effect(`settles video on ${mode.endsWith("Failure") || mode === "failure" ? `source failure (${mode})` : `session end (${mode})`} while its scope stays open`, () =>
       withProtocolScheduler((drain) =>
         Effect.gen(function*() {
           const started = yield* Deferred.make<void>()
@@ -1768,7 +1768,7 @@ describe("Chromium video writer lifetime", () => {
             yield* frame(h, 71)
             yield* Deferred.await(started)
           }
-          if (mode === "failure") {
+          if (mode === "failure" || mode === "blockedFailure") {
             yield* h.browser.receive({
               method: "Page.screencastFrame",
               sessionId: "S1",
@@ -1817,13 +1817,17 @@ describe("Chromium video writer lifetime", () => {
             const error = yield* Effect.flip(outcome)
             assert(Capability.isCapabilityError(error))
             assert.strictEqual(error.reason._tag, "BackendFailure")
-            if (mode === "failure") assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            if ((mode === "failure" || mode === "blockedFailure") && error.reason._tag === "BackendFailure") {
+              assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            }
             if (mode === "empty") {
               assert.strictEqual(writes, 0)
               assert.match(error.message, /no frame|before.*frame/i)
             }
           }
-          if (mode !== "empty") assert.isTrue(releasedAtFile, "the writer must release before file settles")
+          if (mode !== "empty") {
+            assert.isTrue(releasedAtFile, "the writer must release before file settles")
+          }
         })
       ).pipe(onTestClock))
   }
