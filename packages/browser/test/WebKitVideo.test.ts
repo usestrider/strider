@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
 import { WebKit } from "@usestrider/browser/webkit"
+import type * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Deferred from "effect/Deferred"
@@ -23,8 +24,9 @@ import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 import * as Reason from "../src/Reason.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
 
+const frame = { at: 0, format: "png" as const, data: new Uint8Array([1]), width: 10, height: 20 }
 const image: Video.Delivery = {
-  frame: { format: "png", data: new Uint8Array([1]), width: 10, height: 20 },
+  frame,
   take: Effect.void
 }
 
@@ -118,7 +120,7 @@ describe("Shared video lifetime", () => {
           now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
           sleep: () => Effect.never
         }
-        const input = yield* Queue.unbounded<Video.Delivery>()
+        const input = yield* Queue.unbounded<Video.Delivery, Cause.Done>()
         const written = yield* Queue.unbounded<VideoWriter.Frame>()
         const ended = yield* Deferred.make<void>()
         const scope = yield* Scope.make()
@@ -137,10 +139,12 @@ describe("Shared video lifetime", () => {
           "/tmp"
         ).pipe(Scope.provide(scope), Effect.provideService(BrowserClock.CurrentClock, clock))
         // An initial image cached before recording starts must begin at zero.
-        yield* Queue.offer(input, { ...image, frame: { ...image.frame, ...{ at: 9e9 } } })
+        const initial = { ...image.frame, at: 9e9 }
+        yield* Queue.offer(input, { ...image, frame: initial })
         assert.strictEqual((yield* Queue.take(written)).at, 0)
         now = 10.237e9
-        yield* Queue.offer(input, { ...image, frame: { ...image.frame, ...{ at: now } } })
+        const next = { ...image.frame, at: now }
+        yield* Queue.offer(input, { ...image, frame: next })
         assert.strictEqual((yield* Queue.take(written)).at, 237e6)
         now = 12.391e9
         if (ending === "source") yield* Queue.end(input)
@@ -154,6 +158,44 @@ describe("Shared video lifetime", () => {
         yield* Scope.close(scope, Exit.void)
       }))
   }
+
+  it.effect("appends stop time to a single still image without another source frame", () =>
+    Effect.gen(function*() {
+      let now = 0
+      const written: Array<number> = []
+      const first = yield* Deferred.make<void>()
+      const scope = yield* Scope.make()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.concat(Stream.make(image), Stream.never),
+          ended: Effect.never
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach((frame) =>
+                Effect.sync(() => {
+                  written.push(frame.at)
+                  Deferred.doneUnsafe(first, Effect.void)
+                })
+              ),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(
+        Scope.provide(scope),
+        Effect.provideService(BrowserClock.CurrentClock, {
+          now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        })
+      )
+      yield* Deferred.await(first)
+      now = 2391e6
+      yield* Scope.close(scope, Exit.void)
+      yield* file
+      assert.deepStrictEqual(written, [0, 2391e6])
+    }))
 
   it.effect("reports an empty source without starting a writer", () =>
     Effect.gen(function*() {
