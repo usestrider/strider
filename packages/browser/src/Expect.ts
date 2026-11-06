@@ -508,7 +508,12 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
  *
  * **Details**
  *
- * - `last` is the last value seen, and `history` every value seen, with repeats in a row dropped.
+ * - `history` contains observed values and diagnostic error entries, with repeats in a row dropped;
+ *   `last` is its final entry. For locator expectations, page values must reach Strider before the deadline.
+ *   If neither a page value nor a diagnostic error is recorded, `history` is empty and `last` is `Option.none()`.
+ *   Values evaluated in the page but received after the deadline do not update the failure.
+ * - For `Expect.that` on an effect, a check still running at the deadline records
+ *   `{ error: "a check was still running at the deadline" }`, even if no check has returned a value.
  * - `checks` says how many checks ran and what triggered them.
  * - `nearest`, when nothing matched, is an accessibility snapshot of what the locator's first steps found, up to
  *   the step that matched nothing.

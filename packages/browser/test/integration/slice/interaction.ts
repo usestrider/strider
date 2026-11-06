@@ -3104,7 +3104,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const error = yield* status.pipe(Expect.toHaveText("Never"), Deadline.within("300 millis"), Effect.flip)
             assert(Expect.isExpectationFailed(error), String(error))
             assert.strictEqual(error.condition, `to have the text "Never"`)
-            assert.deepStrictEqual(error.history.map((each) => each.value), ["Done for now"])
+            // A round may return after the deadline; every timely value must still be the settled text.
+            assert(error.history.length <= 1)
+            assert.deepStrictEqual(
+              error.history.map((each) => each.value),
+              error.history.length === 0 ? [] : ["Done for now"]
+            )
+            assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
           }))
         }), timeout)
 
