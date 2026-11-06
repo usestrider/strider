@@ -24,6 +24,15 @@ it.effect("owns the failure address until its scope closes", () =>
     const origin = yield* Effect.scoped(Effect.gen(function*() {
       const origin = yield* navigationFailure
       assert.strictEqual(yield* Effect.promise(() => claim(origin)), "EADDRINUSE")
+      const failure = yield* Effect.promise(() =>
+        new Promise<string>((resolve, reject) => {
+          http.get(origin, (response) => {
+            response.resume()
+            reject(new Error(`Unexpected HTTP response: ${response.statusCode}`))
+          }).on("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? error.message))
+        })
+      )
+      assert.strictEqual(failure, "ECONNRESET")
       return origin
     }))
     assert.strictEqual(yield* Effect.promise(() => claim(origin)), "another listener answered")
