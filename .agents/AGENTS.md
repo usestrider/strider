@@ -78,7 +78,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
   request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
-  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site from `main`; `release.yml`, run by hand, publishes to npm
+  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand from `main`; `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
