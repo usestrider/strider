@@ -409,6 +409,22 @@ describe("BoundedAdapter", () => {
     }
   }
 
+  it.effect("keeps an earlier step's acknowledgement when a later step's gesture is guarded", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const diagnostics = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Operation.named("first"))
+        yield* Effect.gen(function*() {
+          const step = yield* Operation.record
+          step.markSent()
+          step.markNotSent()
+        }).pipe(Operation.named("guarded"))
+        return (yield* Operation.record).diagnostics()
+      }).pipe(Operation.named("checkout"))
+      assert.deepStrictEqual(diagnostics.progress.map((step) => step.state), ["ok", "ok"])
+      assert.deepStrictEqual(diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+    }))
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
