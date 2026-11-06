@@ -389,23 +389,22 @@ export const responseBody = Effect.fnUntraced(function*(state: State, hop: Netwo
   return yield* request.kept === undefined ? readBody(request) : Deferred.await(request.kept)
 })
 
-/** Keeps document resources alive until retention settles, only while response collection is declared. */
-export const beforeNavigation = (state: State, page: PageEntry) =>
-  Effect.suspend(() => {
-    if (Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return Effect.void
-    return state.buffer.waitFor(() => {
-      if (page.ended || Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return true
-      if (page.retaining.size > 0) return undefined
-      const main = page.main
-      const document = main.document
-      if (main.removed || document === undefined) return true
-      for (const request of state.requests.values()) {
-        if (
-          request.resourceType !== "document" || request.frame !== main ||
-          request.loaderId !== document.loaderId || request.responded !== request.hop
-        ) continue
-        if (!Deferred.isDoneUnsafe(request.finished)) return undefined
-      }
-      return true
-    })
+/** Selects a retention wait in the running navigation; collection off selects no Effect to yield. */
+export const beforeNavigation = (state: State, page: PageEntry) => {
+  if (Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return undefined
+  return state.buffer.waitFor(() => {
+    if (page.ended || Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return true
+    if (page.retaining.size > 0) return undefined
+    const main = page.main
+    const document = main.document
+    if (main.removed || document === undefined) return true
+    for (const request of state.requests.values()) {
+      if (
+        request.resourceType !== "document" || request.frame !== main ||
+        request.loaderId !== document.loaderId || request.responded !== request.hop
+      ) continue
+      if (!Deferred.isDoneUnsafe(request.finished)) return undefined
+    }
+    return true
   })
+}

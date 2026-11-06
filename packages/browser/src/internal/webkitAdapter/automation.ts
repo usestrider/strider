@@ -434,7 +434,8 @@ export const navigateLaunched = Effect.fnUntraced(function*(
     )
   }
   yield* Deferred.await(frame.page.ready)
-  yield* beforeNavigation(state, frame.page)
+  const retention = beforeNavigation(state, frame.page)
+  if (retention !== undefined) yield* retention
   const document = frame.document
   if (document !== undefined && url.includes("#") && withoutFragment(url) === withoutFragment(document.url)) {
     return yield* Effect.fail(

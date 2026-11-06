@@ -100,7 +100,8 @@ export const reload = Effect.fnUntraced(function*(
   options: { readonly ignoreCache: boolean }
 ) {
   const page = yield* pageOf(state, id)
-  yield* beforeNavigation(state, page)
+  const retention = beforeNavigation(state, page)
+  if (retention !== undefined) yield* retention
   const target = yield* targetOf(page)
   const navigation = Kit.expect(state.ids, page.main.expected, page.main.document?.url ?? "", "reload")
   yield* Kit.protocol(Page.reload({ ignoreCache: options.ignoreCache }).pipe(Protocol.on(target.session))).pipe(
@@ -124,7 +125,8 @@ export const navigateByScript = Effect.fnUntraced(function*(
   const frame = yield* frameById(state, navigable)
   // The page's document is known once its first snapshot is in
   yield* Deferred.await(frame.page.ready)
-  yield* beforeNavigation(state, frame.page)
+  const retention = beforeNavigation(state, frame.page)
+  if (retention !== undefined) yield* retention
   if (frame.document === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Frame", id: navigable }, new L1Target.DocumentReplaced({})))
   }
