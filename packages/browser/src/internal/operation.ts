@@ -526,14 +526,38 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
           })
       ))
 
+const libraryPath = decodeURIComponent(new URL("../", import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, "$1")
+
+/** Synchronous public wrappers and getters still have their caller when they construct an operation. */
+const namedCaller = (): string | undefined => {
+  const limit = Error.stackTraceLimit
+  if (limit === 0) return undefined
+  let stack: string | undefined
+  try {
+    Error.stackTraceLimit = 20
+    stack = new Error().stack
+  } catch {
+    return undefined
+  } finally {
+    Error.stackTraceLimit = limit
+  }
+  for (const line of stack?.split("\n").slice(1) ?? []) {
+    if (line.replaceAll("\\", "/").includes(libraryPath)) continue
+    // Once execution has entered Effect, the immediate public call has already returned.
+    if (/[\\/]effect[\\/](?:src|dist)[\\/]/.test(line)) return undefined
+    return line.trim()
+  }
+  return undefined
+}
+
 /**
  * Runs `self` as an operation: mints its id, reads its deadline once, gives everything inside that deadline and a
  * record, and opens its span. Inside another operation, it is a step of it. A `Timeout` that leaves it is its own: one
  * a step ran out with becomes the operation's, with the step's phase, history and hint.
  */
-export const named =
-  (name: string, options: Spans.Options = {}) =>
-  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
+export const named = (name: string, options: Spans.Options = {}) => {
+  const call = namedCaller()
+  return <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
       const record = yield* start(name)
       return yield* under(Effect.provideService(self, Current, record), record.budget.at).pipe(
@@ -542,7 +566,14 @@ export const named =
         ),
         asStep(record)
       )
-    }).pipe(Spans.operation(name, options))
+    }).pipe(
+      Spans.operation(name, options),
+      Effect.updateService(
+        References.CurrentStackFrame,
+        (parent) => call === undefined || parent?.name === name ? parent : { name, stack: () => call, parent }
+      )
+    )
+}
 
 /**
  * Runs `self` apart from the operation it is in, as an operation of its own named `name`, under a deadline of its

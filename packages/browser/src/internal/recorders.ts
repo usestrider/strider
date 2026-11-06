@@ -7,6 +7,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
 import type * as Tracer from "effect/Tracer"
 import type * as Engine from "./engine.ts"
 
@@ -25,9 +26,43 @@ export const CurrentSubject: Context.Reference<Option.Option<Subject>> = Context
   { defaultValue: () => Option.none() }
 )
 
+/** A viewer location, with one-based line and column numbers. */
+export interface Location {
+  readonly file: string
+  readonly line: number
+  readonly column: number
+  readonly function: string
+}
+
+/** Available caller frames, without Effect.fn's definition frames. */
+const locations = (frame: References.StackFrame | undefined): ReadonlyArray<Location> => {
+  const result: Array<Location> = []
+  for (; frame !== undefined; frame = frame.parent) {
+    if (frame.name.endsWith(" (definition)")) continue
+    // Stack capture is optional; a custom tracer may supply an unavailable or throwing lazy stack.
+    try {
+      const stack = frame.stack()
+      const match = stack?.match(/(?:\(|at )((?:file:\/\/|\/|[A-Za-z]:[\\/]).*):(\d+):(\d+)\)?$/)
+      if (match === undefined || match === null) continue
+      let file = match[1]!
+      if (file.startsWith("file://")) {
+        const url = new URL(file)
+        file = decodeURIComponent(url.pathname)
+        if (/^\/[A-Za-z]:/.test(file)) file = file.slice(1)
+        if (url.hostname !== "" && url.hostname !== "localhost") file = `//${url.hostname}${file}`
+      }
+      result.push({ file, line: Number(match[2]), column: Number(match[3]), function: frame.name })
+    } catch {
+      // A missing call site must not prevent the operation from running.
+    }
+  }
+  return result
+}
+
 /** One operation, as a recording sees it start. */
 export interface Started {
   readonly name: string
+  readonly stack: ReadonlyArray<Location>
   readonly attributes: Readonly<Record<string, unknown>>
   /** The operation's own span, or, when its span is suppressed, the span it runs in. */
   readonly span: Option.Option<Tracer.AnySpan>
@@ -70,9 +105,10 @@ export const observe = <A, E, R>(
     return Effect.gen(function*() {
       const span = yield* Effect.option(Effect.currentParentSpan)
       const subject = yield* CurrentSubject
+      const stack = locations(yield* References.CurrentStackFrame)
       const ends = yield* Effect.forEach(
         covering,
-        (recorder) => recorder.begin({ name, attributes, span, own, subject })
+        (recorder) => recorder.begin({ name, attributes, span, own, subject, stack })
       )
       const exit = yield* Effect.exit(self)
       for (const end of ends) yield* end(exit)

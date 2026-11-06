@@ -26,6 +26,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -507,6 +508,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const buy = Effect.fn("buy")(function*(page: Page.Page) {
               yield* page.goto(url)
               yield* page.getByRole("button", { name: "Buy" }).click()
+              yield* page.title
             })
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
@@ -522,6 +524,23 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const click = events.find((event) => event.type === "before" && event.title === "Locator.click")
             assert.isDefined(group)
             assert.deepInclude(click, { class: "Locator", method: "click", parentId: group.callId })
+            const source = new URL(import.meta.url).pathname
+            const sourceLines = fs.readFileSync(source, "utf8").split("\n")
+            for (
+              const [step, expression] of [[click, "page.getByRole(\"button\", { name: \"Buy\" }).click()"], [
+                events.find((event) => event.type === "before" && event.title === "Page.title"),
+                "page.title"
+              ]] as const
+            ) {
+              const line = sourceLines.findIndex((line) => line.trim() === `yield* ${expression}`)
+              const column = expression === "page.title"
+                ? sourceLines[line]!.indexOf("title") + 1
+                : sourceLines[line]!.indexOf(".click()") + 2
+              assert.deepInclude(step.stack[0], { file: source, line: line + 1, column })
+            }
+            assert.strictEqual(group.stack[0].file, source)
+            const archivedSource = `src/${createHash("sha1").update(source).digest("hex")}.ts`
+            assert.strictEqual(text(files.get(archivedSource)), fs.readFileSync(source, "utf8"))
             const shot = events.find((event) => event.type === "screenshot" && event.callId === click.callId)
             assert.isDefined(shot)
             assert.deepStrictEqual(Array.from(files.get(shot.file)!.slice(1, 4)), [0x50, 0x4e, 0x47])
