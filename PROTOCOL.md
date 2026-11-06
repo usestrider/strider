@@ -1074,7 +1074,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 | body access | buffered + stream | collectors | collectors | ✓ | ✓ | ✗ |
 | console | ✓ (needs Runtime) | ✓ | ✓ | ✓ | ✓ | ✗ |
 | prompts / file chooser / downloads | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✗ (a dialog blocks unreported)/✗/✗; `Unknown`/✗ (file inputs ✓)/✗ (built) | ✓/✗/✗ |
-| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | ✗/✗/✗ | ✗/✗/✗ |
+| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | no native stream; explicit PNG-polled video with a writer / ✗ / ✗ | ✗/✗/✗ |
 | evaluation with user activation | ✓ | ✓ (probe 20) | ✓ (probe 20) | ✓ | ? | ? |
 | page time: virtual / injected | ✓/✓ | ✗/✓ | ✗/✓ | ✗/✓ | ✗/? | ✗/? |
 | WebSocket frames | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ |

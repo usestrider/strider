@@ -7,8 +7,8 @@ import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Browser from "../src/Browser.ts"
 import * as Cdp from "../src/internal/cdpAdapter.ts"
-import * as VideoWriter from "../src/VideoWriter.ts"
 import * as WebKit from "../src/internal/webkitAdapter/capabilities.ts"
+import * as VideoWriter from "../src/VideoWriter.ts"
 
 describe("VideoWriter", () => {
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {

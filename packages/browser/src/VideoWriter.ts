@@ -1,7 +1,8 @@
 /**
  * Writes timestamped image frames to a finished WebM file.
  *
- * Provide a writer to a Chromium layer to enable `Capability.Video`. Firefox writes its own files.
+ * Provide a writer to Chromium, or to WebKit with explicit video polling options, to enable `Capability.Video`.
+ * Firefox writes its own files.
  *
  * @stability unstable
  * @since 0.1.0
@@ -102,7 +103,7 @@ export interface VideoWriter {
 }
 
 /**
- * The optional service Chromium reads when its browser layer is built.
+ * The optional service Chromium and opted-in WebKit read when their browser layers are built.
  *
  * @stability unstable
  * @category services
