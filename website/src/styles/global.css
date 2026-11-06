@@ -403,6 +403,13 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* A recording in a guide: the column's width, framed by a 1px rule */
+.prose :where(video):not(:where([class~="not-prose"] *)) {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
+}
+
 /* ── Capabilities ───────────────────────────────────────────────────────────── */
 
 /* The browsers side by side: a sans table drawn in 1px rules, a group's row a label, and a status that isn't

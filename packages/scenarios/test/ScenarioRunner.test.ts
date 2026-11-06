@@ -126,6 +126,22 @@ describe("scenario runner", () => {
     expect(child.status).toBe(1)
   })
 
+  it("runs a scenario without a Playwright twin as Strider's alone", async () => {
+    let calls = 0
+    const results = await runScenarios([scenario("video")], 10, () => ({
+      strider: async () => {
+        calls++
+        return "42 sold"
+      }
+    }), () => {})
+    expect(calls).toBe(11)
+    expect(results[0]!.outcome.playwright).toBeUndefined()
+    expect(results[0]!.attempts).toEqual({ strider: 10, playwright: 0 })
+    expect(render(results)).toContain("| video | ")
+    expect(render(results)).not.toContain("0/0 successful")
+    expect(publish(results, () => {})).toBe(0)
+  })
+
   it("returns success after publishing a complete passing run", async () => {
     const run = async () => "42 sold"
     const results = await runScenarios([scenario("pass")], 10, () => ({ strider: run, playwright: run }), () => {})

@@ -12,6 +12,12 @@ export interface Scenario {
   readonly expected: string
   /** The public demo site it drives, replayed from a recording; none for the local site */
   readonly recording: string | undefined
+  /** A video the program recorded, under public/videos/; none for most */
+  readonly video: string | undefined
+  /** The browser it runs on */
+  readonly browser: "chromium" | "firefox"
+  /** The name of a scenario that does the same on another browser, shown beside it */
+  readonly compare: string | undefined
   /** The program, with the imports it needs */
   readonly code: string
   /** The modules' members it calls, each linked to the API reference */
@@ -21,11 +27,13 @@ export interface Scenario {
 /** The modules the programs import from `@usestrider/browser` */
 const modules = [
   "Browser",
+  "Capability",
   "Dialog",
   "Expect",
   "FileInput",
   "Har",
   "NetworkResponse",
+  "Page",
   "PageNavigation",
   "Popup",
   "Route"
@@ -41,12 +49,14 @@ const property = (entry: string, key: string) => {
 // The program as it runs, named a scenario: in the source its name pairs it with its Playwright twin
 const withImports = (code: string) => {
   const uses = (name: string) => new RegExp(`\\b${name}\\.`).test(code)
-  const effect = ["Effect", "FileSystem", "Schema"].filter(uses)
+  const effect = ["Deferred", "Effect", "FileSystem", "Ref", "Schedule", "Schema", "Stream"].filter(uses)
   const http = ["HttpIncomingMessage"].filter(uses)
+  const process = ["ChildProcess"].filter(uses)
   return [
     `import { ${modules.filter(uses).join(", ")} } from "@usestrider/browser"`,
     `import { ${effect.join(", ")} } from "effect"`,
     ...(http.length === 0 ? [] : [`import { ${http.join(", ")} } from "effect/http"`]),
+    ...(process.length === 0 ? [] : [`import { ${process.join(", ")} } from "effect/process"`]),
     "",
     code.replace(/^const (\w+)Strider = /m, "const $1Scenario = ")
   ].join("\n")
@@ -95,6 +105,9 @@ export const scenarios = (): ReadonlyArray<Scenario> => {
       description,
       expected,
       recording: property(entry, "recording"),
+      video: property(entry, "video"),
+      browser: property(entry, "browser") === "firefox" ? "firefox" : "chromium",
+      compare: property(entry, "compare"),
       code: withImports(code),
       uses: usesOf(code)
     }

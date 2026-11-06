@@ -11,8 +11,10 @@
  * in `.data/scenarios/`, and a run without them fails, saying to record them.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Browser, Expect, Route } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
+import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
@@ -129,13 +131,25 @@ const striderPids = browserPids()
 const browser = await chromium.launch({ executablePath })
 const playwrightPid = [...browserPids()].find((pid) => !striderPids.has(pid) && !before.has(pid))
 const playwrightArgs = descendants().find((proc) => proc.pid === playwrightPid)?.args ?? []
-const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>) => runtime.runPromise(Effect.scoped(effect))
+// A scenario that runs on Firefox, such as its video, gets the environment's Firefox, launched once it's needed
+let firefoxRuntime: ManagedRuntime.ManagedRuntime<Browser.Browser | NodeServices.NodeServices, unknown> | undefined
+const firefox = () =>
+  firefoxRuntime ??= ManagedRuntime.make(
+    Firefox.layer({ executablePath: process.env["STRIDER_FIREFOX"] ?? "" }).pipe(
+      Layer.provide(NodeSocket.layerWebSocketConstructor),
+      Layer.provideMerge(NodeServices.layer)
+    )
+  )
+const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox") =>
+  (on === "firefox" ? firefox() : runtime).runPromise(Effect.scoped(effect))
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
 const results = await runScenarios(chosen, runs, (scenario) => ({
-  strider: () => strider(scenario.strider(origin)),
-  playwright: () => scenario.playwright(browser, origin, files)
+  strider: () => strider(scenario.strider(origin), scenario.browser),
+  playwright: scenario.playwright === undefined
+    ? undefined
+    : () => scenario.playwright!(browser, origin, files)
 }), log)
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
@@ -244,6 +258,7 @@ if (measured) {
 
 await browser.close()
 await runtime.dispose()
+await firefoxRuntime?.dispose()
 await site.close()
 fs.rmSync(temporary, { recursive: true, force: true })
 
