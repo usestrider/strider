@@ -1577,6 +1577,50 @@ describe("Chromium screenshot renderer readiness", () => {
 })
 
 describe("Chromium screencast renderer readiness", () => {
+  it.effect("acknowledges each shared frame once after every consumer takes it and replays it to an idle join", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const fast = yield* page.capability(Capability.Screencast)
+      const slow = yield* page.capability(Capability.Screencast)
+      const reading = yield* Effect.forkScoped(fast.frames.pipe(Stream.take(1), Stream.runCollect))
+      yield* h.browser.receive({
+        method: "Page.screencastFrame",
+        sessionId: "S1",
+        params: {
+          data: "/9j/2Q==",
+          sessionId: 37,
+          metadata: {
+            offsetTop: 0,
+            pageScaleFactor: 1,
+            deviceWidth: 800,
+            deviceHeight: 600,
+            scrollOffsetX: 0,
+            scrollOffsetY: 0
+          }
+        }
+      })
+      yield* Fiber.join(reading)
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        0,
+        "a fast consumer must not acknowledge the slow consumer's frame"
+      )
+      yield* slow.frames.pipe(Stream.take(1), Stream.runDrain)
+      yield* h.barrier
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.screencastFrameAck").length, 1)
+      const idle = yield* page.capability(Capability.Screencast)
+      const cached = yield* idle.frames.pipe(Stream.take(1), Stream.runCollect)
+      assert.strictEqual(cached.length, 1, "joining an idle session delivers its last image without a repaint")
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        1,
+        "replaying a cached frame must not acknowledge it twice"
+      )
+    }).pipe(onTestClock))
+
   it.effect("holds start until one valid metrics reply, then acknowledges frames and stops normally", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)
