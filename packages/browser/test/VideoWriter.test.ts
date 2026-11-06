@@ -8,8 +8,21 @@ import * as Stream from "effect/Stream"
 import * as Browser from "../src/Browser.ts"
 import * as Cdp from "../src/internal/cdpAdapter.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
+import * as WebKit from "../src/internal/webkitAdapter/capabilities.ts"
 
 describe("VideoWriter", () => {
+  it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {
+    const info = new Browser.Info({ protocol: "webkit", product: "WebKit", version: "test", revision: "test" })
+    for (const capabilities of [WebKit.attachedCapabilities, WebKit.launchedCapabilities]) {
+      const off = capabilities(info).entries.find((e) => e.name === "capability.video")!
+      assert.strictEqual(off.status, "unsupported")
+      const on = capabilities(info, true)
+      assert.strictEqual(on.entries.find((e) => e.name === "capability.video")!.status, "supported")
+      assert.strictEqual(on.entries.find((e) => e.name === "capability.screencast")!.status, "unsupported")
+      assert.strictEqual(on.entries.find((e) => e.name === "downloads")!.status, "unsupported")
+    }
+  })
+
   it("reports Chromium video only with an optional writer", () => {
     const info = new Browser.Info({ protocol: "cdp", product: "Chromium", version: "test", revision: "test" })
     const entry = (writer: boolean) =>
