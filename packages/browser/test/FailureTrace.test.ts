@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
@@ -128,18 +129,31 @@ describe("failure trace files", () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
     const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
-    spawnSync("pnpm", [
+    fs.mkdirSync(directory, { recursive: true })
+    const unrelated = new URL(`unrelated-${randomUUID()}.ndjson`, directory)
+    const run = spawnSync("pnpm", [
       "exec",
       "vitest",
       "--run",
       "--config",
       "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
       "process.fixture"
-    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, STRIDER_UNRELATED_TRACE: unrelated.pathname }
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    expect(fs.readFileSync(unrelated, "utf8")).toBe("unrelated trace\n")
     const files = fs.readdirSync(directory).filter((name) => !before.has(name))
     const shared = files.filter((name) => name.includes("-shared"))
     const contents = shared.map((name) => fs.readFileSync(new URL(name, directory), "utf8"))
     for (const name of files) fs.unlinkSync(new URL(name, directory))
+    try {
+      expect(fs.existsSync(unrelated)).toBe(true)
+    } finally {
+      fs.rmSync(unrelated, { force: true })
+    }
     expect(shared.length).toBe(1)
     for (const line of contents[0]!.replace(/\n$/, "").split("\n")) expect(() => JSON.parse(line)).not.toThrow()
   }, 30_000)
