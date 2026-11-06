@@ -1654,17 +1654,15 @@ describe("Chromium video writer lifetime", () => {
       })
       const page = yield* h.page.control
       const scope = yield* Scope.make()
-      const clock = yield* BrowserClock.CurrentClock
-      const started = clock.now()
       const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
-      yield* frame(h, 51)
+      yield* frame(h, 51, 1000)
       assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
       const first = yield* Queue.take(written)
       yield* TestClock.adjust("120 millis")
       assert.strictEqual(yield* Queue.size(written), 0, "idle periods do not generate copies")
       yield* TestClock.adjust("380 millis")
       // The paint happened at 237ms; receiving it at 500ms must not change its timestamp.
-      yield* frame(h, 52, (performance.timeOrigin + (started + 237e6) / 1e6) / 1000)
+      yield* frame(h, 52, 1000.237)
       const painted = yield* Queue.take(written)
       assert.closeTo(painted.at, 237e6, 1000)
       yield* TestClock.adjust("100 millis")
@@ -1674,6 +1672,52 @@ describe("Chromium video writer lifetime", () => {
       assert.deepStrictEqual(tail.data, first.data)
       assert.match(yield* video.file, /\.webm$/)
     }).pipe(onTestClock))
+
+  for (const epoch of [1000, 4000000000]) {
+    for (const missing of [false, true]) {
+      it.effect(`maps browser epoch ${epoch} with ${missing ? "missing timestamp transitions" : "backward source times"}`, () =>
+        Effect.gen(function*() {
+          const written = yield* Queue.unbounded<VideoWriter.Frame>()
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: (frames, target) =>
+              frames.pipe(
+                Stream.runForEach((image) => Queue.offer(written, image)),
+                Effect.as(target.path)
+              )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          // Reusing the page after a complete stop must establish a new clock mapping.
+          for (const base of [epoch, epoch + 3600]) {
+            const scope = yield* Scope.make()
+            const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+            const samples = missing
+              ? [
+                [0, undefined, 0],
+                [10, base, 10],
+                [20, base + 0.005, 15],
+                [30, undefined, 30],
+                [40, base + 0.020, 30],
+                [4100, base + 4, 4010]
+              ] as const
+              : [[0, base, 0], [10, base + 0.005, 5], [20, base + 0.003, 5], [4100, base + 4, 4000]] as const
+            let previous = 0
+            for (const [receipt, timestamp, expected] of samples) {
+              yield* TestClock.adjust(receipt - previous)
+              previous = receipt
+              yield* frame(h, receipt + 1, timestamp)
+              assert.closeTo((yield* Queue.take(written)).at, expected * 1e6, 1000)
+            }
+            yield* Scope.close(scope, Exit.void)
+            assert.closeTo((yield* Queue.take(written)).at, 4100e6, 1000)
+            yield* video.file
+          }
+        }).pipe(onTestClock))
+    }
+  }
 
   it.effect("propagates a writer failure before the recording scope closes", () =>
     Effect.gen(function*() {

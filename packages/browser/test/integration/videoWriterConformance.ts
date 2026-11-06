@@ -11,6 +11,8 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { deflateSync } from "node:zlib"
+import * as BrowserClock from "../../src/internal/browserClock.ts"
+import * as Video from "../../src/internal/video.ts"
 
 const png = (width: number, height: number, color: readonly number[]) => {
   const chunk = (kind: string, data: Buffer) => {
@@ -45,6 +47,48 @@ export const writerConformance = (
   writer: Layer.Layer<VideoWriter.VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
+    it.effect(
+      `${name} preserves the later four-second frame after normalizing a backward source time`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-order-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [255, 0, 0])
+          const file = yield* Video.record(
+            Effect.succeed({
+              frames: Stream.fromIterable([0, 5e6, 3e6, 4e9]).pipe(Stream.map((at) => ({
+                frame: { at, format: "png" as const, data, width: 2, height: 2 },
+                take: Effect.void
+              }))),
+              ended: Effect.never
+            }),
+            encoder,
+            directory
+          ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+            now: () => 0 as ReturnType<BrowserClock.BrowserClock["now"]>,
+            sleep: () => Effect.never
+          }))
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            yield* file
+          ], { encoding: "utf8" }))
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.005, 0.005, 4, 4]
+          )
+          assert.closeTo(Number(probe.format.duration), 4, 0.002)
+        }),
+      60_000
+    )
+
     it.effect(
       `${name} writer conformance: preserves variable frame times and fits changing odd sizes`,
       () =>
