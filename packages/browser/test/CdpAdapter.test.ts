@@ -1735,6 +1735,99 @@ describe("Chromium video writer lifetime", () => {
       })
     ).pipe(onTestClock))
 
+  for (const mode of ["empty", "started", "blocked", "failure"] as const) {
+    it.effect(`settles video on ${mode === "failure" ? "source failure" : `session end (${mode})`} while its scope stays open`, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          let writes = 0
+          let released = false
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: Effect.fnUntraced(
+              function*(frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) {
+                writes++
+                yield* Deferred.succeed(started, undefined)
+                return yield* (mode === "blocked"
+                  ? Effect.never
+                  : Stream.runDrain(frames).pipe(Effect.as(destination.path)))
+                  .pipe(Effect.ensuring(Effect.sync(() => {
+                    released = true
+                  })))
+              }
+            )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          const recordingScope = yield* Scope.make()
+          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(recordingScope))
+          const file = yield* Effect.forkScoped(Effect.exit(video.file))
+          if (mode !== "empty") {
+            yield* frame(h, 71)
+            yield* Deferred.await(started)
+          }
+          if (mode === "failure") {
+            yield* h.browser.receive({
+              method: "Page.screencastFrame",
+              sessionId: "S1",
+              params: {
+                data: "!",
+                sessionId: 72,
+                metadata: {
+                  offsetTop: 0,
+                  pageScaleFactor: 1,
+                  deviceWidth: 800,
+                  deviceHeight: 600,
+                  scrollOffsetX: 0,
+                  scrollOffsetY: 0
+                }
+              }
+            })
+          } else {
+            yield* h.browser.receive({
+              method: "Target.detachedFromTarget",
+              params: {
+                sessionId: "S1",
+                targetId: "76F3487A52CF4F79FE4AD28961E44D32"
+              }
+            })
+          }
+          yield* drain
+          if (mode === "blocked") {
+            yield* TestClock.adjust("5 seconds")
+            yield* drain
+          }
+          const settled = file.pollUnsafe() !== undefined
+          if (!settled) {
+            // Ensure even the pre-fix regression releases its fibers before asserting.
+            yield* Fiber.interrupt(file)
+          }
+          const releasedAtFile = released
+          const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
+          yield* drain
+          yield* TestClock.adjust("5 seconds")
+          yield* Fiber.join(closing)
+          assert.isTrue(settled, "source termination must settle file without closing the caller scope")
+          const outcome = yield* Fiber.join(file)
+          if (mode === "started") {
+            assert.isTrue(Exit.isSuccess(outcome))
+          } else {
+            const error = yield* Effect.flip(outcome)
+            assert(Capability.isCapabilityError(error))
+            assert.strictEqual(error.reason._tag, "BackendFailure")
+            if (mode === "failure") assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            if (mode === "empty") {
+              assert.strictEqual(writes, 0)
+              assert.match(error.message, /no frame|before.*frame/i)
+            }
+          }
+          if (mode !== "empty") assert.isTrue(releasedAtFile, "the writer must release before file settles")
+        })
+      ).pipe(onTestClock))
+  }
+
   it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
