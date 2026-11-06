@@ -21,6 +21,7 @@ import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
+import { inspect } from "node:util"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -792,6 +793,32 @@ describe("WebKit launcher", () => {
         assert(Deadline.isTimeout(timeout), String(timeout))
         assert.deepStrictEqual(result.stopped, [0])
         assert.match(JSON.stringify({ hint: timeout.hint, last: timeout.last, history: timeout.history }), /spawned/)
+      }))
+
+    // A failed test's log shows its error as Node inspects it, at the default depth; the failure traces hold
+    // protocol and process records, not the error. A stage only that inspection collapses names nothing.
+    it.effect("names the reached startup stage, PID and port in the timeout as a failed test's log prints it", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: false }),
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const inner = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(inner._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(inner))
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        const printed = inspect(timeout)
+        assert.include(printed, "spawned")
+        assert.include(printed, "9100000")
+        assert.include(printed, String(result.ports[0]))
       }))
 
     for (
