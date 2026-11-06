@@ -27,6 +27,12 @@ const ffmpeg = process.env["STRIDER_FFMPEG"]!
 const ffprobe = process.env["STRIDER_FFPROBE"]!
 fs.mkdirSync(output, { recursive: true })
 const rows: Array<unknown> = []
+const auxv = fs.readFileSync("/proc/self/auxv")
+let clockTicksPerSecond: number | undefined
+for (let offset = 0; offset + 16 <= auxv.length; offset += 16) {
+  if (auxv.readBigUInt64LE(offset) === 17n) clockTicksPerSecond = Number(auxv.readBigUInt64LE(offset + 8))
+}
+if (clockTicksPerSecond === undefined) throw new Error("Missing Linux AT_CLKTCK")
 const html = (animated: boolean) =>
   `<body style="margin:0;background:white"><button onclick="window.clicks++">Increment</button><canvas width="800" height="500"></canvas><script>
 window.clicks=0;window.raf=[];window.timers=[];let prev=performance.now(),tp=prev;const c=document.querySelector('canvas'),x=c.getContext('2d');
@@ -68,7 +74,7 @@ await Effect.runPromise(
             cpus: os.cpus(),
             seconds,
             repeats,
-            clockTicksPerSecond: execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).trim(),
+            clockTicksPerSecond,
             note:
               "No artificial load; 1280x800 Xvfb, requested 800x600 viewport; sequential paired baseline/capture, alternating order by repetition."
           },
