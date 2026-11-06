@@ -5,6 +5,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it, layer } from "@effect/vitest"
+import { Deadline } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -24,6 +25,7 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 
@@ -762,6 +764,30 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(result.closed, result.connected)
         assert.deepStrictEqual(result.stopped, [0])
         assert.strictEqual(result.written.length, 0)
+      }))
+
+    // The historical failure: the page's operation deadline, not the launcher's, interrupted a startup whose listener
+    // never appeared. Its Timeout is the only error the caller sees, so it has to name the stage startup reached.
+    it.effect("names the reached startup stage when the calling operation's deadline interrupts startup", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: false }),
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const inner = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(inner._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(inner))
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        assert.deepStrictEqual(result.stopped, [0])
+        assert.match(JSON.stringify({ hint: timeout.hint, last: timeout.last, history: timeout.history }), /spawned/)
       }))
 
     it.effect("reports a child that exits while being polled as its exit, not as unreadable procfs", () =>
