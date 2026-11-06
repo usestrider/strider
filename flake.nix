@@ -61,7 +61,8 @@
           # enters it with `--ignore-environment`, so nothing else of the host's reaches them: no display, no
           # user configuration, no variables but these.
           integration = pkgs.mkShellNoCC {
-            packages = toolchain;
+            # ffmpeg for the video scenario, which encodes Chromium's screencast as a WebM
+            packages = toolchain ++ [ pkgs.ffmpeg-headless ];
             # What the tests check that they run in
             STRIDER_ENVIRONMENT = "nix-integration";
             # The browsers, and nothing else looked up

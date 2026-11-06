@@ -26,7 +26,8 @@ The report contains:
 - **Scenarios:** API.md's call sites that both libraries can do, each written twice, as each library's own
   documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. The documentation site's
   Scenarios section shows each Strider program, read from its `#region <name>/strider` markers, with its title and
-  `description`;
+  `description`. A scenario that only shows Strider, such as the video one, has no Playwright twin, and its
+  Playwright columns are `–`;
 - **Two costs Strider chose** (QUIRKS.md): Q82, an expectation that evaluates at every animation frame while it
   waits, as the renderers' CPU time; and Q103, Chromium's request interceptor always installed, as page loads;
 - **The automation tells:** what a page's own script can read about the library driving it (`/tells` in
@@ -38,6 +39,11 @@ pnpm scenarios              # everything, 10 timed runs each, writing RESULTS.md
 pnpm scenarios --runs 3     # fewer runs
 pnpm scenarios --only login # one scenario, and no measurements, printed: RESULTS.md keeps the full run
 ```
+
+The video scenario encodes Chromium's screencast with ffmpeg, which the integration environment provides, and
+writes `.data/scenarios/dynamic-controls.webm`. Its Firefox counterpart runs on the environment's Firefox, which
+writes the video itself (`Capability.Video`), into `.data/scenarios/dynamic-controls-firefox.webm`. The
+documentation site shows a copy of one run of each, in `website/public/videos/`.
 
 `pnpm scenarios` enters the integration environment (`flake.nix`, `devShells.integration`), as
 `pnpm test:integration` does, and fails anywhere else.

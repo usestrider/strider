@@ -1,6 +1,6 @@
 /**
  * The scenarios, each written twice: with Strider and with Playwright, as each library's own documentation would
- * write it, against the same stock Chromium. API.md's call sites that both libraries can do, on the local site
+ * write it, against the same stock Chromium. One that only shows Strider, such as the video, has no twin. API.md's call sites that both libraries can do, on the local site
  * (`site.ts`), and two public demo sites replayed from recordings, so a run sends nothing to anyone.
  *
  * Each implementation sits between `#region <scenario>/<library>` markers, which the report copies into
@@ -8,24 +8,36 @@
  */
 import {
   Browser,
+  Capability,
   Dialog,
   Expect,
   FileInput,
   Har,
   NetworkResponse,
+  Page,
   PageNavigation,
   Popup,
   Route
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
+import * as ChildProcess from "effect/process/ChildProcess"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import * as Ref from "effect/Ref"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import type * as Playwright from "playwright-core"
 
-/** What a Strider scenario needs: the browser, a scope for its pages, and a file system for HARs. */
-export type StriderNeeds = Browser.Browser | Scope.Scope | FileSystem.FileSystem
+/** What a Strider scenario needs: the browser, a scope for its pages, a file system for HARs, and processes. */
+export type StriderNeeds =
+  | Browser.Browser
+  | Scope.Scope
+  | FileSystem.FileSystem
+  | ChildProcessSpawner.ChildProcessSpawner
 
 export interface Scenario {
   readonly name: string
@@ -38,9 +50,16 @@ export interface Scenario {
   readonly recording?: string
   /** What writing it found, shown under its code. */
   readonly note?: string
+  /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
+  readonly video?: string
+  /** The browser the Strider program runs on: Chromium unless it says Firefox */
+  readonly browser?: "firefox"
+  /** Another scenario that does the same on another browser, shown beside it on its page */
+  readonly compare?: string
   /** The Strider program: given the local site's address, and needing nothing of the runner's */
   readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
-  readonly playwright: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
+  /** Its twin, for the comparison; none for a scenario that only shows Strider */
+  readonly playwright?: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
 }
 
 /** Where a Playwright twin may write a file, and where the recordings are; a Strider program names its own. */
@@ -381,6 +400,92 @@ const controlsPlaywright = async (browser: Playwright.Browser, _: string, files:
 }
 // #endregion
 
+// #region video/strider
+// The page's frames, encoded as a WebM by ffmpeg. Chromium sends a frame only when
+// the page repaints, so the latest is taken 25 times a second, as ffmpeg reads them
+const recordVideo = Effect.fn("recordVideo")(function*(page: Page.Page, file: string) {
+  const screencast = yield* page.capability(Capability.Screencast)
+  const latest = yield* Ref.make<Uint8Array | undefined>(undefined)
+  yield* screencast.frames.pipe(
+    Stream.runForEach((frame) => Ref.set(latest, frame.jpeg)),
+    Effect.ignore,
+    Effect.forkScoped
+  )
+  const stop = yield* Deferred.make<void>()
+  const frames = Stream.fromSchedule(Schedule.fixed("40 millis")).pipe(
+    Stream.mapEffect(() => Ref.get(latest)),
+    Stream.filter((jpeg) => jpeg !== undefined),
+    Stream.interruptWhen(Deferred.await(stop))
+  )
+  const ffmpeg = yield* ChildProcess.make({ stdin: frames, stderr: "inherit" })`
+    ffmpeg -loglevel error -f mjpeg -framerate 25 -i pipe:0
+      -c:v libvpx-vp9 -crf 36 -b:v 0 -deadline realtime -cpu-used 8
+      -y ${file}`
+  // As the page's scope ends: a second more, for the last paint, then the file finished
+  yield* Effect.addFinalizer(() =>
+    Effect.sleep("1 second").pipe(
+      Effect.andThen(Deferred.succeed(stop, undefined)),
+      Effect.andThen(ffmpeg.exitCode),
+      Effect.ignore
+    )
+  )
+})
+
+// The page, a recording of its site to replay instead of visiting it, and the video
+const dynamicControls = "https://the-internet.herokuapp.com/dynamic_controls"
+const dynamicControlsRecording = ".data/scenarios/the-internet.har"
+const videoFile = ".data/scenarios/dynamic-controls.webm"
+
+const videoStrider = Effect.fn("video")(function*() {
+  const value = yield* Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage({
+      emulation: { viewport: { width: 1280, height: 720 } }
+    })
+    yield* page.route("**/*", yield* Route.fromHar(dynamicControlsRecording))
+    yield* page.goto(dynamicControls, { waitUntil: "load" })
+    yield* recordVideo(page, videoFile)
+    yield* page.getByRole("button", { name: "Enable" }).click()
+    const input = page.getByRole("textbox")
+    yield* input.fill("Strider")
+    yield* page.getByText("It's enabled!").pipe(Expect.toBeVisible)
+    return yield* input.readValue
+  }))
+  const fs = yield* FileSystem.FileSystem
+  const { size } = yield* fs.stat(videoFile)
+  return size > 0 ? `${value}, recorded` : `${value}, but the video is empty`
+})
+// #endregion
+
+// #region video-firefox/strider
+// The page, a recording of its site to replay instead of visiting it, and the video
+const firefoxControls = "https://the-internet.herokuapp.com/dynamic_controls"
+const firefoxControlsRecording = ".data/scenarios/the-internet.har"
+const firefoxVideoFile = ".data/scenarios/dynamic-controls-firefox.webm"
+
+const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const page = yield* Browser.newPage({
+    emulation: { viewport: { width: 1280, height: 720 } }
+  })
+  yield* page.route("**/*", yield* Route.fromHar(firefoxControlsRecording))
+  yield* page.goto(firefoxControls, { waitUntil: "load" })
+  const input = page.getByRole("textbox")
+  // Firefox writes the video itself, for as long as the capability's scope lives
+  const video = yield* Effect.scoped(Effect.gen(function*() {
+    const recording = yield* page.capability(Capability.Video)
+    yield* page.getByRole("button", { name: "Enable" }).click()
+    yield* input.fill("Strider")
+    yield* page.getByText("It's enabled!").pipe(Expect.toBeVisible)
+    // A second more, so the last paint is in it
+    yield* Effect.sleep("1 second")
+    return recording
+  }))
+  // Into the context's temporary downloads, which close with the page: keep a copy
+  yield* fs.copyFile(yield* video.file, firefoxVideoFile)
+  return `${yield* input.readValue}, recorded`
+})
+// #endregion
+
 export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "readme",
@@ -465,6 +570,27 @@ export const scenarios: ReadonlyArray<Scenario> = [
     recording: "the-internet",
     strider: controlsStrider,
     playwright: controlsPlaywright
+  },
+  {
+    name: "video",
+    title: "A video of a run, on Chromium",
+    description: "Records the page's screencast to a WebM with ffmpeg while it fills The Internet's dynamic controls.",
+    expected: "Strider, recorded",
+    recording: "the-internet",
+    video: "dynamic-controls.webm",
+    compare: "video-firefox",
+    strider: videoStrider
+  },
+  {
+    name: "video-firefox",
+    title: "A video of a run, on Firefox",
+    description: "Records the page to a WebM with Firefox's own video while it fills The Internet's dynamic controls.",
+    expected: "Strider, recorded",
+    recording: "the-internet",
+    video: "dynamic-controls-firefox.webm",
+    browser: "firefox",
+    compare: "video",
+    strider: videoFirefoxStrider
   }
 ]
 

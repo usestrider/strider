@@ -21,7 +21,8 @@ export interface Measurements {
   readonly launch: { readonly strider: Stats; readonly playwright: Stats }
   readonly scenarios: ReadonlyArray<{
     readonly scenario: Scenario
-    readonly outcome: { readonly strider: Outcome; readonly playwright: Outcome }
+    /** No Playwright outcome for a scenario without a Playwright twin */
+    readonly outcome: { readonly strider: Outcome; readonly playwright: Outcome | undefined }
     readonly attempts: { readonly strider: number; readonly playwright: number }
     readonly failures: ReadonlyArray<
       { readonly library: "strider" | "playwright"; readonly repetition: number; readonly error: string }
@@ -50,8 +51,10 @@ const regions = (source: string) => {
 }
 const lines = (code: string | undefined) => (code ?? "").split("\n").filter((line) => line.trim() !== "").length
 
-const outcomeText = (outcome: Outcome, expected: string) =>
-  outcome._tag === "Failed"
+const outcomeText = (outcome: Outcome | undefined, expected: string) =>
+  outcome === undefined
+    ? "–"
+    : outcome._tag === "Failed"
     ? `failed: ${cell(outcome.error)}`
     : outcome.text === expected
     ? `✓ \`${cell(outcome.text)}\``
@@ -75,13 +78,14 @@ export const report = (m: Measurements): string => {
   out.push("| Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |")
   out.push("|---|---|---|---|---|---|")
   for (const { scenario, outcome, times, attempts } of m.scenarios) {
+    const run = (library: "strider" | "playwright") =>
+      `${timing(times[library])}; ${times[library].runs}/${attempts[library]} successful`
+    const twin = code.get(`${scenario.name}/playwright`)
     out.push(
-      `| ${scenario.title} | ${timing(times.strider)}; ${times.strider.runs}/${attempts.strider} successful | ${
-        timing(times.playwright)
-      }; ${times.playwright.runs}/${attempts.playwright} successful | ${
+      `| ${scenario.title} | ${run("strider")} | ${outcome.playwright === undefined ? "–" : run("playwright")} | ${
         outcomeText(outcome.strider, scenario.expected)
       } | ${outcomeText(outcome.playwright, scenario.expected)} | ${lines(code.get(`${scenario.name}/strider`))} / ${
-        lines(code.get(`${scenario.name}/playwright`))
+        twin === undefined ? "–" : lines(twin)
       } |`
     )
   }
@@ -161,10 +165,13 @@ export const report = (m: Measurements): string => {
     out.push(code.get(`${scenario.name}/strider`) ?? "")
     out.push("```")
     out.push("")
-    out.push("```ts")
-    out.push(code.get(`${scenario.name}/playwright`) ?? "")
-    out.push("```")
-    out.push("")
+    const twin = code.get(`${scenario.name}/playwright`)
+    if (twin !== undefined) {
+      out.push("```ts")
+      out.push(twin)
+      out.push("```")
+      out.push("")
+    }
     if (scenario.note !== undefined) {
       out.push(scenario.note)
       out.push("")
