@@ -1087,68 +1087,72 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }), timeout)
 
       // Focus can remove editability after the initial actionability check.
-      for (const property of ["readOnly", "disabled"] as const) {
-        for (const restores of [false, true]) {
-          it.effect(
-            `focus-time ${property}: ${
-              restores ? "waits until editability returns" : "times out without writing or input/change events"
-            }`,
-            () =>
-              Effect.gen(function*() {
-                const { url } = yield* fixture(() =>
-                  `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; this.${property} = true; events.textContent += 'focus;'; ${
-                    restores
-                      ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
-                      : ""
-                  }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
-                )
-                yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
-                  yield* page.goto(url)
-                  const result = yield* page.locator("#field").fill("2020-03-03").pipe(
-                    Deadline.within("1 second"),
-                    Effect.result
+      for (const changesType of [false, true]) {
+        for (const property of ["readOnly", "disabled"] as const) {
+          for (const restores of changesType ? [false] : [false, true]) {
+            it.effect(
+              `focus-time ${property}: ${
+                restores ? "waits until editability returns" : "times out without writing or input/change events"
+              }${changesType ? " after switching to text" : ""}`,
+              () =>
+                Effect.gen(function*() {
+                  const { url } = yield* fixture(() =>
+                    `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; ${
+                      changesType ? "this.type = 'text';" : ""
+                    } this.${property} = true; events.textContent += 'focus;'; ${
+                      restores
+                        ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
+                        : ""
+                    }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
                   )
-                  const events = yield* page.locator("#events").readText
-                  const value = yield* page.locator("#field").readValue
-                  // Stock WebKit can leave date inputs unfocused. This branch covers only that path.
-                  if (name === "WebKit" && !events.startsWith("focus;")) {
-                    assert.deepStrictEqual({ result: result._tag, value, events }, {
-                      result: "Success",
-                      value: "2020-03-03",
-                      events: "input;change;"
-                    })
-                    return
-                  }
-                  assert.isTrue(events.startsWith("focus;"), "the focus handler ran")
-                  if (restores) {
-                    assert.deepStrictEqual({
-                      result: result._tag,
-                      value,
-                      events,
-                      before: yield* page.locator("#before").readText
-                    }, {
-                      result: "Success",
-                      value: "2020-03-03",
-                      events: "focus;editable;input;change;",
-                      before: "2020-03-02|focus;"
-                    })
-                  } else {
-                    assert.deepStrictEqual({ result: result._tag, value, events }, {
-                      result: "Failure",
-                      value: "2020-03-02",
-                      events: "focus;"
-                    })
-                    assert(result._tag === "Failure")
-                    assert(Deadline.isTimeout(result.failure), String(result.failure))
-                    assert(result.failure.history.some((entry) =>
-                      (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
-                    ))
-                  }
-                }))
-              }),
-            timeout
-          )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const result = yield* page.locator("#field").fill("2020-03-03").pipe(
+                      Deadline.within("1 second"),
+                      Effect.result
+                    )
+                    const events = yield* page.locator("#events").readText
+                    const value = yield* page.locator("#field").readValue
+                    // Stock WebKit can leave date inputs unfocused. This branch covers only that path.
+                    if (name === "WebKit" && !events.startsWith("focus;")) {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "input;change;"
+                      })
+                      return
+                    }
+                    assert.isTrue(events.startsWith("focus;"), "the focus handler ran")
+                    if (restores) {
+                      assert.deepStrictEqual({
+                        result: result._tag,
+                        value,
+                        events,
+                        before: yield* page.locator("#before").readText
+                      }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "focus;editable;input;change;",
+                        before: "2020-03-02|focus;"
+                      })
+                    } else {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Failure",
+                        value: "2020-03-02",
+                        events: "focus;"
+                      })
+                      assert(result._tag === "Failure")
+                      assert(Deadline.isTimeout(result.failure), String(result.failure))
+                      assert(result.failure.history.some((entry) =>
+                        (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
+                      ))
+                    }
+                  }))
+                }),
+              timeout
+            )
+          }
         }
       }
 
