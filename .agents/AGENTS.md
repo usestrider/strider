@@ -30,6 +30,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
     display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). The Linux
     entry point rejects other environments; a browser of another version fails the tests too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
+    `STRIDER_INTEGRATION_JOB=chromium` (or `firefox`, `webkit`, `other`) runs the files of one of CI's Linux jobs
+    (`vitest.integration.config.ts`).
     On Apple Silicon macOS, `pnpm test:integration:macos --no-file-parallelism` downloads the separately pinned
     Chrome for Testing and Firefox builds in `test/integration/browsers.macos.json`, verifies their SHA-256 hashes,
     and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
@@ -77,7 +79,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
-  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
+  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand, a Linux job per browser and one for the other files, and one on macOS, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
