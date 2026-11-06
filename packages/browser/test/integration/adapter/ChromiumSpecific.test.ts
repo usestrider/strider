@@ -586,19 +586,25 @@ describe("Chromium adapter, CDP only", () => {
             const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
-            const page = yield* adapter.createPage(adapter.defaultContext)
-            const url = `${served.origin}/crash-me`
-            const navigation = yield* adapter.navigate(page, url, { referrer: Option.none() })
-            yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
-            // Probe 25: CDP takes several clients at once
+            // Probe 25: CDP takes several clients at once. Capture creation identity before navigation.
             const active = yield* Effect.promise(() =>
               import("node:fs/promises").then((fs) => fs.readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8"))
             )
             const [port, browserPath] = active.split("\n")
             const other = yield* CdpConnection.make(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`))
-            const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(other.browser))
-            const target = targetInfos.find((info) => info.url === url)
-            assert.isDefined(target)
+            const targets = Target.getTargets({}).pipe(
+              Protocol.on(other.browser),
+              Effect.map(({ targetInfos }) => targetInfos.map((info) => ({ ...info, url: "", title: "about:blank" })))
+            )
+            const before = new Set((yield* targets).map((info) => info.targetId))
+            const page = yield* adapter.createPage(adapter.defaultContext)
+            const created = (yield* targets).filter((info) => info.type === "page" && !before.has(info.targetId))
+            assert.lengthOf(created, 1)
+            const target = created[0]!
+            const url = `${served.origin}/crash-me`
+            const navigation = yield* adapter.navigate(page, url, { referrer: Option.none() })
+            yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            assert.isTrue((yield* targets).some((info) => info.targetId === target.targetId))
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(other.browser)
             )
