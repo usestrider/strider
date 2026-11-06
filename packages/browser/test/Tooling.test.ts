@@ -412,38 +412,103 @@ describe("Recordings", () => {
       })).pipe(Effect.provide(Browser.layerTest("")))
     }).pipe(Effect.provide(NodeServices.layer)))
 
-  it.effect("keeps value evidence out of the enclosing operation a failed value expectation leaves", () =>
+  for (
+    const [matcher, condition, observed, secrets] of [
+      ["toHaveValue", "to have the value \"expected-password-secret\"", "typed-password-secret", [
+        "expected-password-secret",
+        "typed-password-secret"
+      ]],
+      [
+        "toHaveURL",
+        "to have the URL \"https://user:password@example.test/done?token=expected-secret#expected-fragment\"",
+        "https://user:password@example.test/start?token=observed-secret#observed-fragment",
+        ["user:", "password@", "expected-secret", "observed-secret", "expected-fragment", "observed-fragment"]
+      ],
+      ["toHaveTitle", "to have the title \"expected-title-secret\"", "observed-title-secret", [
+        "expected-title-secret",
+        "observed-title-secret"
+      ]]
+    ] as const
+  ) {
+    it.effect(`keeps ${matcher} classification through enclosing operations and rethrows`, () =>
+      Effect.gen(function*() {
+        const out = path.join(directory(), "enclosing.zip")
+        const value = Operation.observed(observed)
+        const error = new Expect.ExpectationFailed({
+          subject: "subject",
+          condition,
+          last: Option.some(value),
+          history: [value],
+          elapsed: Duration.millis(100),
+          checks: { count: 1, triggeredBy: ["initial"] },
+          nearest: Option.none(),
+          suggestions: [],
+          diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+        })
+        yield* Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const trace = yield* Trace.record(page)
+          const attributes = { "browser.page.id": page.id }
+          const caught = yield* Recorders.observe(`Expect.${matcher}`, attributes, false, Effect.fail(error)).pipe(
+            PublicOperation.named("checkout", { attributes }),
+            Effect.flip
+          )
+          assert.strictEqual(caught, error)
+          yield* trace.stop
+          // The originating recording has stopped; classification follows the same error into a new one.
+          const later = yield* Trace.record(page)
+          const rethrown = yield* Effect.fail(caught).pipe(
+            PublicOperation.named("retry checkout", { attributes }),
+            Effect.flip
+          )
+          assert.strictEqual(rethrown, error)
+          for (const [index, preset] of (["strict", "local", "strict"] as const).entries()) {
+            for (const [recording, count] of [[trace, 2], [later, 1]] as const) {
+              yield* recording.exportTrace(`${out}-${index}-${count}`).pipe(Diagnostics.withPreset(preset))
+              const content = (yield* unzip(`${out}-${index}-${count}`)).get("trace.trace")!
+              const failures = content.trim().split("\n").map((line) => JSON.parse(line))
+                .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+              assert.strictEqual(failures.length, count)
+              assert.isTrue(failures.every((failure) => failure.message === failures[0].message))
+              for (const secret of secrets) {
+                if (matcher === "toHaveValue" || preset === "strict") assert.notInclude(content, secret)
+                else assert.include(failures[0].message, secret)
+              }
+            }
+          }
+        })).pipe(Effect.provide(Browser.layerTest("")))
+      }).pipe(Effect.provide(NodeServices.layer)))
+  }
+
+  it.effect("keeps a real URL failure classified when caught before recording and rethrown", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "enclosing-value.zip")
-      const typed = Operation.observed("typed-password-secret")
-      const error = new Expect.ExpectationFailed({
-        subject: "getByLabel(\"Password\")",
-        condition: "to have the value \"expected-password-secret\"",
-        last: Option.some(typed),
-        history: [typed],
-        elapsed: Duration.millis(100),
-        checks: { count: 1, triggeredBy: ["initial"] },
-        nearest: Option.none(),
-        suggestions: [],
-        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
-      })
+      const out = path.join(directory(), "real-rethrow.zip")
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
+        const pending = yield* page.pipe(
+          Expect.toHaveURL("https://example.test/done?token=expected-secret#fragment-secret"),
+          Deadline.within("100 millis"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("2 seconds")
+        const caught = yield* Fiber.join(pending)
+        assert(Expect.isExpectationFailed(caught), String(caught))
         const trace = yield* Trace.record(page)
-        // A user's own operation on the page around the failed expectation
-        yield* Recorders.observe("Expect.toHaveValue", { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(
+        const rethrown = yield* Effect.fail(caught).pipe(
           PublicOperation.named("checkout", { attributes: { "browser.page.id": page.id } }),
           Effect.flip
         )
-        yield* trace.exportTrace(out)
+        assert.strictEqual(rethrown, caught)
+        for (const preset of ["strict", "local", "strict"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          if (preset === "strict") {
+            assert.notInclude(content, "expected-secret")
+            assert.notInclude(content, "fragment-secret")
+          } else assert.include(content, "expected-secret#fragment-secret")
+        }
       })).pipe(Effect.provide(Browser.layerTest("")))
-      const content = (yield* unzip(out)).get("trace.trace")!
-      const failures = content.trim().split("\n").map((line) => JSON.parse(line))
-        .filter((event) => event.type === "after" && event.error)
-      assert.strictEqual(failures.length, 2)
-      // The same failure ends both steps; its classification is the expectation's, not the step's name
-      assert.notInclude(content, "typed-password-secret")
-      assert.notInclude(content, "expected-password-secret")
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("hides title evidence only under strict and URL regexps under strict", () =>
