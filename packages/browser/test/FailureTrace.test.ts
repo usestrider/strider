@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
+import * as path from "node:path"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
 import { pipeObserver } from "./integration/tracePipe.ts"
 import { instrument } from "./integration/tracePlugin.ts"
+
+// The runner reports every artifact it writes. Directory snapshots also pick up other runs' traces.
+const fixtureFiles = (
+  stderr: string
+) => [
+  ...new Set([...stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => path.basename(match[1]!)))
+]
 
 describe("failure trace buffer", () => {
   it("keeps both directions and connection identity in sequence", () => {
@@ -58,7 +66,6 @@ describe("failure trace runner lifecycle", () => {
   it("retains failures and shared hook context, discards passes, and observes owned processes", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -70,7 +77,7 @@ describe("failure trace runner lifecycle", () => {
       encoding: "utf8"
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const read = (part: string) =>
       files.filter((name) => name.includes(part)).map((name) => fs.readFileSync(new URL(name, directory), "utf8")).join(
         "\n"
@@ -128,7 +135,6 @@ describe("failure trace files", () => {
   it("writes only JSON lines, even when a failing file has no shared traffic", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     fs.mkdirSync(directory, { recursive: true })
     const unrelated = new URL(`unrelated-${randomUUID()}.ndjson`, directory)
     const run = spawnSync("pnpm", [
@@ -145,17 +151,17 @@ describe("failure trace files", () => {
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
     expect(fs.readFileSync(unrelated, "utf8")).toBe("unrelated trace\n")
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const shared = files.filter((name) => name.includes("-shared"))
     const contents = shared.map((name) => fs.readFileSync(new URL(name, directory), "utf8"))
+    expect(shared.length).toBe(1)
+    for (const line of contents[0]!.replace(/\n$/, "").split("\n")) expect(() => JSON.parse(line)).not.toThrow()
     for (const name of files) fs.unlinkSync(new URL(name, directory))
     try {
       expect(fs.existsSync(unrelated)).toBe(true)
     } finally {
       fs.rmSync(unrelated, { force: true })
     }
-    expect(shared.length).toBe(1)
-    for (const line of contents[0]!.replace(/\n$/, "").split("\n")) expect(() => JSON.parse(line)).not.toThrow()
   }, 30_000)
 })
 
@@ -163,7 +169,6 @@ describe("late cleanup overflow", () => {
   it("writes one terminal overflow marker with a new sequence number", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -176,7 +181,7 @@ describe("late cleanup overflow", () => {
       encoding: "utf8"
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const tests = files.filter((name) => name.includes("-test"))
     expect(tests.length).toBe(1)
     const entries = fs.readFileSync(new URL(tests[0]!, directory), "utf8").replace(/\n$/, "").split("\n").map((line) =>
@@ -195,8 +200,7 @@ describe("a browser shared through layer", () => {
   it("keeps a later failing test's traffic on the connection the first test's beforeEach built", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
-    spawnSync("pnpm", [
+    const run = spawnSync("pnpm", [
       "exec",
       "vitest",
       "--run",
@@ -204,13 +208,13 @@ describe("a browser shared through layer", () => {
       "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
       "sharedLayer.fixture"
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const tests = files.filter((name) => name.includes("-test"))
     const contents = tests.map((name) => fs.readFileSync(new URL(name, directory), "utf8"))
-    for (const name of files) fs.unlinkSync(new URL(name, directory))
     expect(tests.length).toBe(1)
     expect(contents[0]).toContain("LATER_TEST")
     expect(contents[0]).not.toContain("FIRST_TEST")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
 
@@ -218,7 +222,6 @@ describe("shared layer lifecycle attribution", () => {
   it("separates two failures and links shared acquisition and finalization", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -232,7 +235,7 @@ describe("shared layer lifecycle attribution", () => {
       encoding: "utf8"
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const parse = (name: string) =>
       fs.readFileSync(new URL(name, directory), "utf8").trimEnd().split("\n").map((line) => JSON.parse(line))
     const tests = files.filter((name) => name.startsWith("sharedLifecycle.fixture") && name.includes("-test")).map(
@@ -266,7 +269,6 @@ describe("skipped task bookkeeping", () => {
   it("does not treat a skipped test as a concurrent observer", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -279,7 +281,7 @@ describe("skipped task bookkeeping", () => {
       encoding: "utf8"
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const test = files.find((name) => name.includes("-test"))!
     const shared = files.find((name) => name.includes("-shared"))!
     expect(fs.readFileSync(new URL(test, directory), "utf8")).toContain("AFTER_SKIP_PROBE")
@@ -292,8 +294,7 @@ describe("run-time skip bookkeeping", () => {
   it("does not treat a test that skipped itself as a concurrent observer", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
-    const before = new Set(fs.existsSync(directory) ? fs.readdirSync(directory) : [])
-    spawnSync("pnpm", [
+    const run = spawnSync("pnpm", [
       "exec",
       "vitest",
       "--run",
@@ -301,13 +302,13 @@ describe("run-time skip bookkeeping", () => {
       "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
       "dynamicSkip.fixture"
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
-    const files = fs.readdirSync(directory).filter((name) => !before.has(name))
+    const files = fixtureFiles(run.stderr)
     const read = (part: string) =>
       fs.readFileSync(new URL(files.find((name) => name.includes(part))!, directory), "utf8")
     const test = read("-test")
     const shared = read("-shared")
-    for (const name of files) fs.unlinkSync(new URL(name, directory))
     expect(test).toContain("AFTER_DYNAMIC_SKIP")
     expect(shared).not.toContain("AFTER_DYNAMIC_SKIP")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
   }, 30_000)
 })
