@@ -14,6 +14,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as Streams from "effect/Stream"
+import * as BrowserClock from "./internal/browserClock.ts"
 import * as Reason from "./Reason.ts"
 
 /**
@@ -178,7 +179,7 @@ export const layerFfmpeg = (
             "-f",
             "webm",
             path
-          ], { stdin: "pipe", stdout: "ignore", stderr: "pipe", forceKillAfter: "1 second" }))
+          ], { stdin: "pipe", stdout: "ignore", stderr: "pipe", forceKillAfter: "1 second" })).pipe(BrowserClock.onLive)
           let stderr = ""
           yield* process.stderr.pipe(
             Streams.runForEach((chunk) =>
