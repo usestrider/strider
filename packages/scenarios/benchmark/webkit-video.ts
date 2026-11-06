@@ -93,7 +93,9 @@ await Effect.runPromise(
                     capture ? "capture" : "baseline"
                   }`
                   const page = yield* Browser.newPage({ emulation: { viewport: { width: 800, height: 600 } } })
-                  yield* page.goto(`data:text/html,${encodeURIComponent(html(animated))}`, { waitUntil: "load" })
+                  yield* page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html(animated))}`, {
+                    waitUntil: "load"
+                  })
                   yield* Effect.sleep(500)
                   yield* page.evaluateInMainWorld(() => {
                     ;(window as any).raf = []
