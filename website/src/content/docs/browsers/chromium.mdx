@@ -181,6 +181,10 @@ deadline.
 
 **Native HTML drag and drop works.** [`html: "synthetic"`](/docs/pages/actions#dragging) works too, but Chromium ignores a script's `dropEffect`.
 
+**[Video](/docs/tools/video) takes a writer.** `Capability.Video` needs a
+[`VideoWriter`](/docs/api/browser/VideoWriter) on Chromium's layer, such as `VideoWriter.layerFfmpeg`; without
+one it's `Unsupported`.
+
 **Cross-site frames render only in view,** so actions scroll each iframe into view first.
 
 ## The raw protocol
