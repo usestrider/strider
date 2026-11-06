@@ -271,8 +271,8 @@ export const make = (owner: PageOwner): Page.Page => {
         const values = yield* Evaluation.toLocal(args, realm)
         const group = yield* Evaluation.groupFor(runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const value = yield* Evaluation.call(runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn.toString(),
           arguments: values,

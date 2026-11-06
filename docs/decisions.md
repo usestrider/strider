@@ -1164,6 +1164,7 @@ consuming a reply, which needs a separate interruption-safe ownership transfer; 
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
 
+
 Video shares this session stream with user screencasts. A frame is acknowledged once after every current consumer
 has taken it, or released its scope; a fast consumer cannot acknowledge for a slower one. The session retains its
 latest image for a consumer joining an idle confirmed stream, without another acknowledgement. An acquired
@@ -1212,3 +1213,50 @@ A page can evaluate a value without delivering it in time, so a strict deadline 
 even if no check has returned a value. This diagnostic describes the unfinished check rather than a page value.
 Rejected: inventing a page value Strider never received, and waiting past the deadline for a reply, which breaks
 the caller’s budget. Changing how observations are collected is not required by this contract.
+
+
+
+## Diagnostic evidence at failure
+
+An error's diagnostics are a snapshot of what its operation and steps know when it is built. A write starts
+uncertain even after an earlier write was confirmed; a successful adapter reply or explicit browser rejection
+records acknowledgement of that call. Evaluations explicitly sent as writes use the same reply recording;
+read-only evaluations cannot confirm an earlier write. Engine actions record their applied answer, and a guard's proof that
+input did not reach the page remains `NotSent`. Adapter methods may send several protocol commands; their overall
+reply is not a delivery ledger for those commands.
+
+Cleanup reports evidence owned by the operation: completed or failed input recovery, and pending abandoned
+creation cleanup. It preserves existing resource owners and cleanup budgets. A summary gives known failure
+precedence over pending work, pending over completed, and completed over no cleanup; the first known failure
+supplies the cause. A step contributes its cleanup before the enclosing operation builds its error.
+
+Rejected: waiting past the deadline to obtain a final cleanup answer; transferring ownership to diagnostics;
+letting future scope finalizers rewrite earlier errors; treating any adapter failure as a browser rejection;
+and preserving an earlier acknowledgement across a later unanswered write. These would respectively change
+timing, lifetime, snapshot semantics or the evidence available to decide whether repeating an action is safe.
+
+Overlapping calls and steps retain uncertainty until each write has an acknowledgement. Ending a wait without a
+reply, including interruption, leaves that outcome uncertain when another overlapping call replies later. If all
+writes are acknowledged, any rejection takes precedence over successful replies. A later independent write starts
+with fresh evidence. A step that succeeds after handling a known missing reply cannot infer confirmation from its
+success; a manually marked send can still be confirmed by a successful step. Recovery releases are writes too, so
+acknowledgement alone does not prove that the requested gesture was dispatched.
+
+Rejected: counting only calls still running, which loses uncertainty when a wait ends before another reply;
+and allowing one reply or a successful error-handling step to confirm the other writes in its operation. Dispatch
+bookkeeping is acquired and released with interruption-safe finalizers; it adds no wait, deadline or resource owner.
+
+Dispatch overlap follows writes, not the lifetime of every enclosing step. A read-only step can remain active
+while several independent writes finish; it contributes no dispatch evidence and cannot retain a previous
+acknowledgement or overwrite a later guard result when it finishes. Actual call lifetimes propagate through
+enclosing operations as they start and end. Manual sends participate until their guard, confirmation or step
+completion settles them. A tracked call takes over its caller's preparatory manual send annotation; confirming
+or guarding a different manual send cannot erase a concurrent call's missing reply, even after that call's wait
+has ended. Rejected: using every active step as an overlap member, which lets unrelated read waits hide later
+evidence and keep already finished write groups alive.
+
+A guard cancels only its source record's tentative send. In that record, it restores `NotSent` for the guarded
+gesture. In enclosing records, an overlap consisting only of guarded child sends contributes no new delivery
+evidence, so the evidence from before that overlap survives. A completed or unanswered unrelated write in the
+overlap still takes precedence. Rejected: forwarding a child's cancellation as replacement of an enclosing
+operation's prior evidence, which could claim safe retry after an earlier write had reached the browser.

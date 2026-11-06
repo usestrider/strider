@@ -15,6 +15,7 @@ import {
   Mouse,
   Operation
 } from "@usestrider/browser"
+import { Protocol } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -22,8 +23,11 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Adapter from "../../../src/internal/adapter.ts"
+import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -2072,8 +2076,110 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const box = page.locator("#box")
               const error = yield* box[action]().pipe(Effect.flip)
               assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
               assert.strictEqual(yield* box.isChecked, action === "uncheck")
               assert.strictEqual(yield* page.locator("#out").readText, "true")
+            }))
+          }), timeout)
+      }
+
+      it.effect("preserves browser rejection in a public locator failure", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<button id="button">Press</button>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const button = page.locator("#button")
+            assert(button instanceof LocatorImpl)
+            const adapter = button.owner.runtime.model.adapter
+            const original = adapter.dispatchInput
+            const rejected = new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Input.dispatchMouseEvent",
+                reason: "InvalidArgument",
+                code: -32602,
+                description: "refused"
+              })
+            })
+            const fake = BoundedAdapter.make({
+              dispatchInput: () =>
+                Effect.fail(
+                  new Adapter.AdapterError({
+                    reason: { _tag: "Protocol", error: rejected }
+                  })
+                )
+            } as unknown as Adapter.AdapterConnection)
+            yield* Effect.acquireRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput: fake.dispatchInput })),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            const error = yield* button.click().pipe(Effect.flip)
+            assert(Locator.isLocatorError(error) && error.reason._tag === "BackendFailure")
+            assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "rejected" })
+            assert.strictEqual(error.reason.cause, rejected)
+          }))
+        }), timeout)
+
+      for (const action of ["fill", "focus"] as const) {
+        it.effect(`records the engine's confirmed ${action} answer`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field">`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              assert(field instanceof LocatorImpl)
+              const adapter = field.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              let reject = false
+              const rejected = new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.callFunctionOn",
+                  reason: "InvalidArgument",
+                  code: -32602,
+                  description: "refused"
+                })
+              })
+              let actionRecord: InternalOperation.Record | undefined
+              yield* Effect.acquireRelease(
+                Effect.sync(() =>
+                  Object.assign(adapter, {
+                    evaluate: (...args: Parameters<typeof original>) =>
+                      Effect.flatMap(InternalOperation.current, (record) => {
+                        if (Option.isSome(record)) actionRecord = record.value
+                        const call = args[1]
+                        const argument = call.arguments[0]
+                        if (
+                          reject && call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                          argument.value.type === "string"
+                        ) {
+                          const request = JSON.parse(argument.value.value) as Engine.Request
+                          if (request.op === "act" && request.apply) {
+                            return Effect.fail(
+                              new Adapter.AdapterError({
+                                reason: { _tag: "Protocol", error: rejected }
+                              })
+                            )
+                          }
+                        }
+                        return original(...args)
+                      })
+                  })
+                ),
+                () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+              )
+              const result = yield* Effect.gen(function*() {
+                yield* (action === "fill" ? field.fill("value") : field.focus())
+                assert.deepStrictEqual(actionRecord?.dispatch, { _tag: "Acknowledged", result: "ok" })
+                const record = yield* InternalOperation.record
+                return record.timeout(Option.none())
+              }).pipe(Operation.named("engine action"))
+              assert.deepStrictEqual(result.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+              reject = true
+              const error = yield* (action === "fill" ? field.fill("other") : field.focus()).pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === "BackendFailure")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "rejected" })
+              assert.strictEqual(error.reason.cause, rejected)
             }))
           }), timeout)
       }
@@ -2191,7 +2297,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
               assert(Option.isSome(error) && Locator.isLocatorError(error.value))
               if (Option.isSome(error) && Locator.isLocatorError(error.value)) {
-                assert.strictEqual(error.value.diagnostics.dispatch._tag, "MayHaveBeenSent")
+                assert.deepStrictEqual(error.value.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
                 assert.strictEqual(error.value.reason._tag, "StateUnchanged")
               }
             }))

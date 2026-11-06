@@ -5,6 +5,7 @@
  * `Operation.Current`, the public module's service, which the library reads where it is optional: an error built
  * inside an operation takes its diagnostics from the record there, and one built outside any has an id of its own.
  */
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
@@ -19,7 +20,7 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Operation from "../Operation.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
-import { type AdapterError, now } from "./adapter.ts"
+import { AdapterError, now } from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Spans from "./spans.ts"
 
@@ -72,6 +73,7 @@ export const diagnostics = (
     readonly dispatch?: Diagnostics.DispatchState | undefined
     readonly progress?: ReadonlyArray<Diagnostics.StepEvidence> | undefined
     readonly last?: Option.Option<Diagnostics.ObservedValue> | undefined
+    readonly cleanup?: Diagnostics.CleanupState | undefined
   } = {}
 ): Diagnostics.Diagnostics => {
   const current = running()
@@ -81,8 +83,38 @@ export const diagnostics = (
     dispatch: options.dispatch ?? record?.dispatch ?? { _tag: "NotSent" },
     progress: options.progress ?? (record === undefined ? [] : [...record.progress]),
     lastObserved: options.last ?? Option.fromNullishOr(record?.history.at(-1)),
-    cleanup: { _tag: "NotNeeded" }
+    cleanup: options.cleanup ?? record?.cleanup ?? { _tag: "NotNeeded" }
   })
+}
+
+/** A reply confirms only this call; interruption and arbitrary failures leave its delivery uncertain. */
+export const answered = <A, E, R>(record: Record, call: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => record.beginDispatch()),
+    () => call,
+    (finish, exit) =>
+      Effect.sync(() => {
+        if (Exit.isSuccess(exit)) return finish({ _tag: "Acknowledged", result: "ok" })
+        const reason = exit.cause.reasons.length === 1 ? exit.cause.reasons[0] : undefined
+        const error = reason !== undefined && Cause.isFailReason(reason) ? reason.error : undefined
+        finish(
+          error instanceof AdapterError && error.reason._tag === "Protocol" &&
+            error.reason.error.reason._tag === "Rejected"
+            ? { _tag: "Acknowledged", result: "rejected" }
+            : { _tag: "MayHaveBeenSent" }
+        )
+      })
+  )
+
+/** An unanswered member keeps an overlapping group's delivery uncertain; otherwise retain a known rejection. */
+const combinedDispatch = (
+  left: Diagnostics.DispatchState,
+  right: Diagnostics.DispatchState
+): Diagnostics.DispatchState => {
+  if (left._tag === "MayHaveBeenSent" || right._tag === "MayHaveBeenSent") return { _tag: "MayHaveBeenSent" }
+  if (left._tag === "NotSent") return right
+  if (right._tag === "NotSent") return left
+  return { _tag: "Acknowledged", result: left.result === "rejected" || right.result === "rejected" ? "rejected" : "ok" }
 }
 
 /**
@@ -177,10 +209,6 @@ export const appendObservation = (
 /** Where an operation stopped. */
 export type Phase = Deadline.Timeout["phase"]
 
-/** How far a dispatch got: not sent, then may have been sent, then acknowledged. */
-const reach = (dispatch: Diagnostics.DispatchState): number =>
-  dispatch._tag === "NotSent" ? 0 : dispatch._tag === "MayHaveBeenSent" ? 1 : 2
-
 /**
  * What an operation has done (CONCEPTS.md §2, `OperationRecord`): what it observed, whether its input or call may
  * have reached the browser, and its steps. An operation notes facts as they happen, and its `Timeout` takes its phase
@@ -188,7 +216,15 @@ const reach = (dispatch: Diagnostics.DispatchState): number =>
  */
 export class Record implements Operation.Operation {
   readonly "~@usestrider/browser/Operation" = "~@usestrider/browser/Operation" as const
-  dispatch: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private dispatchEvidence: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private readonly dispatches = new Set<object>()
+  private readonly parents = new Set<Record>()
+  private readonly manual = new Map<Record, Diagnostics.DispatchState>()
+  private overlap: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private beforeOverlap: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private replyUncertain = false
+
+  cleanup: Diagnostics.CleanupState = { _tag: "NotNeeded" }
   readonly history: Array<Diagnostics.ObservedValue> = []
   readonly progress: Array<Diagnostics.StepEvidence> = []
   readonly name: string
@@ -200,6 +236,75 @@ export class Record implements Operation.Operation {
     this.id = id
     this.budget = budget
     this.clock = clock
+  }
+
+  /** Active writes have no reply yet; merely running steps do not hold an overlap open. */
+  get dispatch(): Diagnostics.DispatchState {
+    return this.dispatches.size === 0 && this.manual.size === 0 ? this.dispatchEvidence : { _tag: "MayHaveBeenSent" }
+  }
+
+  set dispatch(dispatch: Diagnostics.DispatchState) {
+    this.mark(dispatch)
+  }
+
+  private startDispatch(): void {
+    if (this.dispatches.size === 0 && this.manual.size === 0) {
+      this.beforeOverlap = this.dispatchEvidence
+      this.overlap = { _tag: "NotSent" }
+      this.replyUncertain = false
+    }
+  }
+
+  private finishDispatch(dispatch: Diagnostics.DispatchState): void {
+    this.overlap = combinedDispatch(this.overlap, dispatch)
+    // An overlap made solely of canceled child sends contributes no new delivery evidence.
+    this.dispatchEvidence = this.overlap._tag === "NotSent" ? this.beforeOverlap : this.overlap
+    this.replyUncertain = this.dispatchEvidence._tag === "MayHaveBeenSent"
+  }
+
+  /** Manual sends have a lifetime too: a guard or answer ends only that source's send. */
+  private mark(dispatch: Diagnostics.DispatchState, source: Record = this): void {
+    if (dispatch._tag === "MayHaveBeenSent") {
+      this.startDispatch()
+      this.manual.set(source, dispatch)
+    } else {
+      if (!this.manual.has(source)) this.startDispatch()
+      this.manual.delete(source)
+      // A local guard replaces this record's own gesture evidence. In an enclosing record it cancels only
+      // this child's send, so earlier writes remain evidence if the whole overlap was guarded.
+      if (dispatch._tag === "NotSent" && source === this) this.beforeOverlap = { _tag: "NotSent" }
+      this.finishDispatch(dispatch)
+    }
+    for (const parent of this.parents) parent.mark(dispatch, source)
+  }
+
+  /** Only actual writes join an overlap. Their evidence follows the step's enclosing operations. */
+  beginDispatch(source: Record = this): (dispatch: Diagnostics.DispatchState) => void {
+    this.startDispatch()
+    // A tracked call takes over its caller's preparatory manual send annotation.
+    this.manual.delete(source)
+    const member = {}
+    this.dispatches.add(member)
+    const enclosing = Array.from(this.parents, (parent) => parent.beginDispatch(source))
+    return (dispatch) => {
+      this.dispatches.delete(member)
+      this.finishDispatch(dispatch)
+      for (const finish of enclosing) finish(dispatch)
+    }
+  }
+
+  /** Ends a failed step's manual send without inferring a reply from its completion. */
+  private endManual(source: Record = this): void {
+    if (this.manual.delete(source)) this.finishDispatch({ _tag: "MayHaveBeenSent" })
+    for (const parent of this.parents) parent.endManual(source)
+  }
+
+  /** Attaches evidence propagation while a step runs; read-only steps contribute no dispatch. */
+  enclose(parent: Record): () => void {
+    this.parents.add(parent)
+    return () => {
+      this.parents.delete(parent)
+    }
   }
 
   /** Milliseconds left before the deadline, at least 0. */
@@ -214,30 +319,40 @@ export class Record implements Operation.Operation {
 
   /** From here, input or a call may have reached the browser. */
   markSent(): void {
-    if (this.dispatch._tag === "NotSent") this.dispatch = { _tag: "MayHaveBeenSent" }
+    this.mark({ _tag: "MayHaveBeenSent" })
   }
 
   /** What was sent never reached the page: a gesture the guard stopped. */
   markNotSent(): void {
-    this.dispatch = { _tag: "NotSent" }
+    this.mark({ _tag: "NotSent" })
   }
 
   /** The browser confirmed what was sent; what the operation waits for now is its outcome. */
-  markConfirmed(): void {
-    this.dispatch = { _tag: "Acknowledged", result: "ok" }
+  markConfirmed(result: "ok" | "rejected" = "ok"): void {
+    this.mark({ _tag: "Acknowledged", result })
+  }
+
+  /** Summarizes cleanup owned by this operation; known failure takes precedence over unfinished work. */
+  noteCleanup(cleanup: Diagnostics.CleanupState): void {
+    const priority = { NotNeeded: 0, Completed: 1, Pending: 2, Failed: 3 }
+    if (priority[cleanup._tag] > priority[this.cleanup._tag]) this.cleanup = cleanup
   }
 
   /**
-   * Adds `step`, an operation that ran inside this one and has ended, to its steps, and moves its dispatch as far as
-   * the step's went. A step that succeeded after it sent was confirmed by succeeding. Its state is how far it got:
+   * Adds `step`, an operation that ran inside this one and has ended, to its steps, and takes its dispatch when
+   * the step sent. A manually marked send can be confirmed by success; a known missing reply cannot. Its state is how far it got:
    * `ok` once it succeeded or the browser confirmed it, otherwise `unsent` or `uncertain` by whether it sent. A step
    * that repeats the one before it, in name and state, is kept once, as the history keeps observations.
    */
-  addStep(step: Record, succeeded: boolean): void {
-    const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent"
+  addStep(step: Record, succeeded: boolean): Diagnostics.DispatchState {
+    this.noteCleanup(step.cleanup)
+    const dispatch: Diagnostics.DispatchState = succeeded && step.dispatch._tag === "MayHaveBeenSent" &&
+        !step.replyUncertain && step.dispatches.size === 0
       ? { _tag: "Acknowledged", result: "ok" }
       : step.dispatch
-    if (reach(dispatch) > reach(this.dispatch)) this.dispatch = dispatch
+    if (dispatch._tag === "Acknowledged" && step.dispatch._tag === "MayHaveBeenSent") {
+      step.markConfirmed(dispatch.result)
+    } else step.endManual()
     const state = succeeded
       ? "ok"
       : dispatch._tag === "NotSent"
@@ -246,8 +361,10 @@ export class Record implements Operation.Operation {
       ? "uncertain"
       : dispatch.result
     const previous = this.progress.at(-1)
-    if (previous !== undefined && previous.step === step.name && previous.state === state) return
-    this.progress.push({ step: step.name, state, at: now() })
+    if (previous === undefined || previous.step !== step.name || previous.state !== state) {
+      this.progress.push({ step: step.name, state, at: now() })
+    }
+    return dispatch
   }
 
   /**
@@ -270,6 +387,7 @@ export class Record implements Operation.Operation {
     return diagnostics(this.id, {
       dispatch: this.dispatch,
       progress: [...this.progress],
+      cleanup: this.cleanup,
       last: Option.fromNullishOr(this.history.at(-1))
     })
   }
@@ -292,7 +410,7 @@ export class Record implements Operation.Operation {
   }
 
   /**
-   * The operation's `Timeout` for one a step ran out with: named for this operation, with its budget, its furthest
+   * The operation's `Timeout` for one a step ran out with: named for this operation, with its budget, its latest
    * dispatch and its steps, and the step's phase, history and hint, which say where it stopped.
    */
   adopt<T extends Deadline.Timeout>(step: T): T {
@@ -398,7 +516,15 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
   Effect.flatMap(current, (enclosing) =>
     Option.isNone(enclosing) || enclosing.value === record
       ? self
-      : Effect.onExit(self, (exit) => Effect.sync(() => enclosing.value.addStep(record, Exit.isSuccess(exit)))))
+      : Effect.acquireUseRelease(
+        Effect.sync(() => record.enclose(enclosing.value)),
+        () => self,
+        (detach, exit) =>
+          Effect.sync(() => {
+            enclosing.value.addStep(record, Exit.isSuccess(exit))
+            detach()
+          })
+      ))
 
 /**
  * Runs `self` as an operation: mints its id, reads its deadline once, gives everything inside that deadline and a

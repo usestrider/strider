@@ -30,6 +30,7 @@ import type * as JSHandle from "../JSHandle.ts"
 import type * as Keyboard from "../Keyboard.ts"
 import * as Locator from "../Locator.ts"
 import type * as Mouse from "../Mouse.ts"
+import * as Protocol from "../protocol/Protocol.ts"
 import * as Reason from "../Reason.ts"
 import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
@@ -425,8 +426,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         )
         const rest = yield* Evaluation.toLocal(args, realm, 1)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const result = yield* Evaluation.call(owner.runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn.toString(),
           arguments: [{ _tag: "Node", node: found.node }, ...rest],
@@ -636,6 +637,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           if (given._tag === "Made") {
             record.markSent()
             yield* FileInputImpl.setMade(owner.runtime, found.node, given.files, {
+              dispatch: record,
               page: Option.some(owner.page),
               at: budget.at,
               id
@@ -762,8 +764,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           2
         )
         // From here the drag's events may have been sent
-        record.markSent()
         const result = yield* Evaluation.call(owner.runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: syntheticDrag.toString(),
           arguments: [{ _tag: "Node", node: source.node }, { _tag: "Node", node: target.node }, ...rest],
@@ -915,7 +917,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     const mapped = Operation.fromAdapter(error, id, this.owner.runtime.backend)
     return mapped._tag !== "Reason"
       ? mapped.error
-      : this.error(operation, mapped.reason, id, { _tag: "MayHaveBeenSent" })
+      : this.error(operation, mapped.reason, id)
   }
 
   /** Fails with `Unsupported` when the backend reports a capability as unsupported. */
@@ -1055,8 +1057,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             expected,
             hint: "The click reached it and its state didn't change; the page may prevent it"
           }),
-          (yield* Operation.record).id,
-          { _tag: "MayHaveBeenSent" }
+          (yield* Operation.record).id
         ))
       }
     }).pipe(Operation.named(operation, {
@@ -1294,7 +1295,20 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         }).pipe(
           Effect.tap((answer) =>
             Effect.sync(() => {
-              if (apply && inRound && answer.response._tag !== "Ready") record.markNotSent()
+              if (apply && inRound) {
+                if (answer.response._tag === "Ready") record.markConfirmed()
+                else record.markNotSent()
+              }
+            })
+          ),
+          Effect.tapError((failure) =>
+            Effect.sync(() => {
+              if (
+                apply && inRound && failure._tag === "Reason" && failure.reason._tag === "BackendFailure" &&
+                Protocol.isProtocolError(failure.reason.cause) && failure.reason.cause.reason._tag === "Rejected"
+              ) {
+                record.markConfirmed("rejected")
+              }
             })
           ),
           Effect.mapError((failure) =>
@@ -1412,7 +1426,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                     operation,
                     failure.reason,
                     id,
-                    failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : { _tag: "MayHaveBeenSent" }
+                    failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : record.dispatch
                   )
                   : timedOut()
               )

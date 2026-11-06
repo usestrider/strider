@@ -39,7 +39,18 @@ export type OperationId = typeof OperationId.Type
  * **Details**
  *
  * `MayHaveBeenSent`: the command left and no answer came back, so it may have taken effect. Strider never sends
- * it again, since a second click isn't the same as one.
+ * it again, since a second click isn't the same as one. `Acknowledged` records a successful adapter write or
+ * creation reply, a dispatched evaluation's reply, an engine action's confirmation, or an explicit browser rejection. Local refusal and a missing
+ * reply do not prove acknowledgement. A later write starts uncertain again; earlier replies do not confirm it.
+ * Overlapping calls and steps stay uncertain if any write is still unanswered, including one whose wait ended
+ * without a reply or was interrupted. When all writes in that overlap are acknowledged, any browser rejection
+ * makes the result `"rejected"`. A subsequent sequential write starts with evidence of its own. Read-only steps
+ * do not keep a write overlap open or replace later dispatch evidence when they finish. A guarded child reports
+ * `NotSent` for its gesture; its cancellation does not erase earlier writes from the enclosing operation.
+ *
+ * Acknowledgement can describe a retried held-key or held-button release. It does not by itself prove that the
+ * requested gesture was sent: recovery can fail, or the gesture can be refused before dispatch after recovery.
+ * An adapter method can send several commands, so its reply does not describe each intermediate command.
  *
  * @stability unstable
  * @category schemas
@@ -113,7 +124,14 @@ export const ObservedValue = Schema.Struct({
 export type ObservedValue = typeof ObservedValue.Type
 
 /**
- * Schema for what happened to the cleanup an operation needed, such as releasing a held key.
+ * Schema for what was known about cleanup owned by an operation and its steps when an error was built.
+ *
+ * **Details**
+ *
+ * A retried held-input release reports `Completed` or `Failed`. An abandoned page or context creation reports
+ * `Pending`: its reply or release may still be outstanding. Reporting does not extend the deadline or transfer
+ * cleanup ownership. For several outcomes, `Failed` takes precedence over `Pending`, then `Completed`, then
+ * `NotNeeded`; the first known failure supplies the cause. Later scope finalizers do not change an earlier snapshot.
  *
  * @stability unstable
  * @category schemas
@@ -141,7 +159,7 @@ export type CleanupState = typeof CleanupState.Type
  * **Details**
  *
  * `progress` lists the steps in order, so a failure shows where it stopped. `lastObserved` is the final
- * observation before the failure, when there was one.
+ * observation before the failure, when there was one. All fields are snapshots of the evidence then known.
  *
  * @stability unstable
  * @category models

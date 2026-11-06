@@ -8,12 +8,14 @@
  *
  * Callers hold the page's input permit while they build and send, so the state matches what was sent.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Keyboard from "../Keyboard.ts"
 import type * as Mouse from "../Mouse.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Keys from "./keys.ts"
+import * as Operation from "./operation.ts"
 
 export interface State {
   /** The keys held, in the order they were pressed. */
@@ -47,13 +49,25 @@ export const recover = <E>(
   Effect.suspend(() => {
     if (Option.isNone(state.broken)) return Effect.succeed(Option.none())
     const broken = state.broken.value
-    return dispatch(broken.release).pipe(
-      Effect.andThen(Effect.sync(() => {
-        state.broken = Option.none()
-        return Option.none<string>()
-      })),
-      Effect.orElseSucceed(() => Option.some(broken.description))
-    )
+    return Effect.flatMap(Operation.current, (current) =>
+      dispatch(broken.release).pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            if (Option.isSome(current)) {
+              current.value.noteCleanup(
+                exit._tag === "Success"
+                  ? { _tag: "Completed" }
+                  : { _tag: "Failed", cause: Cause.pretty(exit.cause) }
+              )
+            }
+          })
+        ),
+        Effect.andThen(Effect.sync(() => {
+          state.broken = Option.none()
+          return Option.none<string>()
+        })),
+        Effect.orElseSucceed(() => Option.some(broken.description))
+      ))
   })
 
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
