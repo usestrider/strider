@@ -927,55 +927,85 @@ describe("strider", () => {
 
   it.live(
     "keeps a same-name replacement's socket when the stopped daemon closes its server",
-    () => {
-      // The replacement is unreachable once its socket is gone, so the test ends it by the pid its lock names
-      let replacement: number | undefined
-      return Effect.gen(function*() {
+    () =>
+      Effect.promise(async () => {
         const env = environment()
         const barrier = path.join(env.XDG_RUNTIME_DIR, "close")
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "restart")
+        const socket = path.join(directory, "sock")
+        const lock = path.join(directory, "lock")
         const appears = (file: string) =>
-          Effect.promise(() =>
-            new Promise<void>((resolve, reject) => {
-              const signal = AbortSignal.timeout(30_000)
-              const check = () =>
-                fs.existsSync(file)
-                  ? resolve()
-                  : signal.aborted
-                  ? reject(new Error(`${file} did not appear`))
-                  : setTimeout(check, 10)
-              check()
-            })
-          )
+          new Promise<void>((resolve, reject) => {
+            const signal = AbortSignal.timeout(30_000)
+            const watcher = fs.watch(env.XDG_RUNTIME_DIR, check)
+            function check() {
+              if (fs.existsSync(file)) {
+                watcher.close()
+                signal.removeEventListener("abort", expired)
+                resolve()
+              }
+            }
+            function expired() {
+              watcher.close()
+              reject(new Error(`${file} did not appear`))
+            }
+            signal.addEventListener("abort", expired, { once: true })
+            check()
+          })
         const held = {
           ...env,
           STRIDER_CLOSE_BARRIER: barrier,
           NODE_OPTIONS: `--import=${path.join(fixtures, "stop-close-barrier.mjs")}`
         }
-        const started = yield* strider(held, "start", "--name", "restart", "--chromium", chromium.executable)
-        assert.strictEqual(started.code, 0, started.err)
-        const stopped = yield* strider(held, "-s", "restart", "stop")
-        assert.strictEqual(stopped.code, 0, stopped.err)
-        // The old daemon has answered stop and is held just before it closes its socket server
-        yield* appears(`${barrier}.closing`)
-        const restarted = yield* strider(env, "start", "--name", "restart", "--chromium", chromium.executable)
-        assert.strictEqual(restarted.code, 0, restarted.err)
-        const socket = path.join(env.XDG_RUNTIME_DIR, "strider", "restart", "sock")
-        assert.isTrue(fs.existsSync(socket))
-        replacement = JSON.parse(fs.readFileSync(path.join(env.XDG_RUNTIME_DIR, "strider", "restart", "lock"), "utf8"))
-          .pid
-        fs.writeFileSync(`${barrier}.release`, "")
-        yield* appears(`${barrier}.closed`)
-        // Closing the old server must not unlink the replacement session's socket
-        assert.isTrue(fs.existsSync(socket))
-        const pages = yield* strider(env, "-s", "restart", "pages")
-        assert.strictEqual(pages.code, 0, pages.err)
-        assert.strictEqual((yield* strider(env, "-s", "restart", "stop")).code, 0)
-      }).pipe(Effect.ensuring(Effect.sync(() => {
+        const run = (environment: Record<string, string>, ...args: ReadonlyArray<string>) =>
+          Effect.runPromise(strider(environment, ...args))
+        let original: number | undefined
+        let replacement: number | undefined
+        let stopped: ReturnType<typeof run> | undefined
         try {
-          if (replacement !== undefined) process.kill(replacement, "SIGTERM")
-        } catch {}
-      })))
-    },
+          const started = await run(held, "start", "--name", "restart", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          original = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          stopped = run(held, "-s", "restart", "stop")
+          await appears(`${barrier}.closing`)
+          // The listener must give up its unlink action before the session name is released.
+          assert.isTrue(fs.existsSync(directory))
+          fs.writeFileSync(`${barrier}.release`, "")
+          const result = await stopped
+          assert.strictEqual(result.code, 0, result.err)
+          await appears(`${barrier}.closed`)
+          await appears(`${barrier}.finalizing`)
+          const restarted = await run(env, "start", "--name", "restart", "--chromium", chromium.executable)
+          if (fs.existsSync(lock)) replacement = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          assert.strictEqual(restarted.code, 0, restarted.err)
+          assert.isTrue(fs.existsSync(socket))
+          fs.writeFileSync(`${barrier}.finish`, "")
+          await appears(`${barrier}.finished`)
+          // The old server's eventual finalizer must leave the replacement reachable.
+          assert.isTrue(fs.existsSync(socket))
+          const pages = await run(env, "-s", "restart", "pages")
+          assert.strictEqual(pages.code, 0, pages.err)
+          assert.strictEqual((await run(env, "-s", "restart", "stop")).code, 0)
+        } finally {
+          // Release both synchronous holds even when an earlier assertion fails.
+          fs.writeFileSync(`${barrier}.release`, "")
+          fs.writeFileSync(`${barrier}.finish`, "")
+          if (stopped) await stopped.catch(() => {})
+          // A broken socket makes graceful stop impossible. Both daemons and their ledger resources
+          // still belong to this fixture, including when starting the replacement failed.
+          if (replacement === undefined && fs.existsSync(lock)) {
+            const owner = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+            if (owner !== original) replacement = owner
+          }
+          for (const pid of [original, replacement]) {
+            if (pid === undefined) continue
+            try {
+              process.kill(pid, "SIGKILL")
+            } catch {}
+          }
+          await run(env, "prune", "--yes")
+        }
+      }),
     timeout
   )
 
