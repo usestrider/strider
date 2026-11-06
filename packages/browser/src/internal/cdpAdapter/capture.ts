@@ -354,7 +354,11 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
             const ack = Effect.suspend(() => {
               if (acked || pending.size > 0) return Effect.void
               acked = true
-              return Page.screencastFrameAck({ sessionId: event.sessionId }).pipe(Protocol.on(session), Effect.ignore)
+              return Page.screencastFrameAck({ sessionId: event.sessionId }).pipe(
+                Protocol.on(session),
+                Effect.ignore,
+                Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+              )
             })
             for (const owner of pending) {
               const take = () =>
@@ -664,6 +668,7 @@ export const video = Effect.fnUntraced(
       Effect.exit,
       Effect.flatMap((exit) => Deferred.done(result, exit)),
       Operation.detached,
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
       Effect.interruptible,
       Effect.forkIn(scope)
     )
