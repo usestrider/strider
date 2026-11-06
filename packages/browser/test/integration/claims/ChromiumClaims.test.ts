@@ -108,6 +108,17 @@ const until = Effect.fnUntraced(function*<A, E, R>(read: Effect.Effect<A, E, R>,
   return yield* Effect.die(new Error("browser fact did not arrive within 10 seconds"))
 })
 
+const newTarget = Effect.fnUntraced(
+  function*(browser: Effect.Success<typeof launch>, before: ReadonlySet<string>, type = "page") {
+    const created = (yield* browser.targets).filter((info) => info.type === type && !before.has(info.targetId))
+    assert.lengthOf(created, 1, `exactly one new ${type} target`)
+    return created[0]!
+  }
+)
+
+const targetBaseline = (browser: Effect.Success<typeof launch>) =>
+  browser.targets.pipe(Effect.map((infos) => new Set(infos.map((info) => info.targetId))))
+
 const evaluate = (session: Protocol.ProtocolSession, expression: string) =>
   Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true }).pipe(
     Protocol.on(session),
@@ -123,19 +134,21 @@ const reason = <A, E>(exit: Exit.Exit<A, E>) => {
   return error.reason._tag
 }
 
-const killedClient = (endpoint: string, url: string, mode = "reclaimable") =>
-  Effect.acquireRelease(
-    Effect.sync(() =>
-      spawn(process.execPath, [fileURLToPath(new URL("./client.ts", import.meta.url)), endpoint, url, mode], {
-        stdio: ["ignore", "pipe", "pipe"]
-      })
-    ),
-    (child) =>
-      Effect.sync(() => {
-        child.kill("SIGKILL")
-      })
-  ).pipe(Effect.flatMap((child) =>
-    Effect.promise(async () => {
+const killedClient = Effect.fnUntraced(
+  function*(browser: Effect.Success<typeof launch>, url: string, mode = "reclaimable") {
+    const before = yield* targetBaseline(browser)
+    const child = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        spawn(process.execPath, [fileURLToPath(new URL("./client.ts", import.meta.url)), browser.endpoint, url, mode], {
+          stdio: ["ignore", "pipe", "pipe"]
+        })
+      ),
+      (child) =>
+        Effect.sync(() => {
+          child.kill("SIGKILL")
+        })
+    )
+    const saved = yield* Effect.promise(async () => {
       let output = ""
       let stderr = ""
       child.stderr.on("data", (chunk) => {
@@ -168,21 +181,36 @@ const killedClient = (endpoint: string, url: string, mode = "reclaimable") =>
           })
         }
       )
-      const exited = new Promise<void>((resolve) =>
+      return saved
+    })
+    const target = yield* newTarget(browser, before)
+    const tab = yield* newTarget(browser, before, "tab")
+    assert.isDefined(target.browserContextId)
+    const contexts = yield* Target.getBrowserContexts().pipe(Protocol.on(browser.observer.browser))
+    assert.include(contexts.browserContextIds, target.browserContextId)
+    yield* Effect.promise(() =>
+      new Promise<void>((resolve) => {
         child.once("exit", (_code, signal) => {
           assert.strictEqual(signal, "SIGKILL")
           resolve()
         })
-      )
-      child.kill("SIGKILL")
-      await exited
-      return saved
-    })
-  ))
+        child.kill("SIGKILL")
+      })
+    )
+    return { ...saved, target, tab }
+  }
+)
 
 // The successful reclaim scope must really own the tab, rather than merely control an adopted page.
 const assertOwned = Effect.fnUntraced(
-  function*(browser: Effect.Success<typeof launch>, claim: api.Page.Claim, url: string) {
+  function*(
+    browser: Effect.Success<typeof launch>,
+    claim: api.Page.Claim,
+    url: string,
+    target: Target.TargetInfo,
+    tab: Target.TargetInfo
+  ) {
+    assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
     yield* Effect.scoped(
       Effect.gen(function*() {
         const { page, found } = yield* api.Browser.reclaim(claim)
@@ -193,70 +221,55 @@ const assertOwned = Effect.fnUntraced(
         assert.strictEqual(yield* page.url, url)
         yield* page.getByText("Control").click()
         assert.strictEqual(yield* page.title, "controlled")
+        assert.isTrue((yield* browser.targets).some((info) => info.targetId === target.targetId))
       })
     ).pipe(Effect.provide(browser.connect))
-    yield* until(browser.targets, (infos) => !infos.some((info) => info.type === "page" && info.url === url))
+    yield* until(
+      browser.targets,
+      (infos) => !infos.some((info) => info.targetId === target.targetId || info.targetId === tab.targetId)
+    )
   }
 )
 
 describe("Chromium claims", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
-      for (const pagesOnly of [false, true]) {
-        it.effect(
-          `URL cleanup predicate rejects a live target with stale metadata (pagesOnly=${pagesOnly})`,
-          () =>
-            Effect.gen(function*() {
-              const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
-              const { origin } = yield* serve
-              yield* Effect.scoped(Effect.gen(function*() {
-                const context = yield* Browser.newContext()
-                const before = new Set((yield* browser.targets).map((info) => info.targetId))
-                const page = yield* context.newPage
-                const url = `${origin}/still-live`
-                yield* page.goto(url)
-                assert.strictEqual(yield* page.url, url)
-                const infos = yield* browser.targets
-                const created = infos.filter((info) => info.type === "page" && !before.has(info.targetId))
-                assert.lengthOf(created, 1, "the target is still alive before scope cleanup")
-                // These are the existing cleanup predicates, evaluated before cleanup is allowed to run.
-                const cleanupComplete = !infos.some((info) => (!pagesOnly || info.type === "page") && info.url === url)
-                assert.isFalse(cleanupComplete, "URL absence must not report a live target as cleaned up")
-              })).pipe(Effect.provide(browser.connect))
-            }),
-          60_000
-        )
-      }
-
       it.effect(
         "reclaims a killed client's page, preserves session storage, and owns its cleanup",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
-            const saved = yield* killedClient(browser.endpoint, `${origin}/killed`)
+            const saved = yield* killedClient(browser, `${origin}/killed`)
             yield* Effect.scoped(
               Effect.gen(function*() {
                 const { page } = yield* api.Browser.reclaim(saved.pageClaim)
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => sessionStorage.getItem("survivor")), "saved")
                 yield* page.getByText("Control").click()
+                assert.isTrue((yield* browser.targets).some((info) => info.targetId === saved.target.targetId))
               })
             ).pipe(Effect.provide(browser.connect))
-            yield* until(browser.targets, (infos) => !infos.some((info) => info.url === `${origin}/killed`))
+            yield* until(browser.targets, (infos) =>
+              !infos.some((info) =>
+                info.targetId === saved.target.targetId || info.targetId === saved.tab.targetId
+              ))
           }),
         60_000
       )
 
       it.effect("reclaims the tab after a cross-site navigation", () =>
         Effect.gen(function*() {
-          const browser = yield* launch
+          const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin, crossSite } = yield* serve
+          const baseline = yield* targetBaseline(browser)
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
           const services = yield* Layer.buildWithScope(browser.connect, old)
-          const claim = yield* Effect.gen(function*() {
+          const { claim, target, tab } = yield* Effect.gen(function*() {
             const context = yield* api.UserContext.create({ reclaimable: true })
             const page = yield* context.newPage
+            const target = yield* newTarget(browser, baseline)
+            const tab = yield* newTarget(browser, baseline, "tab")
             yield* page.goto(`${origin}/before`)
             const claim = yield* api.Page.claim(page)
             const trace: Array<Readonly<Record<string, unknown>>> = []
@@ -282,16 +295,17 @@ describe("Chromium claims", () => {
             const marks = trace.filter((event) => event.name === "claims-before" || event.name === "claims-after")
             assert.strictEqual(marks.length, 2)
             assert.notStrictEqual(marks[0]!.pid, marks[1]!.pid, "navigation must swap renderer processes")
-            return claim
+            return { claim, target, tab }
           }).pipe(Scope.provide(old), Effect.provide(services))
           yield* handoff(old)
-          yield* assertOwned(browser, claim, `${crossSite}/after`)
+          yield* assertOwned(browser, claim, `${crossSite}/after`, target, tab)
         }), 60_000)
 
       it.effect("reclaims after proved prerender activation replaces the page target", () =>
         Effect.gen(function*() {
           const browser = yield* launch
           const { origin } = yield* serve
+          const baseline = yield* targetBaseline(browser)
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
           const services = yield* Layer.buildWithScope(browser.connect, old)
@@ -304,9 +318,8 @@ describe("Chromium claims", () => {
           }).pipe(Scope.provide(old), Effect.provide(services))
           yield* handoff(old)
           // The Strider client is now detached: direct page auto-attachment would suppress prerender.
-          const before = yield* browser.targets
-          const original = before.find((info) => info.type === "page" && info.url === `${origin}/start`)!
-          const tab = before.find((info) => info.type === "tab" && info.url === original.url)!
+          const original = yield* newTarget(staleTargetMetadata(browser), baseline)
+          const tab = yield* newTarget(browser, baseline, "tab")
           assert.isDefined(tab)
           const { sessionId } = yield* Target.attachToTarget({ targetId: tab.targetId, flatten: true }).pipe(
             Protocol.on(browser.observer.browser)
@@ -360,7 +373,7 @@ describe("Chromium claims", () => {
             (value) => typeof value === "number" && value > 0
           )
           assert.strictEqual(yield* evaluate(activeSession, "document.prerendering"), false)
-          yield* assertOwned(browser, claim, `${origin}/prerendered`)
+          yield* assertOwned(staleTargetMetadata(browser), claim, `${origin}/prerendered`, activated, tab)
         }), 60_000)
 
       it.effect("returns Gone after the claimed tab closes", () =>
@@ -387,13 +400,13 @@ describe("Chromium claims", () => {
           const first = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const second = yield* launch
           const { origin } = yield* serve
-          const saved = yield* killedClient(first.endpoint, `${origin}/other-browser`)
+          const saved = yield* killedClient(first, `${origin}/other-browser`)
           const exit = yield* Effect.scoped(api.Browser.reclaim(saved.pageClaim)).pipe(
             Effect.provide(second.connect),
             Effect.exit
           )
           assert.strictEqual(reason(exit), "OtherBrowser")
-          assert.isTrue((yield* first.targets).some((info) => info.url === `${origin}/other-browser`))
+          assert.isTrue((yield* first.targets).some((info) => info.targetId === saved.target.targetId))
         }), 60_000)
 
       it.effect("keeps ordinary context and page cleanup unchanged", () =>
@@ -423,10 +436,15 @@ describe("Chromium claims", () => {
 
       it.effect("ordinary contexts still disappear when their client is killed", () =>
         Effect.gen(function*() {
-          const browser = yield* launch
+          const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
-          yield* killedClient(browser.endpoint, `${origin}/ordinary-killed`, "ordinary")
-          yield* until(browser.targets, (infos) => !infos.some((info) => info.url === `${origin}/ordinary-killed`))
+          const saved = yield* killedClient(browser, `${origin}/ordinary-killed`, "ordinary")
+          yield* until(browser.targets, (infos) =>
+            !infos.some((info) =>
+              info.targetId === saved.target.targetId || info.browserContextId === saved.target.browserContextId
+            ))
+          const contexts = yield* Target.getBrowserContexts().pipe(Protocol.on(browser.observer.browser))
+          assert.notInclude(contexts.browserContextIds, saved.target.browserContextId)
         }), 60_000)
 
       it.effect(
@@ -435,10 +453,8 @@ describe("Chromium claims", () => {
           Effect.gen(function*() {
             const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
-            const saved = yield* killedClient(browser.endpoint, `${origin}/context`)
-            const before = (yield* browser.targets).find((info) =>
-              info.url === `${origin}/context` && info.type === "page"
-            )!
+            const saved = yield* killedClient(browser, `${origin}/context`)
+            const before = saved.target
             assert.isDefined(before)
             yield* Effect.scoped(
               Effect.gen(function*() {
@@ -468,23 +484,22 @@ describe("Chromium claims", () => {
         "owns unknown state after handoff without dismissing, and explicitly closes while initialization is blocked",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
+            const baseline = yield* targetBaseline(browser)
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
-            const claim = yield* Effect.gen(function*() {
+            const { claim, target } = yield* Effect.gen(function*() {
               const context = yield* api.UserContext.create({ reclaimable: true })
               const page = yield* context.newPage
+              const target = yield* newTarget(browser, baseline)
               yield* page.goto(`${origin}/dialog`)
-              return yield* api.Page.claim(page)
+              return { claim: yield* api.Page.claim(page), target }
             }).pipe(Scope.provide(old), Effect.provide(services))
             const snapshots = yield* handoff(old)
             const lastKnown = snapshots.find((snapshot) => snapshot.claim === claim)!
             assert.deepStrictEqual(lastKnown.handoff, { _tag: "Complete", events: [] })
-            const target = (yield* browser.targets).find((info) =>
-              info.type === "page" && info.url === `${origin}/dialog`
-            )!
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(browser.observer.browser)
             )
@@ -547,12 +562,20 @@ describe("Chromium claims", () => {
         Effect.gen(function*() {
           const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
-          yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(Protocol.on(browser.observer.browser))
+          const { targetId } = yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
           yield* Effect.scoped(Effect.gen(function*() {
             const connected = yield* Browser.Browser
             const pages = yield* connected.pages.waitFor((pages) => pages.length > 1)
-            const matches = yield* Effect.filter(pages, (page) =>
-              page.url.pipe(Effect.map((url) => url === `${origin}/discovered`)))
+            const matches = yield* until(
+              Effect.filter(pages, (page) =>
+                page.control.pipe(
+                  Effect.flatMap((control) => control.evaluateInMainWorld(() => location.href)),
+                  Effect.map((url) => url === `${origin}/discovered`)
+                )),
+              (matches) => matches.length === 1
+            )
             assert.lengthOf(matches, 1)
             const observed = matches[0]!
             const controlled = yield* observed.control
@@ -560,7 +583,7 @@ describe("Chromium claims", () => {
             const context = yield* connected.defaultContext.control
             assert.strictEqual(reason(yield* api.UserContext.claim(context).pipe(Effect.exit)), "NotPermitted")
           })).pipe(Effect.provide(browser.connect))
-          assert.isTrue((yield* browser.targets).some((info) => info.url === `${origin}/discovered`))
+          assert.isTrue((yield* browser.targets).some((info) => info.targetId === targetId))
         }), 60_000)
 
       it.effect(
@@ -694,7 +717,7 @@ describe("Chromium claims", () => {
         Effect.gen(function*() {
           const browser = yield* launch
           const { origin } = yield* serve
-          const saved = yield* killedClient(browser.endpoint, `${origin}/crash-dialog`, "dialog")
+          const saved = yield* killedClient(browser, `${origin}/crash-dialog`, "dialog")
           yield* Effect.scoped(Effect.gen(function*() {
             const { page, found, handoff: event } = yield* api.Browser.reclaim(saved.pageClaim)
             assert.deepStrictEqual(found, { _tag: "Unknown" })
@@ -880,12 +903,14 @@ describe("Chromium claims", () => {
             const cleanupLogger = Logger.make((entry) => {
               if (entry.logLevel === "Warn") cleanupWarnings.push(entry.message)
             })
+            const baseline = yield* targetBaseline(browser)
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
-            const claim = yield* Effect.gen(function*() {
+            const { claim, target: before } = yield* Effect.gen(function*() {
               const context = yield* api.UserContext.create({ reclaimable: true, eventLog: 0, dialogs: "leaveOpen" })
               const page = yield* context.newPage
+              const target = yield* newTarget(browser, baseline)
               yield* page.goto(`${origin}/before-handoff-dialog`)
               const claim = yield* api.Page.claim(page)
               const opened = yield* Dialog.next(page)
@@ -893,7 +918,7 @@ describe("Chromium claims", () => {
                 setTimeout(() => alert("before handoff"), 0)
               })
               yield* opened
-              return claim
+              return { claim, target }
             }).pipe(
               Scope.provide(old),
               Effect.provide(services),
@@ -905,7 +930,6 @@ describe("Chromium claims", () => {
             assert.deepStrictEqual(cleanupWarnings, [], "handoff must confirm declaration cleanup")
             const lastKnown = snapshots.find((entry) => entry.claim === claim)!
             assert.isDefined(lastKnown)
-            const before = (yield* browser.targets).find((info) => info.url === `${origin}/before-handoff-dialog`)!
             yield* Effect.scoped(Effect.gen(function*() {
               const restoredSnapshot = Schema.decodeUnknownSync(api.Browser.LastKnown)(
                 JSON.parse(JSON.stringify(Schema.encodeSync(api.Browser.LastKnown)(lastKnown)))
@@ -933,15 +957,17 @@ describe("Chromium claims", () => {
           Effect.gen(function*() {
             const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
+            const baseline = yield* targetBaseline(browser)
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
             const url = `${origin}/survivor`
-            const claim = yield* Effect.gen(function*() {
+            const { claim, target } = yield* Effect.gen(function*() {
               const context = yield* api.UserContext.create({ reclaimable: true })
               const page = yield* context.newPage
+              const target = yield* newTarget(browser, baseline)
               yield* page.goto(url)
-              return yield* api.UserContext.claim(context)
+              return { claim: yield* api.UserContext.claim(context), target }
             }).pipe(Scope.provide(old), Effect.provide(services))
             yield* handoff(old)
             const exit = yield* Effect.scoped(
@@ -949,7 +975,9 @@ describe("Chromium claims", () => {
             ).pipe(Effect.provide(browser.connect), Effect.exit)
             assert.isTrue(Exit.isFailure(exit), "expected the settings to be refused")
             assert.isTrue(
-              (yield* browser.targets).some((info) => info.url === url),
+              (yield* browser.targets).some((info) =>
+                info.targetId === target.targetId && info.browserContextId === target.browserContextId
+              ),
               "the claimed context's tab was destroyed"
             )
           }),
@@ -1000,15 +1028,17 @@ describe("Chromium claims", () => {
             Effect.gen(function*() {
               const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
               const { origin } = yield* serve
+              const baseline = yield* targetBaseline(browser)
               const old = yield* Scope.make()
               yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
               const services = yield* Layer.buildWithScope(browser.connect, old)
               const url = `${origin}/rollback-${failure}`
-              const claim = yield* Effect.gen(function*() {
+              const { claim, target } = yield* Effect.gen(function*() {
                 const context = yield* api.UserContext.create({ reclaimable: true })
                 const page = yield* context.newPage
+                const target = yield* newTarget(browser, baseline)
                 yield* page.goto(url)
-                return yield* api.UserContext.claim(context)
+                return { claim: yield* api.UserContext.claim(context), target }
               }).pipe(Scope.provide(old), Effect.provide(services))
               yield* handoff(old)
               yield* Effect.scoped(Effect.gen(function*() {
@@ -1083,12 +1113,17 @@ describe("Chromium claims", () => {
                 assert.deepStrictEqual(warnings, [], "rollback commands must complete with their own cleanup budget")
                 assert.strictEqual(registrations, 0, "setup registrations must unwind before the caller's scope ends")
                 yield* Scope.close(destination, Exit.void)
-                assert.isTrue((yield* browser.targets).some((info) => info.url === url), "surviving tab was destroyed")
+                assert.isTrue(
+                  (yield* browser.targets).some((info) =>
+                    info.targetId === target.targetId && info.browserContextId === target.browserContextId
+                  ),
+                  "surviving tab was destroyed"
+                )
                 // Read the survivor through its actual URL rather than assuming a public id survives reconnect.
                 let checked = 0
                 for (const page of yield* connected.pages) {
-                  if ((yield* page.url) !== url) continue
                   const control = yield* page.control
+                  if ((yield* control.evaluateInMainWorld(() => location.href)) !== url) continue
                   checked++
                   assert.strictEqual(yield* control.evaluateInMainWorld(() => navigator.language), "en-US")
                 }
@@ -1153,18 +1188,19 @@ describe("Chromium claims", () => {
         Effect.gen(function*() {
           const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
+          const baseline = yield* targetBaseline(browser)
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
           const services = yield* Layer.buildWithScope(browser.connect, old)
           const url = `${origin}/context-blocked`
-          const claim = yield* Effect.gen(function*() {
+          const { claim, target } = yield* Effect.gen(function*() {
             const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
             const page = yield* context.newPage
+            const target = yield* newTarget(browser, baseline)
             yield* page.goto(url)
-            return yield* api.UserContext.claim(context)
+            return { claim: yield* api.UserContext.claim(context), target }
           }).pipe(Scope.provide(old), Effect.provide(services))
           yield* handoff(old)
-          const target = (yield* browser.targets).find((info) => info.type === "page" && info.url === url)!
           const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
             Protocol.on(browser.observer.browser)
           )
@@ -1214,9 +1250,9 @@ describe("Chromium claims", () => {
 
       it.effect("context SIGKILL recovery leaves a proved-open dialog untouched", () =>
         Effect.gen(function*() {
-          const browser = yield* launch
+          const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
-          const saved = yield* killedClient(browser.endpoint, `${origin}/context-crash-dialog`, "dialog")
+          const saved = yield* killedClient(browser, `${origin}/context-crash-dialog`, "dialog")
           yield* Effect.scoped(Effect.gen(function*() {
             const { context, found, handoff: history } = yield* api.UserContext.reclaim(saved.contextClaim)
             assert.deepStrictEqual(found.pages.map((page) => page.found._tag), ["Unknown"])
@@ -1228,7 +1264,12 @@ describe("Chromium claims", () => {
             )
             assert.strictEqual(Option.getOrThrow(Exit.findErrorOption(result))._tag, "Timeout")
           })).pipe(Effect.provide(browser.connect))
-          assert.isFalse((yield* browser.targets).some((info) => info.url === `${origin}/context-crash-dialog`))
+          yield* until(browser.targets, (infos) =>
+            !infos.some((info) =>
+              info.targetId === saved.target.targetId || info.browserContextId === saved.target.browserContextId
+            ))
+          const contexts = yield* Target.getBrowserContexts().pipe(Protocol.on(browser.observer.browser))
+          assert.notInclude(contexts.browserContextIds, saved.target.browserContextId)
         }), 60_000)
 
       it.effect(
@@ -1439,21 +1480,21 @@ describe("Chromium claims", () => {
         "mixed Unknown context recovery omits defaults for healthy siblings and future pages",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
+            const baseline = yield* targetBaseline(browser)
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
             const services = yield* Layer.buildWithScope(browser.connect, old)
-            const claim = yield* Effect.gen(function*() {
+            const { claim, target } = yield* Effect.gen(function*() {
               const context = yield* api.UserContext.create({ reclaimable: true, dialogs: "leaveOpen" })
-              yield* (yield* context.newPage).goto(`${origin}/mixed-blocked`)
+              const page = yield* context.newPage
+              const target = yield* newTarget(browser, baseline)
+              yield* page.goto(`${origin}/mixed-blocked`)
               yield* (yield* context.newPage).goto(`${origin}/defaults`)
-              return yield* api.UserContext.claim(context)
+              return { claim: yield* api.UserContext.claim(context), target }
             }).pipe(Scope.provide(old), Effect.provide(services))
             yield* handoff(old)
-            const target = (yield* browser.targets).find((info) =>
-              info.type === "page" && info.url === `${origin}/mixed-blocked`
-            )!
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(browser.observer.browser)
             )
