@@ -1,5 +1,45 @@
 # @usestrider/browser
 
+## 0.4.0
+
+### Minor Changes
+
+- 80fd57e: Enable Chromium WebM recording through the optional VideoWriter service and its explicitly configured ffmpeg layer. Pace idle frames at 25fps, preserve the initial output size through viewport changes, and include native video in traces. Coordinate shared screencast acknowledgements so slow consumers backpressure frame delivery. Consumers that stop reading must now close their acquisition scopes so other consumers can continue.
+  
+  Require writers to fit every output frame to Strider’s fixed dimensions, centred with black padding, and verify this with reusable conformance coverage. End recording input with the source, fail empty recordings promptly, and bound writer finishing even while the caller scope remains open.
+- cbfa7f1: Upload `FileInput.local` contents to attached browsers using scoped open-file reads and sequential acknowledged 64 KiB chunks. Bytes share the chunk transport, avoiding whole-file encoded strings. Preserve transferred basenames, inferred MIME (application/octet-stream fallback), and available stat modification times. No library size cap is added; browser storage and resource limits still apply.
+  
+  Attached Local uploads now require captured Effect FileSystem and Path services and cannot mix with Remote paths; they may mix with Bytes. These compatibility changes require an unstable minor bump. Launched Local uploads retain native paths, previous service requirements and Local/Remote combinations. A container or wrapper launch with separate storage must use Bytes instead. Stock WebKit's existing native-path append limitation remains, and launched stock WebKit supplies upload-time creation timestamps instead of disk modification times.
+  
+  Validate transferred-file and native locator cardinality before selection changes, and clear empty selections through page-side construction. Transferred chooser selections and empty multiple selections need an identified input. Reads and transfer consume the original handler deadline, including time already spent in the handler; failure or interruption cancels the chooser and releases transfer resources.
+  
+  Keep failed chooser preparation out of the handled count, while retaining count-before-application ordering for prepared decisions and the user handler’s registration scope.
+- db5244d: Preserve source frame times in Chromium and polled WebKit video without fixed-rate idle copies. VideoWriter frames now carry nanoseconds relative to recording start, and the final frame marks stop time. Chromium streams anchor browser time to local receipt time, supporting different browser/client host clocks, and cap mapped times at receipt so forward clock jumps cannot extend the recording; frame times never decrease. The ffmpeg writer preserves variable-rate timing in VP8 WebM to millisecond precision.
+- 99745b7: Refuse unchecking checked native radios with `Locator.WrongElement` before sending input, including through labels and their ordinary descendants. Consumers matching `StateUnchanged` for this case must match `WrongElement` instead. Calls with `trial: true` now refuse too, rather than reporting success for an action that cannot succeed. Check another radio in the group instead. Already-unchecked native radios remain successful no-ops, and page-managed ARIA radios can still be unchecked.
+
+### Patch Changes
+
+- 72af3f6: Add explicitly enabled stock WebKit video from PNG polling, with a supplied VideoWriter, polling interval and caller-owned output directory.
+- 38678ab: Explain that response and auth route handlers need an explicit phase when it is omitted on a page or user context.
+- 34171bc: Make `strider state save` and `strider export test` create the missing directories on the way to the file they write.
+- eb9da18: Create the missing directories on the way to a trace or HAR export's path, instead of failing with a file system "not found" that reads as if the file itself were missing.
+- c61613b: Make fill wait when a focus handler makes a settable input read-only or disabled, before assigning its value or switching to typing. Honor per-call enabled and editable check overrides after focus.
+- 4cfc183: Release BiDi script handles returned after interruption or timeout, including exception handles, in the reply realm.
+  
+  Reject unsupported extra release-parameter mappings, handle escaped reply pointers consistently, and keep malformed cleanup definitions from stopping the protocol reply reader.
+- b4bcf73: Expose roleless password inputs in snapshots as inferred editable controls with password evidence, preserving accessible names and excluding values, including values referenced by another element for its name. Find matches the password designation using its usual case and exact rules. Export named password refs by waiting for their exact computed name in snapshots, preserving naming precedence, supporting a single framed match and leaving duplicate names ambiguous. Unnamed refs retain the password input selector.
+- a6c3c98: Preserve both locale and user-agent settings on Chromium when either declaration is installed, replaced or released.
+- b282791: Capture a screenshot when a page-associated expectation succeeds or fails with trace screenshots set to "perAction", including after its deadline expires. Give each completion capture its own fixed one-second browser-clock budget; omit failed or timed-out captures while preserving the original operation result. Keep screenshots off by default and DOM snapshots limited to actions and navigation.
+- f12f85c: Calculate expectation page-round waits from the time remaining after routing and engine setup, keeping the original overall deadline.
+- 19dad83: Blur the previous text control, including one inside open shadow roots, before filling non-input design-mode targets and recheck the target after blur handlers. Retain focus-preparation history when refocusing prevents filling. Document Firefox's top-level design-mode input focus limitation in fill and the capability table.
+- 0422966: Record write acknowledgements and operation cleanup outcomes in diagnostic snapshots, preserving uncertainty for unanswered and overlapping writes and pending late creations.
+- 21d6bcb: Preserve WebKit document response bodies across adapter-controlled navigation and reload during response-body collection. Wait only for the responded, committed main document's unfinished load and document retention reads already started on the page; provisional and unfinished iframe loads do not delay dispatch. The wait is interruptible within the existing navigation deadline, without grace, so an indefinitely streaming main document can cause a timeout. Close the collection's owning scope before navigating when that body need not be preserved. Without response-body collection there is no added wait.
+- ca2eaf1: Include failed expectations' observations, check count, elapsed time, nearest match and suggestions in exported trace error messages so trace viewers display the failure evidence.
+  
+  Record page URL expectations in their page's trace. Apply the diagnostics preset at each export to expected and observed URLs, hide titles under strict, and strip classified form values under both presets without changing the caller's failure. Preserve the originating expectation's redaction through enclosing operations and caught/rethrown failures.
+- 8196abe: Make `Trace.Options` refuse `domSnapshots: true` without `network: true` at compile time. Options are now `CaptureOptions & (NetworkOptions | SnapshotOptions)`; options built from a computed flag choose a branch, as in `flag ? { domSnapshots: true, network: true } : {}`.
+- 992aee8: Reject non-string `Locator.pressSequentially` values, including non-string Redacted contents, with `InvalidInput` before contacting the browser, without exposing the supplied value.
+
 ## 0.3.0
 
 ### Minor Changes
