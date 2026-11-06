@@ -15,6 +15,7 @@ import {
   Har,
   LaunchProfile,
   NetworkResponse,
+  Operation as PublicOperation,
   Page,
   PageNavigation,
   Popup,
@@ -409,6 +410,40 @@ describe("Recordings", () => {
         assert.include(error.message, "expected-password-secret")
         assert.deepStrictEqual(error.last, Option.some(value))
       })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("keeps value evidence out of the enclosing operation a failed value expectation leaves", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "enclosing-value.zip")
+      const typed = Operation.observed("typed-password-secret")
+      const error = new Expect.ExpectationFailed({
+        subject: "getByLabel(\"Password\")",
+        condition: "to have the value \"expected-password-secret\"",
+        last: Option.some(typed),
+        history: [typed],
+        elapsed: Duration.millis(100),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        // A user's own operation on the page around the failed expectation
+        yield* Recorders.observe("Expect.toHaveValue", { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(
+          PublicOperation.named("checkout", { attributes: { "browser.page.id": page.id } }),
+          Effect.flip
+        )
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const content = (yield* unzip(out)).get("trace.trace")!
+      const failures = content.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((event) => event.type === "after" && event.error)
+      assert.strictEqual(failures.length, 2)
+      // The same failure ends both steps; its classification is the expectation's, not the step's name
+      assert.notInclude(content, "typed-password-secret")
+      assert.notInclude(content, "expected-password-secret")
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("hides title evidence only under strict and URL regexps under strict", () =>
