@@ -1289,28 +1289,45 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           ]
         ] as const
       ) {
-        it.effect(`focus-time ${kind}: text fill fails NotEditable, unchanged`, () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() => html)
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
-              const result = yield* page.locator("#field").fill("new").pipe(
-                Deadline.within("1 second"),
-                Effect.result
-              )
-              const field = page.locator("#field")
-              const state = {
-                notEditable: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
-                  result.failure.reason._tag === "NotEditable",
-                value: kind === "type checkbox" ? yield* field.readValue : yield* field.readText,
-                events: yield* page.locator("#events").readText
-              }
-              // Stock WebKit may leave the target unfocused; then the transition is unexercised.
-              if (name === "WebKit" && !state.events.startsWith("focus;")) return
-              assert.deepStrictEqual(state, { notEditable: true, value: "old", events: "focus;" }, String(result))
-            }))
-          }), timeout)
+        for (const editable of [true, false]) {
+          it.effect(
+            `focus-time ${kind}: text fill ${
+              editable ? "fails NotEditable, unchanged" : "skips NotEditable with editable check off"
+            }`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => html)
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator("#field").fill("new", { checks: { editable } }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.result
+                  )
+                  const field = page.locator("#field")
+                  const state = {
+                    notEditable: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                      result.failure.reason._tag === "NotEditable",
+                    value: kind === "type checkbox" ? yield* field.readValue : yield* field.readText,
+                    events: yield* page.locator("#events").readText
+                  }
+                  // Stock WebKit may leave the target unfocused; then the transition is unexercised.
+                  if (name === "WebKit" && !state.events.startsWith("focus;")) {
+                    assert.strictEqual(result._tag, "Success")
+                    assert.deepStrictEqual(state, { notEditable: false, value: "new", events: "input;input;input;" })
+                    return
+                  }
+                  assert.strictEqual(result._tag, editable ? "Failure" : "Success")
+                  assert.deepStrictEqual(
+                    state,
+                    { notEditable: editable, value: "old", events: "focus;" },
+                    String(result)
+                  )
+                }))
+              }),
+            timeout
+          )
+        }
       }
 
       for (const type of ["range", "file", "checkbox"] as const) {
