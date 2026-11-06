@@ -19,3 +19,11 @@ export const supports = (name: string) => Effect.map(status(name), (found) => fo
 
 /** Whether the browser has a capability in full. */
 export const fullySupports = (name: string) => Effect.map(status(name), (found) => found === "supported")
+
+/** Native upload metadata supplied by the pinned browsers, independently of transferred File construction. */
+export const nativeFileModificationTime: Readonly<Record<string, "disk" | "creation">> = {
+  Chromium: "disk",
+  Firefox: "disk",
+  WebKit: "creation",
+  "Chromium attached": "disk"
+}

@@ -1005,6 +1005,58 @@ and visibility filters count the element as hidden. Opacity alone does not make 
   for CSS visibility and missing boxes; and limiting the exception to pointer actions, which would leave transparent
   text fields unusable by fill despite being enabled and editable.
 
+## Local upload transport follows launch and attach
+
+A connection records only whether Strider launched or attached to the browser. Launched `FileInput.local`
+retains native path upload, including absolute paths without caller services, relative paths resolved through
+captured `Path`, and mixtures with Remote paths. Locator existence checks remain conditional on captured
+`FileSystem`; chooser native paths keep their backend failure contract. Launch ownership is a practical storage
+assumption, not proof: container or wrapper launches with a different filesystem must use `FileInput.bytes`.
+An attached browser may be local, but always transferring there makes remote files work without further
+connection classification. Copying every launched upload was rejected because it adds many commands and browser
+storage to the common native-path case.
+
+Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
+base64 encoded, sent and acknowledged before the next is read; no complete encoded file or message is constructed.
+A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
+files, clears the collector and releases the handle on success, failure or interruption; remote cleanup has its
+own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
+constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+as new capability and compatibility contracts without an established requirement.
+
+Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
+Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
+while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
+files after an empty native-path command. The collector validates live input type and cardinality before transfer
+and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
+files on a single-file input. Detached
+chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
+WebKit currently appends native paths on multiple inputs, an existing replacement limitation.
+
+The caller's basename and available open-file stat modification time survive transfer. Effect MIME lookup infers
+MIME from the extension, falling back to `application/octet-stream`. Missing timestamps and Bytes use page-side
+creation time. Local open, stat and read failures retain `FileUnreadable` for locators; chooser failures use the
+existing decision failure report and cancellation policy. Missing caller services fail explicitly.
+
+A chooser's user handler, preparation and staged application run in one registration-scope fiber under the
+original absolute browser-clock deadline. Reads and chunk acknowledgements consume time left after the handler;
+preparation cannot reset its budget or apply after expiry. Decision failures report in the resolving fiber, and
+staged decisions retain their existing count-before-application ordering. Scope interruption cancels stalled work;
+cleanup cannot leave a chooser waiting without a bound.
+
+Chooser transfer preparation runs before the registration's handled count advances. The internal decision has
+its own scope spanning preparation and staged assignment, so failed reads or acknowledgements stay uncounted,
+while a prepared decision is counted before its final application as before. The user handler retains its
+registration scope; introducing a temporary scope around that user callback would close resources the handler
+intends to keep. The collector is released even if the deadline expires between preparation and application.
+
+Launched stock WebKit supplies upload-time creation timestamps rather than disk modification times on its native
+file path. This existing native limitation remains unchanged; transferred files preserve available open-file stat
+times. Native timestamp expectations are explicit in the integration capability table, including exact disk-time
+assertions for Chromium and Firefox and exact transferred-time assertions for attached Chromium.
+
 ## Password snapshot designation
 
 Password inputs have no implicit ARIA role, but agents need a ref to fill them. When inferred interactivity is

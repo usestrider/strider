@@ -261,6 +261,7 @@ export const connect: (
     )
 
     return {
+      ownership: options.ownership,
       claims: options.browserIdentity === undefined || options.claimClient === undefined
         ? undefined
         : Claims.make(state, options.browserIdentity, options.claimClient),

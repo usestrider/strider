@@ -846,6 +846,7 @@ export interface Claims {
 }
 
 export interface AdapterConnection {
+  readonly ownership: "launched" | "attached"
   readonly claims?: Claims | undefined
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
