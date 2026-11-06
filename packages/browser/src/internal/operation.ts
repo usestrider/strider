@@ -22,6 +22,7 @@ import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import { AdapterError, now } from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Recorders from "./recorders.ts"
 import * as Spans from "./spans.ts"
 
 let operations = 0
@@ -555,7 +556,7 @@ const namedCaller = (): string | undefined => {
  * record, and opens its span. Inside another operation, it is a step of it. A `Timeout` that leaves it is its own: one
  * a step ran out with becomes the operation's, with the step's phase, history and hint.
  */
-export const named = (name: string, options: Spans.Options = {}) => {
+const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
   const call = namedCaller()
   return <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
@@ -570,10 +571,16 @@ export const named = (name: string, options: Spans.Options = {}) => {
       Spans.operation(name, options),
       Effect.updateService(
         References.CurrentStackFrame,
-        (parent) => call === undefined || parent?.name === name ? parent : { name, stack: () => call, parent }
+        (parent) =>
+          call === undefined || fromFn && Recorders.isFrame(parent) && parent?.name === name
+            ? parent
+            : Recorders.frame(name, () => call, parent)
       )
     )
 }
+
+/** Runs an operation constructed by a public wrapper or getter. */
+export const named = (name: string, options: Spans.Options = {}) => namedWith(name, options, false)
 
 /**
  * Runs `self` apart from the operation it is in, as an operation of its own named `name`, under a deadline of its
@@ -632,11 +639,12 @@ const framed = <A, E, R>(
   call: Error | undefined,
   definition: () => string | undefined
 ): Effect.Effect<A, E, R> =>
-  Effect.updateService(self, References.CurrentStackFrame, (parent) => ({
-    name,
-    stack: caller(call),
-    parent: { name: `${name} (definition)`, stack: definition, parent }
-  }))
+  Effect.updateService(self, References.CurrentStackFrame, (parent) =>
+    Recorders.frame(
+      name,
+      caller(call),
+      { name: `${name} (definition)`, stack: definition, parent }
+    ))
 
 /**
  * `Effect.fn` as an operation: each call runs its body, then `pipeables`, with the first of them `named`, so the
@@ -650,7 +658,7 @@ export const fnWith = (name: string, options: Spans.Options = {}) => {
     const definition = caller(trace())
     const untraced = Effect.fnUntraced(
       body as never,
-      (effect: Effect.Effect<unknown, unknown, unknown>) => named(name, options)(effect),
+      (effect: Effect.Effect<unknown, unknown, unknown>) => namedWith(name, options, true)(effect),
       ...pipeables as []
     ) as (...args: Array<any>) => Effect.Effect<any, any, any>
     return function(this: unknown, ...args: Array<any>) {

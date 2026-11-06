@@ -34,9 +34,28 @@ export interface Location {
   readonly function: string
 }
 
+// Frame identity distinguishes an operation's own caller from an enclosing span with the same name.
+const operationFrames = new WeakSet<References.StackFrame>()
+
+/** Adds an operation's caller frame to Effect's chain. */
+export const frame = (
+  name: string,
+  stack: () => string | undefined,
+  parent: References.StackFrame | undefined
+): References.StackFrame => {
+  const frame = { name, stack, parent }
+  operationFrames.add(frame)
+  return frame
+}
+
+/** Whether the frame belongs to a library operation rather than a caller's span. */
+export const isFrame = (frame: References.StackFrame | undefined): boolean =>
+  frame !== undefined && operationFrames.has(frame)
+
 /** Available caller frames, without Effect.fn's definition frames. */
-const locations = (frame: References.StackFrame | undefined): ReadonlyArray<Location> => {
+const locations = (frame: References.StackFrame | undefined, name: string) => {
   const result: Array<Location> = []
+  let own = false
   for (; frame !== undefined; frame = frame.parent) {
     if (frame.name.endsWith(" (definition)")) continue
     // Stack capture is optional; a custom tracer may supply an unavailable or throwing lazy stack.
@@ -51,18 +70,20 @@ const locations = (frame: References.StackFrame | undefined): ReadonlyArray<Loca
         if (/^\/[A-Za-z]:/.test(file)) file = file.slice(1)
         if (url.hostname !== "" && url.hostname !== "localhost") file = `//${url.hostname}${file}`
       }
+      if (result.length === 0) own = isFrame(frame) && frame.name === name
       result.push({ file, line: Number(match[2]), column: Number(match[3]), function: frame.name })
     } catch {
       // A missing call site must not prevent the operation from running.
     }
   }
-  return result
+  return { stack: result, enclosingStack: own ? result.slice(1) : result }
 }
 
 /** One operation, as a recording sees it start. */
 export interface Started {
   readonly name: string
   readonly stack: ReadonlyArray<Location>
+  readonly enclosingStack: ReadonlyArray<Location>
   readonly attributes: Readonly<Record<string, unknown>>
   /** The operation's own span, or, when its span is suppressed, the span it runs in. */
   readonly span: Option.Option<Tracer.AnySpan>
@@ -105,10 +126,10 @@ export const observe = <A, E, R>(
     return Effect.gen(function*() {
       const span = yield* Effect.option(Effect.currentParentSpan)
       const subject = yield* CurrentSubject
-      const stack = locations(yield* References.CurrentStackFrame)
+      const locationsOf = locations(yield* References.CurrentStackFrame, name)
       const ends = yield* Effect.forEach(
         covering,
-        (recorder) => recorder.begin({ name, attributes, span, own, subject, stack })
+        (recorder) => recorder.begin({ name, attributes, span, own, subject, ...locationsOf })
       )
       const exit = yield* Effect.exit(self)
       for (const end of ends) yield* end(exit)

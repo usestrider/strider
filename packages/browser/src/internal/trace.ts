@@ -448,10 +448,10 @@ export const start = Effect.fnUntraced(function*(
       if (started.own && Option.isSome(started.span)) {
         bySpan.set(started.span.value.spanId, callId)
         parentId = started.span.value._tag === "Span"
-          ? Option.flatMap(started.span.value.parent, (parent) => stepOf(parent, started.stack))
+          ? Option.flatMap(started.span.value.parent, (parent) => stepOf(parent, started.enclosingStack))
           : Option.none()
       } else {
-        parentId = Option.flatMap(started.span, (span) => stepOf(span, started.stack))
+        parentId = Option.flatMap(started.span, (span) => stepOf(span, started.enclosingStack))
       }
       const step: Step = {
         callId,
