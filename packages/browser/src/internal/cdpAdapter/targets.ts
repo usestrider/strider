@@ -26,7 +26,7 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget } from "./declare.ts"
-import { targetKind } from "./mapping.ts"
+import { frameUrl, targetKind } from "./mapping.ts"
 import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
 
@@ -199,7 +199,7 @@ const installTree = (state: State, target: TargetEntry, tree: Page.FrameTree, ad
       const document = commit(
         state,
         frame,
-        { loaderId: node.frame.loaderId, url: node.frame.url, origin: node.frame.securityOrigin },
+        { loaderId: node.frame.loaderId, url: frameUrl(node.frame), origin: node.frame.securityOrigin },
         (navigation) =>
           navigation !== undefined
             ? { _tag: "Navigation", navigation: navigation.id }
