@@ -1276,6 +1276,43 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }
       }
 
+      // A focus handler can also make the typing target a kind that takes no text at all.
+      for (
+        const [kind, html] of [
+          [
+            "contenteditable off",
+            `<div id="field" contenteditable="true" onfocus="this.contentEditable = 'false'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'">old</div><p id="events"></p>`
+          ],
+          [
+            "type checkbox",
+            `<input id="field" type="text" value="old" onfocus="this.type = 'checkbox'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          ]
+        ] as const
+      ) {
+        it.effect(`focus-time ${kind}: text fill fails NotEditable, unchanged`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => html)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#field").fill("new").pipe(
+                Deadline.within("1 second"),
+                Effect.result
+              )
+              const field = page.locator("#field")
+              const state = {
+                notEditable: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                  result.failure.reason._tag === "NotEditable",
+                value: kind === "type checkbox" ? yield* field.readValue : yield* field.readText,
+                events: yield* page.locator("#events").readText
+              }
+              // Stock WebKit may leave the target unfocused; then the transition is unexercised.
+              if (name === "WebKit" && !state.events.startsWith("focus;")) return
+              assert.deepStrictEqual(state, { notEditable: true, value: "old", events: "focus;" }, String(result))
+            }))
+          }), timeout)
+      }
+
       for (const type of ["range", "file", "checkbox"] as const) {
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
