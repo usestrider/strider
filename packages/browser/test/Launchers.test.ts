@@ -393,24 +393,31 @@ describe("WebKit launcher", () => {
       }
     )
 
-    for (const [mode, stages] of [
-      ["unreadable", ["spawned"]],
-      ["unreadable-after", ["spawned", "listener verified", "connected"]],
-      ["owned", ["spawned", "listener verified", "connected", "inspector established"]]
-    ] as const) {
+    for (
+      const [mode, stages] of [
+        ["unreadable", ["spawned"]],
+        ["unreadable-after", ["spawned", "listener verified", "connected"]],
+        ["owned", ["spawned", "listener verified", "connected", "inspector established"]]
+      ] as const
+    ) {
       it.effect(`reports completed startup stages and times for ${mode} without changing cleanup`, () =>
         Effect.gen(function*() {
           const result = yield* ownershipAttempt(mode)
           const message = result.error.message
           assert.include(message, "WebKit startup (port ")
-          const reached = Array.from(message.matchAll(/(spawned|listener verified|connected|inspector established) at ([0-9.]+)ms/g))
-          assert.deepStrictEqual(reached.map((match) => match[1]), stages)
+          const reached = Array.from(
+            message.matchAll(/(spawned|listener verified|connected|inspector established) at ([0-9.]+)ms/g)
+          )
+          assert.deepStrictEqual(reached.map((match) => match[1]), [...stages])
           const times = reached.map((match) => Number(match[2]))
           assert(times.every((time, index) => time >= 0 && (index === 0 || time >= times[index - 1]!)))
           assert.strictEqual(result.stopped, 1)
           assert.strictEqual(result.closed, result.connected)
           assert(result.error.reason._tag === "ConnectionFailed")
-          assert.include(result.error.reason.hint, mode === "owned" ? "didn't start a session" : "Cannot read Linux procfs")
+          assert.include(
+            result.error.reason.hint,
+            mode === "owned" ? "The connection was lost" : "Cannot read Linux procfs"
+          )
         }))
     }
 
@@ -733,6 +740,21 @@ describe("WebKit launcher", () => {
         assert.include(result.stopped, 0)
       }).pipe(Random.withSeed("port-in-use")))
 
+    it.effect("reports only the last port attempt after a collision", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch((spawn) =>
+          spawn === 0 ? { held: false, foreign: true, collides: true } : { held: false }
+        )
+        assert.strictEqual(result.ports.length, 2)
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.include(error.message, `WebKit startup (port ${result.ports[1]}, PID 9100001;`)
+        assert.strictEqual(Array.from(error.message.matchAll(/spawned at/g)).length, 1)
+        assert.notInclude(error.message, "listener verified at")
+        assert.deepStrictEqual(result.connected, [])
+        assert.deepStrictEqual(result.stopped, [0, 1])
+      }).pipe(Random.withSeed("port-in-use")))
+
     it.effect("closes the connection and stops the child when the deadline interrupts a connection in progress", () =>
       Effect.gen(function*() {
         const result = yield* scriptedLaunch(() => ({ held: true }), Effect.never, "50 millis")
@@ -751,6 +773,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.include(error.reason.hint, "exec MiniBrowser")
         assert.include(error.reason.hint, "WebKit.layerAttach")
         assert.deepStrictEqual(result.connected, [])
@@ -765,6 +788,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.include(error.reason.hint, "exec MiniBrowser")
         assert.include(error.reason.hint, "WebKit.layerAttach")
         assert.strictEqual(result.connected.length, 1)
@@ -783,6 +807,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("keeps a child's exit when procfs loses it before Node reports the exit", () =>
@@ -794,6 +819,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("keeps the exit and closes the connection when procfs disappears before the post-connect exit event", () =>
@@ -804,6 +830,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.strictEqual(result.connected.length, 1)
         assert.deepStrictEqual(result.closed, result.connected)
         assert.deepStrictEqual(result.written, [])
@@ -819,6 +846,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("closes a connection in progress when the child's exit wins the race", () =>
