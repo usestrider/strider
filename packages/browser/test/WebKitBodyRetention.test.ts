@@ -64,12 +64,14 @@ const fixture = Effect.fnUntraced(function*(collect: boolean, via: "automation" 
     requestId: "0.12",
     redirects: 0,
     frame,
+    loaderId: frame.document!.loaderId,
     resourceType: "document",
     finished: Deferred.makeUnsafe<void, string>(),
     kept: undefined,
     url: "https://example.test/first"
   } as State.RequestEntry
   request.hop = ids.hop(request.id, 0)
+  request.responded = request.hop
   const state = {
     ids,
     buffer,
@@ -187,6 +189,70 @@ describe("WebKit document body retention before navigation", () => {
       )
       yield* Fiber.interrupt(navigation)
     }).pipe(Effect.scoped))
+
+  for (const via of ["automation", "reload", "script"] as const) {
+    for (
+      const kind of [
+        "unresponded provisional",
+        "responded uncommitted",
+        "unfinished iframe",
+        "previous-hop response"
+      ] as const
+    ) {
+      it.effect(`does not hold ${via} for an ${kind} load`, () =>
+        Effect.gen(function*() {
+          const f = yield* fixture(true, via)
+          yield* f.finish
+          yield* Deferred.await(f.bodyStarted)
+          yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+          yield* Deferred.await(f.request.kept!)
+          const hop = f.state.ids.hop(f.state.ids.request(), 0)
+          const main = f.request.frame!
+          const pending = {
+            ...f.request,
+            requestId: "pending",
+            hop,
+            responded: kind === "unresponded provisional"
+              ? undefined
+              : kind === "previous-hop response"
+              ? f.request.hop
+              : hop,
+            // Deliberately the same URL: committed loader identity, not URL equality, selects the document.
+            loaderId: kind === "previous-hop response" ? main.document!.loaderId : "different-loader",
+            frame: kind === "unfinished iframe" ? { ...main, parent: main, id: f.state.ids.navigable() } : main,
+            finished: Deferred.makeUnsafe<void, string>(),
+            kept: undefined
+          } as State.RequestEntry
+          f.state.requests.set(State.requestKey(pending.session, pending.requestId), pending)
+          const navigation = yield* f.navigate.pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          const command = via === "automation"
+            ? "Automation.navigateBrowsingContext"
+            : via === "reload"
+            ? "Page.reload"
+            : "Runtime.evaluate"
+          assert.deepStrictEqual(f.sent, ["Network.getResponseBody", command])
+          yield* Fiber.join(navigation)
+        }).pipe(Effect.scoped))
+    }
+  }
+
+  for (const kind of ["iframe", "uncommitted"] as const) {
+    it.effect(`still waits for an already-started ${kind} document body read`, () =>
+      Effect.gen(function*() {
+        const f = yield* fixture(true)
+        if (kind === "iframe") Object.assign(f.request, { frame: { ...f.request.frame!, parent: f.request.frame } })
+        else Object.assign(f.request, { loaderId: "uncommitted-loader" })
+        yield* f.finish
+        yield* Deferred.await(f.bodyStarted)
+        const navigation = yield* f.navigate.pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
+        yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+        yield* Fiber.join(navigation)
+        assert.deepStrictEqual(f.sent, ["Network.getResponseBody", "Automation.navigateBrowsingContext"])
+      }).pipe(Effect.scoped))
+  }
 
   it.effect("dispatches without waiting for loadingFinished when collection is disabled", () =>
     Effect.gen(function*() {
@@ -311,49 +377,51 @@ describe("WebKit document body retention before navigation", () => {
       }).pipe(Effect.scoped))
   }
 
-  for (const phase of ["before loadingFinished", "during body read"]) {
-    it.effect(`interrupts the collection wait ${phase} without dispatching a late navigation`, () =>
-      Effect.gen(function*() {
-        const f = yield* fixture(true)
-        if (phase === "during body read") {
-          yield* f.finish
+  for (const via of ["automation", "reload", "script"] as const) {
+    for (const phase of ["before loadingFinished", "during body read"]) {
+      it.effect(`${via}: interrupts the collection wait ${phase} without dispatching a late navigation`, () =>
+        Effect.gen(function*() {
+          const f = yield* fixture(true, via)
+          if (phase === "during body read") {
+            yield* f.finish
+            yield* Deferred.await(f.bodyStarted)
+          }
+          const navigation = yield* f.navigate.pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Fiber.interrupt(navigation)
+          const exit = yield* Fiber.await(navigation)
+          assert.isTrue(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause))
+          if (phase === "before loadingFinished") yield* f.finish
           yield* Deferred.await(f.bodyStarted)
-        }
-        const navigation = yield* f.navigate.pipe(Effect.forkChild)
-        yield* Effect.yieldNow
-        yield* Fiber.interrupt(navigation)
-        const exit = yield* Fiber.await(navigation)
-        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause))
-        if (phase === "before loadingFinished") yield* f.finish
-        yield* Deferred.await(f.bodyStarted)
-        yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
-        yield* Effect.yieldNow
-        assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
-      }).pipe(Effect.scoped))
+          yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+          yield* Effect.yieldNow
+          assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
+        }).pipe(Effect.scoped))
 
-    it.effect(`ends the collection wait ${phase} at the navigation deadline with no grace or late dispatch`, () =>
-      Effect.gen(function*() {
-        const clock = BrowserClock.fromClock(yield* Clock.Clock)
-        const f = yield* fixture(true)
-        if (phase === "during body read") {
-          yield* f.finish
+      it.effect(`${via}: ends the committed streaming document collection wait ${phase} at the navigation deadline with no grace or late dispatch`, () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Clock.Clock)
+          const f = yield* fixture(true, via)
+          if (phase === "during body read") {
+            yield* f.finish
+            yield* Deferred.await(f.bodyStarted)
+          }
+          const navigation = yield* f.navigate.pipe(
+            Deadline.within("100 millis"),
+            Effect.provideService(BrowserClock.CurrentClock, clock),
+            Effect.forkChild
+          )
+          yield* TestClock.adjust("100 millis")
+          assert.isDefined(navigation.pollUnsafe(), "the deadline must end the wait without extra grace")
+          const exit = yield* Fiber.await(navigation)
+          assert.isTrue(Exit.isFailure(exit))
+          if (Exit.isFailure(exit)) assert.isTrue(Deadline.isTimeout(Option.getOrThrow(Exit.findErrorOption(exit))))
+          if (phase === "before loadingFinished") yield* f.finish
           yield* Deferred.await(f.bodyStarted)
-        }
-        const navigation = yield* f.navigate.pipe(
-          Deadline.within("100 millis"),
-          Effect.provideService(BrowserClock.CurrentClock, clock),
-          Effect.forkChild
-        )
-        yield* TestClock.adjust("100 millis")
-        assert.isDefined(navigation.pollUnsafe(), "the deadline must end the wait without extra grace")
-        const exit = yield* Fiber.await(navigation)
-        assert.isTrue(Exit.isFailure(exit))
-        if (Exit.isFailure(exit)) assert.isTrue(Deadline.isTimeout(Option.getOrThrow(Exit.findErrorOption(exit))))
-        if (phase === "before loadingFinished") yield* f.finish
-        yield* Deferred.await(f.bodyStarted)
-        yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
-        yield* Effect.yieldNow
-        assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
-      }).pipe(Effect.scoped))
+          yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+          yield* Effect.yieldNow
+          assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
+        }).pipe(Effect.scoped))
+    }
   }
 })
