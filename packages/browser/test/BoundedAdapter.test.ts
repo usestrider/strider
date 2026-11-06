@@ -260,6 +260,35 @@ describe("BoundedAdapter", () => {
       }).pipe(Operation.named("outer"))
     }))
 
+  for (const mark of ["sent", "not sent", "rejected"] as const) {
+    it.effect(`keeps a manual ${mark} mark after a confirmed write while a read-only step overlaps`, () =>
+      Effect.gen(function*() {
+        const adapter = stub({ setCookies: () => Effect.void })
+        const dispatch = yield* Effect.gen(function*() {
+          const record = yield* Operation.record
+          const watch = yield* Effect.forkChild(Effect.never.pipe(Operation.named("watch")))
+          yield* real(1)
+          yield* adapter.setCookies(context, [])
+          if (mark === "sent") record.markSent()
+          else if (mark === "not sent") {
+            record.markSent()
+            record.markNotSent()
+          } else record.markConfirmed("rejected")
+          const dispatch = record.diagnostics().dispatch
+          yield* Fiber.interrupt(watch)
+          return dispatch
+        }).pipe(Operation.named("cookies"))
+        assert.deepStrictEqual(
+          dispatch,
+          mark === "sent"
+            ? { _tag: "MayHaveBeenSent" }
+            : mark === "not sent"
+            ? { _tag: "NotSent" }
+            : { _tag: "Acknowledged", result: "rejected" }
+        )
+      }))
+  }
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
