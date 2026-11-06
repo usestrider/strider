@@ -32,6 +32,14 @@ describe("VideoWriter", () => {
     assert.isAtMost(time(4000003600, 240e6), 240e6)
   })
 
+  it("caps lower delivery latency without changing the stream anchor", () => {
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(1000, 200e6), 200e6)
+    // The first delivery's delay also shifts later mapped times; a faster delivery can reach the cap.
+    assert.strictEqual(time(1000.1, 240e6), 240e6)
+    assert.closeTo(time(1000.12, 400e6), 320e6, 1000)
+  })
+
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {
     const info = new Browser.Info({ protocol: "webkit", product: "WebKit", version: "test", revision: "test" })
     for (const capabilities of [WebKit.attachedCapabilities, WebKit.launchedCapabilities]) {

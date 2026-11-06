@@ -1673,6 +1673,36 @@ describe("Chromium video writer lifetime", () => {
       assert.match(yield* video.file, /\.webm$/)
     }).pipe(onTestClock))
 
+  it.effect("keeps the stop-time tail local after a forward browser clock jump", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: (frames, target) =>
+          frames.pipe(
+            Stream.runForEach((image) => Queue.offer(written, image)),
+            Effect.as(target.path)
+          )
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 81, 1000)
+      assert.strictEqual((yield* Queue.take(written)).at, 0)
+      yield* TestClock.adjust("40 millis")
+      yield* frame(h, 82, 4600)
+      const jumped = yield* Queue.take(written)
+      yield* TestClock.adjust("60 millis")
+      yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 100e6, "the wall-clock jump must not extend the recording past stop")
+      assert.strictEqual(jumped.at, 40e6)
+      yield* video.file
+    }).pipe(onTestClock))
+
   for (const epoch of [1000, 4000000000, "local"] as const) {
     for (const missing of [false, true]) {
       it.effect(`maps browser epoch ${epoch} with ${missing ? "missing timestamp transitions" : "backward source times"}`, () =>
