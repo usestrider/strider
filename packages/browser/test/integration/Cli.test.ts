@@ -70,13 +70,19 @@ const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
     )
   })
 
-/** `strider mcp` as a client runs it: messages written to its standard input, answers read until the last id. */
+/**
+ * `strider mcp` as a client runs it: messages written to its standard input, answers read until every request up to
+ * the last id has one, in whatever order the server answers them.
+ */
 const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages: ReadonlyArray<object>, last: number) =>
   Effect.callback<ReadonlyArray<any>>((resume) => {
     const child = spawn(process.execPath, [bin, ...args], {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     })
+    const pending = new Set(
+      messages.flatMap((message: any) => typeof message.id === "number" && message.id <= last ? [message.id] : [])
+    )
     const answers: Array<any> = []
     let buffered = ""
     let errors = ""
@@ -94,7 +100,8 @@ const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages:
         if (line.trim() === "") continue
         const answer = JSON.parse(line)
         answers.push(answer)
-        if (answer.id === last) {
+        pending.delete(answer.id)
+        if (pending.size === 0) {
           clearTimeout(timer)
           child.stdin.end()
           child.kill()
@@ -115,6 +122,19 @@ const handshake = [
   },
   { jsonrpc: "2.0", method: "notifications/initialized" }
 ]
+
+/** Tool calls through one `strider mcp`, which may run them at once: each call's answer, in the calls' order. */
+const mcpTools = (
+  env: Record<string, string>,
+  args: ReadonlyArray<string>,
+  calls: ReadonlyArray<{ readonly name: string; readonly arguments: object }>
+) =>
+  mcp(env, args, [
+    ...handshake,
+    ...calls.map((params, index) => ({ jsonrpc: "2.0", id: index + 2, method: "tools/call", params }))
+  ], calls.length + 1).pipe(
+    Effect.map((answers) => calls.map((_, index) => answers.find((answer) => answer.id === index + 2)))
+  )
 
 /** The page names `strider pages` lists, one a line before its URL. */
 const names = (listing: { readonly out: string }) =>
@@ -1504,19 +1524,20 @@ describe("strider", () => {
               }
               check(snapshot.out)
               check(found.out, true)
-              for (const query of ["rich-heading", "article-private", "paragraph-private", "heading-private"]) {
+              const guesses = ["rich-heading", "article-private", "paragraph-private", "heading-private"]
+              for (const query of guesses) {
                 const guessed = yield* page("--json", "find", query)
                 assert.strictEqual(guessed.code, 0, guessed.err)
                 assert.strictEqual(JSON.parse(guessed.out).outcome.value.length > 0, capture === "local", guessed.out)
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
-                  jsonrpc: "2.0",
-                  id: 2,
-                  method: "tools/call",
-                  params: { name: "find", arguments: { page: "form", query } }
-                }], 2)
-                const result = answers.find((answer) => answer.id === 2)?.result
-                assert.isNotTrue(result?.isError, JSON.stringify(answers))
-                assert.strictEqual(result.structuredContent.outcome.length > 0, capture === "local")
+              }
+              const guessAnswers = yield* mcpTools(
+                env,
+                ["-s", capture, "mcp"],
+                guesses.map((query) => ({ name: "find", arguments: { page: "form", query } }))
+              )
+              for (const answer of guessAnswers) {
+                assert.isNotTrue(answer?.result?.isError, JSON.stringify(answer))
+                assert.strictEqual(answer.result.structuredContent.outcome.length > 0, capture === "local")
               }
               const labeled = yield* page("--json", "find", "Article", "--role", "article")
               assert.strictEqual(JSON.parse(labeled.out).outcome.value.length, 1, labeled.out)
@@ -1570,22 +1591,16 @@ describe("strider", () => {
               const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
               assert.strictEqual(checked.code, 0, checked.err)
 
-              for (const name of ["snapshot", "find"] as const) {
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
-                  ...handshake,
-                  {
-                    jsonrpc: "2.0",
-                    id: 2,
-                    method: "tools/call",
-                    params: {
-                      name,
-                      arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
-                    }
-                  }
-                ], 2)
-                const answer = answers.find((answer) => answer.id === 2)
+              const reads = ["snapshot", "find"] as const
+              const readAnswers = yield* mcpTools(
+                env,
+                ["-s", capture, "mcp"],
+                reads.map((name) => ({ name, arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) } }))
+              )
+              for (const [index, name] of reads.entries()) {
+                const answer = readAnswers[index]
                 assert.isUndefined(answer?.error, JSON.stringify(answer))
-                assert.isDefined(answer?.result, JSON.stringify(answers))
+                assert.isDefined(answer?.result, JSON.stringify(answer))
                 assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
                 const output = JSON.stringify(answer.result)
                 check(output, name === "find")
@@ -1693,33 +1708,18 @@ describe("strider", () => {
                 ? ["public-field-label", "public-heading", "public-nearby"]
                 : [...contents, "public-field-label", "public-heading", "public-nearby"]
               const queries = [...contents, "public-field-label", "public-heading", "public-nearby"]
-              const snapshotAnswers = yield* mcp(env, ["-s", capture, "mcp"], [
-                ...handshake,
-                {
-                  jsonrpc: "2.0",
-                  id: 2,
-                  method: "tools/call",
-                  params: { name: "snapshot", arguments: { page: "form" } }
-                }
-              ], 2)
-              const mcpSnapshot = snapshotAnswers.find((answer) => answer.id === 2)?.result
-              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswers))
+              const [snapshotAnswer, ...findAnswers] = yield* mcpTools(env, ["-s", capture, "mcp"], [
+                { name: "snapshot", arguments: { page: "form" } },
+                ...queries.map((query) => ({ name: "find", arguments: { page: "form", query } }))
+              ])
+              const mcpSnapshot = snapshotAnswer?.result
+              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswer))
               const mcpShown = queries.filter((query) => JSON.stringify(mcpSnapshot).includes(query))
-              const mcpMatched: Array<string> = []
-              for (const query of queries) {
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
-                  ...handshake,
-                  {
-                    jsonrpc: "2.0",
-                    id: 2,
-                    method: "tools/call",
-                    params: { name: "find", arguments: { page: "form", query } }
-                  }
-                ], 2)
-                const result = answers.find((answer) => answer.id === 2)?.result
-                assert.isNotTrue(result?.isError, JSON.stringify(answers))
-                if (result.structuredContent.outcome.length > 0) mcpMatched.push(query)
-              }
+              const mcpMatched = queries.filter((_, index) => {
+                const result = findAnswers[index]?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(findAnswers[index]))
+                return result.structuredContent.outcome.length > 0
+              })
               assert.deepStrictEqual(
                 { shown, matched, mcpShown, mcpMatched },
                 { shown: expected, matched: expected, mcpShown: expected, mcpMatched: expected },

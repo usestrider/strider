@@ -416,7 +416,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }
         })), timeout)
 
-      for (const megabytes of [32, 256, 600]) {
+      // Past the longest string V8 makes, so a transfer that encoded the whole file fails; the chunks' boundaries
+      // are the case above's
+      for (const megabytes of [600]) {
         it.effect(`transfers a local file of ${megabytes} MiB`, () =>
           Effect.gen(function*() {
             const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
