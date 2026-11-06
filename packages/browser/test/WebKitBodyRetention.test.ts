@@ -254,6 +254,51 @@ describe("WebKit document body retention before navigation", () => {
       }).pipe(Effect.scoped))
   }
 
+  for (const via of ["automation", "reload", "script"] as const) {
+    it.effect(`bypasses retention wait machinery for ${via} without collection`, () =>
+      Effect.gen(function*() {
+        const f = yield* fixture(false, via)
+        const waitFor = f.state.buffer.waitFor
+        let calls = 0
+        Object.assign(f.state.buffer, {
+          waitFor: <A>(check: () => A | undefined) => {
+            calls++
+            return waitFor(check)
+          }
+        })
+        yield* f.navigate
+        assert.strictEqual(calls, 0)
+        assert.strictEqual(f.sent.length, 1)
+      }).pipe(Effect.scoped))
+  }
+
+  it.effect("checks collection at execution before entering retention wait machinery", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      const waitFor = f.state.buffer.waitFor
+      let calls = 0
+      Object.assign(f.state.buffer, {
+        waitFor: <A>(check: () => A | undefined) => {
+          calls++
+          return waitFor(check)
+        }
+      })
+      const guard = Network.beforeNavigation(f.state, f.request.frame!.page)
+      yield* f.release
+      yield* guard
+      assert.strictEqual(calls, 0)
+      yield* Declare.declare(f.state, { _tag: "Page", page: f.request.frame!.page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["response"],
+        maxBytes: 1024
+      })
+      const waiting = yield* guard.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.strictEqual(calls, 1)
+      assert.isUndefined(waiting.pollUnsafe())
+      yield* Fiber.interrupt(waiting)
+    }).pipe(Effect.scoped))
+
   it.effect("dispatches without waiting for loadingFinished when collection is disabled", () =>
     Effect.gen(function*() {
       const f = yield* fixture(false)
