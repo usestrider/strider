@@ -416,7 +416,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       it.effect("fails a navigation's wait with the reason goto gives", () =>
         Effect.scoped(Effect.gen(function*() {
-          const origin = yield* navigationFailure
+          const { origin } = yield* navigationFailure
           const { url } = yield* fixture(() => `<a href="${origin}/nowhere">Broken</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()

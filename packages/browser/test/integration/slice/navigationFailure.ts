@@ -21,4 +21,7 @@ export const navigationFailure = Effect.acquireRelease(
         server.closeAllConnections()
       })
     )
-).pipe(Effect.map((server) => `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`))
+).pipe(Effect.map((server) => ({
+  origin: `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`,
+  server
+})))

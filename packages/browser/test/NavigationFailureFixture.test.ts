@@ -21,8 +21,13 @@ const claim = (origin: string) =>
 
 it.effect("owns the failure address until its scope closes", () =>
   Effect.gen(function*() {
-    const origin = yield* Effect.scoped(Effect.gen(function*() {
-      const origin = yield* navigationFailure
+    let closed = false
+    const server = yield* Effect.scoped(Effect.gen(function*() {
+      const { origin, server } = yield* navigationFailure
+      assert.isTrue(server.listening)
+      server.once("close", () => {
+        closed = true
+      })
       assert.strictEqual(yield* Effect.promise(() => claim(origin)), "EADDRINUSE")
       const failure = yield* Effect.promise(() =>
         new Promise<string>((resolve, reject) => {
@@ -33,7 +38,8 @@ it.effect("owns the failure address until its scope closes", () =>
         })
       )
       assert.strictEqual(failure, "ECONNRESET")
-      return origin
+      return server
     }))
-    assert.strictEqual(yield* Effect.promise(() => claim(origin)), "another listener answered")
+    assert.isTrue(closed)
+    assert.isFalse(server.listening)
   }))
