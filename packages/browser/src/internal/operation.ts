@@ -219,6 +219,7 @@ export class Record implements Operation.Operation {
   private readonly parents = new Set<Record>()
   private readonly manual = new Map<Record, Diagnostics.DispatchState>()
   private overlap: Diagnostics.DispatchState = { _tag: "NotSent" }
+  private beforeOverlap: Diagnostics.DispatchState = { _tag: "NotSent" }
   private replyUncertain = false
 
   cleanup: Diagnostics.CleanupState = { _tag: "NotNeeded" }
@@ -246,6 +247,7 @@ export class Record implements Operation.Operation {
 
   private startDispatch(): void {
     if (this.dispatches.size === 0 && this.manual.size === 0) {
+      this.beforeOverlap = this.dispatchEvidence
       this.overlap = { _tag: "NotSent" }
       this.replyUncertain = false
     }
@@ -253,8 +255,9 @@ export class Record implements Operation.Operation {
 
   private finishDispatch(dispatch: Diagnostics.DispatchState): void {
     this.overlap = combinedDispatch(this.overlap, dispatch)
-    this.dispatchEvidence = this.overlap
-    this.replyUncertain = this.overlap._tag === "MayHaveBeenSent"
+    // An overlap made solely of canceled child sends contributes no new delivery evidence.
+    this.dispatchEvidence = this.overlap._tag === "NotSent" ? this.beforeOverlap : this.overlap
+    this.replyUncertain = this.dispatchEvidence._tag === "MayHaveBeenSent"
   }
 
   /** Manual sends have a lifetime too: a guard or answer ends only that source's send. */
@@ -265,6 +268,9 @@ export class Record implements Operation.Operation {
     } else {
       if (!this.manual.has(source)) this.startDispatch()
       this.manual.delete(source)
+      // A local guard replaces this record's own gesture evidence. In an enclosing record it cancels only
+      // this child's send, so earlier writes remain evidence if the whole overlap was guarded.
+      if (dispatch._tag === "NotSent" && source === this) this.beforeOverlap = { _tag: "NotSent" }
       this.finishDispatch(dispatch)
     }
     for (const parent of this.parents) parent.mark(dispatch, source)

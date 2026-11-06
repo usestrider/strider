@@ -1152,3 +1152,9 @@ completion settles them. A tracked call takes over its caller's preparatory manu
 or guarding a different manual send cannot erase a concurrent call's missing reply, even after that call's wait
 has ended. Rejected: using every active step as an overlap member, which lets unrelated read waits hide later
 evidence and keep already finished write groups alive.
+
+A guard cancels only its source record's tentative send. In that record, it restores `NotSent` for the guarded
+gesture. In enclosing records, an overlap consisting only of guarded child sends contributes no new delivery
+evidence, so the evidence from before that overlap survives. A completed or unanswered unrelated write in the
+overlap still takes precedence. Rejected: forwarding a child's cancellation as replacement of an enclosing
+operation's prior evidence, which could claim safe retry after an earlier write had reached the browser.

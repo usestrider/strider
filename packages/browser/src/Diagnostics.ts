@@ -45,7 +45,8 @@ export type OperationId = typeof OperationId.Type
  * Overlapping calls and steps stay uncertain if any write is still unanswered, including one whose wait ended
  * without a reply or was interrupted. When all writes in that overlap are acknowledged, any browser rejection
  * makes the result `"rejected"`. A subsequent sequential write starts with evidence of its own. Read-only steps
- * do not keep a write overlap open or replace later dispatch evidence when they finish.
+ * do not keep a write overlap open or replace later dispatch evidence when they finish. A guarded child reports
+ * `NotSent` for its gesture; its cancellation does not erase earlier writes from the enclosing operation.
  *
  * Acknowledgement can describe a retried held-key or held-button release. It does not by itself prove that the
  * requested gesture was sent: recovery can fail, or the gesture can be refused before dispatch after recovery.
