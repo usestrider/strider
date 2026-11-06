@@ -1,4 +1,4 @@
-/** Page rounds must use the time left after cold engine setup (ROOK-89). */
+/** Page rounds must use the time left after cold engine setup. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Deadline, Expect, Target } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
