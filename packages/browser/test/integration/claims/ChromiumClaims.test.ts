@@ -579,16 +579,24 @@ describe("Chromium claims", () => {
           const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const requested = yield* Deferred.make<ServerResponse>()
           const { origin } = yield* serveWithDiscoveredGate(requested)
-          const targetId = yield* Effect.scoped(Effect.gen(function*() {
+          const initialPages = (yield* browser.targets).filter((info) => info.type === "page")
+          const { targetId } = yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
+          const response = yield* Deferred.await(requested)
+          // Leave only the externally created target, so adoption needs no public-to-CDP ID mapping.
+          for (const page of initialPages) {
+            yield* Target.closeTarget({ targetId: page.targetId }).pipe(Protocol.on(browser.observer.browser))
+          }
+          assert.deepStrictEqual(
+            (yield* browser.targets).filter((info) => info.type === "page").map((info) => info.targetId),
+            [targetId]
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
             const connected = yield* Browser.Browser
-            const before = new Set((yield* connected.pages).map((page) => page.id))
-            const { targetId } = yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(
-              Protocol.on(browser.observer.browser)
-            )
-            const response = yield* Deferred.await(requested)
-            const pages = yield* connected.pages.waitFor((pages) => pages.some((page) => !before.has(page.id)))
-            const matches = pages.filter((page) => !before.has(page.id))
-            assert.lengthOf(matches, 1, "exactly one discovered page while its response is held")
+            // Connect drains existing targets; the sole page was created before this layer was built.
+            const matches = yield* connected.pages
+            assert.lengthOf(matches, 1, "exactly one adopted page while its response is held")
             const observed = matches[0]!
             // Register on the connected model before the response can replace the initial realm.
             const loaded = yield* PageNavigation.next(observed, { url: `${origin}/discovered`, waitUntil: "load" })
@@ -600,7 +608,6 @@ describe("Chromium claims", () => {
             assert.strictEqual(reason(yield* api.Page.claim(controlled).pipe(Effect.exit)), "NotPermitted")
             const context = yield* connected.defaultContext.control
             assert.strictEqual(reason(yield* api.UserContext.claim(context).pipe(Effect.exit)), "NotPermitted")
-            return targetId
           })).pipe(Effect.provide(browser.connect))
           assert.isTrue((yield* browser.targets).some((info) => info.targetId === targetId))
         }), 60_000)
