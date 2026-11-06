@@ -289,6 +289,7 @@ interface ScreencastOwner {
 }
 interface ScreencastOwners {
   readonly termination: Deferred.Deferred<void, Adapter.AdapterError>
+  time: ReturnType<typeof makeScreencastClock>
   latest: Adapter.ScreencastFrame | undefined
   readonly active: Set<ScreencastOwner>
   /** Starts awaiting an outcome, including abandoned commands retained until reply or session end. */
@@ -318,6 +319,7 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
       )
       const owners: ScreencastOwners = {
         termination: Deferred.makeUnsafe<void, Adapter.AdapterError>(),
+        time: makeScreencastClock(),
         latest: undefined,
         active: new Set(),
         pending: new Set(),
@@ -339,6 +341,7 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Operation.detached,
         Effect.forkIn(state.cleanupScope)
       )
+      const clock = yield* BrowserClock.CurrentClock
       const frames = yield* session.subscribe(Page.screencastFrame).pipe(
         Effect.provideService(Scope.Scope, state.cleanupScope)
       )
@@ -346,8 +349,13 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Stream.mapError(Kit.protocolError),
         Stream.runForEach((event) =>
           Effect.gen(function*() {
+            const received = clock.now()
             const jpeg = yield* Kit.decodeBase64(event.data, "Page.screencastFrame")
-            const frame = { at: Adapter.now(), ...Adapter.jpegSize(jpeg), jpeg }
+            const frame = {
+              at: owners.time(event.metadata.timestamp, received),
+              ...Adapter.jpegSize(jpeg),
+              jpeg
+            }
             owners.latest = frame
             const pending = new Set(owners.active)
             let acked = false
@@ -485,6 +493,7 @@ const screencastDeliveries = Effect.fnUntraced(function*(state: State, id: L1Tar
               return Effect.void
             }
             const joining = owners.pending.size > 0 || owners.needsStop
+            if (!joining) owners.time = makeScreencastClock()
             owner.status = "pending"
             owner.stopAtDispatch = owners.stops
             owners.pending.add(owner)
@@ -543,7 +552,20 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
   return deliveries.pipe(Stream.mapEffect(({ frame, take }) => Effect.as(take, frame)))
 })
 
-/** Video is another session consumer; pacing and its lifetime are independent of the caller's acquisition deadline. */
+/** Anchor each native stream to local receipt time and cap browser-clock deltas at receipt. */
+export const makeScreencastClock = () => {
+  let origin: { readonly seconds: number; readonly received: number } | undefined
+  return (seconds: number | undefined, received: number): Adapter.ScreencastFrame["at"] => {
+    if (seconds === undefined) return received as Adapter.ScreencastFrame["at"]
+    origin ??= { seconds, received }
+    return Math.min(
+      received,
+      origin.received + Math.round((seconds - origin.seconds) * 1e9)
+    ) as Adapter.ScreencastFrame["at"]
+  }
+}
+
+/** Video is another session consumer; timing and its lifetime are independent of the caller's acquisition deadline. */
 export const video = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, writer: Option.Option<VideoWriter.VideoWriter>) {
     if (Option.isNone(writer)) {
@@ -561,7 +583,13 @@ export const video = Effect.fnUntraced(
         return {
           frames: frames.pipe(
             Stream.map(({ frame, take }) => ({
-              frame: { format: "jpeg" as const, data: frame.jpeg, width: frame.width, height: frame.height },
+              frame: {
+                at: frame.at,
+                format: "jpeg" as const,
+                data: frame.jpeg,
+                width: frame.width,
+                height: frame.height
+              },
               take
             })),
             Stream.catch((error) => normalSourceEnd(error) ? Stream.empty : Stream.fail(error))

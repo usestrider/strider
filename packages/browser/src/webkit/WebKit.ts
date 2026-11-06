@@ -52,7 +52,7 @@ export interface LaunchOptions extends Browser.LaunchOptions {
    * Enables serial PNG polling for video with a supplied `VideoWriter`. The initial capture is immediate;
    * subsequent captures wait at least `polled` after capture completes, with backpressure from the writer. The interval must be finite and positive.
    * The directory must already exist and be writable, and its files remain caller-owned. This does not enable downloads.
-   * No audio is recorded; a 25fps file repeats samples and can miss states between captures.
+   * No audio is recorded; each sample keeps its time in a variable-rate file. States between captures can be missed.
    *
    * @default undefined — video is disabled
    */
@@ -115,7 +115,7 @@ export interface ConnectOptions extends Browser.ConnectOptions {
  *
  * Video is disabled unless `video` and a `VideoWriter` service are both provided. `polled` is a finite positive
  * delay after each completed PNG capture; 100 ms is a starting point, not a default or a responsiveness guarantee.
- * Captures add work to the page and can miss short states. A 25fps file repeats samples. The output directory
+ * Captures add work to the page and can miss short states. The variable-rate file keeps each sample until the next or recording end. The output directory
  * must already exist, be absolute and writable; invalid video settings fail with `InvalidInput` before launch.
  * Files remain in that caller-owned directory. Downloads and native screencasts remain unsupported.
  *

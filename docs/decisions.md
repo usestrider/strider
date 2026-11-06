@@ -1177,10 +1177,10 @@ and restarting the native stream for an idle join, which disrupts existing consu
 `VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
 the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
 Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
-PATH. The video consumer paces the latest image at 25fps on the browser clock through idle periods. Strider fixes
+PATH. The video consumer keeps source timestamps relative to recording start and sends the last picture once more at stop time so a still ending lasts until stop. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
 the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
 scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
-that policy, pacing, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
+that policy, timestamps, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
 inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
 or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
@@ -1201,7 +1201,7 @@ inferred from writer availability. The interval is finite and positive with no h
 immediate, subsequent serial captures wait the configured interval after completion and any backpressure, and
 navigation target replacement does not end the page proxy recording. Actual page, context or connection end is
 observed independently of writer reads. Rejected: enabling polling whenever a writer is supplied, claiming
-repeated 25fps output is a native 25fps capture, and enabling downloads merely to supply a video destination.
+polled output is a native capture, and enabling downloads merely to supply a video destination.
 
 ## Expectation observations
 

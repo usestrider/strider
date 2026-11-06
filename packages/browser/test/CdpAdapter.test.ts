@@ -1590,7 +1590,8 @@ describe("Chromium screenshot renderer readiness", () => {
 describe("Chromium video writer lifetime", () => {
   const frame = (
     h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
-    sessionId: number
+    sessionId: number,
+    timestamp?: number
   ) =>
     h.browser.receive({
       method: "Page.screencastFrame",
@@ -1599,6 +1600,7 @@ describe("Chromium video writer lifetime", () => {
         data: "/9j/2Q==",
         sessionId,
         metadata: {
+          ...(timestamp === undefined ? {} : { timestamp }),
           offsetTop: 0,
           pageScaleFactor: 1,
           deviceWidth: 800,
@@ -1635,7 +1637,7 @@ describe("Chromium video writer lifetime", () => {
       )
     }).pipe(onTestClock))
 
-  it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
+  it.effect("keeps idle images until the recording scope closes", () =>
     Effect.gen(function*() {
       const written = yield* Queue.unbounded<VideoWriter.Frame>()
       const destination = yield* Deferred.make<VideoWriter.Destination>()
@@ -1653,18 +1655,105 @@ describe("Chromium video writer lifetime", () => {
       const page = yield* h.page.control
       const scope = yield* Scope.make()
       const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
-      yield* frame(h, 51)
+      yield* frame(h, 51, 1000)
       assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
       const first = yield* Queue.take(written)
       yield* TestClock.adjust("120 millis")
-      const second = yield* Queue.take(written)
-      const third = yield* Queue.take(written)
-      assert.strictEqual(second.at - first.at, 40e6)
-      assert.strictEqual(third.at - second.at, 40e6)
-      assert.deepStrictEqual(third.data, first.data)
+      assert.strictEqual(yield* Queue.size(written), 0, "idle periods do not generate copies")
+      yield* TestClock.adjust("380 millis")
+      // The paint happened at 237ms; receiving it at 500ms must not change its timestamp.
+      yield* frame(h, 52, 1000.237)
+      const painted = yield* Queue.take(written)
+      assert.closeTo(painted.at, 237e6, 1000)
+      yield* TestClock.adjust("100 millis")
       yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 600e6)
+      assert.deepStrictEqual(tail.data, first.data)
       assert.match(yield* video.file, /\.webm$/)
     }).pipe(onTestClock))
+
+  it.effect("keeps the stop-time tail local after a forward browser clock jump", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: (frames, target) =>
+          frames.pipe(
+            Stream.runForEach((image) => Queue.offer(written, image)),
+            Effect.as(target.path)
+          )
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 81, 1000)
+      assert.strictEqual((yield* Queue.take(written)).at, 0)
+      yield* TestClock.adjust("40 millis")
+      yield* frame(h, 82, 4600)
+      const jumped = yield* Queue.take(written)
+      yield* TestClock.adjust("60 millis")
+      yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 100e6, "the wall-clock jump must not extend the recording past stop")
+      assert.strictEqual(jumped.at, 40e6)
+      yield* video.file
+    }).pipe(onTestClock))
+
+  for (const epoch of [1000, 4000000000, "local"] as const) {
+    for (const missing of [false, true]) {
+      it.effect(`maps browser epoch ${epoch} with ${missing ? "missing timestamp transitions" : "backward source times"}`, () =>
+        Effect.gen(function*() {
+          const written = yield* Queue.unbounded<VideoWriter.Frame>()
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: (frames, target) =>
+              frames.pipe(
+                Stream.runForEach((image) => Queue.offer(written, image)),
+                Effect.as(target.path)
+              )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          // Reusing the page after a complete stop must establish a new clock mapping.
+          for (const shift of [0, 3600]) {
+            const scope = yield* Scope.make()
+            const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+            const clock = yield* BrowserClock.CurrentClock
+            const base = typeof epoch === "number"
+              ? epoch + shift
+              : (performance.timeOrigin + clock.now() / 1e6) / 1000
+            const samples = missing
+              ? epoch === "local"
+                ? [[0, base, 0], [100, undefined, 100], [110, base + 0.005, 100], [4100, base + 4, 4000]] as const
+                : [
+                  [0, undefined, 0],
+                  [10, base, 10],
+                  [20, base + 0.005, 15],
+                  [30, undefined, 30],
+                  [40, base + 0.020, 30],
+                  [4100, base + 4, 4010]
+                ] as const
+              : [[0, base, 0], [10, base + 0.005, 5], [20, base + 0.003, 5], [4100, base + 4, 4000]] as const
+            let previous = 0
+            for (const [receipt, timestamp, expected] of samples) {
+              yield* TestClock.adjust(receipt - previous)
+              previous = receipt
+              yield* frame(h, receipt + 1, timestamp)
+              assert.closeTo((yield* Queue.take(written)).at, expected * 1e6, 1000)
+            }
+            yield* Scope.close(scope, Exit.void)
+            assert.closeTo((yield* Queue.take(written)).at, 4100e6, 1000)
+            yield* video.file
+          }
+        }).pipe(onTestClock))
+    }
+  }
 
   it.effect("propagates a writer failure before the recording scope closes", () =>
     Effect.gen(function*() {

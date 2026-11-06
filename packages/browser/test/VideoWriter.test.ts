@@ -7,10 +7,39 @@ import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Browser from "../src/Browser.ts"
 import * as Cdp from "../src/internal/cdpAdapter.ts"
+import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as WebKit from "../src/internal/webkitAdapter/capabilities.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
 
 describe("VideoWriter", () => {
+  it("anchors each screencast clock once and preserves source deltas across delayed receipts", () => {
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(undefined, 100e6), 100e6)
+    assert.strictEqual(time(4000000000, 200e6), 200e6)
+    assert.closeTo(time(4000000000.237, 900e6), 437e6, 1000)
+    assert.strictEqual(time(undefined, 1000e6), 1000e6)
+    assert.closeTo(time(4000000000.391, 1100e6), 591e6, 1000)
+    const next = Capture.makeScreencastClock()
+    assert.strictEqual(next(1000, 1200e6), 1200e6)
+  })
+
+  it("never places a screencast frame after the time it was received", () => {
+    // Chromium stamps screencast frames with its wall clock. If that clock steps forward an hour mid-recording
+    // (an NTP step, a resumed VM), a frame received 40ms after the first must not land an hour into the video:
+    // the recording's stop frame is never earlier than the last frame, so the file would last an hour.
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(4000000000, 200e6), 200e6)
+    assert.isAtMost(time(4000003600, 240e6), 240e6)
+  })
+
+  it("caps lower delivery latency without changing the stream anchor", () => {
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(1000, 200e6), 200e6)
+    // The first delivery's delay also shifts later mapped times; a faster delivery can reach the cap.
+    assert.strictEqual(time(1000.1, 240e6), 240e6)
+    assert.closeTo(time(1000.12, 400e6), 320e6, 1000)
+  })
+
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {
     const info = new Browser.Info({ protocol: "webkit", product: "WebKit", version: "test", revision: "test" })
     for (const capabilities of [WebKit.attachedCapabilities, WebKit.launchedCapabilities]) {

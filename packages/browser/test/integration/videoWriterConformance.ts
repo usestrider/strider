@@ -11,6 +11,8 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { deflateSync } from "node:zlib"
+import * as BrowserClock from "../../src/internal/browserClock.ts"
+import * as Video from "../../src/internal/video.ts"
 
 const png = (width: number, height: number, color: readonly number[]) => {
   const chunk = (kind: string, data: Buffer) => {
@@ -46,7 +48,49 @@ export const writerConformance = (
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
     it.effect(
-      `${name} writer conformance: fits changing odd sizes with centred black padding`,
+      `${name} preserves the later four-second frame after normalizing a backward source time`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-order-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [255, 0, 0])
+          const file = yield* Video.record(
+            Effect.succeed({
+              frames: Stream.fromIterable([0, 5e6, 3e6, 4e9]).pipe(Stream.map((at) => ({
+                frame: { at, format: "png" as const, data, width: 2, height: 2 },
+                take: Effect.void
+              }))),
+              ended: Effect.never
+            }),
+            encoder,
+            directory
+          ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+            now: () => 0 as ReturnType<BrowserClock.BrowserClock["now"]>,
+            sleep: () => Effect.never
+          }))
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            yield* file
+          ], { encoding: "utf8" }))
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.005, 0.005, 4, 4]
+          )
+          assert.closeTo(Number(probe.format.duration), 4, 0.002)
+        }),
+      60_000
+    )
+
+    it.effect(
+      `${name} writer conformance: preserves variable frame times and fits changing odd sizes`,
       () =>
         Effect.gen(function*() {
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-conformance-"))
@@ -55,8 +99,9 @@ export const writerConformance = (
           const file = yield* encoder.write(
             Stream.make(
               { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
-              { at: 40e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
-              { at: 80e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
+              { at: 237e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
+              { at: 2391e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) },
+              { at: 4127e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
             ),
             { path: path.join(directory, "conformance.webm"), width: 321, height: 243 }
           )
@@ -64,17 +109,27 @@ export const writerConformance = (
             "-v",
             "error",
             "-show_frames",
+            "-show_format",
             "-of",
             "json",
             file
           ], { encoding: "utf8" }))
-          assert.strictEqual(probe.frames.length, 3)
+          assert.strictEqual(probe.frames.length, 4)
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.237, 2.391, 4.127]
+          )
+          assert.closeTo(Number(probe.format.duration), 4.127, 0.002, "still duration includes the final timestamp")
           for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
           const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
             "-v",
             "error",
             "-i",
             file,
+            "-fps_mode",
+            "passthrough",
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -82,10 +137,16 @@ export const writerConformance = (
             "pipe:1"
           ], { maxBuffer: 2_000_000 })
           const frameBytes = 321 * 243 * 3
-          assert.strictEqual(pixels.length, frameBytes * 3)
+          assert.strictEqual(pixels.length, frameBytes * 4)
           assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
           assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
           assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + 160) * 3 + 1]!, 200, "wide third frame is scaled green")
+          for (const x of [5, 315]) {
+            assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + x) * 3 + 1]!, 200, "wide image fills fitted width")
+          }
+          for (const y of [65, 177]) {
+            assert.isAbove(pixels[frameBytes * 2 + (y * 321 + 160) * 3 + 1]!, 200, "wide image fills fitted height")
+          }
           for (const y of [20, 220]) {
             for (let channel = 0; channel < 3; channel++) {
               assert.isBelow(

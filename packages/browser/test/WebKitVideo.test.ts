@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
 import { WebKit } from "@usestrider/browser/webkit"
+import type * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Deferred from "effect/Deferred"
@@ -11,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
+import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -22,8 +24,9 @@ import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 import * as Reason from "../src/Reason.ts"
 import * as VideoWriter from "../src/VideoWriter.ts"
 
+const frame = { at: 0, format: "png" as const, data: new Uint8Array([1]), width: 10, height: 20 }
 const image: Video.Delivery = {
-  frame: { format: "png", data: new Uint8Array([1]), width: 10, height: 20 },
+  frame,
   take: Effect.void
 }
 
@@ -109,6 +112,130 @@ describe("WebKit video settings", () => {
 })
 
 describe("Shared video lifetime", () => {
+  for (const ending of ["source", "page", "scope"] as const) {
+    it.effect(`keeps irregular source times and a still tail on ${ending} end`, () =>
+      Effect.gen(function*() {
+        let now = 10e9
+        const clock: BrowserClock.BrowserClock = {
+          now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        }
+        const input = yield* Queue.unbounded<Video.Delivery, Cause.Done>()
+        const written = yield* Queue.unbounded<VideoWriter.Frame>()
+        const ended = yield* Deferred.make<void>()
+        const scope = yield* Scope.make()
+        const file = yield* Video.record(
+          Effect.succeed({
+            frames: Stream.fromQueue(input),
+            ended: Deferred.await(ended)
+          }),
+          {
+            write: (frames, destination) =>
+              frames.pipe(
+                Stream.runForEach((frame) => Queue.offer(written, frame)),
+                Effect.as(destination.path)
+              )
+          },
+          "/tmp"
+        ).pipe(Scope.provide(scope), Effect.provideService(BrowserClock.CurrentClock, clock))
+        // An initial image cached before recording starts must begin at zero.
+        const initial = { ...image.frame, at: 9e9 }
+        yield* Queue.offer(input, { ...image, frame: initial })
+        assert.strictEqual((yield* Queue.take(written)).at, 0)
+        now = 10.237e9
+        const next = { ...image.frame, at: now }
+        yield* Queue.offer(input, { ...image, frame: next })
+        assert.strictEqual((yield* Queue.take(written)).at, 237e6)
+        now = 12.391e9
+        if (ending === "source") yield* Queue.end(input)
+        if (ending === "page") yield* Deferred.succeed(ended, undefined)
+        if (ending === "scope") yield* Scope.close(scope, Exit.void)
+        yield* file
+        const tail = yield* Queue.take(written)
+        assert.strictEqual(tail.at, 2391e6)
+        assert.deepStrictEqual(tail.data, image.frame.data)
+        assert.strictEqual(yield* Queue.size(written), 0, "no paced copies during a still period")
+        yield* Scope.close(scope, Exit.void)
+      }))
+  }
+
+  it.effect("never gives the writer a frame earlier than the one before it", () =>
+    Effect.gen(function*() {
+      // The ffmpeg writer's Matroska input loses the timing of every later frame after a timestamp goes back:
+      // frames at 0, 5ms, 3ms and 4s decode at 0, 5ms, 5ms and 5ms. A source time can go back when Chromium's
+      // wall-clock screencast time steps, or when a frame without one falls back to the local clock.
+      const written: Array<number> = []
+      const scope = yield* Scope.make()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.make(
+            { ...image, frame: { ...frame, at: 10e9 } },
+            { ...image, frame: { ...frame, at: 10.005e9 } },
+            { ...image, frame: { ...frame, at: 10.003e9 } },
+            { ...image, frame: { ...frame, at: 14e9 } }
+          ),
+          ended: Effect.never
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach((frame) => Effect.sync(() => written.push(frame.at))),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(
+        Scope.provide(scope),
+        Effect.provideService(BrowserClock.CurrentClock, {
+          now: () => 10e9 as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        })
+      )
+      yield* file
+      yield* Scope.close(scope, Exit.void)
+      for (let i = 1; i < written.length; i++) {
+        assert.isAtLeast(written[i]!, written[i - 1]!, `frame ${i} at ${written[i]} precedes ${written[i - 1]}`)
+      }
+    }))
+
+  it.effect("appends stop time to a single still image without another source frame", () =>
+    Effect.gen(function*() {
+      let now = 0
+      const written: Array<number> = []
+      const first = yield* Deferred.make<void>()
+      const scope = yield* Scope.make()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.concat(Stream.make(image), Stream.never),
+          ended: Effect.never
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach((frame) =>
+                Effect.sync(() => {
+                  written.push(frame.at)
+                  Deferred.doneUnsafe(first, Effect.void)
+                })
+              ),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(
+        Scope.provide(scope),
+        Effect.provideService(BrowserClock.CurrentClock, {
+          now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        })
+      )
+      yield* Deferred.await(first)
+      now = 2391e6
+      yield* Scope.close(scope, Exit.void)
+      yield* file
+      assert.deepStrictEqual(written, [0, 2391e6])
+    }))
+
   it.effect("reports an empty source without starting a writer", () =>
     Effect.gen(function*() {
       let writes = 0

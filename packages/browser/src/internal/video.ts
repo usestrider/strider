@@ -1,4 +1,4 @@
-/** Shared image pacing, writer backpressure and bounded finish for native and polled video. */
+/** Shared image timing, writer backpressure and bounded finish for native and polled video. */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -16,7 +16,7 @@ import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
 export interface Delivery {
-  readonly frame: Omit<VideoWriter.Frame, "at">
+  readonly frame: VideoWriter.Frame
   readonly take: Effect.Effect<void>
 }
 
@@ -31,6 +31,9 @@ export const record = Effect.fnUntraced(function*(
   writer: VideoWriter.VideoWriter,
   directory: string
 ) {
+  const clock = yield* BrowserClock.CurrentClock
+  const started = clock.now()
+  let stopped = started
   const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
   const sourceScope = yield* Scope.fork(scope)
   const { frames, ended: termination } = yield* source.pipe(
@@ -41,24 +44,32 @@ export const record = Effect.fnUntraced(function*(
     { readonly frame: VideoWriter.Frame; readonly accept: Effect.Effect<void> },
     Cause.Done
   >(1)
-  const first = Deferred.makeUnsafe<Omit<VideoWriter.Frame, "at"> | undefined, Adapter.AdapterError>()
+  const first = Deferred.makeUnsafe<VideoWriter.Frame | undefined, Adapter.AdapterError>()
   const ended = Deferred.makeUnsafe<void, Adapter.AdapterError>()
   const result = Deferred.makeUnsafe<string, Adapter.AdapterError>()
   const backendFailure = (hint: string) =>
     new Adapter.AdapterError({
       reason: new Reason.BackendFailure({ kind: "Rejected", method: "VideoWriter.write", hint })
     })
+  let stopping = false
   const end = Effect.sync(() => {
+    if (!stopping) {
+      stopping = true
+      stopped = clock.now()
+    }
     Deferred.doneUnsafe(first, Effect.succeed(undefined))
     Deferred.doneUnsafe(ended, Effect.void)
   })
-  let latest: Delivery | undefined
-  let accepted = Deferred.makeUnsafe<void>()
+  let latest: VideoWriter.Frame | undefined
   yield* frames.pipe(
     Stream.runForEach((delivery) =>
       Effect.gen(function*() {
-        accepted = Deferred.makeUnsafe<void>()
-        latest = delivery
+        const accepted = Deferred.makeUnsafe<void>()
+        latest = { ...delivery.frame, at: Math.max(latest?.at ?? 0, delivery.frame.at - started) }
+        yield* Queue.offer(input, {
+          frame: latest,
+          accept: delivery.take.pipe(Effect.andThen(Deferred.succeed(accepted, undefined)), Effect.asVoid)
+        })
         Deferred.doneUnsafe(first, Effect.succeed(delivery.frame))
         yield* Deferred.await(accepted)
       })
@@ -93,30 +104,21 @@ export const record = Effect.fnUntraced(function*(
       return yield* Effect.fail(backendFailure("The recording ended before receiving a frame; no writer was started"))
     }
     const path = `${directory}/strider-${crypto.randomUUID()}.webm`
-    const clock = yield* BrowserClock.CurrentClock
-    const started = clock.now()
-    const pacing = Effect.gen(function*() {
-      let index = 0
-      while (true) {
-        const at = started + index++ * 40e6
-        const left = (at - clock.now()) / 1e6
-        if (left > 0) yield* clock.sleep(left)
-        const delivery = latest!
-        const frame = delivery.frame
-        const taking = accepted
+    const finishing = Effect.gen(function*() {
+      yield* Deferred.await(ended)
+      if (latest !== undefined) {
         yield* Queue.offer(input, {
-          frame: { at, format: frame.format, data: frame.data, width: frame.width, height: frame.height },
-          accept: delivery.take.pipe(Effect.andThen(Deferred.succeed(taking, undefined)), Effect.asVoid)
+          frame: { ...latest, at: Math.max(latest.at, stopped - started) },
+          accept: Effect.void
         })
       }
     }).pipe(
-      Effect.raceFirst(Deferred.await(ended)),
       Effect.catch((error) => Deferred.fail(ended, error).pipe(Effect.asVoid)),
       Effect.ensuring(Queue.end(input)),
       Effect.forkScoped
     )
     return yield* Effect.scoped(Effect.gen(function*() {
-      yield* pacing
+      yield* finishing
       return yield* writer.write(
         Stream.fromEffectRepeat(
           Queue.take(input).pipe(Effect.flatMap(({ frame, accept }) => Effect.as(accept, frame)))

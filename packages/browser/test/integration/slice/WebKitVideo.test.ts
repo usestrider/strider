@@ -112,15 +112,22 @@ describe("WebKit polled video", () => {
     })), 15_000)
 
   it.live(
-    "records immediately, repeats idle frames, survives navigation and fits resized PNGs",
+    "records timestamped samples, survives navigation and fits resized PNGs",
     () =>
       run(Effect.gen(function*() {
+        const samples: Array<VideoWriter.Frame> = []
         const frames = yield* Queue.unbounded<VideoWriter.Frame>()
         const writer = Layer.effect(VideoWriter.VideoWriter)(Effect.gen(function*() {
           const real = yield* VideoWriter.VideoWriter
           return {
             write: (input: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) =>
-              real.write(input.pipe(Stream.tap((frame) => Queue.offer(frames, frame))), destination)
+              real.write(
+                input.pipe(Stream.tap((frame) => {
+                  samples.push(frame)
+                  return Queue.offer(frames, frame)
+                })),
+                destination
+              )
           }
         })).pipe(Layer.provide(encoder))
         yield* launched(
@@ -152,9 +159,10 @@ describe("WebKit polled video", () => {
             const info = probe(file)
             const video = info.streams[0]
             assert.strictEqual(video.codec_name, "vp8")
-            assert.strictEqual(video.r_frame_rate, "25/1")
+            assert.strictEqual(Number(video.nb_read_frames), samples.length)
+            assert.closeTo(Number(info.format.duration), samples.at(-1)!.at / 1e9, 0.002)
             assert.deepStrictEqual([video.width, video.height], [640, 480])
-            assert.isAtLeast(Number(video.nb_read_frames), 15)
+            assert.isAtLeast(Number(video.nb_read_frames), 3)
             const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
               "-v",
               "error",

@@ -30,7 +30,7 @@ const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(
 describe("Chromium video writer", () => {
   layer(backend, { excludeTestServices: true })((it) => {
     it.effect(
-      "writes playable 25fps WebM through idle periods and viewport changes while screencasting",
+      "writes playable variable-rate WebM through idle periods and viewport changes while screencasting",
       () =>
         Effect.gen(function*() {
           assert.isTrue(yield* supports("capability.video"))
@@ -41,6 +41,8 @@ describe("Chromium video writer", () => {
           yield* cast.frames.pipe(Stream.runForEach(() => Queue.offer(seen, undefined)), Effect.forkScoped)
           yield* Queue.take(seen)
           // Video joins an already confirmed idle stream and must get an initial image without a repaint.
+          const started = performance.now()
+          let stopped = started
           const recording = yield* Effect.scoped(Effect.gen(function*() {
             const video = yield* page.capability(Capability.Video)
             yield* Effect.sleep("600 millis")
@@ -50,6 +52,7 @@ describe("Chromium video writer", () => {
             })
             yield* Queue.take(seen)
             yield* Effect.sleep("800 millis")
+            stopped = performance.now()
             return video
           }))
           const file = yield* recording.file
@@ -65,10 +68,11 @@ describe("Chromium video writer", () => {
           ], { encoding: "utf8" }))
           const video = probe.streams[0]
           assert.strictEqual(video.codec_name, "vp8")
-          assert.strictEqual(video.r_frame_rate, "25/1")
+
           assert.deepStrictEqual([video.width, video.height], [640, 480])
-          assert.isAtLeast(Number(video.nb_read_frames), 30)
-          assert.isAtLeast(Number(probe.format.duration), 1.2)
+          assert.isAtMost(Number(video.nb_read_frames), 8)
+          assert.isAtLeast(Number(video.nb_read_frames), 3)
+          assert.closeTo(Number(probe.format.duration), (stopped - started) / 1000, 0.1)
           // Decode the entire file, so an EBML header alone cannot pass this test.
           execFileSync(process.env["STRIDER_FFMPEG"]!, ["-v", "error", "-i", file, "-f", "null", "-"])
           const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
