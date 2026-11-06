@@ -54,7 +54,7 @@ export interface Scenario {
   readonly video?: string
   /** The browser the Strider program runs on: Chromium unless it says Firefox */
   readonly browser?: "firefox"
-  /** Another scenario that does the same on another browser, shown beside it on its page */
+  /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
   readonly compare?: string
   /** The Strider program: given the local site's address, and needing nothing of the runner's */
   readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
@@ -573,8 +573,9 @@ export const scenarios: ReadonlyArray<Scenario> = [
   },
   {
     name: "video",
-    title: "A video of a run, on Chromium",
-    description: "Records the page's screencast to a WebM with ffmpeg while it fills The Internet's dynamic controls.",
+    title: "A video of a run",
+    description:
+      "Records a page to a WebM while it fills The Internet's dynamic controls: on Chromium from its screencast, with ffmpeg, and on Firefox with its own video.",
     expected: "Strider, recorded",
     recording: "the-internet",
     video: "dynamic-controls.webm",
@@ -584,12 +585,12 @@ export const scenarios: ReadonlyArray<Scenario> = [
   {
     name: "video-firefox",
     title: "A video of a run, on Firefox",
-    description: "Records the page to a WebM with Firefox's own video while it fills The Internet's dynamic controls.",
+    description:
+      "Firefox records the video itself: no recorder and no ffmpeg, only the capability, for as long as its scope lives.",
     expected: "Strider, recorded",
     recording: "the-internet",
     video: "dynamic-controls-firefox.webm",
     browser: "firefox",
-    compare: "video",
     strider: videoFirefoxStrider
   }
 ]
