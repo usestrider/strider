@@ -452,7 +452,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
           Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(yield* fixture("<p>busy</p>"))
-            yield* Trace.record(page, { screenshots: "perAction" })
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
             // The page's main thread never yields again, so neither the check nor a screenshot can finish
             yield* page.evaluateInMainWorld(() => {
               setTimeout(() => {
@@ -473,6 +473,59 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               )
             )
             assert.isTrue(Option.isSome(settled), "the expectation did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) assert.isTrue(Expect.isExpectationFailed(settled.value))
+            const out = path.join(directory(), "hung-expectation.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "ExpectationFailed"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired action when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<button>busy</button>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the action nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("button").click().pipe(
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the action did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) {
+              assert.isTrue(Deadline.isTimeout(settled.value))
+              if (Deadline.isTimeout(settled.value)) assert.strictEqual(settled.value.operation, "Locator.click")
+            }
+            const out = path.join(directory(), "hung-action.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Locator.click")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "Timeout"
+            )
           })),
         timeout
       )
