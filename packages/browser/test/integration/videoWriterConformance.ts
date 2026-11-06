@@ -48,6 +48,62 @@ export const writerConformance = (
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
     it.effect(
+      `${name} decodes the final picture with an end-relative seek after a delayed first capture`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-end-seek-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [0, 0, 255])
+          const file = yield* encoder.write(
+            Stream.fromIterable([127, 237, 391, 412]).pipe(Stream.map((at) => ({
+              at: at * 1e6,
+              format: "png" as const,
+              width: 2,
+              height: 2,
+              data
+            }))),
+            { path: path.join(directory, "end-seek.webm"), width: 2, height: 2 }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0.127, 0.237, 0.391, 0.412]
+          )
+          assert.strictEqual(Number(probe.format.start_time), 0.127)
+          assert.strictEqual(Number(probe.format.duration), 0.413)
+          // Reproduce the WebKit video assertion with deterministic capture times and no browser.
+          const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+            "-v",
+            "error",
+            "-sseof",
+            "-0.1",
+            "-i",
+            file,
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1"
+          ])
+          assert.strictEqual(pixels.length, 2 * 2 * 3)
+        }),
+      60_000
+    )
+
+    it.effect(
       `${name} preserves the later four-second frame after normalizing a backward source time`,
       () =>
         Effect.gen(function*() {
