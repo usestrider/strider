@@ -117,6 +117,12 @@ Use the narrowest check that covers the change:
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
+An integration case costs a page, and on stock WebKit a context costs a browser process, so the suites grow by
+rules, not combinations. Write a case for each rule the code has, run on every backend, and a cross-product of
+variants only where the browsers handle them differently. What the code decides in one place, such as a selector or a
+set of roles, is one rule: sample it, don't enumerate it. A suite whose cases keep nothing in their context opens its
+pages in one (`slice/interaction.ts`).
+
 Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
 `integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
 `packages/browser/test/integration/failureTrace.ts`.
