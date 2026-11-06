@@ -3,7 +3,7 @@
 import { Code } from "astro-expressive-code/components"
 import Rail from "../../../components/Rail.astro"
 import ScenarioNav from "../../../components/ScenarioNav.astro"
-import { type Scenario, scenarioRoute, scenarios } from "../../../features/scenarios/scenarios.ts"
+import { comparedWith, type Scenario, scenarios } from "../../../features/scenarios/scenarios.ts"
 import DocShell from "../../../layouts/DocShell.astro"
 
 export const getStaticPaths = () => scenarios().map((scenario) => ({ params: { name: scenario.name }, props: { scenario } }))
@@ -11,12 +11,7 @@ export const getStaticPaths = () => scenarios().map((scenario) => ({ params: { n
 const { scenario } = Astro.props as { scenario: Scenario }
 const browserNames = { chromium: "Chromium", firefox: "Firefox" } as const
 // The same program on another browser, shown beside this one
-const other = scenario.compare === undefined
-  ? undefined
-  : scenarios().find((candidate) => candidate.name === scenario.compare)
-if (scenario.compare !== undefined && other === undefined) {
-  throw new Error(`The scenario ${scenario.name} compares itself with ${scenario.compare}, which doesn't exist`)
-}
+const other = comparedWith(scenario)
 const sites: Record<string, string> = {
   "the-internet": "The Internet, a site of examples for practicing automation"
 }
@@ -67,9 +62,7 @@ const site = scenario.recording === undefined
       other !== undefined && (
         <>
           <h2 id="compare">On {browserNames[other.browser]}</h2>
-          <p>
-            <a href={scenarioRoute(other)}>{other.title}</a>: {other.description}
-          </p>
+          <p>{other.description}</p>
           <Code code={other.code} lang="ts" />
           {
             other.video !== undefined && (

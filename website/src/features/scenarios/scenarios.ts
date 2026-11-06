@@ -75,7 +75,8 @@ const usesOf = (code: string) => {
 
 let loaded: ReadonlyArray<Scenario> | undefined
 
-export const scenarios = (): ReadonlyArray<Scenario> => {
+/** Every scenario, those shown only on another's page among them */
+const allScenarios = (): ReadonlyArray<Scenario> => {
   if (loaded !== undefined) return loaded
   const file = process.env["STRIDER_SCENARIOS_SOURCE"]
   if (file === undefined) throw new Error("STRIDER_SCENARIOS_SOURCE isn't set: astro.config.ts sets it")
@@ -114,6 +115,25 @@ export const scenarios = (): ReadonlyArray<Scenario> => {
   })
   if (loaded.length === 0) throw new Error(`No scenarios found in ${file}`)
   return loaded
+}
+
+/**
+ * The scenarios with a page of their own: all but those another scenario shows beside it as its `compare`, such as
+ * the video's Firefox counterpart, which is shown only on the video's page
+ */
+export const scenarios = (): ReadonlyArray<Scenario> => {
+  const shownElsewhere = new Set(allScenarios().flatMap((scenario) => scenario.compare ?? []))
+  return allScenarios().filter((scenario) => !shownElsewhere.has(scenario.name))
+}
+
+/** The scenario a page shows beside its own */
+export const comparedWith = (scenario: Scenario): Scenario | undefined => {
+  if (scenario.compare === undefined) return undefined
+  const other = allScenarios().find((candidate) => candidate.name === scenario.compare)
+  if (other === undefined) {
+    throw new Error(`The scenario ${scenario.name} compares itself with ${scenario.compare}, which doesn't exist`)
+  }
+  return other
 }
 
 export const scenarioRoute = (scenario: Scenario) => `/docs/scenarios/${scenario.name}`
