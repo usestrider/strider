@@ -1,10 +1,8 @@
 # macOS integration
 
-The proposed CI job targets GitHub's standard Apple Silicon `macos-15` runner
-([runner image labels](https://github.com/actions/runner-images#available-images)). Apply the adjacent
-`integration-macos.workflow.patch` from the repository root with `git apply`; it appends a job without changing
-the Linux job. It waits for Linux, runs after Linux failures too, and respects the existing nightly
-unchanged-commit gate and manual dispatch. This patch still needs workflow review and a dispatched run on main.
+CI runs it as the `integration-macos` job in `.github/workflows/integration.yml`, on GitHub's standard Apple Silicon
+`macos-15` runner ([runner image labels](https://github.com/actions/runner-images#available-images)). It runs after
+the Linux job, after Linux failures too, nightly when `main` has changed and on manual dispatch.
 No macOS browser execution has been validated on the Linux development machine.
 
 Run locally on Apple Silicon macOS with Node 24 and the repository's pinned pnpm:

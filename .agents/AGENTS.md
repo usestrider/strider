@@ -35,7 +35,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
     and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
     WebKitGTK, Xvfb, Linux host settings and the other integration suites remain Linux-only. macOS traffic
     recording is refused; its fonts and display come from the host, not Nix. Its first CI run is pending.
-    `scripts/integration-macos.md` describes the entry point and owner-applied workflow patch.
+    `scripts/integration-macos.md` describes the entry point and its CI job.
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
     the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
