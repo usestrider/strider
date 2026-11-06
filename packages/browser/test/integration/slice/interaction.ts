@@ -1332,12 +1332,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const { url } = yield* fixture(() =>
                 `<input id="other"><p id="target">old</p><script>
               document.designMode = "on";
-              other.onblur = () => { ${mutation}; document.body.dataset.blurred = "yes" };
+              document.getElementById("other").onblur = () => {
+                document.body.dataset.blurred = "yes";
+                const target = document.getElementById("target");
+                ${mutation};
+              };
               </script>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
                 const page = yield* Browser.newPage()
                 yield* page.goto(url)
+                yield* page.activate
+                yield* page.locator("#other").click()
                 yield* page.locator("#other").fill("other")
                 if (
                   change === "replace" || change === "restore" || change === "disable with checks off" ||
@@ -1351,7 +1357,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }).pipe(Deadline.within("3 seconds"))
                   assert.strictEqual(yield* page.locator("#target").readText, "new")
                 } else {
-                  const error = yield* page.locator("#target").fill("new").pipe(
+                  // WebKit makes inert content non-editable too; isolate the inert check on every backend.
+                  const error = yield* page.locator("#target").fill("new", {
+                    checks: { editable: change !== "inert" }
+                  }).pipe(
                     Deadline.within("1 second"),
                     Effect.flip
                   )
