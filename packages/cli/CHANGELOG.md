@@ -1,5 +1,32 @@
 # @usestrider/cli
 
+## 0.2.1
+
+### Patch Changes
+
+- b4bcf73: Expose roleless password inputs in snapshots as inferred editable controls with password evidence, preserving accessible names and excluding values, including values referenced by another element for its name. Find matches the password designation using its usual case and exact rules. Export named password refs by waiting for their exact computed name in snapshots, preserving naming precedence, supporting a single framed match and leaving duplicate names ambiguous. Unnamed refs retain the password input selector.
+- Updated dependencies [72af3f6]
+- Updated dependencies [80fd57e]
+- Updated dependencies [38678ab]
+- Updated dependencies [34171bc]
+- Updated dependencies [eb9da18]
+- Updated dependencies [c61613b]
+- Updated dependencies [4cfc183]
+- Updated dependencies [cbfa7f1]
+- Updated dependencies [b4bcf73]
+- Updated dependencies [a6c3c98]
+- Updated dependencies [b282791]
+- Updated dependencies [f12f85c]
+- Updated dependencies [db5244d]
+- Updated dependencies [99745b7]
+- Updated dependencies [19dad83]
+- Updated dependencies [0422966]
+- Updated dependencies [21d6bcb]
+- Updated dependencies [ca2eaf1]
+- Updated dependencies [8196abe]
+- Updated dependencies [992aee8]
+  - @usestrider/browser@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes
