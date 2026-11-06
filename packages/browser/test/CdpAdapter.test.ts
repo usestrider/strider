@@ -1735,7 +1735,7 @@ describe("Chromium video writer lifetime", () => {
       })
     ).pipe(onTestClock))
 
-  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure"] as const) {
+  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure", "connection"] as const) {
     it.effect(`settles video on ${mode.endsWith("Failure") || mode === "failure" ? `source failure (${mode})` : `session end (${mode})`} while its scope stays open`, () =>
       withProtocolScheduler((drain) =>
         Effect.gen(function*() {
@@ -1785,6 +1785,8 @@ describe("Chromium video writer lifetime", () => {
                 }
               }
             })
+          } else if (mode === "connection") {
+            yield* h.browser.lose("video transport lost")
           } else {
             yield* h.browser.receive({
               method: "Target.detachedFromTarget",
@@ -1819,6 +1821,9 @@ describe("Chromium video writer lifetime", () => {
             assert.strictEqual(error.reason._tag, "BackendFailure")
             if ((mode === "failure" || mode === "blockedFailure") && error.reason._tag === "BackendFailure") {
               assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            }
+            if (mode === "connection" && error.reason._tag === "BackendFailure") {
+              assert.notStrictEqual(error.reason.method, "VideoWriter.write")
             }
             if (mode === "empty") {
               assert.strictEqual(writes, 0)
