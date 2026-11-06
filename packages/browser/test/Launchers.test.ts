@@ -21,6 +21,8 @@ import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
+import * as Adapter from "../src/internal/adapter.ts"
+import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
@@ -28,6 +30,7 @@ import * as Launch from "../src/internal/launch.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
+import type * as UserContext from "../src/UserContext.ts"
 
 /** A scoped process-platform stub for fake launchers; no production override or public bypass. */
 const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -561,6 +564,7 @@ describe("WebKit launcher", () => {
     const scriptedLaunch = Effect.fnUntraced(function*(
       behavior: (spawn: number) => {
         readonly held: boolean
+        readonly silentSession?: boolean | undefined
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
@@ -710,7 +714,7 @@ describe("WebKit launcher", () => {
           const write = () =>
             Effect.andThen(
               Effect.sync(() => written.push(port)),
-              Effect.fail(
+              behavior(ports.indexOf(port)).silentSession === true ? Effect.void : Effect.fail(
                 new Socket.SocketError({
                   reason: new Socket.SocketWriteError({ cause: "stop after the first write" })
                 })
@@ -789,6 +793,106 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(result.stopped, [0])
         assert.match(JSON.stringify({ hint: timeout.hint, last: timeout.last, history: timeout.history }), /spawned/)
       }))
+
+    for (
+      const [held, pendingConnect, stages] of [
+        [false, false, ["spawned"]],
+        [true, true, ["spawned", "listener verified"]],
+        [true, false, ["spawned", "listener verified", "connected", "inspector established"]]
+      ] as const
+    ) {
+      it.effect(`carries ${stages.at(-1)} through detached bounded creation into the calling timeout`, () =>
+        Effect.gen(function*() {
+          const result = yield* scriptedLaunch(
+            () => ({ held, silentSession: true }),
+            pendingConnect ? Effect.never : Effect.void,
+            "300 millis",
+            (start) =>
+              Effect.gen(function*() {
+                const finished = yield* Deferred.make<void>()
+                let caller: Operation.Record | undefined
+                let detached: Operation.Record | undefined
+                const adapter = BoundedAdapter.make({
+                  createUserContext: () =>
+                    Effect.gen(function*() {
+                      detached = Option.getOrUndefined(yield* Operation.current)
+                      return yield* start.pipe(Effect.scoped, Effect.as("created" as UserContext.Id))
+                    }).pipe(Effect.ensuring(Deferred.succeed(finished, undefined))),
+                  removeUserContext: () => Effect.die("A failed creation must not release a context that doesn't exist")
+                } as unknown as Adapter.AdapterConnection)
+                const exit = yield* Effect.gen(function*() {
+                  caller = yield* Operation.record
+                  return yield* adapter.createUserContext({})
+                }).pipe(Operation.named("Browser.newPage"), Deadline.within("100 millis"), Effect.exit)
+                // The detached creation keeps its original launch deadline and owns cleanup after the caller leaves.
+                const endedWithCaller = yield* Deferred.isDone(finished)
+                yield* Deferred.await(finished)
+                assert.isFalse(endedWithCaller)
+                assert.strictEqual(detached, caller)
+                assert(exit._tag === "Failure")
+                const timeout = Option.getOrThrow(Exit.findErrorOption(exit))
+                assert(Deadline.isTimeout(timeout))
+                assert.strictEqual(timeout.phase, "dispatchedUnconfirmed")
+                assert.strictEqual(timeout.diagnostics.operationId, caller!.id)
+                assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+                const observations = timeout.history.map(({ value }) =>
+                  value as {
+                    _tag: string
+                    stage: string
+                    port: number
+                    pid: number
+                    attempt: number
+                    elapsedMillis: number
+                  }
+                )
+                assert.deepStrictEqual(observations.map((value) => value.stage), [...stages])
+                for (const [index, value] of observations.entries()) {
+                  assert.strictEqual(value._tag, "WebKitStartup")
+                  assert.strictEqual(value.pid, 9100000)
+                  assert.strictEqual(value.attempt, 1)
+                  assert.isTrue(value.port >= 49152 && value.port <= 65535)
+                  assert.isTrue(value.elapsedMillis >= 0)
+                  if (index > 0) assert.isTrue(value.elapsedMillis >= observations[index - 1]!.elapsedMillis)
+                }
+                assert.deepStrictEqual(Option.getOrThrow(timeout.last), timeout.history.at(-1))
+                return timeout
+              })
+          )
+          assert(result.exit._tag === "Success")
+          assert.deepStrictEqual(result.stopped, [0])
+          assert.deepStrictEqual(result.closed, result.connected)
+        }))
+    }
+
+    it.effect("keeps startup observations attributed to their own port attempt after a collision", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          (spawn) => spawn === 0 ? { held: false, foreign: true, collides: true } : { held: false },
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const exit = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(exit._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(exit))
+        assert(Deadline.isTimeout(timeout))
+        assert.strictEqual(result.ports.length, 2)
+        assert.deepStrictEqual(
+          timeout.history.map(({ value }) => {
+            const stage = value as { stage: string; port: number; pid: number; attempt: number }
+            return { stage: stage.stage, port: stage.port, pid: stage.pid, attempt: stage.attempt }
+          }),
+          result.ports.map((port, index) => ({ stage: "spawned", port, pid: 9100000 + index, attempt: index + 1 }))
+        )
+        assert.deepStrictEqual(Option.getOrThrow(timeout.last), timeout.history.at(-1))
+        assert.deepStrictEqual(result.stopped, [0, 1])
+      }).pipe(Random.withSeed("port-in-use")))
 
     it.effect("reports a child that exits while being polled as its exit, not as unreadable procfs", () =>
       Effect.gen(function*() {
