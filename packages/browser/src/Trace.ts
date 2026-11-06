@@ -60,8 +60,8 @@ export interface CaptureOptions {
    */
   readonly screenshots?: "perAction" | "off" | undefined
   /**
-   * Frames as the browser renders them, or polled screenshots at an interval. On Firefox, `"native"` is the
-   * browser's own video of each page (`Capability.Video`).
+   * Frames as the browser renders them, or polled screenshots at an interval. Where video is supported, `"native"` is the
+   * video of each page (`Capability.Video`).
    *
    * @default "off"
    */
@@ -147,8 +147,8 @@ export interface Recording extends Declaration.Registration {
  *   nests as the program did.
  * - Console messages and uncaught exceptions are always recorded.
  * - `screenshots: "perAction"` adds a screenshot after each action and navigation.
- * - `screencast` adds frames: the browser's own where `Capability.Screencast` has them, Firefox's video
- *   (`Capability.Video`) or polled screenshots.
+ * - `screencast` adds frames: the page's video where `Capability.Video` is supported, native frames otherwise
+ *   (`Capability.Screencast`) or polled screenshots.
  * - `network` adds the requests a `Har` would record, with their bodies.
  * - `domSnapshots` adds a snapshot of each frame of the page before and after each action and navigation, which
  *   the viewer renders with the recorded network and the action's target highlighted.
@@ -166,7 +166,7 @@ export interface Recording extends Declaration.Registration {
  *   stylesheet again. Stock WebKit has no isolated worlds, so there they run in the page's own.
  * - The viewer draws a snapshot's canvas from the action's screenshot, so canvases need
  *   `screenshots: "perAction"`.
- * - Firefox's video ends at the first `exportTrace`, which reads its file.
+ * - The page's video ends at the first `exportTrace`, which reads its file.
  *
  * **Example** (Exporting a trace when checkout fails)
  *

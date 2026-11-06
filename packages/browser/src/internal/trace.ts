@@ -90,7 +90,7 @@ interface Snapshot {
   readonly captures: ReadonlyArray<Capture.FrameCapture>
 }
 
-/** Firefox's video of a page: recording until the first export, which reads its file. */
+/** A video of a page: recording until the first export, which reads its file. */
 interface Video {
   readonly page: Target.NavigableId
   readonly at: MonotonicInstant.MonotonicInstant
@@ -390,7 +390,7 @@ export const start = Effect.fnUntraced(function*(
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
-  // Firefox has a video of its own where the other backends stream frames
+  // Prefer video when the browser can write it; otherwise use native frames
   const video = screencast === "native" && (yield* Filters.supported(runtime, "capability.video"))
   if (screencast !== "off") {
     const seen = new Set<Target.NavigableId>()
@@ -637,7 +637,7 @@ export const start = Effect.fnUntraced(function*(
         })
       }
     }
-    // Firefox's videos end here, the first time, and their files are read
+    // Videos end here, the first time, and their files are read
     for (const video of videos) {
       if (Option.isNone(video.read)) {
         yield* Scope.close(video.scope, Exit.void)

@@ -1932,6 +1932,34 @@ User contexts: isolated browser sessions, at two access levels.
 - `class UserContextError: Schema.TaggedError "UserContextError" { operation, reason, diagnostics }`
   - `override get cause(): unknown`
 
+### VideoWriter
+
+Writes timestamped image frames to a finished WebM file.
+
+*services*
+
+- `const VideoWriter: Context.Service<VideoWriter, VideoWriter>`
+
+*layers*
+
+- `const layerFfmpeg: (options: { readonly path: string }) => Layer.Layer<VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>`
+
+*models*
+
+- `type Frame = typeof Frame.Type`
+- `type Destination = typeof Destination.Type`
+- `interface VideoWriter`
+  - `readonly write: (frames: Stream.Stream<Frame>, destination: Destination) => Effect.Effect<string, VideoWriterError>`
+
+*schemas*
+
+- `const Frame = Schema.Struct({ at: Schema.Number, format: Schema.Literals(["jpeg", "png"]), data: Schema.Uint8Array, width: Schema.Number, height: Schema.Number })`
+- `const Destination = Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number })`
+
+*errors*
+
+- `class VideoWriterError: Schema.TaggedError "VideoWriterError" { reason }`
+
 ### Watchable
 
 Read-only views of state that changes, kept up to date from the browser's events.
