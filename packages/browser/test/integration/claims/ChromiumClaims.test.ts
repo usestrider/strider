@@ -551,7 +551,10 @@ describe("Chromium claims", () => {
           yield* Effect.scoped(Effect.gen(function*() {
             const connected = yield* Browser.Browser
             const pages = yield* connected.pages.waitFor((pages) => pages.length > 1)
-            const observed = pages.find((page) => page.id !== undefined)!
+            const matches = yield* Effect.filter(pages, (page) =>
+              page.url.pipe(Effect.map((url) => url === `${origin}/discovered`)))
+            assert.lengthOf(matches, 1)
+            const observed = matches[0]!
             const controlled = yield* observed.control
             assert.strictEqual(reason(yield* api.Page.claim(controlled).pipe(Effect.exit)), "NotPermitted")
             const context = yield* connected.defaultContext.control
@@ -1082,11 +1085,14 @@ describe("Chromium claims", () => {
                 yield* Scope.close(destination, Exit.void)
                 assert.isTrue((yield* browser.targets).some((info) => info.url === url), "surviving tab was destroyed")
                 // Read the survivor through its actual URL rather than assuming a public id survives reconnect.
+                let checked = 0
                 for (const page of yield* connected.pages) {
                   if ((yield* page.url) !== url) continue
                   const control = yield* page.control
+                  checked++
                   assert.strictEqual(yield* control.evaluateInMainWorld(() => navigator.language), "en-US")
                 }
+                assert.strictEqual(checked, 1, "must check the surviving page locale")
               })).pipe(Effect.provide(browser.connect))
             }),
           60_000
