@@ -594,10 +594,12 @@ describe("Chromium claims", () => {
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const connected = yield* Browser.Browser
-            // Connect drains existing targets; the sole page was created before this layer was built.
+            // The sole page was created before this connection adopted its existing targets.
             const matches = yield* connected.pages
             assert.lengthOf(matches, 1, "exactly one adopted page while its response is held")
             const observed = matches[0]!
+            // A listed adopted page can still be Opening while its initial frame snapshot is installed.
+            assert.strictEqual((yield* observed.status)._tag, "Open")
             // Register on the connected model before the response can replace the initial realm.
             const loaded = yield* PageNavigation.next(observed, { url: `${origin}/discovered`, waitUntil: "load" })
             response.setHeader("Content-Type", "text/html")
