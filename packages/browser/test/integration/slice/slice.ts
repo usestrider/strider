@@ -191,5 +191,19 @@ export const slice = (
           assert.strictEqual((yield* context.closed)._tag, "UserContextRemoved")
           assert.strictEqual((yield* page.status)._tag, "Closed")
         }), timeout)
+
+      it.effect("opens pages in a context one after another, each closed before the next", () =>
+        Effect.scoped(
+          Effect.gen(function*() {
+            const url = yield* fixture(`<p id="out">ready</p>`)
+            const context = yield* Browser.newContext()
+            for (let index = 0; index < 3; index++) {
+              const page = yield* context.newPage
+              yield* page.goto(url)
+              assert.strictEqual(yield* page.locator("#out").readText, "ready")
+              yield* page.close()
+            }
+          }).pipe(Deadline.within("20 seconds"))
+        ), timeout)
     })
   })

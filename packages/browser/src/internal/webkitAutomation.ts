@@ -462,6 +462,10 @@ const startProcess = Effect.fnUntraced(function*(
       yield* Deferred.succeed(firstList, pagesListed)
       return
     }
+    // The anchor is open for as long as the process runs, so a list without it isn't the process's pages: stock
+    // WebKit sends one with no targets at all as a context's page opens after another closed. Taken as the pages,
+    // it would end the new one, and the next list would announce it again after its target had already arrived
+    if (anchors.size > 0 && !pagesListed.some((listed) => anchors.has(listed.id))) return
     for (const target of pagesListed) {
       if (announced.has(target.id) || anchors.has(target.id) || initial.has(target.id)) continue
       if (holdNext !== undefined) {
