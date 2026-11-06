@@ -3,7 +3,7 @@
  *
  * Every failure carries its operation's record as `diagnostics`, which says, for an action, whether the input was
  * sent. `CurrentPreset` decides how much of a URL is shown: in an operation's span attributes, and wherever Effect's
- * logger, formatter or inspection shows a `NetworkRequest` or `NetworkResponse`. Under `"strict"`, the default, a URL
+ * logger, formatter or inspection shows a `NetworkRequest` or `NetworkResponse`, and in exported trace errors. Under `"strict"`, the default, a URL
  * keeps its origin and path with each query value redacted; under `"local"` it's shown whole.
  *
  * @stability unstable

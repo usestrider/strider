@@ -20,6 +20,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
+import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
@@ -30,6 +31,7 @@ import type * as Tracer from "effect/Tracer"
 import * as Capability from "../Capability.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as Diagnostics from "../Diagnostics.ts"
+import * as Expect from "../Expect.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
@@ -39,6 +41,7 @@ import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Capture from "./capture.ts"
 import * as Events from "./events.ts"
+import * as ExpectImpl from "./expect.ts"
 import * as Filters from "./filters.ts"
 import * as HarImpl from "./har.ts"
 import * as HarLog from "./harLog.ts"
@@ -62,6 +65,9 @@ export type Recorded =
   | { readonly _tag: "Page"; readonly entry: Model.PageEntry }
   | { readonly _tag: "UserContext"; readonly entry: Model.ContextEntry }
 
+/** Ordinary errors are already text; expectations retain evidence until the export chooses its preset. */
+type RecordedError = { readonly name: string; readonly message: string } | Expect.ExpectationFailed
+
 interface Step {
   readonly callId: string
   readonly parentId: Option.Option<string>
@@ -69,7 +75,7 @@ interface Step {
   readonly params: Readonly<Record<string, unknown>>
   readonly start: MonotonicInstant.MonotonicInstant
   end: Option.Option<MonotonicInstant.MonotonicInstant>
-  error: Option.Option<{ readonly name: string; readonly message: string }>
+  error: Option.Option<RecordedError>
   /** A span of the caller's, which spans the operations recorded inside it. */
   readonly group: boolean
 }
@@ -134,11 +140,67 @@ const actions = new Set([
   "Page.forward"
 ])
 
-const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<{ name: string; message: string }> => {
+/** Observations may contain cycles, bigints or user-defined inspection that throws. */
+const observedText = (value: unknown): string => {
+  try {
+    return Inspectable.toStringUnknown(value)
+  } catch {
+    return "[Unprintable observed value]"
+  }
+}
+
+/** Keep the evidence in the message: existing trace viewers display only name and message. */
+const expectationMessage = (error: Expect.ExpectationFailed, preset: Diagnostics.Preset): string => {
+  const kind = ExpectImpl.evidenceKind(error)
+  const url = kind === "URL"
+  // Form values are classified typed text in both presets; titles are hidden only under strict.
+  const hidden = kind === "Value" || kind === "Title" && preset === "strict"
+  const valueText = (value: unknown) =>
+    hidden
+      ? "REDACTED"
+      : observedText(url && typeof value === "string" ? Spans.redactUrl(value, preset) : value)
+  let condition = error.condition
+  if (hidden) condition = kind === "Value" ? "to have the value REDACTED" : "to have the title REDACTED"
+  else if (url && preset === "strict") {
+    // String matchers are JSON-quoted by the expectation. A regexp isn't a URL and can't be safely parsed.
+    let expected = "REDACTED"
+    try {
+      const raw: unknown = JSON.parse(condition.slice("to have the URL ".length))
+      if (typeof raw === "string") expected = JSON.stringify(Spans.redactUrl(raw, preset))
+    } catch {
+      // Keep the URL redactor's refusal for input that isn't a whole URL.
+    }
+    condition = `to have the URL ${expected}`
+  }
+  const lines = [`Expected ${error.subject} ${condition}`]
+  if (Option.isSome(error.last)) lines.push(`Last observed: ${valueText(error.last.value.value)}`)
+  if (error.history.length > 0) {
+    lines.push("History:", ...error.history.map((entry) => `  ${valueText(entry.value)}`))
+  }
+  lines.push(
+    `Checks: ${error.checks.count}${
+      error.checks.triggeredBy.length > 0 ? ` (${error.checks.triggeredBy.join(", ")})` : ""
+    }`,
+    `Elapsed: ${Math.round(Duration.toMillis(error.elapsed))} ms`
+  )
+  if (Option.isSome(error.nearest)) lines.push(`Nearest match:\n${error.nearest.value}`)
+  if (error.suggestions.length > 0) lines.push(`Suggestions:\n${error.suggestions.join("\n")}`)
+  return lines.join("\n")
+}
+
+const errorOf = (exit: Exit.Exit<unknown, unknown>, name: string): Option.Option<RecordedError> => {
   if (Exit.isSuccess(exit)) return Option.none()
   const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
   if (failure !== undefined) {
     const error = failure.error as { readonly _tag?: unknown; readonly name?: unknown; readonly message?: unknown }
+    if (Expect.isExpectationFailed(error)) {
+      // Library failures are classified at creation, even without a recording. A manually constructed failure
+      // can acquire metadata from its first recorded canonical expectation; later steps never override it.
+      if (ExpectImpl.evidenceKind(error) === undefined && name.startsWith("Expect.")) {
+        ExpectImpl.classifyFailure(error, name.slice("Expect.".length))
+      }
+      return Option.some(error)
+    }
     return Option.some({
       name: typeof error._tag === "string" ? error._tag : typeof error.name === "string" ? error.name : "Error",
       message: typeof error.message === "string" ? error.message : String(failure.error)
@@ -351,7 +413,7 @@ export const start = Effect.fnUntraced(function*(
       return (exit) =>
         Effect.gen(function*() {
           step.end = Option.some(Adapter.now())
-          step.error = errorOf(exit)
+          step.error = errorOf(exit, started.name)
           if (Option.isNone(page)) {
             return
           }
@@ -524,7 +586,13 @@ export const start = Effect.fnUntraced(function*(
           type: "after",
           callId: step.callId,
           endTime: Recordings.millis(end as MonotonicInstant.MonotonicInstant),
-          ...(Option.isSome(step.error) ? { error: step.error.value } : {})
+          ...(Option.isSome(step.error)
+            ? {
+              error: Expect.isExpectationFailed(step.error.value)
+                ? { name: step.error.value._tag, message: expectationMessage(step.error.value, preset) }
+                : step.error.value
+            }
+            : {})
         }
       })
     }

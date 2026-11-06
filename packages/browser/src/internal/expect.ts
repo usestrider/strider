@@ -37,6 +37,31 @@ export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextM
     ? { _tag: "String", value: expected, exact }
     : { _tag: "RegExp", source: expected.source, flags: expected.flags }
 
+/** Export classification follows the failure's identity, including catches and rethrows outside its operation. */
+export type EvidenceKind = "URL" | "Title" | "Value" | "Other"
+
+const evidenceKinds = new WeakMap<Expect.ExpectationFailed, EvidenceKind>()
+
+/** First classification wins; recording an enclosing operation can never reclassify its failure. */
+export const classifyFailure = (error: Expect.ExpectationFailed, matcherName: string): Expect.ExpectationFailed => {
+  if (!evidenceKinds.has(error)) {
+    evidenceKinds.set(
+      error,
+      matcherName === "toHaveURL"
+        ? "URL"
+        : matcherName === "toHaveTitle"
+        ? "Title"
+        : matcherName === "toHaveValue"
+        ? "Value"
+        : "Other"
+    )
+  }
+  return error
+}
+
+/** Metadata lives as long as its failure; it does not keep the failure alive or change the public error. */
+export const evidenceKind = (error: Expect.ExpectationFailed): EvidenceKind | undefined => evidenceKinds.get(error)
+
 /** What a failed expectation says, from what it saw. */
 const failure = (
   id: Diagnostics.OperationId,
@@ -46,19 +71,23 @@ const failure = (
   history: ReadonlyArray<Diagnostics.ObservedValue>,
   checks: number,
   triggers: ReadonlySet<"initial" | "change" | "interval">,
-  explained: Explained = { nearest: Option.none(), suggestions: [] }
+  explained: Explained = { nearest: Option.none(), suggestions: [] },
+  matcherName: string = "that"
 ) =>
-  new Expect.ExpectationFailed({
-    subject,
-    condition,
-    last: Option.fromNullishOr(history.at(-1)),
-    history: [...history],
-    elapsed: Duration.millis((now() - started) / 1e6),
-    checks: { count: checks, triggeredBy: Array.from(triggers) },
-    nearest: explained.nearest,
-    suggestions: explained.suggestions,
-    diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
-  })
+  classifyFailure(
+    new Expect.ExpectationFailed({
+      subject,
+      condition,
+      last: Option.fromNullishOr(history.at(-1)),
+      history: [...history],
+      elapsed: Duration.millis((now() - started) / 1e6),
+      checks: { count: checks, triggeredBy: Array.from(triggers) },
+      nearest: explained.nearest,
+      suggestions: explained.suggestions,
+      diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+    }),
+    matcherName
+  )
 
 /** What a failed expectation says when nothing matched its locator. */
 interface Explained {
@@ -154,7 +183,9 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
-          Effect.fail(failure(id, subject.description, condition, started, history, checks, triggers, explained))
+          Effect.fail(
+            failure(id, subject.description, condition, started, history, checks, triggers, explained, matcherName)
+          )
       )
     while (true) {
       const left = record.left()
@@ -223,7 +254,8 @@ export const watching = <A>(
   holds: (value: A) => boolean,
   matcherName: string,
   description: string,
-  condition: string
+  condition: string,
+  attributes: Readonly<Record<string, unknown>> = {}
 ): Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone> =>
   Effect.gen(function*() {
     const record = yield* Operation.record
@@ -243,8 +275,10 @@ export const watching = <A>(
       BrowserClock.until(record.budget.at)
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
-    return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
+    return yield* Effect.fail(
+      failure(id, description, condition, started, history, checks, triggers, undefined, matcherName)
+    )
+  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
 /**
  * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
@@ -298,7 +332,8 @@ export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
       typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
     "toHaveURL",
     `page ${page.id}`,
-    `to have the URL ${show(expected)}`
+    `to have the URL ${show(expected)}`,
+    { "browser.page.id": page.id }
   )
 
 /** The page's title is expected to match, in the page. */
