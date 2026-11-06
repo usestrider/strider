@@ -33,11 +33,26 @@ import type * as UserContext from "./UserContext.ts"
 /**
  * What a trace records beyond spans, logs, errors and console messages.
  *
+ * **Details**
+ *
+ * DOM snapshots render with the recorded network, so `domSnapshots: true` needs `network: true` beside it, and
+ * options with one but not the other don't compile. Options built from a computed flag choose a branch:
+ * `flag ? { domSnapshots: true, network: true } : {}`.
+ *
  * @stability experimental
  * @category models
  * @since 0.1.0
  */
-export interface Options {
+export type Options = CaptureOptions & (NetworkOptions | SnapshotOptions)
+
+/**
+ * The screenshots and frames a trace records, whichever the other options are.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface CaptureOptions {
   /**
    * A screenshot after each action and navigation.
    *
@@ -51,19 +66,47 @@ export interface Options {
    * @default "off"
    */
   readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined
+}
+
+/**
+ * Options for a trace without DOM snapshots, with or without the network.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface NetworkOptions {
   /**
-   * DOM snapshots of every frame of the page before and after each action and navigation, which the trace viewer
-   * renders. They render with the recorded network, so they need `network: true`.
+   * DOM snapshots, which need `network: true` beside them.
    *
    * @default false
    */
-  readonly domSnapshots?: boolean | undefined
+  readonly domSnapshots?: false | undefined
   /**
-   * Network entries, so DOM snapshots render with their resources.
+   * Network entries: the requests a `Har` would record, with their bodies.
    *
    * @default false
    */
   readonly network?: boolean | undefined
+}
+
+/**
+ * Options for a trace with DOM snapshots, and the network they render with.
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export interface SnapshotOptions {
+  /**
+   * DOM snapshots of every frame of the page before and after each action and navigation, which the trace
+   * viewer renders.
+   */
+  readonly domSnapshots: true
+  /**
+   * Network entries, so DOM snapshots render with their resources.
+   */
+  readonly network: true
 }
 
 /**
@@ -116,8 +159,9 @@ export interface Recording extends Declaration.Registration {
  *
  * **Gotchas**
  *
- * - `domSnapshots` without `network: true` fails with `InvalidInput`: a snapshot's images, fonts and cross-origin
- *   styles come from the network recording.
+ * - `domSnapshots` needs `network: true`, since a snapshot's images, fonts and cross-origin styles come from the
+ *   network recording. The types refuse one without the other; options that get past them, such as a cast, fail
+ *   with `InvalidInput`.
  * - Snapshots are taken in an isolated world of Strider's, which the page can't see, and each one reads every
  *   stylesheet again. Stock WebKit has no isolated worlds, so there they run in the page's own.
  * - The viewer draws a snapshot's canvas from the action's screenshot, so canvases need
