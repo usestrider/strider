@@ -2,7 +2,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, CookieJar, Deadline, Dialog, Download, FileChooser, StorageState } from "@usestrider/browser"
+import {
+  Browser,
+  CookieJar,
+  Deadline,
+  Dialog,
+  Download,
+  FileChooser,
+  PageNavigation,
+  StorageState
+} from "@usestrider/browser"
 import * as CdpBrowser from "@usestrider/browser/cdp/Browser"
 import * as Preload from "@usestrider/browser/cdp/Preload"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
@@ -24,7 +33,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { spawn } from "node:child_process"
 import { readFile } from "node:fs/promises"
-import { createServer } from "node:http"
+import { createServer, type ServerResponse } from "node:http"
 import { fileURLToPath } from "node:url"
 import * as Kit from "../../../src/internal/adapterKit.ts"
 import * as BrowserClock from "../../../src/internal/browserClock.ts"
@@ -34,42 +43,49 @@ import { handoff } from "../../../src/internal/handoff.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
-const serve = Effect.acquireRelease(
-  Effect.promise(async () => {
-    const server = createServer((request, response) => {
-      if (request.url === "/claims-download") {
-        response.setHeader("Content-Type", "application/octet-stream")
-        response.setHeader("Content-Disposition", "attachment; filename=\"claims.txt\"")
-        response.end("claims bytes")
-        return
-      }
-      if (request.url === "/defaults") {
+const serveWithDiscoveredGate = (gate?: Deferred.Deferred<ServerResponse>) =>
+  Effect.acquireRelease(
+    Effect.promise(async () => {
+      const server = createServer((request, response) => {
+        if (gate && request.url === "/discovered") {
+          Effect.runSync(Deferred.succeed(gate, response))
+          return
+        }
+        if (request.url === "/claims-download") {
+          response.setHeader("Content-Type", "application/octet-stream")
+          response.setHeader("Content-Disposition", "attachment; filename=\"claims.txt\"")
+          response.end("claims bytes")
+          return
+        }
+        if (request.url === "/defaults") {
+          response.setHeader("Content-Type", "text/html")
+          response.end(
+            `<title>defaults</title><input type="file" id="file"><button onclick="document.querySelector('#file').click()">Upload</button><a href="/claims-download" download>Export</a>`
+          )
+          return
+        }
         response.setHeader("Content-Type", "text/html")
         response.end(
-          `<title>defaults</title><input type="file" id="file"><button onclick="document.querySelector('#file').click()">Upload</button><a href="/claims-download" download>Export</a>`
+          request.url === "/start"
+            ? `<script>window.activate = () => { location.href = '/prerendered' };</script>`
+            : `<title>${request.url}</title><button onclick="document.title='controlled'">Control</button>`
         )
-        return
-      }
-      response.setHeader("Content-Type", "text/html")
-      response.end(
-        request.url === "/start"
-          ? `<script>window.activate = () => { location.href = '/prerendered' };</script>`
-          : `<title>${request.url}</title><button onclick="document.title='controlled'">Control</button>`
-      )
-    })
-    await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve))
-    const address = server.address()
-    assert(address && typeof address !== "string")
-    return { origin: `http://localhost:${address.port}`, crossSite: `http://127.0.0.1:${address.port}`, server }
-  }),
-  ({ server }) =>
-    Effect.promise(() =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections()
-        server.close(() => resolve())
       })
-    )
-)
+      await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve))
+      const address = server.address()
+      assert(address && typeof address !== "string")
+      return { origin: `http://localhost:${address.port}`, crossSite: `http://127.0.0.1:${address.port}`, server }
+    }),
+    ({ server }) =>
+      Effect.promise(() =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections()
+          server.close(() => resolve())
+        })
+      )
+  )
+
+const serve = serveWithDiscoveredGate()
 
 const launch = Effect.gen(function*() {
   const { launched, transport } = yield* ChromiumLauncher.launchWithPort({
@@ -561,24 +577,36 @@ describe("Chromium claims", () => {
       it.effect("refuses claims for discovered control handles and the default context", () =>
         Effect.gen(function*() {
           const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
-          const { origin } = yield* serve
+          const requested = yield* Deferred.make<ServerResponse>()
+          const { origin } = yield* serveWithDiscoveredGate(requested)
+          const initialPages = (yield* browser.targets).filter((info) => info.type === "page")
           const { targetId } = yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(
             Protocol.on(browser.observer.browser)
           )
+          const response = yield* Deferred.await(requested)
+          // Leave only the externally created target, so adoption needs no public-to-CDP ID mapping.
+          for (const page of initialPages) {
+            yield* Target.closeTarget({ targetId: page.targetId }).pipe(Protocol.on(browser.observer.browser))
+          }
+          assert.deepStrictEqual(
+            (yield* browser.targets).filter((info) => info.type === "page").map((info) => info.targetId),
+            [targetId]
+          )
           yield* Effect.scoped(Effect.gen(function*() {
             const connected = yield* Browser.Browser
-            const pages = yield* connected.pages.waitFor((pages) => pages.length > 1)
-            const matches = yield* until(
-              Effect.filter(pages, (page) =>
-                page.control.pipe(
-                  Effect.flatMap((control) => control.evaluateInMainWorld(() => location.href)),
-                  Effect.map((url) => url === `${origin}/discovered`)
-                )),
-              (matches) => matches.length === 1
-            )
-            assert.lengthOf(matches, 1)
+            // The sole page was created before this connection adopted its existing targets.
+            const matches = yield* connected.pages
+            assert.lengthOf(matches, 1, "exactly one adopted page while its response is held")
             const observed = matches[0]!
+            // A listed adopted page can still be Opening while its initial frame snapshot is installed.
+            assert.strictEqual((yield* observed.status)._tag, "Open")
+            // Register on the connected model before the response can replace the initial realm.
+            const loaded = yield* PageNavigation.next(observed, { url: `${origin}/discovered`, waitUntil: "load" })
+            response.setHeader("Content-Type", "text/html")
+            response.end("<title>discovered</title>")
+            assert.strictEqual((yield* loaded).url, `${origin}/discovered`)
             const controlled = yield* observed.control
+            assert.strictEqual(yield* controlled.evaluateInMainWorld(() => location.href), `${origin}/discovered`)
             assert.strictEqual(reason(yield* api.Page.claim(controlled).pipe(Effect.exit)), "NotPermitted")
             const context = yield* connected.defaultContext.control
             assert.strictEqual(reason(yield* api.UserContext.claim(context).pipe(Effect.exit)), "NotPermitted")
