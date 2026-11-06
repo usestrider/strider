@@ -411,6 +411,44 @@ describe("Recordings", () => {
       })).pipe(Effect.provide(Browser.layerTest("")))
     }).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("hides title evidence only under strict and URL regexps under strict", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "classified.zip")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        for (
+          const [name, condition] of [
+            ["Expect.toHaveTitle", "to have the title \"expected-title-secret\""],
+            ["Expect.toHaveURL", "to have the URL /expected-regexp-secret/"]
+          ]
+        ) {
+          const value = Operation.observed("observed-title-secret")
+          const error = new Expect.ExpectationFailed({
+            subject: `page ${page.id}`,
+            condition: condition!,
+            last: Option.some(value),
+            history: [value],
+            elapsed: Duration.millis(1.703511),
+            checks: { count: 1, triggeredBy: ["initial"] },
+            nearest: Option.none(),
+            suggestions: [],
+            diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+          })
+          yield* Recorders.observe(name!, { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(Effect.flip)
+        }
+        for (const preset of ["strict", "local"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          for (const secret of ["expected-title-secret", "observed-title-secret", "expected-regexp-secret"]) {
+            if (preset === "strict") assert.notInclude(content, secret)
+            else assert.include(content, secret)
+          }
+          assert.include(content, "Elapsed: 2 ms")
+        }
+      })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("records a failed URL expectation as a step of the page's trace", () =>
     Effect.gen(function*() {
       const out = path.join(directory(), "url-expectation.zip")

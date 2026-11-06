@@ -137,6 +137,54 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
   describe(`${name} recordings`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       it.effect(
+        "records URL expectation evidence with export-time redaction",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const served = yield* site
+            const requested = `${served.origin}/json?token=observed-token-secret#observed-fragment-secret`
+            const expected = `${served.origin}/done?token=expected-token-secret#expected-fragment-secret`
+            yield* page.goto(requested)
+            const actual = yield* page.url
+            assert.include(actual, "observed-token-secret")
+            const trace = yield* Trace.record(page)
+            const error = yield* page.pipe(Expect.toHaveURL(expected), Deadline.within("300 millis"), Effect.flip)
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.isAbove(error.history.length, 0)
+            for (const preset of ["strict", "local", "strict"] as const) {
+              const out = path.join(directory(), `${preset}.zip`)
+              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+              const content = text((yield* unzip(out)).get("trace.trace"))
+              const failure = lines(new TextEncoder().encode(content)).find((event) =>
+                event.type === "after" && event.error
+              )?.error
+              assert.strictEqual(failure.name, "ExpectationFailed")
+              assert.include(failure.message, "Last observed:")
+              if (preset === "local") {
+                assert.include(failure.message, actual)
+                assert.include(failure.message, expected)
+              } else {
+                assert.include(failure.message, `${served.origin}/json?token=REDACTED`)
+                assert.include(failure.message, `${served.origin}/done?token=REDACTED`)
+                for (
+                  const secret of [
+                    "observed-token-secret",
+                    "observed-fragment-secret",
+                    "expected-token-secret",
+                    "expected-fragment-secret"
+                  ]
+                ) {
+                  assert.notInclude(content, secret)
+                }
+              }
+            }
+            assert.include(error.message, expected)
+            assert.include(JSON.stringify(error.history), actual)
+          })),
+        timeout
+      )
+
+      it.effect(
         "keeps password expectation values out of trace errors under both presets",
         () =>
           Effect.scoped(Effect.gen(function*() {
