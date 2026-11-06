@@ -1803,11 +1803,16 @@ Recordings of what happened on a page, exported as traces that Playwright's trac
 
 *models*
 
-- `interface Options` (experimental)
+- `type Options = CaptureOptions & (NetworkOptions | SnapshotOptions)` (experimental)
+- `interface CaptureOptions` (experimental)
   - `readonly screenshots?: "perAction" | "off" | undefined`
   - `readonly screencast?: "native" | { readonly polled: Duration.Input } | "off" | undefined`
-  - `readonly domSnapshots?: boolean | undefined`
+- `interface NetworkOptions` (experimental)
+  - `readonly domSnapshots?: false | undefined`
   - `readonly network?: boolean | undefined`
+- `interface SnapshotOptions` (experimental)
+  - `readonly domSnapshots: true`
+  - `readonly network: true`
 - `interface Recording extends Declaration.Registration` (experimental)
   - `exportTrace(path: FilePath.Local | string): Effect.Effect<FilePath.Local, TraceError>`
 - `type TraceErrorReason = typeof TraceErrorReason.Type` (experimental)
@@ -1926,6 +1931,34 @@ User contexts: isolated browser sessions, at two access levels.
 
 - `class UserContextError: Schema.TaggedError "UserContextError" { operation, reason, diagnostics }`
   - `override get cause(): unknown`
+
+### VideoWriter
+
+Writes timestamped image frames to a finished WebM file.
+
+*services*
+
+- `const VideoWriter: Context.Service<VideoWriter, VideoWriter>`
+
+*layers*
+
+- `const layerFfmpeg: (options: { readonly path: string }) => Layer.Layer<VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>`
+
+*models*
+
+- `type Frame = typeof Frame.Type`
+- `type Destination = typeof Destination.Type`
+- `interface VideoWriter`
+  - `readonly write: (frames: Stream.Stream<Frame>, destination: Destination) => Effect.Effect<string, VideoWriterError>`
+
+*schemas*
+
+- `const Frame = Schema.Struct({ at: Schema.Number, format: Schema.Literals(["jpeg", "png"]), data: Schema.Uint8Array, width: Schema.Number, height: Schema.Number })`
+- `const Destination = Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number })`
+
+*errors*
+
+- `class VideoWriterError: Schema.TaggedError "VideoWriterError" { reason }`
 
 ### Watchable
 
@@ -2420,9 +2453,16 @@ The WebKit backend: stock WebKitGTK and WPE, launched in automation mode or atta
 
 *layers*
 
-- `const layer: (options: Browser.LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
-- `const layerConfig: (options: Config.Wrap<Browser.LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
-- `const layerAttach: (endpoint: Url.Url | string, options?: Browser.ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+- `const layer: (options: LaunchOptions) => Layer.Layer< Browser.Browser, Browser.BrowserError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
+- `const layerConfig: (options: Config.Wrap<LaunchOptions>) => Layer.Layer< Browser.Browser, Browser.BrowserError | Config.ConfigError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector >`
+- `const layerAttach: (endpoint: Url.Url | string, options?: ConnectOptions | undefined) => Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor>`
+
+*models*
+
+- `interface LaunchOptions extends Browser.LaunchOptions`
+  - `readonly video?: { readonly polled: Duration.Input; readonly directory: string } | undefined`
+- `interface ConnectOptions extends Browser.ConnectOptions`
+  - `readonly video?: LaunchOptions["video"]`
 
 ## `@usestrider/browser/webkit-automation-protocol`
 

@@ -13,7 +13,7 @@ import type * as Adapter from "../adapter.ts"
  * `Emulation` or `Screencast` domain, no navigate command, no worlds of its own and no `DOM.describeNode`, and no
  * events for a frame's attachment, a same-document navigation, a file chooser or a download.
  */
-export const attachedCapabilities = (info: Browser.Info) => {
+export const attachedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, attached, ${info.product} ${info.revision}`
   const noInput = "stock WebKit's inspector protocol has no Input domain"
   const noEmulation = "stock WebKit's inspector has no Emulation domain"
@@ -26,6 +26,7 @@ export const attachedCapabilities = (info: Browser.Info) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("input.topLevelDesignMode", "unsupported", [noInput]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
@@ -136,7 +137,13 @@ export const attachedCapabilities = (info: Browser.Info) => {
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
-      entry("capability.video", "unsupported", ["stock WebKit's inspector has no Screencast domain"])
+      entry(
+        "capability.video",
+        video ? "supported" : "unsupported",
+        video
+          ? ["Explicit PNG polling; 25fps output repeats samples and can miss states between captures"]
+          : ["Stock WebKit video requires video polling options and a VideoWriter service"]
+      )
     ]
   })
 }
@@ -178,13 +185,14 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
  * session drives: contexts as browser processes, pages, trusted input, dialogs whose kind it doesn't say, the
  * window's size as the viewport, and file inputs. History traversal stays unsupported (`navigation.traverse`).
  */
-export const launchedCapabilities = (info: Browser.Info) => {
+export const launchedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
+    "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
     "input.insertText": ["supported", []],
     "input.keyboardLayout": ["unsupported", [
@@ -217,7 +225,7 @@ export const launchedCapabilities = (info: Browser.Info) => {
       "found through Automation, by its document"
     ]]
   }
-  const base = attachedCapabilities(info).entries
+  const base = attachedCapabilities(info, video).entries
   const entries = base.map((entry) => {
     const different = differ[entry.name]
     return different === undefined

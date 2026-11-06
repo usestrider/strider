@@ -61,12 +61,14 @@
           # enters it with `--ignore-environment`, so nothing else of the host's reaches them: no display, no
           # user configuration, no variables but these.
           integration = pkgs.mkShellNoCC {
-            # ffmpeg for the video scenario, which encodes Chromium's screencast as a WebM
+            # ffmpeg for Chromium video recordings
             packages = toolchain ++ [ pkgs.ffmpeg-headless ];
             # What the tests check that they run in
             STRIDER_ENVIRONMENT = "nix-integration";
             # The browsers, and nothing else looked up
             STRIDER_CHROMIUM = lib.getExe pinnedBrowsers.chromium;
+            STRIDER_FFMPEG = lib.getExe pkgs.ffmpeg-headless;
+            STRIDER_FFPROBE = lib.getExe' pkgs.ffmpeg-headless "ffprobe";
             STRIDER_FIREFOX = lib.getExe pinnedBrowsers.firefox;
             STRIDER_WEBKITGTK = "${pinnedBrowsers.webkitgtk}/libexec/webkitgtk-6.0/MiniBrowser";
             # The MiniBrowser isn't wrapped: GIO finds a TLS backend only where this says, or HTTPS fails with

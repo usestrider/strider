@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Deadline, NetworkRequest } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -966,6 +966,7 @@ const sentHeaders = Effect.fnUntraced(
     const screenshotWork = yield* Queue.unbounded<Sent>()
     const stops = yield* Queue.unbounded<Sent>()
     const stopDeadlines: Array<Option.Option<number>> = []
+    const ackDeadlines: Array<Option.Option<number>> = []
     const stopWrites = yield* Queue.unbounded<void>()
     const stopWriteGate = yield* Deferred.make<void>()
     const startWrites = yield* Queue.unbounded<void>()
@@ -1030,6 +1031,7 @@ const sentHeaders = Effect.fnUntraced(
         yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
       }
     }).pipe(Effect.forkScoped)
+    let connection!: Adapter.AdapterConnection
     const services = yield* Layer.build(BrowserImpl.layer((sink) =>
       CdpAdapter.connect({
         ...browser.transport,
@@ -1037,6 +1039,9 @@ const sentHeaders = Effect.fnUntraced(
           if (JSON.parse(message).method === "Page.startScreencast" && blockStart) {
             yield* Queue.offer(startWrites, undefined)
             yield* Deferred.await(startWriteGate)
+          }
+          if (JSON.parse(message).method === "Page.screencastFrameAck") {
+            ackDeadlines.push(yield* ProtocolClient.CommandDeadline)
           }
           if (JSON.parse(message).method === "Page.stopScreencast") {
             stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
@@ -1053,7 +1058,11 @@ const sentHeaders = Effect.fnUntraced(
           if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
           if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
         })
-      })
+      }).pipe(Effect.tap((adapter) =>
+        Effect.sync(() => {
+          connection = adapter
+        })
+      ))
     ))
     yield* browser.receive({
       method: "Target.attachedToTarget",
@@ -1090,6 +1099,7 @@ const sentHeaders = Effect.fnUntraced(
     const request = yield* next
     return {
       browser,
+      connection,
       page,
       request,
       send,
@@ -1097,6 +1107,7 @@ const sentHeaders = Effect.fnUntraced(
       captures,
       stops,
       stopDeadlines,
+      ackDeadlines,
       stopWrites,
       stopWriteGate,
       startWrites,
@@ -1576,7 +1587,359 @@ describe("Chromium screenshot renderer readiness", () => {
   }
 })
 
+describe("Chromium video writer lifetime", () => {
+  const frame = (
+    h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
+    sessionId: number
+  ) =>
+    h.browser.receive({
+      method: "Page.screencastFrame",
+      sessionId: "S1",
+      params: {
+        data: "/9j/2Q==",
+        sessionId,
+        metadata: {
+          offsetTop: 0,
+          pageScaleFactor: 1,
+          deviceWidth: 800,
+          deviceHeight: 600,
+          scrollOffsetX: 0,
+          scrollOffsetY: 0
+        }
+      }
+    })
+
+  it.effect("does not retain the acquisition protocol deadline in recording work", () =>
+    Effect.gen(function*() {
+      const deadline = yield* Deferred.make<Option.Option<number>>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(_frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(deadline, yield* ProtocolClient.CommandDeadline)
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video).pipe(Deadline.within("1 second"))
+      yield* frame(h, 70)
+      const recordedDeadline = yield* Deferred.await(deadline)
+      yield* video.file
+      assert.isTrue(Option.isNone(recordedDeadline), "recording and preparation outlive the acquisition deadline")
+      assert.strictEqual(h.ackDeadlines.length, 1)
+      assert.isTrue(
+        h.ackDeadlines.every(Option.isNone),
+        "releasing a pending frame must also clear the acquisition deadline"
+      )
+    }).pipe(onTestClock))
+
+  it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const destination = yield* Deferred.make<VideoWriter.Destination>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(destination, target)
+          yield* frames.pipe(Stream.runForEach((image) => Queue.offer(written, image)))
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 51)
+      assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
+      const first = yield* Queue.take(written)
+      yield* TestClock.adjust("120 millis")
+      const second = yield* Queue.take(written)
+      const third = yield* Queue.take(written)
+      assert.strictEqual(second.at - first.at, 40e6)
+      assert.strictEqual(third.at - second.at, 40e6)
+      assert.deepStrictEqual(third.data, first.data)
+      yield* Scope.close(scope, Exit.void)
+      assert.match(yield* video.file, /\.webm$/)
+    }).pipe(onTestClock))
+
+  it.effect("propagates a writer failure before the recording scope closes", () =>
+    Effect.gen(function*() {
+      const failed = new VideoWriter.VideoWriterError({
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "fake writer", hint: "encoder failed" })
+      })
+      const h = yield* sentHeaders().pipe(
+        Effect.provideService(VideoWriter.VideoWriter, { write: () => Effect.fail(failed) })
+      )
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video)
+      yield* frame(h, 52)
+      const error = yield* Effect.flip(video.file)
+      assert(Capability.isCapabilityError(error))
+      assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("shares video ownership and holds acknowledgements behind a blocked writer", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const unblock = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: Effect.fnUntraced(
+            function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(unblock)
+              yield* Stream.runDrain(frames)
+              return target.path
+            }
+          )
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const castScope = yield* Scope.make()
+        const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
+        yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
+        const videoScope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+        yield* frame(h, 61)
+        yield* Deferred.await(started)
+        yield* drain
+        yield* frame(h, 62)
+        yield* drain
+        yield* frame(h, 63)
+        yield* TestClock.adjust("80 millis")
+        yield* drain
+        const acks = () =>
+          h.commands.filter((c) => c.method === "Page.screencastFrameAck").map((c) => c.params?.sessionId)
+        assert.deepStrictEqual(acks(), [], "the fast screencast cannot acknowledge the writer's waiting frame")
+        yield* Deferred.succeed(unblock, undefined)
+        yield* TestClock.adjust("120 millis")
+        yield* drain
+        assert.deepStrictEqual(acks(), [61, 62, 63])
+        yield* Scope.close(castScope, Exit.void)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+        yield* Scope.close(videoScope, Exit.void)
+        yield* video.file
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      })
+    ).pipe(onTestClock))
+
+  it.effect("closes a recording that never received a frame without waiting for the finish budget", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        let writes = 0
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: (_frames, target) => Effect.sync(() => writes++).pipe(Effect.as(target.path))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* drain
+        // No Page.screencastFrame arrives before the scope closes, as when the page never paints.
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("1 second")
+        yield* drain
+        const closedPromptly = closing.pollUnsafe() !== undefined
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert.strictEqual(writes, 0)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.notMatch(error.message, /did not finish within 5 seconds/)
+      })
+    ).pipe(onTestClock))
+
+  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure", "connection"] as const) {
+    it.effect(`settles video on ${mode.endsWith("Failure") || mode === "failure" ? `source failure (${mode})` : `session end (${mode})`} while its scope stays open`, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          let writes = 0
+          let released = false
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: Effect.fnUntraced(
+              function*(frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) {
+                writes++
+                yield* Deferred.succeed(started, undefined)
+                return yield* (mode === "blocked"
+                  ? Effect.never
+                  : Stream.runDrain(frames).pipe(Effect.as(destination.path)))
+                  .pipe(Effect.ensuring(Effect.sync(() => {
+                    released = true
+                  })))
+              }
+            )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          const recordingScope = yield* Scope.make()
+          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(recordingScope))
+          const file = yield* Effect.forkScoped(Effect.exit(video.file))
+          if (mode !== "empty") {
+            yield* frame(h, 71)
+            yield* Deferred.await(started)
+          }
+          if (mode === "failure" || mode === "blockedFailure") {
+            yield* h.browser.receive({
+              method: "Page.screencastFrame",
+              sessionId: "S1",
+              params: {
+                data: "!",
+                sessionId: 72,
+                metadata: {
+                  offsetTop: 0,
+                  pageScaleFactor: 1,
+                  deviceWidth: 800,
+                  deviceHeight: 600,
+                  scrollOffsetX: 0,
+                  scrollOffsetY: 0
+                }
+              }
+            })
+          } else if (mode === "connection") {
+            yield* h.browser.lose("video transport lost")
+          } else {
+            yield* h.browser.receive({
+              method: "Target.detachedFromTarget",
+              params: {
+                sessionId: "S1",
+                targetId: "76F3487A52CF4F79FE4AD28961E44D32"
+              }
+            })
+          }
+          yield* drain
+          if (mode === "blocked") {
+            yield* TestClock.adjust("5 seconds")
+            yield* drain
+          }
+          const settled = file.pollUnsafe() !== undefined
+          if (!settled) {
+            // Ensure even the pre-fix regression releases its fibers before asserting.
+            yield* Fiber.interrupt(file)
+          }
+          const releasedAtFile = released
+          const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
+          yield* drain
+          yield* TestClock.adjust("5 seconds")
+          yield* Fiber.join(closing)
+          assert.isTrue(settled, "source termination must settle file without closing the caller scope")
+          const outcome = yield* Fiber.join(file)
+          if (mode === "started") {
+            assert.isTrue(Exit.isSuccess(outcome))
+          } else {
+            const error = yield* Effect.flip(outcome)
+            assert(Capability.isCapabilityError(error))
+            assert.strictEqual(error.reason._tag, "BackendFailure")
+            if ((mode === "failure" || mode === "blockedFailure") && error.reason._tag === "BackendFailure") {
+              assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            }
+            if (mode === "connection" && error.reason._tag === "BackendFailure") {
+              assert.notStrictEqual(error.reason.method, "VideoWriter.write")
+            }
+            if (mode === "empty") {
+              assert.strictEqual(writes, 0)
+              assert.match(error.message, /no frame|before.*frame/i)
+            }
+          }
+          if (mode !== "empty") {
+            assert.isTrue(releasedAtFile, "the writer must release before file settles")
+          }
+        })
+      ).pipe(onTestClock))
+  }
+
+  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* frame(h, 53)
+        yield* Deferred.await(started)
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+      })
+    ).pipe(onTestClock))
+})
+
 describe("Chromium screencast renderer readiness", () => {
+  it.effect("acknowledges each shared frame once after every consumer takes it and replays it to an idle join", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const fast = yield* page.capability(Capability.Screencast)
+      const slow = yield* page.capability(Capability.Screencast)
+      const reading = yield* Effect.forkScoped(fast.frames.pipe(Stream.take(1), Stream.runCollect))
+      yield* h.browser.receive({
+        method: "Page.screencastFrame",
+        sessionId: "S1",
+        params: {
+          data: "/9j/2Q==",
+          sessionId: 37,
+          metadata: {
+            offsetTop: 0,
+            pageScaleFactor: 1,
+            deviceWidth: 800,
+            deviceHeight: 600,
+            scrollOffsetX: 0,
+            scrollOffsetY: 0
+          }
+        }
+      })
+      yield* Fiber.join(reading)
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        0,
+        "a fast consumer must not acknowledge the slow consumer's frame"
+      )
+      yield* slow.frames.pipe(Stream.take(1), Stream.runDrain)
+      yield* h.barrier
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.screencastFrameAck").length, 1)
+      const idle = yield* page.capability(Capability.Screencast)
+      const cached = yield* idle.frames.pipe(Stream.take(1), Stream.runCollect)
+      assert.strictEqual(cached.length, 1, "joining an idle session delivers its last image without a repaint")
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        1,
+        "replaying a cached frame must not acknowledge it twice"
+      )
+    }).pipe(onTestClock))
+
   it.effect("holds start until one valid metrics reply, then acknowledges frames and stops normally", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)

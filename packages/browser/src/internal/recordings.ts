@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import { now } from "./adapter.ts"
-import { isAbsolute } from "./paths.ts"
+import { dirname, isAbsolute } from "./paths.ts"
 import type * as Runtime from "./runtime.ts"
 
 /** The monotonic clock, anchored to wall time when a recording starts. */
@@ -55,7 +55,7 @@ export const resolve = (
   })
 }
 
-/** Writes a file, which its directory must already hold room for: nothing is created on the way. */
+/** Writes a file, creating the directories on the way to it. */
 export const write = (
   runtime: Runtime.Runtime,
   path: FilePath.Local,
@@ -63,11 +63,22 @@ export const write = (
 ): Effect.Effect<FilePath.Local, WriteFailure> =>
   Option.match(runtime.fileSystem, {
     onNone: () => Effect.fail({ path, hint: "The browser's layer was built without Effect's FileSystem" }),
-    onSome: (fs) =>
-      fs.writeFile(path, content).pipe(
-        Effect.as(path),
-        Effect.mapError((error): WriteFailure => ({ path, hint: error.message, cause: error }))
+    onSome: (fs) => {
+      const directory = dirname(path)
+      return fs.makeDirectory(directory, { recursive: true }).pipe(
+        Effect.mapError((error): WriteFailure => ({
+          path,
+          hint: `Its directory ${directory} couldn't be created: ${error.message}`,
+          cause: error
+        })),
+        Effect.andThen(
+          fs.writeFile(path, content).pipe(
+            Effect.mapError((error): WriteFailure => ({ path, hint: error.message, cause: error }))
+          )
+        ),
+        Effect.as(path)
       )
+    }
   })
 
 /** A zip of files, deflated but for those already compressed. */

@@ -832,11 +832,11 @@ describe("strider", () => {
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
-        // State for a program, and a test of what ran
-        const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
+        // State for a program, and a test of what ran, into directories that don't exist yet
+        const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
         assert.strictEqual(fs.statSync(state).mode & 0o777, 0o600)
-        const test = path.join(env.XDG_RUNTIME_DIR, "shop.test.ts")
+        const test = path.join(env.XDG_RUNTIME_DIR, "tests", "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")
         // The test's context is made as the session's was, with every page rendering

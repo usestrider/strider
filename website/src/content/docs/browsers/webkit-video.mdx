@@ -1,0 +1,58 @@
+---
+title: WebKit video
+description: Enable PNG polling explicitly, choose its interval and output directory, and write a WebM file.
+order: 5
+---
+
+Stock WebKit has no native screencast stream. Explicit PNG polling records a WebM file, at the cost of page work
+and missed states between captures.
+
+```ts
+import { NodeServices, NodeSocket } from "@effect/platform-node"
+import { Browser, Capability, VideoWriter } from "@usestrider/browser"
+import { SocketConnector } from "@usestrider/browser/protocol"
+import { WebKit } from "@usestrider/browser/webkit"
+import { Effect, Layer } from "effect"
+
+const Sockets = SocketConnector.layer((endpoint) =>
+  NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+)
+const WebKitLive = WebKit.layer({
+  executablePath: "/opt/MiniBrowser",
+  video: { polled: "100 millis", directory: "/tmp/videos" }
+}).pipe(
+  Layer.provide(VideoWriter.layerFfmpeg({ path: "/opt/ffmpeg" })),
+  Layer.provide([NodeServices.layer, Sockets])
+)
+
+const record = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  const video = yield* Effect.scoped(Effect.gen(function*() {
+    const video = yield* page.capability(Capability.Video)
+    yield* page.goto("https://example.com")
+    return video
+  }))
+  return yield* video.file
+})).pipe(Effect.provide(WebKitLive))
+```
+
+Provide both `video` options and a [`VideoWriter`](/docs/api/browser/VideoWriter) to the WebKit layer. Create the
+absolute output directory first; it must be writable. The writer installs nothing and uses the ffmpeg path you name.
+
+`"100 millis"` is an explicit starting point, not a default or a responsiveness guarantee. The first screenshot
+is immediate; later captures wait the interval after capture completes, and a slow writer can hold them back.
+The actual sampling period includes screenshot latency. A 25fps output file repeats the latest sample, so it can
+miss animations, brief errors and other states between captures. There is no audio. Larger pages and shorter
+intervals can add more page work.
+
+The writer fits viewport changes into the initial output size, centring the image and padding with black. Navigation
+continues the recording. Closing its scope, page or context ends input; a started writer has up to five seconds
+on the browser clock to finish. Capture and writer failures fail `video.file`.
+
+Files remain in the caller's output directory after the context closes. This enables neither downloads nor
+`Capability.Screencast`. A trace's [`screencast: "native"`](/docs/tools/recordings) selects the enabled video path.
+Supplying just a writer, or just the video options, leaves video unsupported.
+
+The same `video` settings work with [`WebKit.layerConfig`](/docs/api/webkit/WebKit#layerConfig) and
+[`WebKit.layerAttach`](/docs/api/webkit/WebKit#layerAttach). Attached video also needs `FileSystem`, supplied by
+`NodeServices.layer`. Invalid intervals or unusable directories fail with `InvalidInput` before launch or attach.

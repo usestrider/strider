@@ -184,7 +184,7 @@ for (const { library, sample } of runs) {
       "<input type='radio' name='test' checked id='radio'>",
       Effect.fn("CH-017")(function*(page) {
         const error = yield* Effect.flip(page.locator("#radio").uncheck())
-        expect(error).toMatchObject({ _tag: "LocatorError", reason: { _tag: "StateUnchanged" } })
+        expect(error).toMatchObject({ _tag: "LocatorError", reason: { _tag: "WrongElement" } })
         expect(yield* page.locator("#radio").isChecked).toBe(true)
       }),
       async (page) => {

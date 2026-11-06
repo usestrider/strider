@@ -131,6 +131,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
       return "The element is read-only"
     case "NoSuchOption":
       return `The select has no option with that ${reason.option}`
+    case "PreparingFocus":
+      return `Focus was being moved from ${reason.from} before filling the target`
   }
 }
 
@@ -543,7 +545,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {
-    const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
+    const value = Redacted.isRedacted(text) ? Redacted.value(text) : text
+    if (typeof value !== "string") {
+      return Effect.fail(this.error(
+        "Locator.pressSequentially",
+        new Reason.InvalidInput({
+          input: "text",
+          expected: "a string or Redacted string",
+          hint: "PressSequentially requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
+    const characters = Array.from(value)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
     return this.act(
       "Locator.pressSequentially",
@@ -816,7 +830,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           new Locator.WrongElement({
             expected: final.expected,
             element: final.element,
-            hint: "The locator found an element of another kind; narrow it to the one meant"
+            hint: final.hint ?? "The locator found an element of another kind; narrow it to the one meant"
           }),
           id
         )
@@ -1016,8 +1030,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
-      const now = yield* read.pipe(
+      const now = yield* this.readOne(
+        operation,
+        { _tag: "Checked", followLabel: true, uncheck: !checked },
+        (value) => value as boolean
+      ).pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1030,7 +1047,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
       if (options?.trial === true) return
-      const after = yield* read
+      const after = yield* this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,

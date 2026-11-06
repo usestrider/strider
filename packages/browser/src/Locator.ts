@@ -1110,9 +1110,10 @@ export interface Locator extends ReadonlyLocator {
    * It follows `check`, using the checked state and optional checkability described by `isChecked`. The
    * selected element's own checked state takes precedence. Otherwise a selected label, or an ordinary
    * descendant's nearest DOM label, supplies its associated control. The selected element remains the
-   * click target and position origin. If already unchecked, nothing is sent. Otherwise it clicks and
-   * reads the state again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays
-   * checked.
+   * click target and position origin. If already unchecked, nothing is sent. A checked native radio
+   * fails with `WrongElement` before input, including with `trial: true`; check another radio in its
+   * group instead. Page-managed ARIA radios can be unchecked. Otherwise it clicks and reads the state
+   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -1212,6 +1213,13 @@ export interface Locator extends ReadonlyLocator {
    *   digits with an optional fractional part (or a leading decimal point and digits), and an optional exponent
    *   such as `1e2`. Whitespace, a leading plus, a trailing decimal point, hexadecimal and non-finite values fail
    *   with `InvalidInput` before focus, selection or mutation. The input's min, max and step don't restrict fill.
+   * - In a design-mode document, filling a non-input target blurs a different active input or textarea,
+   *   including one inside open shadow roots. The target is resolved and its effective checks run again
+   *   after blur handlers, before selection. If refocusing prevents preparation until the deadline,
+   *   the timeout reports focus preparation in its history.
+   * - Firefox cannot focus inputs in top-level design-mode documents. Filling one is unsupported:
+   *   native typing can insert into the document body instead. Strider does not change design mode
+   *   or synthesize input to work around this browser limitation.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    *
    * **Example** (Choosing a delivery date)
@@ -1252,6 +1260,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Accepts a string or a `Redacted` string; any other value fails with `InvalidInput` before contacting the browser.
    * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
    * errors.
    *

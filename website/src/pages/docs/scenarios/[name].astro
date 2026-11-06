@@ -15,10 +15,8 @@ const other = comparedWith(scenario)
 const sites: Record<string, string> = {
   "the-internet": "The Internet, a site of examples for practicing automation"
 }
-// A public demo site is replayed from a recording; any other scenario drives a page of the local site
-const site = scenario.recording === undefined
-  ? undefined
-  : `${sites[scenario.recording] ?? scenario.recording}, replayed from a recording of the site`
+// A public demo site, which the program visits as written; any other scenario drives a page of the local site
+const site = scenario.recording === undefined ? undefined : sites[scenario.recording] ?? scenario.recording
 ---
 
 <DocShell
