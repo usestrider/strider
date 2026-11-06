@@ -23,6 +23,7 @@ import {
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import type * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
@@ -441,6 +442,37 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.notDeepEqual(shots[0], final)
             const failed = events.find((event) => event.type === "after" && event.callId === checks[1].callId)
             assert.include(JSON.stringify(failed.error), "ExpectationFailed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired expectation when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>busy</p>"))
+            yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the check nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the expectation did not return within 10 s of its 300 ms deadline")
           })),
         timeout
       )
