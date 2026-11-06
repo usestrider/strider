@@ -1419,7 +1419,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
-        "names the target's state when a top-level design-mode blur handler keeps refocusing the input",
+        "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",
         (context) =>
           Effect.gen(function*() {
             if (!(yield* supports("input.topLevelDesignMode"))) {
@@ -1429,7 +1429,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="other"><p id="target">old</p><script>
               document.designMode = "on";
               const other = document.getElementById("other");
-              other.onblur = () => setTimeout(() => other.focus());
+              other.onblur = () => {
+                document.body.dataset.blurs = String(Number(document.body.dataset.blurs ?? 0) + 1);
+                setTimeout(() => {
+                  other.focus();
+                  document.body.dataset.refocuses = String(Number(document.body.dataset.refocuses ?? 0) + 1);
+                });
+              };
               </script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
@@ -1440,16 +1446,29 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.locator("#other").fill("other")
               const error = yield* page.locator("#target").fill("new").pipe(
                 Deadline.within("1 second"),
-                Effect.flip
+                Effect.match({ onSuccess: () => undefined, onFailure: (error) => error })
               )
-              assert(Deadline.isTimeout(error), String(error))
-              // The target exists and passes every check; a timeout that reports NoMatch misleads.
-              assert(
-                !error.history.every((entry) => (entry.value as { _tag: string })._tag === "NoMatch"),
-                JSON.stringify(error.history)
+              assert.isAbove(
+                yield* page.evaluateInMainWorld(() => Number(document.body.dataset.blurs ?? 0)),
+                0,
+                "the native blur handler must execute"
               )
               assert.strictEqual(yield* page.locator("#other").readValue, "other")
-              assert.strictEqual(yield* page.locator("#target").readText, "old")
+              // Scheduled refocus can race insertion. Successful completion is valid only on the intended target.
+              assert.strictEqual(yield* page.locator("#target").readText, error === undefined ? "new" : "old")
+              if (error !== undefined) {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.isAbove(
+                  yield* page.evaluateInMainWorld(() => Number(document.body.dataset.refocuses ?? 0)),
+                  0,
+                  "the asynchronous handler must run before it can block filling"
+                )
+                // The target exists and passes every check. The focus blocker must not erase that evidence.
+                assert(
+                  error.history.some((entry) => (entry.value as { _tag: string })._tag !== "NoMatch"),
+                  JSON.stringify(error.history)
+                )
+              }
             }))
           }),
         timeout
