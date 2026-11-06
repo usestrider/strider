@@ -1,5 +1,6 @@
 import { assert } from "@effect/vitest"
 import * as Data from "effect/Data"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import * as FileSystem from "effect/FileSystem"
@@ -22,27 +23,29 @@ class RecordingFailure extends Data.TaggedError("RecordingFailure")<{ readonly m
 
 export const scenario = Effect.fnUntraced(
   function*(
-    stage?: "acquisition" | "pending" | "stop" | "file-read",
+    stage?: "acquisition" | "pending" | "pending-success" | "pending-failure" | "stop" | "file-read",
     interruptAt?: "stop" | "file-read"
   ) {
+    const gate = yield* Deferred.make<void>()
     let acquisitions = 0
     let reads = 0
     let stops = 0
     const exports: Array<Uint8Array> = []
     const bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x80, 0xb0, 0x81, 32, 0xba, 0x81, 24])
     vi.mocked(Capabilities.acquire).mockImplementation(() =>
-      Effect.suspend(() => {
+      Effect.gen(function*() {
         acquisitions++
+        if (stage === "pending-success" || stage === "pending-failure") yield* Deferred.await(gate)
         // Still starting the browser's recorder when the trace is exported
-        if (stage === "pending") return Effect.never as never
-        if (stage === "acquisition") {
-          return Effect.fail(
+        if (stage === "pending") return yield* Effect.never
+        if (stage === "acquisition" || stage === "pending-failure") {
+          return yield* Effect.fail(
             new RecordingFailure({
               message: "ACQUISITION_REASON https://user:pass@example.test/video?token=secret#fragment"
             })
-          ) as never
+          )
         }
-        return Effect.succeed({
+        return yield* Effect.succeed({
           file: Effect.suspend(() => {
             stops++
             if (interruptAt === "stop") return Effect.interrupt
@@ -54,8 +57,8 @@ export const scenario = Effect.fnUntraced(
               )
               : Effect.succeed("/native.webm")
           })
-        }) as never
-      })
+        })
+      }) as never
     )
     const id = "video-page" as Target.NavigableId
     const target = { _tag: "Page", id } as const
@@ -105,7 +108,12 @@ export const scenario = Effect.fnUntraced(
     yield* Effect.yieldNow
     assert.strictEqual(acquisitions, 1)
     yield* trace.exportTrace("/first.zip")
+    if (stage === "pending-success" || stage === "pending-failure") {
+      yield* Deferred.succeed(gate, undefined)
+      yield* Effect.yieldNow
+    }
     yield* trace.exportTrace("/second.zip").pipe(Diagnostics.withPreset("local"))
+    if (stage === "pending-success" || stage === "pending-failure") yield* trace.exportTrace("/third.zip")
     const files = yield* Effect.forEach(exports, (zip) =>
       Stream.make(zip).pipe(
         Stream.pipeThroughChannel(Zip.decode()),

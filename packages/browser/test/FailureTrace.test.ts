@@ -317,6 +317,8 @@ describe("native video failure artifacts", () => {
     expect(paths.length).toBeGreaterThan(0)
     const content = paths.map((match) => fs.readFileSync(match[1]!, "utf8")).join("\n")
     expect(content).toContain("native-video-failure")
+    expect(content).toContain("native-video-pending")
+    expect(content).toContain("acquisition is still pending at export")
     expect(content).toContain("video-page")
     expect(content).toContain("acquisition")
     expect(content).toContain("ACQUISITION_REASON")

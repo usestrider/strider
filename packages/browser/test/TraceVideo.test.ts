@@ -50,6 +50,8 @@ describe("native trace video", () => {
         assert.strictEqual(errors.length, 1)
         assert.strictEqual(errors[0].pageId, "video-page")
         assert.include(errors[0].text, "acquisition")
+        assert.include(errors[0].text, "pending")
+        assert.notInclude(errors[0].text, "failed")
       }
     })))
   it.effect("keeps successful video bytes and reads them only on the first export", () =>
@@ -78,4 +80,36 @@ for (const stage of ["stop", "file-read"] as const) {
       assert(Exit.isFailure(exit))
       assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
     }))
+}
+
+for (const stage of ["pending-success", "pending-failure"] as const) {
+  it.effect(`updates a pending acquisition after ${stage}`, () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { files, stops, reads } = yield* scenario(stage)
+      assert.strictEqual(files.length, 3)
+      for (const [index, file] of files.entries()) {
+        const events = new TextDecoder().decode(file.get("trace.trace")).trim().split("\n").map((line) =>
+          JSON.parse(line)
+        )
+        const messages = events.filter((event) => event.type === "console")
+        const videos = events.filter((event) => event.type === "video")
+        if (index === 0) {
+          assert.strictEqual(messages.length, 1)
+          assert.include(messages[0].text, "acquisition")
+          assert.include(messages[0].text, "pending")
+          assert.notInclude(messages[0].text, "failed")
+          assert.strictEqual(videos.length, 0)
+        } else if (stage === "pending-success") {
+          assert.strictEqual(messages.length, 0)
+          assert.strictEqual(videos.length, 1)
+        } else {
+          assert.strictEqual(messages.length, 1)
+          assert.notInclude(messages[0].text, "pending")
+          assert.include(messages[0].text, "ACQUISITION_REASON")
+          assert.strictEqual(videos.length, 0)
+        }
+      }
+      assert.strictEqual(stops, stage === "pending-success" ? 1 : 0)
+      assert.strictEqual(reads, stage === "pending-success" ? 1 : 0)
+    })))
 }
