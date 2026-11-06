@@ -18,6 +18,7 @@ import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import type * as WebKitAutomation from "../webkitAutomation.ts"
 import { navigateByScript } from "./navigation.ts"
+import { beforeNavigation } from "./network.ts"
 import { promptClosed, promptOpened } from "./obligations.ts"
 import { type ContextEntry, contextOf, frameById, type PageEntry, pageOf, placement, type State } from "./state.ts"
 import { withoutFragment } from "./tree.ts"
@@ -433,6 +434,8 @@ export const navigateLaunched = Effect.fnUntraced(function*(
     )
   }
   yield* Deferred.await(frame.page.ready)
+  const retention = beforeNavigation(state, frame.page)
+  if (retention !== undefined) yield* retention
   const document = frame.document
   if (document !== undefined && url.includes("#") && withoutFragment(url) === withoutFragment(document.url)) {
     return yield* Effect.fail(

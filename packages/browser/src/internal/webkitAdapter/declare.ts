@@ -274,7 +274,9 @@ export const declare = Effect.fnUntraced(
         state.registry.add(scope, declaration, id)
         const remove = Effect.suspend(() => {
           if (Option.isNone(state.registry.remove(id))) return Effect.void
-          return applyDeclaration(state, declaration, scope, true)
+          return declaration._tag === "BodyCollection"
+            ? state.buffer.run(() => {})
+            : applyDeclaration(state, declaration, scope, true)
         })
         const viewport = declaration._tag === "Override" && declaration.override._tag === "Viewport"
         yield* Effect.addFinalizer(() =>
