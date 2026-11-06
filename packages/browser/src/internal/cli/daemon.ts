@@ -1625,12 +1625,13 @@ const serve = Effect.fnUntraced(
     const disconnected = (client: number) => {
       for (const request of pending.values()) if (request.client === client) written(request)
     }
+    const listener = new AbortController()
     yield* Layer.build(
       RpcServer.layer(Protocol.Rpcs, { disableTracing: true }).pipe(
         Layer.provide(Protocol.Rpcs.toLayer(handlers(daemon, commands(() => daemon), version, touch))),
         Layer.provide(protocolTelling(written, disconnected)),
         Layer.provide(RpcSerialization.layerNdjson),
-        Layer.provide(NodeSocketServer.layer({ path: paths.socket }))
+        Layer.provide(NodeSocketServer.layer({ path: paths.socket, signal: listener.signal }))
       )
     ).pipe(Effect.mapError(failedWith))
     yield* Effect.gen(function*() {
@@ -1659,6 +1660,9 @@ const serve = Effect.fnUntraced(
     prepared.retain(keep)
     const cleanup = yield* Effect.gen(function*() {
       yield* Scope.close(scope, Exit.void)
+      // Stop accepting before releasing the name. Closing the listener unlinks its own socket now;
+      // accepted RPC connections remain open for their responses, and a later close owns no path.
+      yield* Effect.sync(() => listener.abort())
       if (keep) {
         for (const file of [paths.socket, paths.lock]) {
           yield* fs.remove(file, { force: true })
