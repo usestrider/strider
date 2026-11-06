@@ -423,6 +423,10 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
  * **Details**
  *
  * A `Watchable` subject is checked again on each change. Any other effect is run again every `CheckInterval`.
+ * Direct `page.url` and `page.title` subjects classify failed observations as URLs and titles for trace export.
+ * The export preset applies through rethrows of the same failure. User transformations (including
+ * `Watchable.map` and `Effect.map`) and reconstructed failures do not retain that source classification.
+ * Condition descriptions are user-authored text exported as written; classification does not infer secrets.
  *
  * **Example** (Waiting for a download to complete)
  *
