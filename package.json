@@ -10,7 +10,7 @@
     "lint": "oxlint && dprint check && strider-docs format --check",
     "lint-fix": "oxlint --fix && dprint fmt && strider-docs format",
     "test": "vitest",
-    "test:integration": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORD --keep STRIDER_UPSTREAM_SAMPLES --command pnpm exec vitest --run --config vitest.integration.config.ts",
+    "test:integration": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORD --keep STRIDER_UPSTREAM_SAMPLES --keep STRIDER_INTEGRATION_GROUP --command pnpm exec vitest --run --config vitest.integration.config.ts",
     "test:integration:macos": "node scripts/integration-macos.mjs",
     "test:upstream": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_UPSTREAM_SAMPLES --keep STRIDER_UPSTREAM_RUN --command pnpm exec vitest --run --config vitest.upstream.config.ts",
     "benchmark:upstream": "node packages/scenarios/benchmark/cli.ts run",
