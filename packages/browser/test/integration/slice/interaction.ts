@@ -1280,8 +1280,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
 
       it.effect(
         "fills an input then a paragraph in a top-level design-mode document",
-        () =>
+        (context) =>
           Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
             const { url } = yield* fixture(() =>
               "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
             )
@@ -1314,8 +1317,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       ) {
         it.effect(
           `rechecks a top-level design-mode target when blur handlers ${change} it`,
-          () =>
+          (context) =>
             Effect.gen(function*() {
+              if (!(yield* supports("input.topLevelDesignMode"))) {
+                context.skip(
+                  "Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY"
+                )
+              }
               const mutation = change === "replace"
                 ? "target.outerHTML = \"<p id=target>replacement</p>\""
                 : change === "detach"

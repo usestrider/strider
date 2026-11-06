@@ -43,6 +43,11 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
+In a design-mode document, filling a paragraph blurs a previously focused input or textarea and checks the
+target again after its blur handlers. Firefox cannot focus inputs in top-level design-mode documents:
+filling one can insert text into the document body instead. This is a known browser limitation of
+[`fill`](/docs/api/browser/Locator#Locator.fill).
+
 An action sends its input at most once. If it fails after the input may have reached the page, the error's
 [`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
 

@@ -26,6 +26,7 @@ export const attachedCapabilities = (info: Browser.Info) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("input.topLevelDesignMode", "unsupported", [noInput]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
@@ -185,6 +186,7 @@ export const launchedCapabilities = (info: Browser.Info) => {
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
+    "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
     "input.insertText": ["supported", []],
     "input.keyboardLayout": ["unsupported", [

@@ -1854,6 +1854,19 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
+        if (
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        ) {
+          const active = document.activeElement
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            rects = []
+            continue
+          }
+        }
         let response = ready(element, action, request.apply, scrolled, point)
         if (
           response._tag === "Ready" && action._tag === "Point" && action.position === null &&

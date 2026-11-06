@@ -545,6 +545,12 @@ optional fractional part (or a leading decimal point and digits), and an optiona
 a leading plus, a trailing decimal point, hexadecimal and non-finite values fail with `InvalidInput` before focus,
 selection or mutation. The input's min, max and step do not restrict fill. Redacted values never appear in diagnostics.
 
+In a design-mode document, filling a non-input target first blurs a different active input or textarea, then
+resolves the target and checks its readiness again before selecting its contents. Blur handlers can therefore
+replace the target or make the action wait. Firefox cannot focus an input inside a top-level design-mode
+document, so filling that input is unsupported; text intended for it can reach the document body instead.
+Strider does not change design mode or synthesize input to work around this browser limitation.
+
 
 - **How a locator finds elements** is CONCEPTS.md §8, Queries: one engine of ours, in each document's utility world, the same on every backend. Text is text content with whitespace collapsed, never `innerText`; `getByText` finds the smallest element that says it; `getByRole` uses the explicit or HTML-AAM implicit role and the accname 1.2 name.
 - **Actionability is the CONCEPTS.md §8 predicate set**, evaluated together in the target document per attempt, with frame bounds read from each parent document. An attempt checks at each animation frame, in the page, for up to a second; when the checks pass, the action takes the page's input permit, checks once more, and dispatches (CONCEPTS.md §5, Actions). At the deadline it fails with `Timeout{phase}`, `waitingForCondition`, or `resolving` when nothing ever matched, whose hint explains the last reason: "Another element covers the element's action point: div.toast "Saved"". Each action documents its checks:

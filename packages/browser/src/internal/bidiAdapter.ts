@@ -56,6 +56,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("input.topLevelDesignMode", "unsupported", [
+        "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
+      ]),
       entry("userContexts", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
