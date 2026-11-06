@@ -1211,7 +1211,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="field" type="text" value="old" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const result = yield* page.locator("#field").fill("new").pipe(
               Deadline.within("1 second"),
@@ -1250,7 +1250,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const result = yield* page.locator("#field").fill("new", {
                   checks: mode === "override" ? { [property === "readOnly" ? "editable" : "enabled"]: false } : {}
@@ -1310,7 +1310,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.gen(function*() {
                 const { url } = yield* fixture(() => html)
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const result = yield* page.locator("#field").fill("new", { checks: { editable } }).pipe(
                     Deadline.within("1 second"),
