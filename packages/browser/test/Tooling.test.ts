@@ -297,6 +297,14 @@ describe("Recordings", () => {
       }
       const circular: { self?: unknown } = {}
       circular.self = circular
+      const unprintable = {
+        toJSON() {
+          throw new Error("cannot encode")
+        },
+        toString() {
+          throw new Error("cannot display")
+        }
+      }
       const errors = [
         new Expect.ExpectationFailed(details),
         new Expect.ExpectationFailed({
@@ -310,7 +318,12 @@ describe("Recordings", () => {
         new Expect.ExpectationFailed({
           ...details,
           last: Option.some(Operation.observed(circular)),
-          history: [Operation.observed(1n), Operation.observed(undefined), Operation.observed(circular)]
+          history: [
+            Operation.observed(1n),
+            Operation.observed(undefined),
+            Operation.observed(circular),
+            Operation.observed(unprintable)
+          ]
         }),
         new Error("ordinary failure")
       ]
@@ -353,6 +366,7 @@ describe("Recordings", () => {
       assert.include(failures[2].message, "History:")
       assert.include(failures[2].message, "undefined")
       assert.include(failures[2].message, "1")
+      assert.include(failures[2].message, "[Unprintable observed value]")
       assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
     }).pipe(Effect.provide(NodeServices.layer)))
 

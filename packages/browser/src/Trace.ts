@@ -166,6 +166,8 @@ export interface Recording extends Declaration.Registration {
  *   stylesheet again. Stock WebKit has no isolated worlds, so there they run in the page's own.
  * - The viewer draws a snapshot's canvas from the action's screenshot, so canvases need
  *   `screenshots: "perAction"`.
+ * - Failed expectations keep their original message plus the last observation, observation history, check
+ *   count and triggers, elapsed time, nearest match and suggestions where available in the viewer's error message.
  * - The page's video ends at the first `exportTrace`, which reads its file.
  *
  * **Example** (Exporting a trace when checkout fails)

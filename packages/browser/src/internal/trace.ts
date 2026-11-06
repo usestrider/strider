@@ -20,6 +20,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
+import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
@@ -30,6 +31,7 @@ import type * as Tracer from "effect/Tracer"
 import * as Capability from "../Capability.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as Diagnostics from "../Diagnostics.ts"
+import * as Expect from "../Expect.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
@@ -134,6 +136,33 @@ const actions = new Set([
   "Page.forward"
 ])
 
+/** Observations may contain cycles, bigints or user-defined inspection that throws. */
+const observedText = (value: unknown): string => {
+  try {
+    return Inspectable.toStringUnknown(value)
+  } catch {
+    return "[Unprintable observed value]"
+  }
+}
+
+/** Keep the evidence in the message: existing trace viewers display only name and message. */
+const expectationMessage = (error: Expect.ExpectationFailed): string => {
+  const lines = [error.message]
+  if (Option.isSome(error.last)) lines.push(`Last observed: ${observedText(error.last.value.value)}`)
+  if (error.history.length > 0) {
+    lines.push("History:", ...error.history.map((entry) => `  ${observedText(entry.value)}`))
+  }
+  lines.push(
+    `Checks: ${error.checks.count}${
+      error.checks.triggeredBy.length > 0 ? ` (${error.checks.triggeredBy.join(", ")})` : ""
+    }`,
+    `Elapsed: ${Duration.toMillis(error.elapsed)} ms`
+  )
+  if (Option.isSome(error.nearest)) lines.push(`Nearest match:\n${error.nearest.value}`)
+  if (error.suggestions.length > 0) lines.push(`Suggestions:\n${error.suggestions.join("\n")}`)
+  return lines.join("\n")
+}
+
 const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<{ name: string; message: string }> => {
   if (Exit.isSuccess(exit)) return Option.none()
   const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
@@ -141,7 +170,11 @@ const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<{ name: strin
     const error = failure.error as { readonly _tag?: unknown; readonly name?: unknown; readonly message?: unknown }
     return Option.some({
       name: typeof error._tag === "string" ? error._tag : typeof error.name === "string" ? error.name : "Error",
-      message: typeof error.message === "string" ? error.message : String(failure.error)
+      message: Expect.isExpectationFailed(error)
+        ? expectationMessage(error)
+        : typeof error.message === "string"
+        ? error.message
+        : String(failure.error)
     })
   }
   return Option.some(
