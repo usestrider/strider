@@ -245,9 +245,12 @@ export const withBodyLimit: {
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
- * While response bodies are collected on WebKit, navigation and reload wait for the page's document loads and
- * body reads to settle within the navigation's existing deadline. The wait can be interrupted; navigation
- * triggered by page scripts or input is outside this coordination.
+ * On WebKit, response-body collection makes navigation and reload wait for the responded, committed main
+ * document to finish loading and for document body reads already started on the page to settle. Unresponded or
+ * uncommitted loads and unfinished iframe loads do not delay dispatch. This interruptible wait uses the existing
+ * navigation deadline with no grace. An indefinitely streaming main document can consume that deadline and
+ * cause `Deadline.Timeout`; close the scopes owning all response-body collection before navigating if preserving
+ * the body is unnecessary. Navigation started by page scripts or input is outside this coordination.
  *
  * **Example** (Waiting for the cart's response)
  *

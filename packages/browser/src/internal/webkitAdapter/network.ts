@@ -160,6 +160,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           id,
           session: session,
           requestId: params.requestId,
+          loaderId: loader,
           redirects: 0,
           hop: state.ids.hop(id, 0),
           responded: undefined,
@@ -242,6 +243,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         id,
         session: session,
         requestId: params.requestId,
+        loaderId: undefined,
         redirects: 0,
         hop: state.ids.hop(id, 0),
         responded: undefined,
@@ -392,8 +394,14 @@ export const beforeNavigation = (state: State, page: PageEntry) =>
   state.buffer.waitFor(() => {
     if (page.ended || Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return true
     if (page.retaining.size > 0) return undefined
+    const main = page.main
+    const document = main.document
+    if (main.removed || document === undefined) return true
     for (const request of state.requests.values()) {
-      if (request.resourceType !== "document" || request.frame?.page !== page || request.frame.removed) continue
+      if (
+        request.resourceType !== "document" || request.frame !== main ||
+        request.loaderId !== document.loaderId || request.responded !== request.hop
+      ) continue
       if (!Deferred.isDoneUnsafe(request.finished)) return undefined
     }
     return true

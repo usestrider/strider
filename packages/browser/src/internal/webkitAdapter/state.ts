@@ -134,6 +134,8 @@ export interface RequestEntry {
   readonly session: ProtocolClient.Session
   /** WebKit's id, its target's own. */
   readonly requestId: string
+  /** The request event’s loader key, when reported. */
+  readonly loaderId: string | undefined
   redirects: number
   hop: NetworkRequest.HopId
   /** The last hop a response was reported for: WebKit can report one twice. */

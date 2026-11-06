@@ -170,9 +170,15 @@ export interface Recording extends Declaration.Registration {
  * **Gotchas**
  *
  * - Bodies are collected for the target while it records, up to `NetworkResponse.BodyLimit`.
- * - On WebKit, navigation and reload wait for the page's document loads and body reads to settle while response
- *   bodies are collected. This wait uses the navigation's existing deadline and can be interrupted. Navigation
- *   triggered by page scripts or input is outside this coordination.
+ * - On WebKit, while response bodies are collected, navigation and reload wait for the responded, committed main
+ *   document to finish loading and for document body reads already started on the page to settle. Unresponded
+ *   or uncommitted loads and unfinished iframe loads do not delay dispatch. The wait is interruptible within the
+ *   existing navigation deadline, with no grace: a main document that streams indefinitely can consume that
+ *   deadline and make navigation or reload fail with `Deadline.Timeout`.
+ * - If preserving that body is unnecessary, close the scope owning response-body collection before navigating.
+ *   Stopping a recording with `remove` alone does not release its collection declaration; other active response
+ *   collections on the page can also keep the wait enabled. Navigation started by page scripts or input is
+ *   outside this coordination.
  * - `webSocketFrames` is `Unsupported` on WebDriver BiDi.
  * - Chromium keeps only the body a request's last hop sent, so an earlier hop's body that its event didn't carry,
  *   such as a file upload that a 307 redirected, is left out.
@@ -188,6 +194,22 @@ export interface Recording extends Declaration.Registration {
  *   yield* page.goto("https://shop.example.com/cart")
  *   yield* page.getByRole("button", { name: "Pay" }).click()
  *   return yield* har.exportHar("checkout.zip")
+ * })
+ * ```
+ *
+ * **Example** (Releasing body collection before leaving a streaming page)
+ *
+ * ```ts import.meta.vitest
+ * import { Har, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordThenLeave = Effect.fn("recordThenLeave")(function*(page: Page.Page) {
+ *   yield* Effect.scoped(Effect.gen(function*() {
+ *     yield* Har.record(page, { content: "embed" })
+ *     yield* page.goto("https://example.com/stream")
+ *   }))
+ *   // The collection scope has closed; the unfinished body need not be preserved.
+ *   yield* page.goto("https://example.com/next")
  * })
  * ```
  *
