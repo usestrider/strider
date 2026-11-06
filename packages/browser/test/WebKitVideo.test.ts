@@ -159,6 +159,45 @@ describe("Shared video lifetime", () => {
       }))
   }
 
+  it.effect("never gives the writer a frame earlier than the one before it", () =>
+    Effect.gen(function*() {
+      // The ffmpeg writer's Matroska input loses the timing of every later frame after a timestamp goes back:
+      // frames at 0, 5ms, 3ms and 4s decode at 0, 5ms, 5ms and 5ms. A source time can go back when Chromium's
+      // wall-clock screencast time steps, or when a frame without one falls back to the local clock.
+      const written: Array<number> = []
+      const scope = yield* Scope.make()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.make(
+            { ...image, frame: { ...frame, at: 10e9 } },
+            { ...image, frame: { ...frame, at: 10.005e9 } },
+            { ...image, frame: { ...frame, at: 10.003e9 } },
+            { ...image, frame: { ...frame, at: 14e9 } }
+          ),
+          ended: Effect.never
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach((frame) => Effect.sync(() => written.push(frame.at))),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(
+        Scope.provide(scope),
+        Effect.provideService(BrowserClock.CurrentClock, {
+          now: () => 10e9 as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        })
+      )
+      yield* file
+      yield* Scope.close(scope, Exit.void)
+      for (let i = 1; i < written.length; i++) {
+        assert.isAtLeast(written[i]!, written[i - 1]!, `frame ${i} at ${written[i]} precedes ${written[i - 1]}`)
+      }
+    }))
+
   it.effect("appends stop time to a single still image without another source frame", () =>
     Effect.gen(function*() {
       let now = 0
