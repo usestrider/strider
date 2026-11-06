@@ -91,6 +91,14 @@ const launch = Effect.gen(function*() {
   return { endpoint, observer, targets, connect }
 })
 
+// Preserve target identity and lifetime while modeling the observer's lagging metadata.
+const staleTargetMetadata = (browser: Effect.Success<typeof launch>) => ({
+  ...browser,
+  targets: browser.targets.pipe(
+    Effect.map((infos) => infos.map((info) => ({ ...info, url: "", title: "about:blank" })))
+  )
+})
+
 const until = Effect.fnUntraced(function*<A, E, R>(read: Effect.Effect<A, E, R>, ready: (value: A) => boolean) {
   for (let attempt = 0; attempt < 200; attempt++) {
     const value = yield* read
@@ -194,6 +202,32 @@ const assertOwned = Effect.fnUntraced(
 describe("Chromium claims", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
+      for (const pagesOnly of [false, true]) {
+        it.effect(
+          `URL cleanup predicate rejects a live target with stale metadata (pagesOnly=${pagesOnly})`,
+          () =>
+            Effect.gen(function*() {
+              const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
+              const { origin } = yield* serve
+              yield* Effect.scoped(Effect.gen(function*() {
+                const context = yield* Browser.newContext()
+                const before = new Set((yield* browser.targets).map((info) => info.targetId))
+                const page = yield* context.newPage
+                const url = `${origin}/still-live`
+                yield* page.goto(url)
+                assert.strictEqual(yield* page.url, url)
+                const infos = yield* browser.targets
+                const created = infos.filter((info) => info.type === "page" && !before.has(info.targetId))
+                assert.lengthOf(created, 1, "the target is still alive before scope cleanup")
+                // These are the existing cleanup predicates, evaluated before cleanup is allowed to run.
+                const cleanupComplete = !infos.some((info) => (!pagesOnly || info.type === "page") && info.url === url)
+                assert.isFalse(cleanupComplete, "URL absence must not report a live target as cleaned up")
+              })).pipe(Effect.provide(browser.connect))
+            }),
+          60_000
+        )
+      }
+
       it.effect(
         "reclaims a killed client's page, preserves session storage, and owns its cleanup",
         () =>
@@ -350,7 +384,7 @@ describe("Chromium claims", () => {
 
       it.effect("returns OtherBrowser for a live claim from another browser", () =>
         Effect.gen(function*() {
-          const first = yield* launch
+          const first = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const second = yield* launch
           const { origin } = yield* serve
           const saved = yield* killedClient(first.endpoint, `${origin}/other-browser`)
@@ -399,7 +433,7 @@ describe("Chromium claims", () => {
         "reclaims a killed client's context, reapplies settings, and owns context cleanup",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
             const saved = yield* killedClient(browser.endpoint, `${origin}/context`)
             const before = (yield* browser.targets).find((info) =>
@@ -511,7 +545,7 @@ describe("Chromium claims", () => {
       )
       it.effect("refuses claims for discovered control handles and the default context", () =>
         Effect.gen(function*() {
-          const browser = yield* launch
+          const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
           yield* Target.createTarget({ url: `${origin}/discovered` }).pipe(Protocol.on(browser.observer.browser))
           yield* Effect.scoped(Effect.gen(function*() {
@@ -837,7 +871,7 @@ describe("Chromium claims", () => {
         "dismisses a pre-handoff dialog, reports the event and confirms declaration teardown",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
             const cleanupWarnings: Array<unknown> = []
             const cleanupLogger = Logger.make((entry) => {
@@ -894,7 +928,7 @@ describe("Chromium claims", () => {
         "a failed context reclaim leaves the surviving context and its tabs open",
         () =>
           Effect.gen(function*() {
-            const browser = yield* launch
+            const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
             const { origin } = yield* serve
             const old = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
@@ -961,7 +995,7 @@ describe("Chromium claims", () => {
           `${failure} storageState reclaim unwinds registrations without destroying survivors`,
           () =>
             Effect.gen(function*() {
-              const browser = yield* launch
+              const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
               const { origin } = yield* serve
               const old = yield* Scope.make()
               yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
@@ -1111,7 +1145,7 @@ describe("Chromium claims", () => {
 
       it.effect("context reclaim with a blocked page returns it as Unknown", () =>
         Effect.gen(function*() {
-          const browser = yield* launch
+          const browser = yield* launch.pipe(Effect.map(staleTargetMetadata))
           const { origin } = yield* serve
           const old = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(old, Exit.void))
