@@ -23,6 +23,15 @@ describe("VideoWriter", () => {
     assert.strictEqual(next(1000, 1200e6), 1200e6)
   })
 
+  it("never places a screencast frame after the time it was received", () => {
+    // Chromium stamps screencast frames with its wall clock. If that clock steps forward an hour mid-recording
+    // (an NTP step, a resumed VM), a frame received 40ms after the first must not land an hour into the video:
+    // the recording's stop frame is never earlier than the last frame, so the file would last an hour.
+    const time = Capture.makeScreencastClock()
+    assert.strictEqual(time(4000000000, 200e6), 200e6)
+    assert.isAtMost(time(4000003600, 240e6), 240e6)
+  })
+
   it("reports opted-in WebKit video without enabling downloads or native screencasts", () => {
     const info = new Browser.Info({ protocol: "webkit", product: "WebKit", version: "test", revision: "test" })
     for (const capabilities of [WebKit.attachedCapabilities, WebKit.launchedCapabilities]) {
