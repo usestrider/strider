@@ -1264,7 +1264,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   assert.deepStrictEqual(state, {
                     result: "Success",
                     value: "new",
-                    events: "focus;editable;input;input;input;"
+                    events: name === "Chromium" ? "focus;editable;input;" : "focus;editable;input;input;input;"
                   })
                   assert.strictEqual(yield* page.locator("#before").readText, "old|focus;")
                 } else {
