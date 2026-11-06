@@ -393,6 +393,27 @@ describe("WebKit launcher", () => {
       }
     )
 
+    for (const [mode, stages] of [
+      ["unreadable", ["spawned"]],
+      ["unreadable-after", ["spawned", "listener verified", "connected"]],
+      ["owned", ["spawned", "listener verified", "connected", "inspector established"]]
+    ] as const) {
+      it.effect(`reports completed startup stages and times for ${mode} without changing cleanup`, () =>
+        Effect.gen(function*() {
+          const result = yield* ownershipAttempt(mode)
+          const message = result.error.message
+          assert.include(message, "WebKit startup (port ")
+          const reached = Array.from(message.matchAll(/(spawned|listener verified|connected|inspector established) at ([0-9.]+)ms/g))
+          assert.deepStrictEqual(reached.map((match) => match[1]), stages)
+          const times = reached.map((match) => Number(match[2]))
+          assert(times.every((time, index) => time >= 0 && (index === 0 || time >= times[index - 1]!)))
+          assert.strictEqual(result.stopped, 1)
+          assert.strictEqual(result.closed, result.connected)
+          assert(result.error.reason._tag === "ConnectionFailed")
+          assert.include(result.error.reason.hint, mode === "owned" ? "didn't start a session" : "Cannot read Linux procfs")
+        }))
+    }
+
     it.effect("writes only after the same spawned PID holds the listener across connecting", () =>
       Effect.gen(function*() {
         const result = yield* ownershipAttempt("owned")
