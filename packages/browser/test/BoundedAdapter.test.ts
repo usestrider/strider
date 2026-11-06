@@ -425,6 +425,102 @@ describe("BoundedAdapter", () => {
       assert.deepStrictEqual(diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
     }))
 
+  for (const earlier of ["ok", "rejected", "uncertain"] as const) {
+    for (const firstStep of [false, true]) {
+      for (const nestedGuard of [false, true]) {
+        for (const active of [false, true]) {
+          it.effect(`keeps earlier ${earlier} ${firstStep ? "step" : "direct"} evidence through a ${nestedGuard ? "nested" : "child"} guard with ${active ? "an active write" : "no active write"}`, () =>
+            Effect.gen(function*() {
+              const started = yield* Deferred.make<void>()
+              const error = new Adapter.AdapterError({
+                reason: {
+                  _tag: "Protocol",
+                  error: new Protocol.ProtocolError({
+                    reason: earlier === "rejected"
+                      ? new Protocol.Rejected({
+                        method: "setCookies",
+                        reason: "InvalidArgument",
+                        code: -32602,
+                        description: "refused"
+                      })
+                      : new Protocol.NoReply({ method: "setCookies", timeout: Duration.zero })
+                  })
+                }
+              })
+              const adapter = stub({
+                setCookies: () => earlier === "ok" ? Effect.void : Effect.fail(error),
+                clearCookies: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+              })
+              yield* Effect.gen(function*() {
+                const parent = yield* Operation.record
+                const first = adapter.setCookies(context, []).pipe(Effect.exit)
+                yield* firstStep ? first.pipe(Operation.named("first")) : first
+                const before = parent.diagnostics()
+                const write = active
+                  ? yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+                  : undefined
+                if (active) yield* Deferred.await(started)
+                let child: ReturnType<Operation.Record["diagnostics"]> | undefined
+                const guard = Effect.gen(function*() {
+                  const local = yield* Operation.record
+                  local.markSent()
+                  local.markNotSent()
+                  child = local.diagnostics()
+                }).pipe(Operation.named("guard"))
+                yield* nestedGuard ? guard.pipe(Operation.named("wrapper")) : guard
+                const after = parent.diagnostics()
+                if (write !== undefined) yield* Fiber.interrupt(write)
+                assert.deepStrictEqual(child?.dispatch, { _tag: "NotSent" })
+                assert.deepStrictEqual(after.dispatch, active ? { _tag: "MayHaveBeenSent" } : before.dispatch)
+                assert.deepStrictEqual(
+                  parent.diagnostics().dispatch,
+                  active ? { _tag: "MayHaveBeenSent" } : before.dispatch
+                )
+              }).pipe(Operation.named("parent"))
+            }))
+        }
+      }
+    }
+
+    it.effect(`restores earlier ${earlier} evidence after overlapping child guards cancel in reverse order`, () =>
+      Effect.gen(function*() {
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        const finishFirst = yield* Deferred.make<void>()
+        const finishSecond = yield* Deferred.make<void>()
+        yield* Effect.gen(function*() {
+          const parent = yield* Operation.record
+          if (earlier === "uncertain") {
+            parent.markSent()
+            yield* Operation.answered(parent, Effect.fail("unanswered")).pipe(Effect.exit)
+          } else parent.markConfirmed(earlier)
+          const before = parent.diagnostics()
+          const guard = (started: Deferred.Deferred<void>, finish: Deferred.Deferred<void>, name: string) =>
+            Effect.gen(function*() {
+              const local = yield* Operation.record
+              local.markSent()
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(finish)
+              local.markNotSent()
+              return local.diagnostics()
+            }).pipe(Operation.named(name))
+          const first = yield* Effect.forkChild(guard(firstStarted, finishFirst, "first guard"))
+          yield* Deferred.await(firstStarted)
+          const second = yield* Effect.forkChild(guard(secondStarted, finishSecond, "second guard"))
+          yield* Deferred.await(secondStarted)
+          yield* Deferred.succeed(finishSecond, undefined)
+          const secondResult = yield* Fiber.join(second)
+          const between = parent.diagnostics()
+          yield* Deferred.succeed(finishFirst, undefined)
+          const firstResult = yield* Fiber.join(first)
+          assert.deepStrictEqual(secondResult.dispatch, { _tag: "NotSent" })
+          assert.deepStrictEqual(firstResult.dispatch, { _tag: "NotSent" })
+          assert.deepStrictEqual(between.dispatch, { _tag: "MayHaveBeenSent" })
+          assert.deepStrictEqual(parent.diagnostics().dispatch, before.dispatch)
+        }).pipe(Operation.named("overlapping guards"))
+      }))
+  }
+
   for (const failed of [false, true]) {
     for (const recoverFirst of [false, true]) {
       it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
