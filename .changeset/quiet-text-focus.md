@@ -2,4 +2,4 @@
 "@usestrider/browser": patch
 ---
 
-Make text fill wait when a focus handler makes the target read-only or disabled, respecting the enabled and editable check overrides.
+Make text fill recheck the target after focus: wait when it becomes read-only or disabled, and refuse a target whose kind no longer accepts text. Respect the enabled and editable check overrides.

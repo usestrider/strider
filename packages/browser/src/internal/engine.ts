@@ -1978,6 +1978,9 @@ export function engine(render: (root: SnapNode) => string) {
         }
         selectContents(element as HTMLElement)
         // Selection focuses the target; its handlers can remove actionability before native typing.
+        if (checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
+        }
         if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
         if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
         return { ...answer, fill: "type" }
