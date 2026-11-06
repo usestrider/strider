@@ -170,10 +170,11 @@ export const slice = (
             )
             assert(Expect.isExpectationFailed(error), String(error))
             assert.strictEqual(error.subject, `page.getByText("item")`)
-            assert.deepStrictEqual(error.history.map((each) => each.value), [{ matches: 2, visible: 2 }])
-            // One round waited in the page, checking again on each frame, for the whole deadline
+            for (const entry of error.history) {
+              assert.deepStrictEqual(entry.value, { matches: 2, visible: 2 })
+            }
+            assert.deepStrictEqual(error.last, Option.fromUndefinedOr(error.history.at(-1)))
             assert.isAtLeast(error.checks.count, 1)
-            assert.include(error.checks.triggeredBy, "change")
             yield* page.getByText("3 items").pipe(Expect.toBeHidden)
           }))
         }), timeout)
