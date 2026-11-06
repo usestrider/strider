@@ -60,6 +60,7 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),

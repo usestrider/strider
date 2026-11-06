@@ -131,6 +131,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
       return "The element is read-only"
     case "NoSuchOption":
       return `The select has no option with that ${reason.option}`
+    case "PreparingFocus":
+      return `Focus was being moved from ${reason.from} before filling the target`
   }
 }
 

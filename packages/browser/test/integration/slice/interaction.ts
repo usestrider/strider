@@ -1434,6 +1434,207 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "fills an input then a paragraph in a top-level design-mode document",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#other").fill("other")
+              yield* page.locator("#target").fill("new")
+              assert.deepStrictEqual({
+                input: yield* page.locator("#other").readValue,
+                paragraph: yield* page.locator("#target").readText
+              }, { input: "other", paragraph: "new" })
+            }))
+          }),
+        timeout
+      )
+
+      for (
+        const change of [
+          "replace",
+          "detach",
+          "hide",
+          "inert",
+          "disable",
+          "disable with checks off",
+          "readonly",
+          "readonly with checks off",
+          "restore"
+        ] as const
+      ) {
+        it.effect(
+          `rechecks a top-level design-mode target when blur handlers ${change} it`,
+          (context) =>
+            Effect.gen(function*() {
+              if (!(yield* supports("input.topLevelDesignMode"))) {
+                context.skip(
+                  "Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY"
+                )
+              }
+              const mutation = change === "replace"
+                ? "target.outerHTML = \"<p id=target>replacement</p>\""
+                : change === "detach"
+                ? "target.remove()"
+                : change === "hide"
+                ? "target.style.display = \"none\""
+                : change === "inert"
+                ? "target.inert = true"
+                : change === "restore"
+                ? "target.style.display = \"none\"; setTimeout(() => target.style.display = \"\", 100)"
+                : change.startsWith("readonly")
+                ? "target.setAttribute(\"aria-readonly\", \"true\")"
+                : "target.setAttribute(\"aria-disabled\", \"true\")"
+              const { url } = yield* fixture(() =>
+                `<input id="other"><p id="target">old</p><script>
+              document.designMode = "on";
+              document.getElementById("other").onblur = () => {
+                document.body.dataset.blurred = "yes";
+                const target = document.getElementById("target");
+                ${mutation};
+              };
+              </script>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* page.activate
+                yield* page.locator("#other").click()
+                yield* page.locator("#other").fill("other")
+                if (
+                  change === "replace" || change === "restore" || change === "disable with checks off" ||
+                  change === "readonly with checks off"
+                ) {
+                  yield* page.locator("#target").fill("new", {
+                    checks: {
+                      enabled: change !== "disable with checks off",
+                      editable: change !== "readonly with checks off"
+                    }
+                  }).pipe(Deadline.within("3 seconds"))
+                  assert.strictEqual(yield* page.locator("#target").readText, "new")
+                } else {
+                  // WebKit makes inert content non-editable too; isolate the inert check on every backend.
+                  const error = yield* page.locator("#target").fill("new", {
+                    checks: { editable: change !== "inert" }
+                  }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.flip
+                  )
+                  assert(Deadline.isTimeout(error), String(error))
+                  const expected = {
+                    detach: "NoMatch",
+                    hide: "NotVisible",
+                    inert: "Inert",
+                    disable: "Disabled",
+                    readonly: "ReadOnly"
+                  }[change]
+                  assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === expected))
+                  if (change !== "detach") assert.strictEqual(yield* page.locator("#target").readText, "old")
+                }
+                assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.blurred), "yes")
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "fills a paragraph after an input in a shadow root of a top-level design-mode document",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              `<div id="host"></div><p id="target">old</p><script>
+              document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<input id=other>";
+              document.designMode = "on";
+              </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#other").fill("other")
+              yield* page.locator("#target").fill("new")
+              assert.deepStrictEqual({
+                input: yield* page.locator("#other").readValue,
+                paragraph: yield* page.locator("#target").readText
+              }, { input: "other", paragraph: "new" })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              `<input id="other"><p id="target">old</p><script>
+              document.designMode = "on";
+              const other = document.getElementById("other");
+              other.onblur = () => {
+                document.body.dataset.blurs = String(Number(document.body.dataset.blurs ?? 0) + 1);
+                setTimeout(() => {
+                  other.focus();
+                  document.body.dataset.refocuses = String(Number(document.body.dataset.refocuses ?? 0) + 1);
+                });
+              };
+              </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.activate
+              yield* page.locator("#other").click()
+              yield* page.locator("#other").fill("other")
+              const error = yield* page.locator("#target").fill("new").pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onSuccess: () => undefined, onFailure: (error) => error })
+              )
+              assert.isAbove(
+                yield* page.evaluateInMainWorld(() => Number(document.body.dataset.blurs ?? 0)),
+                0,
+                "the native blur handler must execute"
+              )
+              assert.strictEqual(yield* page.locator("#other").readValue, "other")
+              // Scheduled refocus can race insertion. Successful completion is valid only on the intended target.
+              assert.strictEqual(yield* page.locator("#target").readText, error === undefined ? "new" : "old")
+              if (error !== undefined) {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.isAbove(
+                  yield* page.evaluateInMainWorld(() => Number(document.body.dataset.refocuses ?? 0)),
+                  0,
+                  "the asynchronous handler must run before it can block filling"
+                )
+                // Resolving means the target was never found; this target is waiting on focus preparation.
+                assert.strictEqual(error.phase, "waitingForCondition")
+                // The target exists and passes every check. The focus blocker must not erase that evidence.
+                assert(
+                  error.history.some((entry) => {
+                    const value = entry.value as { _tag: string; from?: string }
+                    return value._tag === "PreparingFocus" && value.from?.includes("#other")
+                  }),
+                  JSON.stringify(error.history)
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture((origin) =>
