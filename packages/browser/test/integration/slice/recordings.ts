@@ -9,10 +9,13 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   Browser,
   Capability,
+  Deadline,
   Diagnostics,
+  Expect,
   Har,
   NetworkRequest,
   NetworkResponse,
+  Operation,
   Page,
   Route,
   Trace
@@ -396,6 +399,73 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               line.snapshot.response.status === 200
             ))
           }),
+        timeout
+      )
+
+      it.effect(
+        "captures completed locator expectations, including their final state after failure",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>initial</p>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction", domSnapshots: true, network: true })
+            yield* page.locator("p").pipe(Expect.toHaveText("initial"))
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                document.querySelector("p")!.textContent = "final"
+              }, 50)
+            })
+            const failure = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Operation.named("check final state"),
+              Deadline.within("300 millis"),
+              Effect.flip
+            )
+            assert.isTrue(Expect.isExpectationFailed(failure))
+            const final = yield* page.screenshot()
+            const out = path.join(directory(), "expectations.zip")
+            yield* trace.exportTrace(out)
+            const files = yield* unzip(out)
+            const events = lines(files.get("trace.trace"))
+            const checks = events.filter((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.lengthOf(checks, 2)
+            const shots = checks.map((check) => {
+              const matching = events.filter((event) => event.type === "screenshot" && event.callId === check.callId)
+              assert.lengthOf(matching, 1)
+              assert.isFalse(
+                events.some((event) => event.type === "frame-snapshot" && event.snapshot.callId === check.callId)
+              )
+              return files.get(matching[0].file)!
+            })
+            assert.deepStrictEqual(shots[1], final)
+            assert.notDeepEqual(shots[0], final)
+            const failed = events.find((event) => event.type === "after" && event.callId === checks[1].callId)
+            assert.include(JSON.stringify(failed.error), "ExpectationFailed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps expectation screenshots off by default and when explicitly disabled",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>ready</p>"))
+            for (const options of [undefined, { screenshots: "off" as const }]) {
+              const trace = yield* Trace.record(page, options)
+              yield* page.locator("p").pipe(Expect.toHaveText("ready"))
+              const failure = yield* page.locator("p").pipe(
+                Expect.toHaveText("missing"),
+                Deadline.within("100 millis"),
+                Effect.flip
+              )
+              assert.isTrue(Expect.isExpectationFailed(failure))
+              const out = path.join(directory(), "off.zip")
+              yield* trace.exportTrace(out)
+              const events = lines((yield* unzip(out)).get("trace.trace"))
+              assert.isFalse(events.some((event) => event.type === "screenshot"))
+            }
+          })),
         timeout
       )
 
