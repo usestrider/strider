@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import { TestClock } from "effect/testing"
 import * as Deadline from "../src/Deadline.ts"
@@ -14,15 +15,19 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Declarations from "../src/internal/declarations.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as Automation from "../src/internal/webkitAdapter/automation.ts"
+import * as Declare from "../src/internal/webkitAdapter/declare.ts"
+import * as Navigation from "../src/internal/webkitAdapter/navigation.ts"
 import * as Network from "../src/internal/webkitAdapter/network.ts"
 import * as State from "../src/internal/webkitAdapter/state.ts"
+import * as Targets from "../src/internal/webkitAdapter/targets.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 
-const fixture = Effect.fnUntraced(function*(collect: boolean) {
+const fixture = Effect.fnUntraced(function*(collect: boolean, via: "automation" | "reload" | "script" = "automation") {
   const ids = Kit.makeIds()
-  const bodyReply = yield* Deferred.make<{ body: string; base64Encoded: boolean }>()
+  const bodyReply = yield* Deferred.make<{ body: string; base64Encoded: boolean }, Protocol.ProtocolError>()
   const bodyStarted = yield* Deferred.make<void>()
   const sent: Array<string> = []
   const buffer = yield* Kit.makeFactBuffer(() => Effect.void)
@@ -32,7 +37,8 @@ const fixture = Effect.fnUntraced(function*(collect: boolean) {
     id: ids.navigable(),
     context,
     ready: Deferred.makeUnsafe<void>(),
-    ended: false
+    ended: false,
+    retaining: new Set()
   } as unknown as State.PageEntry
   Deferred.doneUnsafe(page.ready, Effect.void)
   const frame = {
@@ -47,7 +53,7 @@ const fixture = Effect.fnUntraced(function*(collect: boolean) {
     key: "inspector:page-17",
     send: Effect.fnUntraced(function*(command: Protocol.Command<string, unknown, unknown>) {
       sent.push(command.method)
-      assert.strictEqual(command.method, "Network.getResponseBody")
+      if (command.method !== "Network.getResponseBody") return {}
       yield* Deferred.succeed(bodyStarted, undefined)
       return yield* Deferred.await(bodyReply)
     })
@@ -74,7 +80,7 @@ const fixture = Effect.fnUntraced(function*(collect: boolean) {
     pageHandles: new Map([[page, "handle"]]),
     requests: new Map([[State.requestKey(session, request.requestId), request]]),
     hops: new Map([[request.hop, request]]),
-    registry: { bodyLimit: () => collect ? Option.some(1024) : Option.none() },
+    registry: Declarations.make(),
     retire: () => {},
     automation: {
       process: () => ({
@@ -88,6 +94,27 @@ const fixture = Effect.fnUntraced(function*(collect: boolean) {
       })
     }
   } as unknown as State.State
+  const collection = yield* Scope.make()
+  yield* Effect.addFinalizer(() => Scope.close(collection, Exit.void))
+  if (collect) {
+    yield* Declare.declare(state, { _tag: "Page", page: page.id }, {
+      _tag: "BodyCollection",
+      bodies: ["response"],
+      maxBytes: 1024
+    }).pipe(Effect.provideService(Scope.Scope, collection))
+  }
+  const target = { page, session, ended: false } as State.TargetEntry
+  Object.assign(page, { target, main: frame })
+  Object.assign(state, {
+    workers: new Map(),
+    targets: new Map([[session, target]]),
+    pausedRequests: new Map(),
+    realms: new Map()
+  })
+  const endTarget = buffer.run(() => Targets.ended(state, session, { why: "targetClosed" } as never))
+  const otherPage = buffer.run(() => {
+    Object.assign(request, { frame: { ...frame, page: {} as State.PageEntry } })
+  })
   const handlers = Network.register(Kit.handlers<State.Event>())
   const finish = buffer.run(() =>
     handlers.apply("Network.loadingFinished", { requestId: "0.12" }, {
@@ -96,12 +123,25 @@ const fixture = Effect.fnUntraced(function*(collect: boolean) {
     } as State.Event)
   )
   const adapter = BoundedAdapter.make({
-    navigate: (id, url, options) => Automation.navigateLaunched(state, id, url, options)
+    navigate: (id, url, options) =>
+      via === "reload"
+        ? Navigation.reload(state, id, { ignoreCache: false })
+        : via === "script" ?
+        Navigation.navigateByScript(state, id, url, options)
+        : Automation.navigateLaunched(state, id, url, options)
   } as Adapter.AdapterConnection)
   const navigate = adapter.navigate(page.id, "https://example.test/second", { referrer: Option.none() }).pipe(
     Operation.named("Page.goto")
   )
-  return { navigate, finish, sent, request, bodyStarted, bodyReply }
+  const fail = buffer.run(() =>
+    handlers.apply("Network.loadingFailed", {
+      requestId: "0.12",
+      errorText: "Canceled",
+      canceled: true
+    }, { state, session } as State.Event)
+  )
+  const release = Scope.close(collection, Exit.void)
+  return { navigate, finish, fail, release, endTarget, otherPage, sent, request, bodyStarted, bodyReply, state }
 })
 
 describe("WebKit document body retention before navigation", () => {
@@ -141,6 +181,108 @@ describe("WebKit document body retention before navigation", () => {
       yield* f.navigate
       assert.deepStrictEqual(f.sent, ["Network.getResponseBody", "Automation.navigateBrowsingContext"])
     }).pipe(Effect.scoped))
+
+  for (const via of ["reload", "script"] as const) {
+    it.effect(`coordinates inspector ${via} with document retention`, () =>
+      Effect.gen(function*() {
+        const f = yield* fixture(true, via)
+        const navigation = yield* f.navigate.pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.deepStrictEqual(f.sent, [])
+        yield* f.finish
+        yield* Deferred.await(f.bodyStarted)
+        assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
+        yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+        yield* Fiber.join(navigation)
+        assert.deepStrictEqual(f.sent, [
+          "Network.getResponseBody",
+          via === "reload" ? "Page.reload" : "Runtime.evaluate"
+        ])
+      }).pipe(Effect.scoped))
+  }
+
+  it.effect("keeps waiting when bounded request history forgets an active body read", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      yield* f.finish
+      yield* Deferred.await(f.bodyStarted)
+      f.state.requests.clear()
+      const navigation = yield* f.navigate.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(f.sent, ["Network.getResponseBody"])
+      yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+      yield* Fiber.join(navigation)
+      assert.deepStrictEqual(f.sent, ["Network.getResponseBody", "Automation.navigateBrowsingContext"])
+    }).pipe(Effect.scoped))
+
+  it.effect("dispatches after the document target ends", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      const navigation = yield* f.navigate.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(f.sent, [])
+      yield* f.endTarget
+      yield* Fiber.join(navigation)
+      assert.deepStrictEqual(f.sent, ["Automation.navigateBrowsingContext"])
+    }).pipe(Effect.scoped))
+
+  it.effect("does not wait for another page's document", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      yield* f.otherPage
+      yield* f.navigate
+      assert.deepStrictEqual(f.sent, ["Automation.navigateBrowsingContext"])
+    }).pipe(Effect.scoped))
+
+  it.effect("dispatches after a failed document load", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      const navigation = yield* f.navigate.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(f.sent, [])
+      yield* f.fail
+      yield* Fiber.join(navigation)
+      assert.deepStrictEqual(f.sent, ["Automation.navigateBrowsingContext"])
+    }).pipe(Effect.scoped))
+
+  it.effect("dispatches after a failed body read", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture(true)
+      yield* f.finish
+      yield* Deferred.await(f.bodyStarted)
+      const navigation = yield* f.navigate.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Deferred.fail(
+        f.bodyReply,
+        new Protocol.ProtocolError({
+          reason: new Protocol.Rejected({
+            method: "Network.getResponseBody",
+            reason: "Unrecognized",
+            code: -32000,
+            description: "Missing resource for given requestId"
+          })
+        })
+      )
+      yield* Fiber.join(navigation)
+      assert.deepStrictEqual(f.sent, ["Network.getResponseBody", "Automation.navigateBrowsingContext"])
+    }).pipe(Effect.scoped))
+
+  for (const phase of ["before loadingFinished", "during body read"]) {
+    it.effect(`dispatches when collection is released ${phase}`, () =>
+      Effect.gen(function*() {
+        const f = yield* fixture(true)
+        if (phase === "during body read") {
+          yield* f.finish
+          yield* Deferred.await(f.bodyStarted)
+        }
+        const navigation = yield* f.navigate.pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* f.release
+        yield* Fiber.join(navigation)
+        assert.strictEqual(f.sent.at(-1), "Automation.navigateBrowsingContext")
+        yield* Deferred.succeed(f.bodyReply, { body: "cookie", base64Encoded: false })
+      }).pipe(Effect.scoped))
+  }
 
   for (const phase of ["before loadingFinished", "during body read"]) {
     it.effect(`interrupts the collection wait ${phase} without dispatching a late navigation`, () =>
