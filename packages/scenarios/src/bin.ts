@@ -8,11 +8,15 @@
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
- * in `.data/scenarios/`, and a run without them fails, saying to record them.
+ * in `.data/scenarios/`, and a run without them fails, saying to record them. A Strider program visits its site as
+ * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
+ * its own.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { Browser, Expect, Route } from "@usestrider/browser"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
+import { Browser, Expect, Route, VideoWriter } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
+import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
@@ -23,7 +27,9 @@ import * as path from "node:path"
 import { chromium } from "playwright-core"
 import type * as Playwright from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
+import { replaying } from "./replay.ts"
 import { type Measurements, report } from "./report.ts"
+import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
 import { start } from "./site.ts"
 
@@ -48,7 +54,11 @@ const files: Files = {
   recording: (name) => path.join(recordingsDirectory, `${name}.har`)
 }
 
-const layer = Chromium.layer({ executablePath }).pipe(Layer.provideMerge(NodeServices.layer))
+const ffmpeg = fs.realpathSync(process.env["STRIDER_FFMPEG"]!)
+const layer = Chromium.layer({ executablePath }).pipe(
+  Layer.provide(VideoWriter.layerFfmpeg({ path: ffmpeg })),
+  Layer.provideMerge(NodeServices.layer)
+)
 const browserPids = () =>
   new Set(
     descendants().filter((proc) =>
@@ -128,41 +138,31 @@ const striderPids = browserPids()
 const browser = await chromium.launch({ executablePath })
 const playwrightPid = [...browserPids()].find((pid) => !striderPids.has(pid) && !before.has(pid))
 const playwrightArgs = descendants().find((proc) => proc.pid === playwrightPid)?.args ?? []
-const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>) => runtime.runPromise(Effect.scoped(effect))
+// A scenario that runs on Firefox, such as its video, gets the environment's Firefox, launched once it's needed
+let firefoxRuntime: ManagedRuntime.ManagedRuntime<Browser.Browser | NodeServices.NodeServices, unknown> | undefined
+const firefox = () =>
+  firefoxRuntime ??= ManagedRuntime.make(
+    Firefox.layer({ executablePath: process.env["STRIDER_FIREFOX"] ?? "" }).pipe(
+      Layer.provide(NodeSocket.layerWebSocketConstructor),
+      Layer.provideMerge(NodeServices.layer)
+    )
+  )
+const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox", recording?: string) =>
+  (on === "firefox" ? firefox() : runtime).runPromise(
+    Effect.scoped(recording === undefined ? effect : replaying(effect, files.recording(recording)))
+  )
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
-const normalize = (text: string) => text.replace(/\s+/g, " ").trim()
-const outcomeOf = async (run: () => Promise<string>) => {
-  try {
-    return { _tag: "Read" as const, text: normalize(await run()) }
-  } catch (error) {
-    return { _tag: "Failed" as const, error: normalize(String((error as Error)?.message ?? error)).slice(0, 300) }
-  }
-}
+// A program writes its files beside it, as a reader's would, which here is into `.data/scenarios/`
+process.chdir(recordingsDirectory)
 
-const results: Array<Measurements["scenarios"][number]> = []
-for (const scenario of chosen) {
-  log(`scenario ${scenario.name}`)
-  const runStrider = () => strider(scenario.strider(origin))
-  const runPlaywright = () => scenario.playwright(browser, origin, files)
-  // The first run of each is its outcome, and warms it up
-  const outcome = { strider: await outcomeOf(runStrider), playwright: await outcomeOf(runPlaywright) }
-  const times = { strider: [] as Array<number>, playwright: [] as Array<number> }
-  for (let i = 0; i < runs; i++) {
-    // Alternating which goes first, so neither always follows the other
-    const order = i % 2 === 0 ? (["strider", "playwright"] as const) : (["playwright", "strider"] as const)
-    for (const library of order) {
-      if (outcome[library]._tag === "Failed") continue
-      times[library].push(await elapsed(library === "strider" ? runStrider : runPlaywright))
-    }
-  }
-  results.push({
-    scenario,
-    outcome,
-    times: { strider: stats(times.strider), playwright: stats(times.playwright) }
-  })
-}
+const results = await runScenarios(chosen, runs, (scenario) => ({
+  strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
+  playwright: scenario.playwright === undefined
+    ? undefined
+    : () => scenario.playwright!(browser, origin, files)
+}), log)
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
 
@@ -219,7 +219,7 @@ if (measured) {
   const never = `${origin}/never/**`
   const striderLoad = Effect.fnUntraced(function*(route: boolean) {
     const page = yield* Browser.newPage()
-    if (route) yield* page.route(never, () => Effect.succeed(Route.abort()))
+    if (route) yield* page.route(never, () => Route.abort())
     const started = performance.now()
     yield* page.goto(many, { waitUntil: "load" })
     return performance.now() - started
@@ -270,6 +270,7 @@ if (measured) {
 
 await browser.close()
 await runtime.dispose()
+await firefoxRuntime?.dispose()
 await site.close()
 fs.rmSync(temporary, { recursive: true, force: true })
 
@@ -319,10 +320,12 @@ const written = report({
   source: fs.readFileSync(path.join(import.meta.dirname, "scenarios.ts"), "utf8")
 })
 // One scenario is a check, printed; RESULTS.md is the full run's record
-if (only === undefined) {
-  const out = path.join(import.meta.dirname, "../RESULTS.md")
-  fs.writeFileSync(out, written)
-  log(`wrote ${path.relative(root, out)}`)
-} else {
-  process.stdout.write(written)
-}
+process.exitCode = publish(results, () => {
+  if (only === undefined) {
+    const out = path.join(import.meta.dirname, "../RESULTS.md")
+    fs.writeFileSync(out, written)
+    log(`wrote ${path.relative(root, out)}`)
+  } else {
+    process.stdout.write(written)
+  }
+})

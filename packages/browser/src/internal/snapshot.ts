@@ -9,18 +9,27 @@
  * - **The tree** is narrowed by `depth` in the engine, and by `interactiveOnly` here, once the frames are in.
  * - **`text`** is the tree as indented YAML (`Engine.renderText`).
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import type * as Equivalence from "effect/Equivalence"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
+import type * as Locator from "../Locator.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as Engine from "./engine.ts"
-import * as LocatorImpl from "./locator.ts"
+import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+
+/** Internal masking-metadata request; ordinary library snapshots omit field editability and name provenance. @default false */
+export const NameProvenance = Context.Reference<boolean>("@usestrider/browser/internal/snapshot/NameProvenance", {
+  defaultValue: () => false
+})
 
 const TypeId = "~@usestrider/browser/Snapshot"
 
@@ -59,7 +68,8 @@ type Table = Map<string, ReadonlyArray<Engine.Step>>
  * inside it.
  */
 export const take = (
-  owner: LocatorImpl.Owner,
+  owner: Owner,
+  locate: Locate,
   steps: ReadonlyArray<Engine.Step> | null,
   options: Snapshot.Options | undefined,
   id: Diagnostics.OperationId,
@@ -68,10 +78,11 @@ export const take = (
   Effect.gen(function*() {
     const interactivity = (options?.sources ?? "aria+interactivity") === "aria+interactivity"
     const depth = options?.depth ?? null
+    const provenance = yield* NameProvenance
     const answer = yield* Runtime.sendRouted(
       owner.runtime,
       owner.page,
-      { op: "snapshot", steps, interactivity, depth },
+      { op: "snapshot", steps, interactivity, depth, provenance },
       id,
       at
     )
@@ -128,6 +139,7 @@ export const take = (
         op: "snapshot",
         steps: null,
         interactivity,
+        provenance,
         depth: depth === null ? null : depth - level
       }, id).pipe(Effect.orElseSucceed(() => Option.none<Engine.Response>()))
       if (Option.isNone(inner) || inner.value._tag !== "Snapshot") return []
@@ -150,7 +162,7 @@ export const take = (
           root: toNode(root),
           text: Engine.renderText(root)
         },
-        owner,
+        locate,
         table
       )
     } as const
@@ -180,12 +192,15 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
     ? {
       _tag: "Inferred",
       value: node.name.value,
-      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel"
+      from: node.name.from as "text" | "title" | "placeholder" | "alt" | "nearbyLabel",
+      ...(node.name.fieldContent === undefined ? {} : { fieldContent: node.name.fieldContent })
     }
     : node.name,
   states: new Set(
-    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed">
+    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
   ),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
+  validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
 })
 
@@ -200,6 +215,20 @@ const refsOf = (root: Snapshot.Node): ReadonlyMap<Snapshot.RefId, Snapshot.Node>
   return refs
 }
 
+/** Renders a structured tree with the same renderer as page snapshots. */
+export const render = (node: Snapshot.Node): string => Engine.renderText(toEngine(node))
+
+const toEngine = (node: Snapshot.Node): Engine.SnapNode => ({
+  ref: Option.getOrNull(node.ref),
+  role: node.role,
+  name: node.name,
+  states: [...node.states],
+  validationMessage: Option.getOrNull(node.validationMessage),
+  ...(node.editable === undefined ? {} : { editable: node.editable }),
+  children: node.children.map(toEngine),
+  frame: false
+})
+
 /** One node's line of the text, without its children. */
 const lineOf = (node: Snapshot.Node): string =>
   Engine.renderText({
@@ -207,17 +236,23 @@ const lineOf = (node: Snapshot.Node): string =>
     role: node.role,
     name: node.name,
     states: [...node.states],
+    validationMessage: Option.getOrNull(node.validationMessage),
     children: [],
     frame: false
   }).replace(/^- /, "")
 
-/** What a diff compares of a node: its role, name and states. */
-const sameNode = (a: Snapshot.Node, b: Snapshot.Node) =>
-  JSON.stringify([a.role, a.name, [...a.states].sort()]) === JSON.stringify([b.role, b.name, [...b.states].sort()])
+/** What a diff compares of a node: its role, name, states and validation message. */
+const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Schema.Struct({
+  role: Snapshot.Role,
+  name: Snapshot.Name,
+  states: Schema.ReadonlySet(Snapshot.State),
+  editable: Schema.optional(Schema.Boolean),
+  validationMessage: Schema.Option(Schema.String)
+}))
 
-export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<LocatorImpl.LocatorImpl> {
+export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Locator.Locator> {
   readonly [TypeId] = TypeId as typeof TypeId
-  #owner: LocatorImpl.Owner | undefined
+  #locate: Locate | undefined
   #table: Table = new Map()
   #refs: ReadonlyMap<Snapshot.RefId, Snapshot.Node> | undefined
 
@@ -229,11 +264,11 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
       readonly root: Snapshot.Node
       readonly text: string
     },
-    owner: LocatorImpl.Owner,
+    locate: Locate,
     table: Table
   ): SnapshotImpl {
     const snapshot = new SnapshotImpl(data)
-    snapshot.#owner = owner
+    snapshot.#locate = locate
     snapshot.#table = table
     return snapshot
   }
@@ -242,11 +277,11 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
     return this.#refs ??= refsOf(this.root)
   }
 
-  ref(id: Snapshot.RefId): LocatorImpl.LocatorImpl {
+  ref(id: Snapshot.RefId): Locator.Locator {
     // A ref no snapshot gave still makes a locator, which fails with `StaleRef` when used
     const steps = this.#table.get(id) ??
       [{ _tag: "Ref", document: this.document, generation: this.generation, ref: id } as const]
-    return new LocatorImpl.LocatorImpl(this.#owner!, steps, Option.some(`snapshot.ref(${JSON.stringify(id)})`))
+    return this.#locate!(steps, Option.some(`snapshot.ref(${JSON.stringify(id)})`))
   }
 
   diff(previous: Snapshot.Snapshot): Effect.Effect<Snapshot.Diff, Snapshot.SnapshotError> {
@@ -258,7 +293,7 @@ export class SnapshotImpl extends Snapshot.Data implements Snapshot.Snapshot<Loc
               documents: [previous.document, this.document],
               hint: "Refs name nodes of one document; diff two snapshots of the same document"
             }),
-            diagnostics: Operation.diagnostics(Operation.operationId())
+            diagnostics: Operation.diagnosticsNow()
           })
         )
       }

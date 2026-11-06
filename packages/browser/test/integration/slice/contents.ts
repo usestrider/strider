@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
+import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
 
@@ -478,6 +479,91 @@ export const contents = (
 
       // ── Snapshots ──
 
+      it.effect("reports invalid state and native validation message after a required select blocks submission", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<form onsubmit="event.preventDefault(); document.querySelector('output').textContent = 'submitted'">
+<label>How did you hear about this job? * <select required id="source"><option value="">Choose one</option><option value="friend">Friend</option></select></label>
+<button type="submit">Apply</button><output>not submitted</output></form>`
+              )
+            )
+            yield* page.getByRole("button", { name: "Apply" }).click()
+            const native = yield* page.evaluateInMainWorld(() => {
+              const select = document.querySelector("select")!
+              return {
+                submitted: document.querySelector("output")!.textContent,
+                focused: document.activeElement === select,
+                valid: select.validity.valid,
+                message: select.validationMessage
+              }
+            })
+            assert.strictEqual(native.submitted, "not submitted")
+            assert.isTrue(native.focused)
+            assert.isFalse(native.valid)
+            assert.isNotEmpty(native.message)
+            const snapshot = yield* page.snapshot()
+            assert.include(snapshot.text, "[focused]")
+            assert.deepStrictEqual(
+              {
+                invalid: snapshot.text.includes("[invalid]"),
+                message: snapshot.text.includes(native.message)
+              },
+              { invalid: true, message: true },
+              JSON.stringify({ native, snapshot: snapshot.text })
+            )
+          }))
+        }), timeout)
+
+      it.effect("reads constraint invalidity without events or focus changes and diffs messages and clearing", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<button autofocus>Stay</button><label>Entry<input required></label><label>Disabled<input required disabled></label><label>Readonly<input required readonly></label><output>0</output><script>document.addEventListener("invalid", () => { document.querySelector("output").textContent = String(Number(document.querySelector("output").textContent) + 1) }, true)</script>`
+              )
+            )
+            yield* page.getByRole("button", { name: "Stay" }).focus()
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("input")!.setCustomValidity("First \"message\"")
+            )
+            const before = yield* page.snapshot()
+            assert.include(before.text, "[invalid]")
+            assert.include(before.text, JSON.stringify("First \"message\""))
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("input")!.setCustomValidity("Second message")
+            )
+            const after = yield* page.snapshot()
+            const diff = yield* after.diff(before)
+            assert.strictEqual(diff.changed.length, 1)
+            assert.include(diff.text, "Second message")
+            assert.isFalse(diff.text.includes("First"))
+            yield* page.evaluateInMainWorld(() => {
+              const input = document.querySelector("input")!
+              input.setCustomValidity("")
+              input.value = "valid"
+            })
+            const cleared = yield* page.snapshot()
+            assert.isFalse(cleared.text.includes("[invalid]"))
+            assert.isFalse(cleared.text.includes("message"))
+            const clearing = yield* cleared.diff(after)
+            assert.strictEqual(clearing.changed.length, 1)
+            assert.isFalse(clearing.text.includes("[invalid]"))
+            const observed = yield* page.evaluateInMainWorld(() => ({
+              events: document.querySelector("output")!.textContent,
+              focus: document.activeElement!.textContent
+            }))
+            assert.deepStrictEqual(observed, { events: "0", focus: "Stay" })
+          }))
+        }), timeout)
+
       it.effect("takes the accessibility tree, with interactivity inferred and tagged", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -591,7 +677,9 @@ export const contents = (
               node.name._tag === "Accessible" && node.name.value === "Later"
             ))
             assert.isTrue(
-              diff.changed.some((node) => node.role.role === "checkbox" && !node.states.has("checked"))
+              diff.changed.some((node) =>
+                node.role.role === "checkbox" && !node.states.has("checked")
+              )
             )
             assert.strictEqual(diff.removed.length, 1)
             assert.match(diff.text, /\+ button "Later" \[ref=e\d+\]/)
@@ -621,7 +709,9 @@ export const contents = (
               snapshot.text,
               /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
             )
-            const add = [...snapshot.refs].find(([ref, node]) => ref.startsWith("f1") && node.role.role === "button")!
+            const add = [...snapshot.refs].find(([ref, node]) =>
+              ref.startsWith("f1") && node.role.role === "button"
+            )!
             yield* snapshot.ref(add[0]).click()
             yield* page.frame(page.locator("#cross")).locator("#count").pipe(Expect.toHaveText("1"))
           }))
@@ -720,6 +810,46 @@ export const contents = (
         }), timeout)
 
       // ── Captures ──
+
+      it.effect("captures fresh pixels after mutation, replacement and opening another window", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const url = (color: string) =>
+              fixtureUrl(
+                origin,
+                `<body style="margin:0;background:${color}"><div id="color" style="height:1400px;background:inherit"></div></body>`
+              )
+            const pixel = (png: Uint8Array) =>
+              Effect.sync(() => {
+                const pixels = pngRegion(png, { x: 4, y: 4, width: 8, height: 8 })
+                for (const value of pixels) {
+                  assert.deepStrictEqual(value, pixels[0])
+                }
+                return pixels[0]
+              })
+            yield* page.goto(url("rgb(200,40,60)"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [200, 40, 60, 255])
+            yield* page.evaluateInMainWorld(() => {
+              document.body.style.background = "rgb(30,170,90)"
+            })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [30, 170, 90, 255])
+            assert.deepStrictEqual(
+              yield* pixel(
+                yield* page.screenshot({
+                  area: { _tag: "Clip", rect: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
+                })
+              ),
+              [30, 170, 90, 255]
+            )
+            yield* page.goto(url("rgb(50,80,220)"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+            const other = yield* Browser.newPage()
+            yield* other.goto(url("black"), { waitUntil: "load" })
+            assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
+          }))
+        }), timeout)
 
       it.effect("captures the viewport, a clip, an element and the full page, in device pixels", () =>
         Effect.gen(function*() {
@@ -867,7 +997,12 @@ export const contents = (
               }
               // A browser that prints says so in its table (QUIRKS.md, Q247)
               const capabilities = yield* (yield* Browser.Browser).capabilities
-              assert.strictEqual(capabilities.entries.find((each) => each.name === "pdf")?.status, "supported")
+              assert.strictEqual(
+                capabilities.entries.find((each) =>
+                  each.name === "pdf"
+                )?.status,
+                "supported"
+              )
               if (name === "Firefox") {
                 assert.deepInclude((reasonOf(headed) as unknown as Page.PageError).reason, {
                   _tag: "Unsupported",
@@ -904,7 +1039,9 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
+              const token = (yield* jar.list).find((cookie) =>
+                cookie.name === "token"
+              )
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")
@@ -926,7 +1063,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

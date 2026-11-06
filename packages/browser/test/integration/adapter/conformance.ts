@@ -14,10 +14,12 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
-import type * as Target from "../../../src/Target.ts"
+import * as Target from "../../../src/Target.ts"
 import { type Backend, json, makeRecorder, type Recorder, type Site, site, tlsSite } from "./harness.ts"
 
 const timeout = 60_000
@@ -378,7 +380,7 @@ export const conformance = (backend: Backend) =>
               )
               yield* mainRealm(world, frame.frame)
             }
-            const urls = frames.map((frame) =>
+            const urls: Array<string> = frames.map((frame) =>
               world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === frame.frame).at(-1)!.url
             )
             assert.sameMembers(urls, [`${world.site.origin}/child`, `${world.site.crossSite}/child`])
@@ -393,7 +395,7 @@ export const conformance = (backend: Backend) =>
               "NavigableRemoved",
               (fact) => frames.some((frame) => frame.frame === fact.navigable)
             )
-            assert.deepStrictEqual(removed.reason, { _tag: "FrameDetached" })
+            assert.deepStrictEqual(removed.reason, new Target.FrameDetached({}))
             yield* goto(world, page, `${world.site.origin}/hello`)
             for (const frame of frames) {
               yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === frame.frame)
@@ -958,6 +960,22 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(thrown.exception.name, "Error")
           }), timeout)
 
+        it.effect("restores the viewport when released immediately after applying it", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { context, page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const width = yield* evaluate(world, page, "() => innerWidth")
+            yield* Effect.scoped(world.adapter.declare(
+              { _tag: "UserContext", context },
+              {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+              }
+            ))
+            assert.strictEqual(yield* evaluate(world, page, "() => innerWidth"), width, "the viewport it had before")
+          }), timeout)
+
         it.effect("applies overrides to pages in scope, and restores them when released", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1049,6 +1067,106 @@ export const conformance = (backend: Backend) =>
             const raw = yield* world.facts.when("UncaughtException", (fact) =>
               fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
+          }), timeout)
+
+        it.effect("captures overridden viewports and full pages beyond the native view", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* evaluate(
+              world,
+              page,
+              `() => {
+              document.documentElement.style.overflow = 'hidden';
+              document.body.style.cssText = 'margin:0;width:1400px;height:1200px;background:rgb(0,255,0)';
+              document.body.innerHTML = '<div style="position:absolute;left:950px;top:650px;width:50px;height:50px;background:rgb(255,0,0)"></div><div style="position:absolute;left:1350px;top:1150px;width:50px;height:50px;background:rgb(0,0,255)"></div>';
+            }`
+            )
+            for (const [width, height] of [[640, 480], [1000, 700]] as const) {
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+                })
+                for (const fullPage of [false, true]) {
+                  const png = yield* world.adapter.screenshot(page, {
+                    format: "png",
+                    quality: Option.none(),
+                    clip: Option.none(),
+                    fullPage,
+                    scale: "device",
+                    omitBackground: false
+                  })
+                  const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
+                  assert.deepStrictEqual(
+                    [view.getUint32(16), view.getUint32(20)],
+                    fullPage ? [1400, 1200] : [width, height]
+                  )
+                  const x = fullPage ? 1375 : width - 25
+                  const y = fullPage ? 1175 : height - 25
+                  const pixel = yield* evaluate(
+                    world,
+                    page,
+                    `async () => {
+                    const image = new Image();
+                    image.src = 'data:image/png;base64,${Buffer.from(png).toString("base64")}';
+                    await image.decode();
+                    const canvas = document.createElement('canvas');
+                    canvas.width = image.width; canvas.height = image.height;
+                    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+                    return Array.from(context.getImageData(${x}, ${y}, 1, 1).data);
+                  }`
+                  )
+                  assert.deepStrictEqual(
+                    pixel,
+                    fullPage ?
+                      [0, 0, 255, 255] :
+                      width === 1000
+                      ? [255, 0, 0, 255]
+                      : [0, 255, 0, 255]
+                  )
+                }
+              }))
+            }
+          }), timeout)
+
+        it.effect("captures screencast frames at the overridden viewport's size", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "capability.screencast"))) {
+              return
+            }
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* evaluate(
+              world,
+              page,
+              `() => { document.documentElement.style.overflow = 'hidden'; let n = 0; setInterval(() => { document.body.style.background = 'rgb(' + (n++ % 255) + ',1,1)' }, 16) }`
+            )
+            const seen: Record<string, Array<ReadonlyArray<number>>> = {}
+            for (const [width, height] of [[640, 480], [1000, 700]] as const) {
+              const key = `${width}x${height}`
+              seen[key] = []
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+                })
+                const frames = yield* world.adapter.screencast(page)
+                yield* frames.pipe(
+                  Stream.take(6),
+                  Stream.runForEach((frame) =>
+                    Effect.sync(() =>
+                      seen[key]!.push([frame.width, frame.height])
+                    )
+                  ),
+                  Effect.timeout("3 seconds"),
+                  Effect.ignore
+                )
+              }))
+              assert.deepStrictEqual(seen[key]!.at(-1), [width, height], "the last frame is the viewport's size")
+            }
           }), timeout)
 
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
@@ -1144,8 +1262,7 @@ export const conformance = (backend: Backend) =>
             yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -1159,9 +1276,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() =>
-              import("node:os")
-            )).tmpdir() +
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -1263,11 +1378,11 @@ export const conformance = (backend: Backend) =>
             yield* goto(world, page, `${world.site.origin}/hello`)
             yield* world.adapter.closePage(page, { runBeforeUnload: false })
             const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
-            assert.deepStrictEqual(removed.reason, { _tag: "PageClosed", by: "command" })
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
             const second = yield* world.adapter.createPage(context)
             yield* world.adapter.removeUserContext(context)
             const gone = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === second)
-            assert.deepStrictEqual(gone.reason, { _tag: "PageClosed", by: "userContextRemoved" })
+            assert.deepStrictEqual(gone.reason, new Target.PageClosed({ by: "userContextRemoved" }))
             yield* world.facts.when("UserContextRemoved", (fact) => fact.context === context)
           }), timeout)
 
@@ -1313,7 +1428,7 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(lost.initiator, "remote")
             for (const navigable of [page, frame.frame]) {
               const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable)
-              assert.deepStrictEqual(removed.reason, { _tag: "ConnectionLost" })
+              assert.deepStrictEqual(removed.reason, new Target.ConnectionLost({}))
             }
             const late = yield* world.adapter.createPage(world.adapter.defaultContext).pipe(Effect.flip)
             assert.strictEqual(late._tag, "AdapterError")
@@ -1323,3 +1438,192 @@ export const conformance = (backend: Backend) =>
   })
 
 export type { Backend }
+
+/** Restoration across different scopes and release order. */
+export const viewportRestoration = (backend: Backend, options: { readonly nested?: boolean } = {}) =>
+  describe(`${backend.name} viewport restoration`, () => {
+    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+      (it) => {
+        ;(options.nested === false ? it.effect.skip : it.effect)(
+          "restores nested viewport overrides",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 1000, height: 700, deviceScaleFactor: 1, mobile: false }
+                })
+                yield* Effect.scoped(
+                  world.adapter.declare({ _tag: "Page", page }, {
+                    _tag: "Override",
+                    override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                  })
+                )
+                assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
+              }))
+              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+            }),
+          timeout
+        )
+
+        it.effect(
+          "preserves viewport precedence across broader replacements and creation",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const measure = (target: Target.NavigableId) =>
+                evaluate(world, target, "() => [innerWidth, innerHeight, devicePixelRatio]")
+              const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+              const viewport = capabilities.entries.find((entry) => entry.name === "emulation.viewport")
+              assert.isDefined(viewport)
+              const contextScale = viewport.status === "supported" ? 2 : 1
+              const pageScale = viewport.status === "supported" ? 3 : 1
+              if (viewport.status !== "supported") {
+                const refused = yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 600, deviceScaleFactor: 2, mobile: false }
+                })).pipe(Effect.flip)
+                assert.strictEqual(refused.reason._tag, "Unsupported")
+              }
+              const original = yield* measure(page)
+              const browser = yield* Scope.make()
+              const userContext = yield* Scope.make()
+              const pageScope = yield* Scope.make()
+              for (const scope of [browser, userContext, pageScope]) {
+                yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+              }
+              const declare = (scope: Adapter.DeclarationScope, width: number, ratio: number, lifetime: Scope.Scope) =>
+                world.adapter.declare(scope, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height: 600, deviceScaleFactor: ratio, mobile: false }
+                }).pipe(Effect.provideService(Scope.Scope, lifetime))
+              yield* declare({ _tag: "Browser" }, 1100, 1, browser)
+              yield* declare({ _tag: "UserContext", context }, 1000, contextScale, userContext)
+              yield* declare({ _tag: "Page", page }, 640, pageScale, pageScope)
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 900, height: 600, deviceScaleFactor: 1, mobile: false }
+                })
+                assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+                const sibling = yield* world.adapter.createPage(context)
+                yield* goto(world, sibling, `${world.site.origin}/hello`)
+                assert.deepStrictEqual(yield* measure(sibling), [900, 600, 1])
+              }))
+              const sibling = yield* world.adapter.createPage(context)
+              yield* goto(world, sibling, `${world.site.origin}/hello`)
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              const other = yield* newPage(world)
+              yield* goto(world, other.page, `${world.site.origin}/hello`)
+              assert.deepStrictEqual(yield* measure(other.page), [1100, 600, 1])
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              yield* Scope.close(browser, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              yield* Scope.close(pageScope, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), [1000, 600, contextScale])
+              yield* Scope.close(userContext, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), original)
+              assert.deepStrictEqual(yield* measure(sibling), original)
+            }),
+          timeout
+        )
+
+        it.effect("restores replaced viewport overrides released out of order", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+            const first = yield* Scope.make()
+            const second = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(first, Exit.void))
+            yield* Effect.addFinalizer(() => Scope.close(second, Exit.void))
+            const declare = (width: number, height: number) =>
+              world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile: false }
+              })
+            yield* declare(640, 480).pipe(Effect.provideService(Scope.Scope, first))
+            yield* declare(1000, 700).pipe(Effect.provideService(Scope.Scope, second))
+            yield* Scope.close(first, Exit.void)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
+            yield* Scope.close(second, Exit.void)
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+          }), timeout)
+      }
+    )
+  })
+
+/** CDP measurement is isolated from author globals and also works during target setup. */
+export const viewportMeasurement = (backend: Backend) =>
+  describe(`${backend.name} viewport measurement`, () => {
+    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+      (it) => {
+        for (const enabled of [true, false]) {
+          it.effect(`restores a page created under a context viewport with JavaScript ${enabled ? "on" : "off"}`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page: control } = yield* newPage(world)
+              yield* goto(world, control, `${world.site.origin}/hello`)
+              const original = yield* evaluate(world, control, "() => [innerWidth, innerHeight]")
+              yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                _tag: "Override",
+                override: { _tag: "JavaScriptEnabled", enabled }
+              })
+              const page = yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+                })
+                const page = yield* world.adapter.createPage(context)
+                yield* goto(world, page, `${world.site.origin}/hello`)
+                assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [640, 480])
+                return page
+              }))
+              assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+            }), timeout)
+        }
+        for (const shadow of ["\"wide\"", "123"]) {
+          it.effect(`restores despite author dimension shadows ${shadow}`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const html = `<script>let innerWidth = ${shadow}; let innerHeight = 456;</script>`
+              yield* goto(world, page, `${world.site.origin}/fixture?html=${encodeURIComponent(html)}`)
+              const original = yield* evaluate(world, page, "() => [window.innerWidth, window.innerHeight]")
+              yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+              }))
+              assert.deepStrictEqual(
+                yield* evaluate(world, page, "() => [window.innerWidth, window.innerHeight]"),
+                original
+              )
+            }), timeout)
+        }
+        it.effect("restores a mobile viewport", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const original = yield* evaluate(world, page, "() => [innerWidth, innerHeight]")
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* world.adapter.declare({ _tag: "Page", page }, {
+                _tag: "Override",
+                override: { _tag: "Viewport", width: 375, height: 667, deviceScaleFactor: 2, mobile: true }
+              })
+              assert.strictEqual(yield* evaluate(world, page, "() => devicePixelRatio"), 2)
+            }))
+            assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+          }), timeout)
+      }
+    )
+  })

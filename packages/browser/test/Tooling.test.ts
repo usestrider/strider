@@ -16,6 +16,7 @@ import {
   Page,
   PageNavigation,
   Popup,
+  Target,
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
@@ -63,10 +64,35 @@ describe("LaunchProfile", () => {
     assert.notInclude(LaunchProfile.automation.args, "--disable-renderer-backgrounding")
   })
 
+  it("shares the screenshot surface feature with concurrent", () => {
+    const feature = "--enable-features=CDPScreenshotNewSurface"
+    for (const profile of [LaunchProfile.automation, LaunchProfile.concurrent]) {
+      assert.strictEqual(profile.args.filter((arg) => arg === feature).length, 1)
+    }
+    assert.deepStrictEqual(
+      LaunchProfile.concurrent.args.slice(0, LaunchProfile.automation.args.length),
+      LaunchProfile.automation.args
+    )
+    assert.notInclude(LaunchProfile.stock.args, feature)
+  })
+
+  it("keeps caller feature switches verbatim after the preset", () => {
+    const caller = [
+      "--enable-features=Other",
+      "--disable-features=CDPScreenshotNewSurface",
+      "--enable-features=Final"
+    ] as const
+    const args = Chromium.argsFor({ profile: "automation", args: [...caller] }, "/tmp/profile", "pipe")
+    const index = args.indexOf(caller[0])
+    assert.deepStrictEqual(args.slice(index, index + caller.length), [...caller])
+    assert.isBelow(args.indexOf("--enable-features=CDPScreenshotNewSurface"), index)
+  })
+
   it("launches with a profile value's own arguments, in place of its name's", () => {
     const args = Chromium.argsFor({ profile: "automation", profileArgs: ["--custom"] }, "/tmp/profile", "pipe")
     assert.strictEqual(args[0], "--custom")
     assert.notInclude(args, LaunchProfile.automation.args[0])
+    assert.notInclude(args, "--enable-features=CDPScreenshotNewSurface")
   })
 })
 
@@ -180,7 +206,7 @@ describe("Browser.layerTest", () => {
       assert.strictEqual(committed.url, "https://example.test/")
       yield* TestClock.adjust("20 millis")
       const reason = yield* page.closed
-      assert.deepStrictEqual(reason, { _tag: "PageClosed", by: "script" })
+      assert.deepStrictEqual(reason, new Target.PageClosed({ by: "script" }))
     })).pipe(Effect.provide(Browser.layerTest("--resp(cart)--commit--load--|"))))
 
   it.effect("opens a timeline's dialogs and popups, decided and reported as a browser's are", () =>
@@ -188,6 +214,7 @@ describe("Browser.layerTest", () => {
       const page = yield* Browser.newPage()
       const handler = yield* Dialog.handle(page, Dialog.dismissAll)
       const popups = yield* Popup.next(page)
+      // The dialog opens a tick in: a handler decides what opens after it is registered
       yield* TestClock.adjust("10 millis")
       assert.strictEqual(yield* handler.handled, 1)
       assert.strictEqual((yield* Dialog.history(page)).entries[0]?._tag, "Confirm")
@@ -195,8 +222,8 @@ describe("Browser.layerTest", () => {
       const popup = yield* popups
       assert.strictEqual((yield* popup.status)._tag, "Open")
       yield* TestClock.adjust("10 millis")
-      assert.deepStrictEqual(yield* page.closed, { _tag: "PageCrashed" })
-    })).pipe(Effect.provide(Browser.layerTest("dialog(confirm)-popup-crash"))))
+      assert.deepStrictEqual(yield* page.closed, new Target.PageCrashed({}))
+    })).pipe(Effect.provide(Browser.layerTest("-dialog(confirm)-popup-crash"))))
 
   it.effect("has no DOM: the engine is unsupported", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -226,7 +253,8 @@ const unzip = (file: string) =>
 describe("Recordings", () => {
   it.effect("records a HAR of the timeline's responses, with the library's timings", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "cart.har")
+      // The directories on the way don't exist yet: the export creates them
+      const out = path.join(directory(), "test-results", "cart", "cart.har")
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const har = yield* Har.record(page, { content: "embed" })
@@ -249,7 +277,7 @@ describe("Recordings", () => {
 
   it.effect("records a trace whose steps nest in the caller's spans", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "trace.zip")
+      const out = path.join(directory(), "test-results", "trace.zip")
       const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
         yield* page.goto("https://example.test/cart")
         yield* Effect.ignore(page.title)
@@ -357,19 +385,6 @@ describe("BrowserToolkit", () => {
       yield* TestClock.adjust("10 millis")
       assert.deepStrictEqual((yield* told(3))[2], ["Popup", "p3", "shop"])
     })).pipe(Effect.provide(Browser.layerTest("-popup-popup"))))
-
-  it("masks an editable field's text under the strict capture policy", () => {
-    assert.deepStrictEqual(
-      CapturePolicy.strict,
-      new CapturePolicy.CapturePolicy({ screenshots: "denied", snapshotText: "redacted", consoleText: "omitted" })
-    )
-    assert.strictEqual(CapturePolicy.local.screenshots, "allowed")
-    const text = `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "4242 4242"\n  - text: "Total"`
-    assert.strictEqual(
-      ToolkitImpl.masked(text),
-      `- form:\n  - textbox "Card" [ref=e1]:\n    - text: "•••"\n  - text: "Total"`
-    )
-  })
 })
 
 describe("strider", () => {

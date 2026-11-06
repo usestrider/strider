@@ -77,22 +77,24 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
     switch (dialog._tag) {
       case "Confirm": {
         const yes = dialog.message.includes("delete")
-        return Effect.succeed(yes ? dialog.accept : dialog.dismiss)
+        return yes ? dialog.accept : dialog.dismiss
       }
       case "Prompt":
-        return Effect.succeed(dialog.respond("DELETE"))
+        return dialog.respond("DELETE")
       case "Alert":
-        return Effect.succeed(dialog.accept)
+        return dialog.accept
       case "BeforeUnload":
-        return Effect.succeed(dialog.leave)
+        return dialog.leave
       case "Unknown":
-        return Effect.succeed(dialog.accept)
+        return dialog.accept
     }
   })
   yield* page.getByRole("button", { name: "Delete account" }).click()
 })
 ```
 
+- Each decision is an Effect: return it directly, or end a generator with `return yield* dialog.accept`
+  after other work.
 - Each kind offers only its own decisions: an alert can only be accepted, a prompt can be answered.
 - `Dialog.acceptAll` and [`Dialog.dismissAll`](/docs/api/browser/Dialog#dismissAll) are ready-made handlers.
 - On WebKit every dialog is `Unknown`, since WebKit doesn't say which kind is open: a handler meant for WebKit

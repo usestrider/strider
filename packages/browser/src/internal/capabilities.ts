@@ -13,7 +13,7 @@ import * as Capability from "../Capability.ts"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as FilePath from "../FilePath.ts"
-import type * as Pixels from "../Pixels.ts"
+import * as Pixels from "../Pixels.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
@@ -25,7 +25,7 @@ import * as Runtime from "./runtime.ts"
 const known: Readonly<Record<string, { readonly entry: string; readonly backends: string }>> = {
   AxTree: { entry: "capability.axTree", backends: "Chromium's (CDP)" },
   Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP)" },
-  Video: { entry: "capability.video", backends: "Firefox's, launched by the program" }
+  Video: { entry: "capability.video", backends: "Chromium with VideoWriter, or Firefox launched by the program" }
 }
 
 const capabilityError = (capability: string, reason: Capability.CapabilityErrorReason, id: Diagnostics.OperationId) =>
@@ -87,7 +87,7 @@ export const acquire = <H>(
           read: Effect.flatMap(Operation.record, ({ id }) =>
             adapter.accessibilityTree(page.id).pipe(
               Effect.mapError(fromAdapter(runtime, capability.name, id)),
-              Effect.raceFirst(Runtime.pageEnded(page, id))
+              Effect.raceFirst(Runtime.pageEnded(page))
             )).pipe(Operation.named("Capability.AxTree.read", { attributes }))
         }
         return reader as H
@@ -97,7 +97,7 @@ export const acquire = <H>(
         const recording: Capability.VideoRecording = {
           file: file.pipe(
             Effect.map((path) => path as FilePath.Local),
-            Effect.mapError(fromAdapter(runtime, capability.name, Operation.operationId()))
+            Effect.mapError(fromAdapter(runtime, capability.name, Operation.idNow()))
           )
         }
         return recording as H
@@ -110,18 +110,18 @@ export const acquire = <H>(
           frames: frames.pipe(
             Stream.map((frame): Capability.ScreencastFrame => ({
               at: frame.at,
-              width: frame.width as Pixels.Device,
-              height: frame.height as Pixels.Device,
+              width: Pixels.Device.make(frame.width),
+              height: Pixels.Device.make(frame.height),
               jpeg: frame.jpeg
             })),
             // The stream ends with the page: its session's end, as the page's
             Stream.catch((error) =>
               Stream.fromEffect(Effect.flatMap(Deferred.poll(page.closed), (closed) =>
                 Option.isSome(closed)
-                  ? Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.operationId())))
+                  ? Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.idNow())))
                   : Effect.die(error)))
             ),
-            Stream.interruptWhen(Runtime.pageEnded(page, id))
+            Stream.interruptWhen(Runtime.pageEnded(page))
           )
         }
         return control as H

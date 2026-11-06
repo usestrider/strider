@@ -1,0 +1,75 @@
+/**
+ * Experimental page claims issued only for owned pages.
+ *
+ * @stability experimental
+ * @since 0.1.0
+ */
+import * as Schema from "effect/Schema"
+import * as Claims from "../internal/claims.ts"
+import type * as Base from "../Page.ts"
+
+/**
+ * An opaque, serializable page claim. Store its encoded value without interpreting it.
+ *
+ * **Example** (Using claims)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser/experimental"
+ * import { Schema } from "effect"
+ *
+ * const read = (json: string): Page.Claim =>
+ *   Schema.decodeUnknownSync(Page.Claim)(JSON.parse(json))
+ * ```
+ *
+ * @stability experimental
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Claim = Schema.String.pipe(Schema.brand("~@usestrider/browser/experimental/Page/Claim"))
+
+/**
+ * The opaque value of a page claim.
+ *
+ * **Example** (Using claims)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser/experimental"
+ * import { Schema } from "effect"
+ *
+ * const read = (json: string): Page.Claim =>
+ *   Schema.decodeUnknownSync(Page.Claim)(JSON.parse(json))
+ * ```
+ *
+ * @stability experimental
+ * @category models
+ * @since 0.1.0
+ */
+export type Claim = typeof Claim.Type
+
+/**
+ * Issues a claim for an owned page in a reclaimable context or the default context.
+ *
+ * **Details**
+ *
+ * Control access alone does not give ownership. Pages in ordinary disposable contexts are refused because
+ * those contexts and their tabs cannot survive the creating connection.
+ *
+ * **Example** (Using claims)
+ *
+ * ```ts import.meta.vitest
+ * import type { Page as Base } from "@usestrider/browser"
+ * import { Page } from "@usestrider/browser/experimental"
+ *
+ * import { Effect, Schema } from "effect"
+ *
+ * const save = Effect.fn("save")(function*(value: Base.Page) {
+ *   const claim = yield* Page.claim(value)
+ *   return JSON.stringify(Schema.encodeSync(Page.Claim)(claim))
+ * })
+ * ```
+ *
+ * @stability experimental
+ * @category claims
+ * @since 0.1.0
+ */
+export const claim = (value: Base.Page) => Claims.claimPage(value)

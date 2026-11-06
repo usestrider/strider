@@ -15,10 +15,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import * as Operation from "./internal/operation.ts"
+import * as ConsoleMessageImpl from "./internal/consoleMessage.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -114,29 +111,6 @@ export interface Filter {
   readonly text?: string | RegExp | undefined
 }
 
-// ── Implementation ──
-
-const kind = (operation: string): Events.Kind<ConsoleMessage, ConsoleMessage> => ({
-  operation,
-  noun: "a console message",
-  deliver: (message) => message
-})
-
-const subscription = (
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter: Filter | undefined,
-  operation: string
-) =>
-  Effect.sync(() => {
-    const level = Filters.among(filter?.level)
-    const text = Filters.text(filter?.text)
-    return {
-      kind: kind(operation),
-      channel: Handles.target(target).behind.entry.events.console,
-      accepts: (entry: Events.Entry<ConsoleMessage>) => level(entry.value.level) && text(entry.value.text)
-    }
-  })
-
 /**
  * Subscribes to console messages and returns the wait: an effect that gives the first match, the same each time
  * it runs.
@@ -166,11 +140,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<ConsoleMessage, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "ConsoleMessage.next"),
-    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Operation.named("ConsoleMessage.next"))
+> => ConsoleMessageImpl.next(target, filter, where)
 
 /**
  * Subscribes to console messages and emits every match from now on.
@@ -204,11 +174,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<ConsoleMessage, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "ConsoleMessage.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )
+> => ConsoleMessageImpl.stream(target, filter, where)
 
 /**
  * Reads the console messages still in the event log; never waits.
@@ -233,7 +199,4 @@ export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<ConsoleMessage>, Subscription.SubscriptionError> =>
-  Effect.flatMap(
-    subscription(target, filter, "ConsoleMessage.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )
+  ConsoleMessageImpl.history(target, filter)

@@ -9,6 +9,10 @@
 // - a project with only the packages and their peers installed imports every subpath under Node, type-checks an
 //   import of each with `moduleResolution: "nodenext"`, and runs `strider --help`, which, without its optional
 //   peer `@effect/platform-node`, says to install it.
+// - `packages/cli`, the command to install globally, packs its bin and `LICENSE`, and is the one package with
+//   `dependencies`, the library and what the command runs on, so it runs under pnpm's isolated layout, as a global
+//   install lays it out, where the library's optional peer would otherwise never be linked. It also runs with Bun
+//   and no Node on the path.
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -210,11 +214,64 @@ export const packCheck = (root) => {
       run(strider, ["--help"], { cwd: consumer })
       fail("strider --help without @effect/platform-node succeeded")
     } catch (error) {
-      if (!String(error.stderr).includes("npm install @effect/platform-node")) {
+      if (!String(error.stderr).includes("pnpm add @effect/platform-node")) {
         fail(`strider --help without @effect/platform-node: ${String(error.stderr || error.message).trim()}`)
       }
     } finally {
       fs.renameSync(`${platform}.away`, platform)
+    }
+
+    // The command to install globally, in a project of its own laid out as a global install is
+    const cliOut = path.join(work, "cli-tarball")
+    fs.mkdirSync(cliOut)
+    run("pnpm", ["pack", "--pack-destination", cliOut], { cwd: path.join(root, "packages/cli") })
+    const cliTarball = path.join(cliOut, fs.readdirSync(cliOut)[0])
+    const cliUnpacked = path.join(work, "unpacked", "cli")
+    fs.mkdirSync(cliUnpacked, { recursive: true })
+    run("tar", ["-xzf", cliTarball, "-C", cliUnpacked])
+    const cliPkg = JSON.parse(fs.readFileSync(path.join(cliUnpacked, "package", "package.json"), "utf8"))
+    const cliFiles = walk(path.join(cliUnpacked, "package"))
+    if (!cliFiles.includes("LICENSE")) fail(`${cliPkg.name}: LICENSE isn't packed`)
+    if (cliPkg.license !== "MIT") fail(`${cliPkg.name}: license ${cliPkg.license}, not MIT`)
+    if (!cliFiles.includes(path.normalize(cliPkg.bin.strider))) {
+      fail(`${cliPkg.name}: bin ${cliPkg.bin.strider} isn't packed`)
+    }
+    const cliDependencies = Object.keys(cliPkg.dependencies ?? {}).sort().join(", ")
+    if (cliDependencies !== "@effect/platform-node, @usestrider/browser, effect") {
+      fail(`${cliPkg.name}: dependencies ${cliDependencies}`)
+    }
+    const library = packed.find(({ name }) => name === "@usestrider/browser")
+    const cliConsumer = path.join(work, "cli-consumer")
+    fs.mkdirSync(cliConsumer)
+    fs.writeFileSync(
+      path.join(cliConsumer, "package.json"),
+      JSON.stringify({
+        name: "strider-pack-check-cli",
+        private: true,
+        dependencies: { [cliPkg.name]: `file:${cliTarball}` }
+      })
+    )
+    // The library isn't on the registry here: the project's own workspace file points the command at the packed one
+    fs.writeFileSync(
+      path.join(cliConsumer, "pnpm-workspace.yaml"),
+      `overrides:\n  ${JSON.stringify(library.name)}: ${JSON.stringify(`file:${library.tarball}`)}\n`
+    )
+    run("pnpm", ["install", "--prefer-offline"], { cwd: cliConsumer })
+    try {
+      run(path.join(cliConsumer, "node_modules", ".bin", "strider"), ["--help"], { cwd: cliConsumer })
+    } catch (error) {
+      fail(`${cliPkg.name}: strider --help: ${String(error.stderr || error.message).trim().split("\n")[0]}`)
+    }
+    // With Bun alone on the path, the launcher runs it there, daemon's runtime and all
+    const bunOnly = path.join(work, "bun-only")
+    fs.mkdirSync(bunOnly)
+    const launcher = path.join(cliConsumer, "node_modules", "@usestrider", "cli", "strider.js")
+    try {
+      fs.symlinkSync(run("sh", ["-c", "command -v bun"]).trim(), path.join(bunOnly, "bun"))
+      const help = run(launcher, ["--help"], { cwd: cliConsumer, env: { ...process.env, PATH: bunOnly } })
+      if (!help.includes("USAGE")) fail(`${cliPkg.name}: strider --help on Bun printed no usage`)
+    } catch (error) {
+      fail(`${cliPkg.name}: strider --help on Bun: ${String(error.stderr || error.message).trim().split("\n")[0]}`)
     }
   } finally {
     fs.rmSync(work, { recursive: true, force: true })

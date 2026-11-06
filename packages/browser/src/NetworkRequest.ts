@@ -12,21 +12,16 @@
  * @since 0.1.0
  */
 import type * as Context from "effect/Context"
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
-import * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handles from "./internal/handles.ts"
-import * as Operation from "./internal/operation.ts"
+import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
@@ -215,32 +210,6 @@ export interface Filter {
   readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined
 }
 
-// ── Implementation ──
-
-const kind = (operation: string): Events.Kind<NetworkRequest, NetworkRequest> => ({
-  operation,
-  noun: "a request",
-  deliver: (request) => request
-})
-
-const subscription = (
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter: Filter | undefined,
-  operation: string
-) =>
-  Effect.suspend(() => {
-    const channel = Handles.target(target).behind.entry.events.request
-    const method = Filters.among<string>(filter?.method)
-    const resourceType = Filters.among(filter?.resourceType)
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
-      kind: kind(operation),
-      channel,
-      accepts: (entry: Events.Entry<NetworkRequest>) =>
-        Filters.urlMatches(matches, entry.value.url) && method(entry.value.method) &&
-        resourceType(entry.value.resourceType)
-    }))
-  })
-
 /**
  * Subscribes to requests and returns the wait: an effect whose value is the first match, the same each time it
  * runs.
@@ -278,11 +247,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkRequest.next"),
-    ({ accepts, channel, kind }) => Events.next(kind, channel, accepts, where)
-  ).pipe(Operation.named("NetworkRequest.next"))
+> => NetworkRequestImpl.next(target, filter, where)
 
 /**
  * Subscribes to requests and emits every match from now on.
@@ -314,11 +279,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkRequest.stream"),
-    ({ accepts, channel, kind }) => Events.stream(kind, channel, accepts, where)
-  )
+> => NetworkRequestImpl.stream(target, filter, where)
 
 /**
  * Reads the requests the target's event log kept (`UserContext.Options.eventLog`); never waits.
@@ -343,10 +304,7 @@ export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError> =>
-  Effect.flatMap(
-    subscription(target, filter, "NetworkRequest.history"),
-    ({ accepts, channel, kind }) => Events.history(kind, channel, accepts)
-  )
+  NetworkRequestImpl.history(target, filter)
 
 /**
  * Converts a captured request to an `HttpClientRequest`, to replay it with Effect's `HttpClient`.
@@ -387,17 +345,24 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
   HttpClientRequest.make(request.method)(request.url, { headers: request.headers })
 
 /**
- * Gives the headers a request was sent with, as the network sent them, once the browser has reported them.
+ * Gives a request's sent headers, waiting until the browser can attribute them to that request.
  *
  * **Details**
  *
  * - A request's `headers` are the ones its event gives, which on Chromium and WebKit leave out what the network
- *   adds, such as `Cookie`. This waits until the browser reports the rest: on Chromium for the `ExtraInfo` event
- *   its response promises, on WebKit for the response. On Firefox it returns at once.
+ *   adds, such as `Cookie`. On Chromium this can wait for response or redirect information even after the extra
+ *   headers arrive, so they cannot be confused with another redirect hop's headers. On WebKit it waits for the
+ *   response. On Firefox it returns at once. The operation's deadline bounds the wait.
+ * - If the request finishes, fails, is canceled or its page goes away before its sent headers are known, this
+ *   returns the available sent headers, or the request event's headers if none were reported. Those can omit
+ *   network additions such as `Cookie`.
  * - `target` is the page or context the request was seen on.
  * - Strider keeps the last 1000 redirect hops; for an older request, this gives its event's headers.
  *
  * **Gotchas**
+ *
+ * On Chromium, awaiting this before letting the same request's response proceed waits until the deadline. Let
+ * the response proceed first, or read `request.headers` immediately if its possible omissions are acceptable.
  *
  * WebKit never reports `Cookie` among the headers sent (`network.headersSent` is partial there).
  *
@@ -424,16 +389,4 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
 export const headersSent = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest
-): Effect.Effect<Headers.Headers, Deadline.Timeout> =>
-  Effect.gen(function*() {
-    const { runtime } = Handles.target(target as Page.Page | UserContext.UserContext).behind
-    const hop = runtime.model.hop(request.hop)
-    if (Option.isNone(hop)) return request.headers
-    const record = yield* Operation.record
-    yield* record.bound(
-      Deferred.await(hop.value.sentKnown),
-      () => Option.some("The browser hadn't said which headers it sent by the deadline"),
-      "waitingForEvent"
-    )
-    return Option.getOrElse(hop.value.sent, () => request.headers)
-  }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))
+): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)

@@ -26,7 +26,7 @@ After O'Reilly's engineering books: an inked animal, paper and ink, and one band
 are engine labels. Structure is drawn with 1px rules, never shadows, rounded corners or tints. Type is set for reading
 on a screen: EB Garamond for titles, Source Serif 4 for prose at 18px on a 1.65 leading, IBM Plex Sans for navigation
 and labels, and IBM Plex Mono for code, all self-hosted from Fontsource (`astro.config.ts`). Night paper follows the
-reader's system until they choose with the masthead's toggle. On either, the cover is the engraving's ivory plate.
+reader's system until they choose with the masthead's toggle. The cover is the engraving's ivory plate, dimmed on night paper.
 
 | Where                                 | What                                                                                  |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -36,9 +36,13 @@ reader's system until they choose with the masthead's toggle. On either, the cov
 | `src/components/SideNav.astro`        | a sidebar's groups; `SideFilter.astro` narrows the reference's modules as you type    |
 | `src/components/Rail.astro`           | what's on the page: a module's categories and declarations, the one being read marked |
 | `src/components/BackToTop.astro`      | on every page, a button back to the masthead, shown once the reader is a screen down  |
+| `src/components/SiteFooter.astro`     | on every page, the cover's ivory with the mark, documentation and project links     |
 | `ec.config.mjs`, `src/features/code/` | code: highlighted in inks that pass 4.5:1 on code ground, a mono title bar with the file and the language |
 | `src/components/Mark.astro`           | the silhouette, for the masthead and anything under 64px                              |
-| `src/assets/heron-engraving.png`      | the engraving, on the home page only, from `design/strider/heron/`                    |
+| `src/assets/heron-engraving.png`      | the engraving, on the home page only                                               |
+| `public/heron.svg`                   | the favicon and T3 project icon                                                   |
+| `social/`                             | the link-preview images, as pages: `public/og.png`, and `github.png` for the repository's settings; `render.ts` says how to render them |
+| `src/features/sitemap.ts`             | `sitemap.xml` and `/sitemap/`, of every page the build wrote; `public/robots.txt` points to the first, and `src/pages/sitemap.css.ts` styles both |
 | `src/components/Aside.astro`          | callouts in guides: `<Aside type="note">`, `"tip"`, `"caution"` or `"warning"`        |
 
 The band is Chromium blue, Firefox orange, WebKit cyan, Edge green or Opera red, by the brand of the browser the page

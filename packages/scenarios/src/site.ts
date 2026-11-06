@@ -19,7 +19,7 @@ const pixel = Buffer.from(
   "base64"
 )
 
-/** What a page reads about the browser that runs it, the tells bot protection looks for. */
+/** What a page reads about the browser that runs it. */
 const tells = `<script>
 window.tells = (async () => {
   // A console argument whose stack is read when a CDP client has Runtime.enable on, which serializes it
@@ -56,6 +56,11 @@ window.tells = (async () => {
 })()
 </script>`
 
+export const responseBody = (size: number): Buffer =>
+  Buffer.from(Uint8Array.from({ length: size }, (_, i) => (i * 31 + (i >>> 8)) & 255))
+
+const bodies = new Map([4096, 4 * 1024 * 1024].map((size) => [size, responseBody(size)]))
+
 const routes: Record<
   string,
   (
@@ -63,6 +68,28 @@ const routes: Record<
     request: http.IncomingMessage
   ) => { status?: number; type?: string; headers?: Record<string, string>; body: string | Buffer; delay?: number }
 > = {
+  "/benchmark/body": (url) => ({
+    type: "application/octet-stream",
+    body: bodies.get(Number(url.searchParams.get("size"))) ?? Buffer.alloc(0)
+  }),
+  "/benchmark": () => ({
+    body: page(
+      "Benchmark",
+      `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
+    )
+  }),
+  "/benchmark-reads": (url) => ({
+    body: page(
+      "Read benchmark",
+      Array.from(
+        { length: Number(url.searchParams.get("n") ?? 100) },
+        (_, i) =>
+          `<input id="field-${i}" value="Value ${i} café"${i % 2 === 0 ? " disabled" : ""}${
+            i % 3 === 0 ? "" : ` aria-label="Field ${i}"`
+          }>`
+      ).join("")
+    )
+  }),
   // The README's program: a heading, and a button that shows a message
   "/": () => ({
     body: page(

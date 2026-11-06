@@ -5,7 +5,10 @@
 import type { Stats } from "./measure.ts"
 import type { Scenario } from "./scenarios.ts"
 
-type Outcome = { readonly _tag: "Read"; readonly text: string } | { readonly _tag: "Failed"; readonly error: string }
+export type Outcome = { readonly _tag: "Read"; readonly text: string } | {
+  readonly _tag: "Failed"
+  readonly error: string
+}
 
 export interface Measurements {
   readonly date: string
@@ -18,7 +21,12 @@ export interface Measurements {
   readonly launch: { readonly strider: Stats; readonly playwright: Stats }
   readonly scenarios: ReadonlyArray<{
     readonly scenario: Scenario
-    readonly outcome: { readonly strider: Outcome; readonly playwright: Outcome }
+    /** No Playwright outcome for a scenario without a Playwright twin */
+    readonly outcome: { readonly strider: Outcome; readonly playwright: Outcome | undefined }
+    readonly attempts: { readonly strider: number; readonly playwright: number }
+    readonly failures: ReadonlyArray<
+      { readonly library: "strider" | "playwright"; readonly repetition: number; readonly error: string }
+    >
     readonly times: { readonly strider: Stats; readonly playwright: Stats }
   }>
   readonly q82: ReadonlyArray<{ readonly label: string; readonly cpu: Stats }>
@@ -43,8 +51,10 @@ const regions = (source: string) => {
 }
 const lines = (code: string | undefined) => (code ?? "").split("\n").filter((line) => line.trim() !== "").length
 
-const outcomeText = (outcome: Outcome, expected: string) =>
-  outcome._tag === "Failed"
+const outcomeText = (outcome: Outcome | undefined, expected: string) =>
+  outcome === undefined
+    ? "–"
+    : outcome._tag === "Failed"
     ? `failed: ${cell(outcome.error)}`
     : outcome.text === expected
     ? `✓ \`${cell(outcome.text)}\``
@@ -56,7 +66,7 @@ export const report = (m: Measurements): string => {
   out.push("# Strider and Playwright, side by side")
   out.push("")
   out.push(
-    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`, whose own browsers are never installed; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
+    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`, whose own browsers are never installed; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
   )
   out.push("")
   out.push("## Scenarios")
@@ -67,14 +77,31 @@ export const report = (m: Measurements): string => {
   out.push("")
   out.push("| Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |")
   out.push("|---|---|---|---|---|---|")
-  for (const { scenario, outcome, times } of m.scenarios) {
+  for (const { scenario, outcome, times, attempts } of m.scenarios) {
+    const run = (library: "strider" | "playwright") =>
+      `${timing(times[library])}; ${times[library].runs}/${attempts[library]} successful`
+    const twin = code.get(`${scenario.name}/playwright`)
     out.push(
-      `| ${scenario.title} | ${timing(times.strider)} | ${timing(times.playwright)} | ${
+      `| ${scenario.title} | ${run("strider")} | ${outcome.playwright === undefined ? "–" : run("playwright")} | ${
         outcomeText(outcome.strider, scenario.expected)
       } | ${outcomeText(outcome.playwright, scenario.expected)} | ${lines(code.get(`${scenario.name}/strider`))} / ${
-        lines(code.get(`${scenario.name}/playwright`))
+        twin === undefined ? "–" : lines(twin)
       } |`
     )
+  }
+  out.push("")
+  out.push(
+    "Timing counts are successful/attempted repetitions; failed attempts are excluded from statistics. Initial outcomes above are retained separately."
+  )
+  out.push("")
+  for (const { scenario, failures } of m.scenarios) {
+    for (const failure of failures) {
+      out.push(
+        `- ${cell(scenario.title)}, ${failure.library}, timed repetition ${failure.repetition}: failed: ${
+          cell(failure.error)
+        }`
+      )
+    }
   }
   out.push("")
   out.push(
@@ -112,7 +139,7 @@ export const report = (m: Measurements): string => {
     out.push("## What each leaves for a page to see")
     out.push("")
     out.push(
-      "What a page's own script reads about the browser driving it, the signals bot protection looks for (`/tells` in `src/site.ts`), headless, as each launches by default:"
+      "What a page's own script reads about the browser driving it (`/tells` in `src/site.ts`), headless, as each launches by default:"
     )
     out.push("")
     out.push("| | Strider | Playwright |")
@@ -138,10 +165,13 @@ export const report = (m: Measurements): string => {
     out.push(code.get(`${scenario.name}/strider`) ?? "")
     out.push("```")
     out.push("")
-    out.push("```ts")
-    out.push(code.get(`${scenario.name}/playwright`) ?? "")
-    out.push("```")
-    out.push("")
+    const twin = code.get(`${scenario.name}/playwright`)
+    if (twin !== undefined) {
+      out.push("```ts")
+      out.push(twin)
+      out.push("```")
+      out.push("")
+    }
     if (scenario.note !== undefined) {
       out.push(scenario.note)
       out.push("")

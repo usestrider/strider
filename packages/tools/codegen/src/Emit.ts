@@ -202,6 +202,30 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
   }
 
   /**
+   * The shapes whose wire form isn't their model: one with a sensitive member (a `Redacted` in the model, a plain
+   * value on the wire), and any that refers to one. Their codec's `Encoded` type is `unknown`, not the model.
+   */
+  const redacting = new Set<string>()
+  for (let grew = true; grew;) {
+    grew = false
+    for (const id of emitted) {
+      if (redacting.has(id)) continue
+      const shape = shapes[id]!
+      const refs = shape._tag === "Struct"
+        ? membersOf(shape).flatMap(([, member]) => member.traits.sensitive === true ? [id] : refsOf(member.type))
+        : shape._tag === "Alias"
+        ? refsOf(shape.type)
+        : []
+      if (refs.some((ref) => ref === id || redacting.has(ref))) {
+        redacting.add(id)
+        grew = true
+      }
+    }
+  }
+  const codecTypeOf = ($Schema: string, id: string, name: string) =>
+    `${$Schema}.Codec<${name}${redacting.has(id) ? ", unknown" : ""}>`
+
+  /**
    * The order a union's members are tried in when decoding: the spec's, except that a member typing a field
    * loosely (BiDi's `log.GenericLogEntry`, `type: text`) goes after the members that fix that field to a
    * literal, so it doesn't decode their values and drop their fields.
@@ -356,7 +380,7 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
             jsdoc("", [describe(shape.traits, `\`${splitId(id)[1]}\`.`), ...tags(id, shape.traits, "models")]) +
               `export type ${name} = ${type}\n\n` +
               jsdoc("", [`Schema for \`${name}\`.`, ...tags(id, shape.traits, "schemas")]) +
-              `export const ${name} = ${codec} as any as ${$Schema}.Codec<${name}>\n`
+              `export const ${name} = ${codec} as any as ${codecTypeOf($Schema, id, name)}\n`
           )
           break
         }
@@ -377,13 +401,18 @@ export const emit = (model: ProtocolModel, source: Source): Emitted => {
             }
           })
           const identifier = `${domain}.${name}`
+          // The cast stays: a typed `suspend((): Codec<X> => Struct(...))` checks each schema against its interface
+          // (19 mismatches, all the `Encoded` type of a shape with sensitive members, which `redacting` now declares), but made `tsc -b --force` about 28% slower and
+          // its memory about 24% higher (browser package, native tsc, median of 5; 970ms to 1243ms, 770MB to 960MB).
           types.push(
             jsdoc("", [describe(shape.traits, `\`${splitId(id)[1]}\`.`), ...tags(id, shape.traits, "models")]) +
               `export interface ${name} {\n${fields.map((field) => field.type).join("\n")}\n}\n\n` +
               jsdoc("", [`Schema for \`${name}\`.`, ...tags(id, shape.traits, "schemas")]) +
               `export const ${name} = /*#__PURE__*/ ${$Schema}.suspend(() =>\n  ${$Schema}.Struct({\n${
                 fields.map((field) => field.codec).join(",\n")
-              }\n  }).annotate({ identifier: ${JSON.stringify(identifier)} })\n) as any as ${$Schema}.Codec<${name}>\n`
+              }\n  }).annotate({ identifier: ${JSON.stringify(identifier)} })\n) as any as ${
+                codecTypeOf($Schema, id, name)
+              }\n`
           )
           break
         }
@@ -477,7 +506,9 @@ const traitsLiteral = (traits: Traits) => {
         traits.release.map((release) =>
           `{ method: ${JSON.stringify(release.method)}, param: ${JSON.stringify(release.param)}, from: ${
             JSON.stringify(release.from)
-          }${release.list === true ? ", list: true" : ""} }`
+          }${release.list === true ? ", list: true" : ""}${
+            release.paramsFrom === undefined ? "" : `, paramsFrom: ${JSON.stringify(release.paramsFrom)}`
+          } }`
         ).join(", ")
       }]`
     )

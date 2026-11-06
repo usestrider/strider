@@ -1,17 +1,22 @@
-/**
- * The browsers the integration tests run against: the pinned builds (`pins.ts`), which the Nix environment
- * (`flake.nix`, `devShells.integration`) names in `STRIDER_CHROMIUM`, `STRIDER_FIREFOX` and `STRIDER_WEBKITGTK`,
- * with the X server stock WebKit's MiniBrowser needs in `STRIDER_XVFB`. Nothing else is looked up, and nothing is
- * skipped: outside that environment the integration tests don't run (`environment.ts`), and a browser that isn't
- * the pinned version fails them, saying which version it found.
- */
-import { pins } from "./pins.ts"
+/** Browser paths and strict versions for the selected integration entry point. */
+import * as fs from "node:fs"
+import { pins as linuxPins } from "./pins.ts"
+import { assertVersion } from "./platform.ts"
+
+interface BrowserPins {
+  readonly chromium: { readonly version: string }
+  readonly firefox: { readonly version: string }
+}
+
+const pins: BrowserPins = process.env["STRIDER_ENVIRONMENT"] === "macos-integration"
+  ? JSON.parse(fs.readFileSync(`${import.meta.dirname}/browsers.macos.json`, "utf8")) as BrowserPins
+  : linuxPins
 
 const named = (variable: string): string => {
   const value = process.env[variable]
   if (value === undefined || value === "") {
     throw new Error(
-      `${variable} isn't set: the browser integration tests run in the Nix environment, with \`pnpm test:integration\``
+      `${variable} isn't set: use pnpm test:integration or pnpm test:integration:macos`
     )
   }
   return value
@@ -27,13 +32,16 @@ export const firefox = { executable: named("STRIDER_FIREFOX"), ...pins.firefox }
 export const openssl = named("STRIDER_OPENSSL")
 
 /** Stock WebKit: WebKitGTK's MiniBrowser, the version it must be, and the X server it runs on. */
-export const webkitgtk = { executable: named("STRIDER_WEBKITGTK"), xvfb: named("STRIDER_XVFB"), ...pins.webkitgtk }
+export const webkitgtk = {
+  get executable() {
+    return named("STRIDER_WEBKITGTK")
+  },
+  get xvfb() {
+    return named("STRIDER_XVFB")
+  },
+  ...linuxPins.webkitgtk
+}
 
 /** Fails unless a browser is the version the tests are pinned to. */
-export const assertPinned = (browser: string, found: string, pinned: string): void => {
-  if (found !== pinned) {
-    throw new Error(
-      `${browser} ${found} isn't the pinned ${pinned} (test/integration/browsers.json); the Nix environment provides it`
-    )
-  }
-}
+export const assertPinned = (browser: string, found: string, pinned: string): void =>
+  assertVersion(browser, found, pinned, process.env["STRIDER_ENVIRONMENT"] === "macos-integration" ? "macos" : "linux")

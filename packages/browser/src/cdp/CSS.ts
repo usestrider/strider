@@ -46,7 +46,7 @@ export const CSSAnimationStyle = /*#__PURE__*/ Schema.suspend(() =>
     name: Schema.optional(Schema.String),
     style: CSSStyle
   }).annotate({ identifier: "CSS.CSSAnimationStyle" })
-) as any as Schema.Codec<CSSAnimationStyle>
+) as any as Schema.Codec<CSSAnimationStyle, unknown>
 
 /**
  * CSS generic \@rule representation.
@@ -100,7 +100,7 @@ export const CSSAtRule = /*#__PURE__*/ Schema.suspend(() =>
     origin: StyleSheetOrigin,
     style: CSSStyle
   }).annotate({ identifier: "CSS.CSSAtRule" })
-) as any as Schema.Codec<CSSAtRule>
+) as any as Schema.Codec<CSSAtRule, unknown>
 
 /**
  * Subsection of font-feature-values, if this is a subsection.
@@ -295,7 +295,7 @@ export const CSSFunctionConditionNode = /*#__PURE__*/ Schema.suspend(() =>
     children: Schema.Array(CSSFunctionNode),
     conditionText: Schema.String
   }).annotate({ identifier: "CSS.CSSFunctionConditionNode" })
-) as any as Schema.Codec<CSSFunctionConditionNode>
+) as any as Schema.Codec<CSSFunctionConditionNode, unknown>
 
 /**
  * Section of the body of a CSS function rule.
@@ -327,7 +327,7 @@ export const CSSFunctionNode = /*#__PURE__*/ Schema.suspend(() =>
     condition: Schema.optional(CSSFunctionConditionNode),
     style: Schema.optional(CSSStyle)
   }).annotate({ identifier: "CSS.CSSFunctionNode" })
-) as any as Schema.Codec<CSSFunctionNode>
+) as any as Schema.Codec<CSSFunctionNode, unknown>
 
 /**
  * CSS function argument representation.
@@ -412,7 +412,7 @@ export const CSSFunctionRule = /*#__PURE__*/ Schema.suspend(() =>
     children: Schema.Array(CSSFunctionNode),
     originTreeScopeNodeId: Schema.optional(DOM.BackendNodeId)
   }).annotate({ identifier: "CSS.CSSFunctionRule" })
-) as any as Schema.Codec<CSSFunctionRule>
+) as any as Schema.Codec<CSSFunctionRule, unknown>
 
 /**
  * CSS keyframe rule representation.
@@ -455,7 +455,7 @@ export const CSSKeyframeRule = /*#__PURE__*/ Schema.suspend(() =>
     keyText: Value,
     style: CSSStyle
   }).annotate({ identifier: "CSS.CSSKeyframeRule" })
-) as any as Schema.Codec<CSSKeyframeRule>
+) as any as Schema.Codec<CSSKeyframeRule, unknown>
 
 /**
  * CSS keyframes rule representation.
@@ -487,7 +487,7 @@ export const CSSKeyframesRule = /*#__PURE__*/ Schema.suspend(() =>
     animationName: Value,
     keyframes: Schema.Array(CSSKeyframeRule)
   }).annotate({ identifier: "CSS.CSSKeyframesRule" })
-) as any as Schema.Codec<CSSKeyframesRule>
+) as any as Schema.Codec<CSSKeyframesRule, unknown>
 
 /**
  * CSS Layer at-rule descriptor.
@@ -563,7 +563,7 @@ export const CSSLayerData = /*#__PURE__*/ Schema.suspend(() =>
     subLayers: Schema.optional(Schema.Array(CSSLayerData)),
     order: Schema.Number
   }).annotate({ identifier: "CSS.CSSLayerData" })
-) as any as Schema.Codec<CSSLayerData>
+) as any as Schema.Codec<CSSLayerData, unknown>
 
 /**
  * CSS media rule descriptor.
@@ -733,7 +733,7 @@ export const CSSPositionTryRule = /*#__PURE__*/ Schema.suspend(() =>
     style: CSSStyle,
     active: Schema.Boolean
   }).annotate({ identifier: "CSS.CSSPositionTryRule" })
-) as any as Schema.Codec<CSSPositionTryRule>
+) as any as Schema.Codec<CSSPositionTryRule, unknown>
 
 /**
  * CSS property declaration data.
@@ -801,7 +801,7 @@ export const CSSProperty = /*#__PURE__*/ Schema.suspend(() =>
     range: Schema.optional(SourceRange),
     longhandProperties: Schema.optional(Schema.Array(CSSProperty))
   }).annotate({ identifier: "CSS.CSSProperty" })
-) as any as Schema.Codec<CSSProperty>
+) as any as Schema.Codec<CSSProperty, unknown>
 
 /**
  * Representation of a custom property registration through CSS.registerProperty
@@ -874,7 +874,7 @@ export const CSSPropertyRule = /*#__PURE__*/ Schema.suspend(() =>
     propertyName: Value,
     style: CSSStyle
   }).annotate({ identifier: "CSS.CSSPropertyRule" })
-) as any as Schema.Codec<CSSPropertyRule>
+) as any as Schema.Codec<CSSPropertyRule, unknown>
 
 /**
  * CSS rule representation.
@@ -974,7 +974,7 @@ export const CSSRule = /*#__PURE__*/ Schema.suspend(() =>
     startingStyles: Schema.optional(Schema.Array(CSSStartingStyle)),
     navigations: Schema.optional(Schema.Array(CSSNavigation))
   }).annotate({ identifier: "CSS.CSSRule" })
-) as any as Schema.Codec<CSSRule>
+) as any as Schema.Codec<CSSRule, unknown>
 
 /**
  * Enum indicating the type of a CSS rule, used to represent the order of a style rule's ancestors.
@@ -1121,7 +1121,7 @@ export const CSSStyle = /*#__PURE__*/ Schema.suspend(() =>
     cssText: Schema.optional(Schema.String),
     range: Schema.optional(SourceRange)
   }).annotate({ identifier: "CSS.CSSStyle" })
-) as any as Schema.Codec<CSSStyle>
+) as any as Schema.Codec<CSSStyle, unknown>
 
 /**
  * CSS stylesheet metainformation.
@@ -1321,7 +1321,7 @@ export const CSSTryRule = /*#__PURE__*/ Schema.suspend(() =>
     origin: StyleSheetOrigin,
     style: CSSStyle
   }).annotate({ identifier: "CSS.CSSTryRule" })
-) as any as Schema.Codec<CSSTryRule>
+) as any as Schema.Codec<CSSTryRule, unknown>
 
 /**
  * `ComputedStyleExtraFields`.
@@ -1502,7 +1502,7 @@ export const InheritedAnimatedStyleEntry = /*#__PURE__*/ Schema.suspend(() =>
     animationStyles: Schema.optional(Schema.Array(CSSAnimationStyle)),
     transitionsStyle: Schema.optional(CSSStyle)
   }).annotate({ identifier: "CSS.InheritedAnimatedStyleEntry" })
-) as any as Schema.Codec<InheritedAnimatedStyleEntry>
+) as any as Schema.Codec<InheritedAnimatedStyleEntry, unknown>
 
 /**
  * Inherited pseudo element matches from pseudos of an ancestor node.
@@ -1529,7 +1529,7 @@ export const InheritedPseudoElementMatches = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     pseudoElements: Schema.Array(PseudoElementMatches)
   }).annotate({ identifier: "CSS.InheritedPseudoElementMatches" })
-) as any as Schema.Codec<InheritedPseudoElementMatches>
+) as any as Schema.Codec<InheritedPseudoElementMatches, unknown>
 
 /**
  * Inherited CSS rule collection from ancestor node.
@@ -1561,7 +1561,7 @@ export const InheritedStyleEntry = /*#__PURE__*/ Schema.suspend(() =>
     inlineStyle: Schema.optional(CSSStyle),
     matchedCSSRules: Schema.Array(RuleMatch)
   }).annotate({ identifier: "CSS.InheritedStyleEntry" })
-) as any as Schema.Codec<InheritedStyleEntry>
+) as any as Schema.Codec<InheritedStyleEntry, unknown>
 
 /**
  * Media query descriptor.
@@ -1719,7 +1719,7 @@ export const PseudoElementMatches = /*#__PURE__*/ Schema.suspend(() =>
     pseudoIdentifier: Schema.optional(Schema.String),
     matches: Schema.Array(RuleMatch)
   }).annotate({ identifier: "CSS.PseudoElementMatches" })
-) as any as Schema.Codec<PseudoElementMatches>
+) as any as Schema.Codec<PseudoElementMatches, unknown>
 
 /**
  * Match data for a CSS rule.
@@ -1751,7 +1751,7 @@ export const RuleMatch = /*#__PURE__*/ Schema.suspend(() =>
     rule: CSSRule,
     matchingSelectors: Schema.Array(Schema.Int)
   }).annotate({ identifier: "CSS.RuleMatch" })
-) as any as Schema.Codec<RuleMatch>
+) as any as Schema.Codec<RuleMatch, unknown>
 
 /**
  * CSS coverage information.
@@ -2163,7 +2163,7 @@ export const AddRuleResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     rule: CSSRule
   }).annotate({ identifier: "CSS.AddRuleResult" })
-) as any as Schema.Codec<AddRuleResult>
+) as any as Schema.Codec<AddRuleResult, unknown>
 
 /**
  * Returns all class names from specified stylesheet.
@@ -2460,7 +2460,7 @@ export const GetAnimatedStylesForNodeResult = /*#__PURE__*/ Schema.suspend(() =>
     transitionsStyle: Schema.optional(CSSStyle),
     inherited: Schema.optional(Schema.Array(InheritedAnimatedStyleEntry))
   }).annotate({ identifier: "CSS.GetAnimatedStylesForNodeResult" })
-) as any as Schema.Codec<GetAnimatedStylesForNodeResult>
+) as any as Schema.Codec<GetAnimatedStylesForNodeResult, unknown>
 
 /**
  * `getBackgroundColors.Params`.
@@ -2668,7 +2668,7 @@ export const GetInlineStylesForNodeResult = /*#__PURE__*/ Schema.suspend(() =>
     inlineStyle: Schema.optional(CSSStyle),
     attributesStyle: Schema.optional(CSSStyle)
   }).annotate({ identifier: "CSS.GetInlineStylesForNodeResult" })
-) as any as Schema.Codec<GetInlineStylesForNodeResult>
+) as any as Schema.Codec<GetInlineStylesForNodeResult, unknown>
 
 /**
  * Returns all layers parsed by the rendering engine for the tree scope of a node.
@@ -2722,7 +2722,7 @@ export const GetLayersForNodeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     rootLayer: CSSLayerData
   }).annotate({ identifier: "CSS.GetLayersForNodeResult" })
-) as any as Schema.Codec<GetLayersForNodeResult>
+) as any as Schema.Codec<GetLayersForNodeResult, unknown>
 
 /**
  * Given a CSS selector text and a style sheet ID, getLocationForSelector
@@ -2824,7 +2824,7 @@ export const GetLonghandPropertiesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     longhandProperties: Schema.Array(CSSProperty)
   }).annotate({ identifier: "CSS.GetLonghandPropertiesResult" })
-) as any as Schema.Codec<GetLonghandPropertiesResult>
+) as any as Schema.Codec<GetLonghandPropertiesResult, unknown>
 
 /**
  * Returns requested styles for a DOM node identified by `nodeId`.
@@ -2941,7 +2941,7 @@ export const GetMatchedStylesForNodeResult = /*#__PURE__*/ Schema.suspend(() =>
     parentLayoutNodeId: Schema.optional(DOM.NodeId),
     cssFunctionRules: Schema.optional(Schema.Array(CSSFunctionRule))
   }).annotate({ identifier: "CSS.GetMatchedStylesForNodeResult" })
-) as any as Schema.Codec<GetMatchedStylesForNodeResult>
+) as any as Schema.Codec<GetMatchedStylesForNodeResult, unknown>
 
 /**
  * Returns all media queries parsed by the rendering engine.
@@ -3716,7 +3716,7 @@ export const SetStyleTextsResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     styles: Schema.Array(CSSStyle)
   }).annotate({ identifier: "CSS.SetStyleTextsResult" })
-) as any as Schema.Codec<SetStyleTextsResult>
+) as any as Schema.Codec<SetStyleTextsResult, unknown>
 
 /**
  * Modifies the expression of a supports at-rule.

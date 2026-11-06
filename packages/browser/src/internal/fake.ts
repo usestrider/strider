@@ -19,14 +19,14 @@ import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as Browser from "../Browser.ts"
+import type * as Browser from "../Browser.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
-import type * as Target from "../Target.ts"
-import type * as Url from "../Url.ts"
+import * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as Urls from "./urls.ts"
 
 /** One step of a timeline. */
 export type Step =
@@ -93,43 +93,55 @@ const noDom = "Browser.layerTest's pages have no DOM"
 const unsupported = (capability: string, hint = noDom) =>
   Effect.fail(new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } }))
 
-const capabilities = () => {
-  const evidence = "Browser.layerTest's fake adapter"
-  const entry = (
-    name: string,
-    status: Browser.CapabilityEntry["status"],
-    limitations: ReadonlyArray<string> = []
-  ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
-  return new Browser.CapabilitySet({
-    entries: [
-      entry("userContexts", "supported"),
-      entry("prompts", "supported"),
-      entry("prompts.kind", "supported"),
-      entry("popups.opener", "supported"),
-      entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
-      entry("engine", "unsupported", [noDom]),
-      entry("isolatedWorlds", "unsupported", [noDom]),
-      entry("input.native", "unsupported", [noDom]),
-      entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
-      entry("interception.response", "unsupported", ["the timeline's requests are never paused"]),
-      entry("interception.auth", "unsupported", ["the timeline's requests are never paused"]),
-      entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
-      entry("bodies", "supported", ["every body is empty"]),
-      entry("console", "unsupported", ["the timeline has no console messages"]),
-      entry("fileChooser", "unsupported", [noDom]),
-      entry("downloads", "unsupported", ["the timeline has no downloads"]),
-      entry("screenshot", "unsupported", ["nothing is painted"]),
-      entry("pdf", "unsupported", ["nothing is painted"]),
-      entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
-      entry("capability.axTree", "unsupported", [noDom]),
-      entry("capability.screencast", "unsupported", ["nothing is painted"]),
-      entry("capability.video", "unsupported", ["nothing is painted"])
-    ]
-  })
-}
+const entry = (
+  name: string,
+  status: Browser.CapabilityEntry["status"],
+  limitations: ReadonlyArray<string> = []
+): Browser.CapabilityEntry => ({
+  name,
+  status,
+  evidence: "Browser.layerTest's fake adapter",
+  limitations: [...limitations]
+})
 
-/** Connects the fake for the layer's scope, its first page to play `steps`. */
-export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
+/** What the fake can do, as `Browser.layerTest` makes its `CapabilitySet` of. */
+export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
+  entry("userContexts", "supported"),
+  entry("prompts", "supported"),
+  entry("prompts.kind", "supported"),
+  entry("popups.opener", "supported"),
+  entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
+  entry("engine", "unsupported", [noDom]),
+  entry("isolatedWorlds", "unsupported", [noDom]),
+  entry("input.native", "unsupported", [noDom]),
+  entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
+  entry("interception.response", "unsupported", ["the timeline's requests are never paused"]),
+  entry("interception.auth", "unsupported", ["the timeline's requests are never paused"]),
+  entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
+  entry("bodies", "supported", ["every body is empty"]),
+  entry("console", "unsupported", ["the timeline has no console messages"]),
+  entry("fileChooser", "unsupported", [noDom]),
+  entry("downloads", "unsupported", ["the timeline has no downloads"]),
+  entry("screenshot", "unsupported", ["nothing is painted"]),
+  entry("pdf", "unsupported", ["nothing is painted"]),
+  entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
+  entry("capability.axTree", "unsupported", [noDom]),
+  entry("capability.screencast", "unsupported", ["nothing is painted"]),
+  entry("capability.video", "unsupported", ["nothing is painted"])
+]
+
+/** What the fake is, as `Browser.layerTest` makes its `Info` of. */
+export const info = { product: "Fake", version: "1", protocol: "fake", revision: "layerTest" } as const
+
+/**
+ * Connects the fake for the layer's scope, its first page to play `steps`; `Browser.layerTest` makes what it
+ * reports itself as, so this module needn't load `Browser.ts`, which loads it.
+ */
+export const connect = (
+  steps: ReadonlyArray<Step>,
+  describe: { readonly info: Browser.Info; readonly capabilities: Browser.CapabilitySet }
+) =>
+(sink: Adapter.Sink) =>
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const ids = Adapter.makeIds()
@@ -165,13 +177,13 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
             context,
             kind,
             origin: kind === "popup" ? { _tag: "Opened", opener } : { _tag: "Created" },
-            url: page.url
+            url: Urls.reported(page.url)
           },
           {
             _tag: "DocumentCommitted",
             document: page.document,
             navigable: page.id,
-            url: page.url,
+            url: Urls.reported(page.url),
             origin: "null",
             createdBy: { _tag: "InitialBlank" },
             replaced: Option.none(),
@@ -192,12 +204,12 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
         page.document = ids.document()
         page.url = url
         yield* emit(
-          { _tag: "NavigationStarted", navigation, navigable: page.id, url, initiatedAs },
+          { _tag: "NavigationStarted", navigation, navigable: page.id, url: Urls.reported(url), initiatedAs },
           {
             _tag: "DocumentCommitted",
             document: page.document,
             navigable: page.id,
-            url,
+            url: Urls.reported(url),
             origin,
             createdBy: { _tag: "Navigation", navigation },
             replaced: Option.some(replaced),
@@ -245,7 +257,7 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
               )
               break
             case "Response": {
-              const url = `${origin}/${step.name}` as Url.Url
+              const url = Urls.reported(`${origin}/${step.name}`)
               const hop = ids.hop(ids.request(), 0)
               yield* emit(
                 {
@@ -292,9 +304,9 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
               yield* addPage(page.context, "popup", Option.some(page.id))
               break
             case "Crash":
-              return yield* end(page, { _tag: "PageCrashed" }, "fake: crash")
+              return yield* end(page, new Target.PageCrashed({}), "fake: crash")
             case "Close":
-              return yield* end(page, { _tag: "PageClosed", by: "script" }, "fake: |")
+              return yield* end(page, new Target.PageClosed({ by: "script" }), "fake: |")
           }
         }
       })
@@ -305,15 +317,16 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
         return page === undefined || page.ended
           ? Effect.fail(
             new Adapter.AdapterError({
-              reason: { _tag: "Gone", target: { _tag: "Page", id }, reason: { _tag: "PageClosed", by: "command" } }
+              reason: { _tag: "Gone", target: { _tag: "Page", id }, reason: new Target.PageClosed({ by: "command" }) }
             })
           )
           : Effect.succeed(page)
       })
 
     const adapter: Adapter.AdapterConnection = {
-      info: new Browser.Info({ product: "Fake", version: "1", protocol: "fake", revision: "layerTest" }),
-      capabilities: yield* SubscriptionRef.make(capabilities()),
+      ownership: "attached",
+      info: describe.info,
+      capabilities: yield* SubscriptionRef.make(describe.capabilities),
       pauseScope: "browser",
       defaultContext,
       closed: Effect.never,
@@ -340,7 +353,9 @@ export const connect = (steps: ReadonlyArray<Step>) => (sink: Adapter.Sink) =>
       closePage: (id) =>
         Effect.suspend(() => {
           const page = pages.get(id)
-          return page === undefined ? Effect.void : end(page, { _tag: "PageClosed", by: "command" }, "fake: closePage")
+          return page === undefined
+            ? Effect.void
+            : end(page, new Target.PageClosed({ by: "command" }), "fake: closePage")
         }),
       activatePage: (id) => Effect.asVoid(pageOf(id)),
       navigate: (id, url) => Effect.flatMap(pageOf(id), (page) => commit(page, url, "crossDocument", true)),

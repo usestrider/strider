@@ -36,7 +36,10 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
         const options = [
           ...(step.name === null ? [] : [`name: ${quote(step.name)}`]),
           ...(step.name !== null && step.name._tag === "String" && step.name.exact ? ["exact: true"] : []),
-          ...(step.includeHidden ? ["includeHidden: true"] : [])
+          ...(step.includeHidden ? ["includeHidden: true"] : []),
+          ...(["level", "checked", "pressed", "expanded", "selected", "disabled"] as const).flatMap((key) =>
+            step[key] === undefined ? [] : [`${key}: ${step[key]}`]
+          )
         ]
         return `getByRole(${JSON.stringify(step.role)}${options.length === 0 ? "" : `, { ${options.join(", ")} }`})`
       }
@@ -87,7 +90,12 @@ export const roleStep = (role: AriaRole.AriaRole, options: Locator.RoleOptions |
   _tag: "Role",
   role,
   name: options?.name === undefined ? null : matcher(options.name, options.exact),
-  includeHidden: options?.includeHidden ?? false
+  includeHidden: options?.includeHidden ?? false,
+  ...Object.fromEntries(
+    (["level", "checked", "pressed", "expanded", "selected", "disabled"] as const)
+      .filter((key) => options?.[key] !== undefined)
+      .map((key) => [key, options![key]])
+  )
 })
 
 /** The queries, as steps appended to `steps`. */

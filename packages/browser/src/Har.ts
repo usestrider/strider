@@ -21,6 +21,7 @@ import type * as Adapter from "./internal/adapter.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
+import * as HarLog from "./internal/harLog.ts"
 import * as Operation from "./internal/operation.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Recordings from "./internal/recordings.ts"
@@ -257,7 +258,12 @@ export const record = (
               ? { _tag: "File", prefix: "" }
               : { _tag: "Omit" }
           }, { name: info.product, version: info.version })
-          const text = JSON.stringify(log, null, 2)
+          const text = yield* Schema.encodeEffect(HarLog.LogJson)(log).pipe(
+            Effect.mapError((error): Recordings.WriteFailure => ({
+              path: "",
+              hint: `The HAR couldn't be encoded: ${error.message}`
+            }))
+          )
           const resolved = yield* Recordings.resolve(runtime, path)
           const bytes = options.content === "attach"
             ? yield* Recordings.zip([{ path: "har.har", content: text }, ...files])
@@ -271,7 +277,7 @@ export const record = (
                 hint: failure.hint,
                 ...(failure.cause === undefined ? {} : { cause: failure.cause })
               }),
-              diagnostics: Operation.diagnostics(Operation.operationId())
+              diagnostics: Operation.diagnosticsNow()
             })
           ),
           Operation.named("Har.exportHar", { attributes: { ...Spans.scopeAttributes(scopeOf), "browser.path": path } })

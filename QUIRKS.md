@@ -1,6 +1,6 @@
 # QUIRKS: weird behaviors to reconsider
 
-*Started 2026-10-23, at the maintainer's request: "record all the weird behaviors we amass as we build, so we can go back and reconsider them when we're done." Back-filled from the probes (PROBES.md, Results) and PROTOCOL.md's Built sections, up to `ebe4b16`.*
+*Started 2026-10-23, at the maintainer's request: "record all the weird behaviors we amass as we build, so we can go back and reconsider them when we're done." Back-filled from the probes and PROTOCOL.md's Built sections, up to `ebe4b16`.*
 
 Two kinds of entry:
 
@@ -11,11 +11,11 @@ Each entry says what is weird, where it was seen (with the builds: Chromium 155.
 
 - **Resolved**, with the commit that resolved it;
 - **Kept**, with the reason it was kept;
-- **Reported**, with its draft in `upstream/`, and the report's link once one is sent.
+- **Reported**, once drafted, and the report's link once one is sent.
 
 An entry with no marker is open.
 
-**Closed** on 2026-10-29: nothing more is added here. New findings are issues on the Rookery board (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
+**Closed** on 2026-10-29: nothing more is added here. New findings are filed as issues (`.agents/AGENTS.md`, Issues). Numbers stay stable, so documents and code comments can still cite them (`QUIRKS.md, Q12`).
 
 ## Browsers: navigation, history and documents
 
@@ -45,13 +45,13 @@ An entry with no marker is open.
 - *Seen:* PROTOCOL.md, History and restores; probes 3.
 - *We:* report each as `Restored` where the evidence allows, inferring Firefox's from a new main-world realm while a traversal is in flight.
 - *Reconsider:* the inference on Firefox, which is timing-dependent (Q5), and the duplicate console message.
-- **Reported**: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q5. Firefox can reply to `traverseHistory` before the restored document's realm arrives** (Browser). Under load, the reply came first, and the adapter, which looked for a waiting realm only at the reply, never ended the traversal.
 - *Seen:* in two full integration runs of four.
 - *We:* restore the traversal when the realm arrives (`restoring` on the navigable).
 - *Reconsider:* whether Firefox will ever report restores with a commit, which would remove both this and Q4's inference.
-- **Reported**: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q6. Chromium retries are needed for "Not attached to an active page"** (Ours). Chromium refuses a page's commands for a moment while it swaps documents.
 - *Seen:* PROTOCOL.md, History and restores.
@@ -118,14 +118,14 @@ An entry with no marker is open.
 - *We:* nothing yet; the restore inference (Q4) waits for a realm that didn't come.
 - *Reconsider:* with Q4 and Q5, an end Firefox reports for every traversal.
 - **Resolved** in `a7ee8dc`: traced under synthetic load, where 12 of 32 runs failed: Firefox sends no `navigationStarted` for a traversal that leaves its JSON viewer before the viewer has loaded, fetches the page again, and reports no new document. With the viewer off in `automation` (Q15), 48 of 48 passed. The viewer's own case goes into Q4's report.
-- **Reported**: drafted in `upstream/webdriver-bidi-restores.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q149. A Chromium page closed under full load went unreported** (Browser). In one full integration run, the conformance test's `closePage` was answered, and no `NavigableRemoved` came within 10 s; three runs of that test alone passed.
 - *Seen:* once.
 - *We:* nothing yet.
 - *Reconsider:* whether `Target.targetDestroyed` or `detachedFromTarget` was lost, or arrived for a target the adapter no longer tracked, if it happens again.
 - **Resolved** in `a7ee8dc`: traced under synthetic load, where 4 of 48 runs failed: Chromium answers a `Target.closeTarget` sent as a navigation commits, and drops it; the page stays attached and alive, and a second close closes it. Raw CDP showed the same, 10 dropped closes in 120. The adapter first sends a page command, `Page.getNavigationHistory`, which Chromium refuses during the swap and accepts once it is over, and which is answered with a dialog open; with it, raw CDP dropped no close in 120, and 100 of 100 stress runs passed.
-- **Reported**: drafted in `upstream/chromium-close-dropped.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q198. Stock WebKit reports a failed load and a download only through the document's request** (Browser). It has no `Playwright.provisionalLoadFailed` or `downloadCreated`: a refused connection is `Network.loadingFailed` with the error, and a download's response is followed by `loadingFailed` "Frame load interrupted", canceled, as a 204's is.
 - *Seen:* WebKitGTK 2.54.1's MiniBrowser.
@@ -197,7 +197,7 @@ An entry with no marker is open.
 - *Seen:* WebKit probe findings.
 - *We:* never send either outside what the model has seen; a frame that goes between the check and the command is a race we can't close.
 - *Reconsider:* when the build is rolled.
-- **Reported**: drafted in `upstream/playwright-webkit-crashes.md`, not sent.
+- **Reported**: drafted, not sent.
 - **Resolved** in `9c8280c`: neither command is in stock WebKit, which the adapter now drives alone.
 
 **Q23. A raw WebKit dialog answer left the page blocked once** (Browser). In a scratch probe, the same answer the adapter sends left the dialog open; the difference was never traced.
@@ -379,8 +379,8 @@ An entry with no marker is open.
 **Q33. Console text is formatted differently** (Browser). Firefox applies format specifiers (`%s`, `%d`), Chromium and WebKit don't; objects render as their class name (`Object`, Firefox's `Object(2)`); `console.count()` is `debug` on WebKit and `log` elsewhere; `console.timeEnd` of an unknown timer is a warning on Chromium and WebKit and a log on Firefox, each worded differently.
 - *We:* report the browser's text and level as they are.
 - *Reconsider:* formatting from the arguments ourselves, which needs their handles.
-- **Resolved** in `c790129`: the library applies the Console Standard's formatter (`%s`, `%d`, `%i`, `%f`, `%o`, `%O`, `%c`) to the arguments CDP and WebKit report (`internal/consoleFormat.ts`), as Firefox applies its own. Two differences stay. Firefox writes `%f` as printf does (`1.250000`, not `parseFloat`'s `1.25`) and sends its formatted text as the call's only argument, so nothing can reformat it (reported: `upstream/firefox-console-args-formatted.md`). And objects read as each browser describes them: WebDriver BiDi serializes an `Error` without its message, so rendering them one way would drop Chromium's error messages.
-- **Reported**: drafted in `upstream/firefox-console-args-formatted.md`, not sent.
+- **Resolved** in `c790129`: the library applies the Console Standard's formatter (`%s`, `%d`, `%i`, `%f`, `%o`, `%O`, `%c`) to the arguments CDP and WebKit report (`internal/consoleFormat.ts`), as Firefox applies its own. Two differences stay. Firefox writes `%f` as printf does (`1.250000`, not `parseFloat`'s `1.25`) and sends its formatted text as the call's only argument, so nothing can reformat it. And objects read as each browser describes them: WebDriver BiDi serializes an `Error` without its message, so rendering them one way would drop Chromium's error messages.
+- **Reported**: drafted, not sent.
 
 **Q34. Console locations have different bases and columns** (Browser). Chromium's and Firefox's lines and columns are 0-based, WebKit's 1-based; the column points at the call's property on Chromium and its parenthesis on WebKit.
 - *We:* convert to 1-based on CDP and BiDi; columns stay where each engine puts them.
@@ -485,7 +485,7 @@ An entry with no marker is open.
 - *Seen:* through the adapter and raw BiDi.
 - *We:* a new URL is `Unsupported` (`interception.continueUrl`); the BiDi adapter sends a new body's length.
 - *Reconsider:* when Firefox implements `url`.
-- **Reported**: drafted in `upstream/firefox-continue-request.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q93. Firefox can't fulfill at the response phase, and leaves a request it refused paused** (Browser). `network.provideResponse` there answers `unsupported operation`; a continue with new headers replaces the response's.
 - *We:* refuse it up front (`interception.responseFulfill`), so the default continues the request.
@@ -529,7 +529,7 @@ An entry with no marker is open.
 - *Seen:* in a HAR on Chromium.
 - *We:* a HAR marks it `_incomplete`; `inFlightAtStop: "wait"` waits for it until the deadline.
 - *Reconsider:* ending a request with its document, if a protocol event allows it.
-- **Reported**: drafted in `upstream/chromium-favicon-never-ends.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q160. Chromium forgets a document's bodies once the page navigates on** (Browser). `Network.getResponseBody` for the document a page just left fails "No resource with given identifier found", or "Missing resource for given requestId".
 - *Seen:* a HAR recording two navigations in a row.
@@ -677,7 +677,7 @@ An entry with no marker is open.
 **Q111. Firefox doesn't deliver page coordinates into a cross-site frame** (Browser). A click at page coordinates over a cross-site iframe reaches nothing in it, not even `pointerdown`, though the page's hit test at the point is the iframe; the same click sent to the frame's own browsing context, in the frame's coordinates, lands. Chromium and WebKit deliver page coordinates into every frame.
 - *We:* input names the frame and its origin; the BiDi adapter subtracts the origin and sends to the frame's context, and keyboard input goes there too.
 - *Reconsider:* a drag between documents on Firefox, which is sent to the source's frame.
-- **Reported**: drafted in `upstream/firefox-cross-site-frame-input.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q112. No backend reports a frame's name** (Browser). The frame tree each protocol gives has ids and URLs; a frame's `name` is its document's `window.name`, which only its document can read.
 - *We:* `FrameTree.name` is `None`.
@@ -756,7 +756,7 @@ An entry with no marker is open.
 **Q137. Firefox allows one WebDriver BiDi session, and keeps it after its connection closes** (Browser). A second `session.new` fails "Maximum number of active sessions"; a session started over a socket outlives the socket, 13 s and counting, so every later client is refused until the browser restarts; `session.end` frees it at once; and a second socket to the session's own URL is refused.
 - *We:* the BiDi adapter ends a session it started when its scope closes, bounded by a second, and a connect refused for it says why (`ConnectionFailed{handshake}`).
 - *Reconsider:* a program that dies without ending its session still locks Firefox (Q146).
-- **Reported**: drafted in `upstream/firefox-session-outlives-socket.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q138. Firefox reports the contexts that exist as `session.subscribe` is answered** (Browser). The BiDi adapter mapped Firefox's `"default"` user context after subscribing, so the tabs those events reported landed in a context of their own, never the default: a launched Firefox's first tab, and an attached Firefox's first tab.
 - *Seen:* through the facts.
@@ -804,7 +804,7 @@ An entry with no marker is open.
 - *Seen:* PROTOCOL.md, Transports.
 - *We:* lose the connection with a description; launched browsers use the pipe; remote endpoints are limited to 128 MiB until Effect's constructor passes `ws` options through.
 - *Reconsider:* a `ws` constructor of our own, or upstream option passthrough.
-- **Reported**: drafted in `upstream/effect-websocket-max-payload.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q56. WebKit carries a command in a wrapper that takes a negated id** (Browser and ours). Commands to a target or worker go inside `Target.sendMessageToTarget` or `Worker.sendMessageToWorker`; we give the wrapper the negated id of the command it carries.
 - *Seen:* PROTOCOL.md, Built for WebKit.
@@ -842,7 +842,7 @@ An entry with no marker is open.
 - *We:* a correction in `packages/tools/codegen/protocols/bidi/patches/navigationInfo-userContext.json` makes the member nullable, as Q53's two are; the adapter places no context it can't attribute.
 - *Reconsider:* on each roll (`pnpm codegen:audit`), and whether to report the transient tab with the deviation.
 - **Resolved** in `38ce8ff`: as above.
-- **Reported**: drafted in `upstream/firefox-window-user-context-null.md`, not sent.
+- **Reported**: drafted, not sent.
 
 **Q180. A page another client crashed went unreported under load** (Browser, or ours: not traced). The CDP-only test where a second client attaches to a page and sends `Page.crash` waits for the page's end, `PageCrashed`; under synthetic load (eight processes at once beside a dozen busy loops), none came within 10 s in 24 runs of 40, with and without `fa0a3a9`. It passed alone, and failed once in a normal full run.
 - *We:* nothing yet.
@@ -1146,7 +1146,7 @@ An entry with no marker is open.
 - *We:* nothing more.
 - *Reconsider:* a CLI command that ends a stuck session, if one turns up.
 - **Kept**: the *We* line is the decision.
-- **Reported**: drafted in `upstream/firefox-session-outlives-socket.md`, not sent.
+- **Reported**: drafted, not sent.
 - **Resolved** in `6ff530c`: the CLI's daemons keep a ledger record of the browser they launched, so `strider prune --yes` kills a Firefox a dead program left running, which frees its session.
 
 **Q147. An attached Chromium's every page gets the library's interceptor** (Ours). The CDP adapter enables `Fetch` for every page from its start, with a pattern nothing matches (Q103), observed pages included: nothing changes for the page, but the interceptor is installed while the client is attached.
@@ -1356,6 +1356,7 @@ An entry with no marker is open.
 - *Seen:* the comparison scripts: `check()` on TodoMVC's first todo timed out `waitingForCondition`, its last observation `NotVisible`; Playwright's passed.
 - *We:* the rule stands; the scenario turned the check off at its call site, `check({ checks: { visible: false } })`, and its note said why, until it was replaced by The Internet's dynamic controls (2026-10-27), TodoMVC's demo being hosted by Playwright.
 - *Reconsider:* whether an action's `visible` should ignore opacity, as `receivesPointer` already says whether the pointer reaches the element; `Expect.toBeVisible` could keep it, which reads as a person would see it. A design change.
+- **Resolved** in `8d10bf79`: actions accept zero opacity on the element or its ancestors and require their other checks; visibility assertions and filters count these transparent elements as hidden.
 
 **Q242. A scenario takes Strider longer than Playwright, on the same Chromium** (Ours). Over 10 runs each, 8 of the comparison's 10 scenarios took 1.4 to 2.4 times as long with Strider, contexts and pages made and closed in each: the README's program 173 ms to Playwright's 98, a popup with a dialog 311 to 145, TodoMVC 424 to 176; a route blocking analytics took the same, and a HAR recorded and replayed 139 to 152. A launch with a first page took 201 ms to 130. Where the time goes isn't known.
 - *Seen:* the comparison scripts (`packages/scenarios/RESULTS.md`), on the maintainer's desktop at `nice 19`.
@@ -1364,8 +1365,9 @@ An entry with no marker is open.
 
 **Q243. `getByRole` matches a role and a name, and none of the states Playwright's filters by** (Ours). `Locator.RoleOptions` has `name`, `exact` and `includeHidden`; Playwright's also has `level`, `checked`, `pressed`, `expanded`, `selected` and `disabled`, so a heading's level or a checked box is a CSS selector or a filter in Strider.
 - *Seen:* the comparison scripts: The Internet's `h2` was to be `getByRole("heading", { level: 2 })`, which doesn't type-check; both versions read `locator("h2")`.
-- *We:* nothing yet.
-- *Reconsider:* the states as `RoleOptions`, from the accessibility tree the engine already computes.
+- *We:* `Locator.RoleOptions` accepts `level`, `checked`, `pressed`, `expanded`, `selected` and `disabled`. The shared role-query engine reads native and ARIA states, combines them with names and visibility, and keeps queries unchanged when filters are omitted.
+- *Reconsider:* nothing for the missing filters. Malformed checked-state values retain the existing reader’s behavior.
+- **Resolved** with the six role-state filters, native/ARIA integration coverage, and type-checked examples.
 
 **Q244. A handler's or a route's decision ran under the deadline in force when it was registered** (Ours). `Dialog.handle`, `FileChooser.handle` and `route` run each decision with the context they captured at registration, the deadline included, so a handler registered inside `Deadline.within("5 seconds")` failed its operations with `Timeout` once those five seconds had passed, though its own budget, `Deadline.DefaultBudget` per decision, had barely begun. Its time limit was also on the fiber's clock, which `TestClock` stops.
 - *Seen:* giving every operation a record and a deadline of its own, which would have handed the registration's to every decision too.
@@ -1408,3 +1410,19 @@ An entry with no marker is open.
 - *Seen:* checking what an exported test repeats of a session that two commands drove at once.
 - *We:* a command acts on the page it names with `-p`, on the page it opens, from the moment the toolkit opens it (`page new`, or `newPage` through `strider mcp`), and on the popups given to it; a segment acts on every page. A popup goes to the command acting on its opener as it opened, or, when none is, to the last that acted on it. When two commands act on its opener at once, the session can't know which opened it, and the test has a placeholder for it.
 - *Reconsider:* the popup's opening event's initiator, where a backend reports the script or the input that opened it, which would single out the command even on one page.
+
+**Q254. A session flag after the command never reached the daemon** (Ours). `strider stop -s checkout`, as documented, reported no session and left the browser running, although `strider -s checkout stop` worked. The client's routing scan stopped at the command; the daemon's shared flags already accepted either order.
+- *Seen:* the CLI integration tests on Chromium 155.0.8059.79, with `STRIDER_SESSION` empty.
+- *We:* scan session flags before and after the command, preserving inline command values and stopping at `--`. Explicit flags override the environment default, and MCP uses the same scan.
+- **Resolved:** both stop forms pass, including assertions that the session disappears from the listing and its directory is removed.
+- *Reconsider:* keeping the client's lightweight routing scan aligned with the daemon's shared flags when those flags change.
+
+**Q255. A WebKit expectation failure can contain no observations in a full integration run** (Untraced). `WebKit slice > fails an expectation that never holds, with what it saw` failed at `test/integration/slice/slice.ts:173`: its failure history was `[]`, where the test expected one observation with `{ matches: 2, visible: 2 }`.
+- *Seen:* a merge's validation against pinned stock WebKit, through `pnpm test:integration`; 537 tests passed and two failed, the other having Q180's Chromium crash-notification symptom. No isolated reproduction or protocol trace was collected, so the cause and whether it depends on a full run are unknown.
+- *We:* retain the expectation test and implementation unchanged, with no retry or delay. Report the red suite for follow-up rather than treating the merge as fully validated.
+- *Reconsider:* trace the expectation's evaluation and deadline to establish why its failure held no observation before deciding what to change.
+
+**Q256. Independent CLI help calls exhausted one test's time budget on CI** (Ours). The nested-command description test started seven synchronous Node processes under one five-second test budget. Two GitHub checks at `33674aa` took 7399 ms and 7035 ms and timed out, while local runs passed. Another test combined several MCP help calls and reached 4822 ms on CI.
+- *Seen:* repeated CI failures and the opt-in subprocess timings in `dd0b80b`. Locally the seven calls totalled 2361 ms; separate phase tracing showed dependency loading and evaluation dominated each process, with only 6–8 ms from starting the CLI runner to its first output. CI phase timings were unavailable, so that phase breakdown is established only locally.
+- *We:* each independent invocation has its own named test; assertions about the same output stay together, including toolkit descriptions. The five-second test budget, ten-second subprocess limit, actual subprocess boundary and argument coverage stay intact.
+- *Reconsider:* if an individual invocation exceeds its budget, measure its phases on the failing runner before changing CLI loading or the timeout.

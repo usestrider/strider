@@ -8,16 +8,75 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Ledger } from "@usestrider/browser"
-import { BrowserToolkit } from "@usestrider/browser/ai"
+import { Declaration, Reason } from "@usestrider/browser"
+import * as McpSchema from "effect/ai/McpSchema"
+import * as Tool from "effect/ai/Tool"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Daemon from "../src/internal/cli/daemon.ts"
 import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as Mcp from "../src/internal/cli/mcp.ts"
 import * as Recorder from "../src/internal/cli/recorder.ts"
+import * as Session from "../src/internal/cli/session.ts"
+import * as Operation from "../src/internal/operation.ts"
+import * as Tools from "../src/internal/tools.ts"
+
+describe("Session.scan", () => {
+  it("reads the session before stop", () => {
+    assert.deepStrictEqual(Session.scan(["-s", "checkout", "stop"]), { session: "checkout", command: "stop" })
+  })
+
+  it("reads the session after stop", () => {
+    assert.deepStrictEqual(Session.scan(["stop", "-s", "checkout"]), { session: "checkout", command: "stop" })
+  })
+  it("reads long session flags on either side of the command", () => {
+    for (const flags of [["--session", "checkout"], ["--session=checkout"], ["-s=checkout"]]) {
+      for (const argv of [[...flags, "stop"], ["stop", ...flags]]) {
+        assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "stop" })
+      }
+    }
+  })
+
+  it("preserves inline command data and stops at the literal boundary", () => {
+    for (
+      const data of [
+        ["fill", "css=input", "text containing --session=other"],
+        ["expect", "css=p", "visible", "--text=--session=other"],
+        ["fill", "css=input", "--", "-s", "other"],
+        ["run", "file.ts", "--", "--session=other"]
+      ]
+    ) {
+      const argv = ["-s", "checkout", ...data]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: data[0] })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+    assert.deepStrictEqual(Session.scan(["--", "-s", "other"]), { session: undefined, command: undefined })
+    assert.deepStrictEqual(Session.scan(["stop", "--", "--session=other"]), { session: undefined, command: "stop" })
+    assert.deepStrictEqual(Session.scan(["-p", "stop", "pages", "--session=checkout"]), {
+      session: "checkout",
+      command: "pages"
+    })
+    assert.deepStrictEqual(Session.scan(["stop", "-p", "--", "-s", "other"]), {
+      session: undefined,
+      command: "stop"
+    })
+  })
+
+  it("removes only session options before the literal boundary", () => {
+    for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+      const data = ["--page=stop", "fill", "css=input", "--", "--session=other", "-s", "literal"]
+      const argv = [...data.slice(0, 2), ...flags, ...data.slice(2)]
+      assert.deepStrictEqual(Session.scan(argv), { session: "checkout", command: "fill" })
+      assert.deepStrictEqual(Session.withoutSession(argv), data)
+    }
+  })
+})
 
 describe("Ledger", () => {
   it.effect("records what a program owns while it owns it, and forgets it as the program ends", () =>
@@ -54,36 +113,189 @@ describe("Ledger", () => {
 })
 
 describe("strider mcp", () => {
-  it("serves a session it is named, or one it starts, which ends with it unless kept", () => {
-    assert.deepStrictEqual(Mcp.parse(["mcp", "-s", "shop"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["-s", "shop", "mcp"], 7, {}), { _tag: "Serve", session: "shop" })
-    assert.deepStrictEqual(Mcp.parse(["mcp"], 7, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
-    assert.strictEqual(Mcp.parse(["mcp"], 7, {})._tag, "Invalid")
-    assert.deepStrictEqual(Mcp.parse(["mcp", "--start", "--chromium", "/bin/chromium"], 7, {}), {
-      _tag: "Start",
-      session: "mcp-7",
-      start: ["start", "--name", "mcp-7", "--chromium", "/bin/chromium", "--owner-pid", "7"]
-    })
-    assert.deepStrictEqual(
-      Mcp.parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], 7, {}),
-      {
-        _tag: "Start",
-        session: "kept",
-        start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
-      }
-    )
+  it("tells a client which tools only read and which act on a page as a person would", () => {
+    const hints = (name: Tools.ToolName) => {
+      const annotations = Tools.toolkit.tools[name].annotations
+      return [Context.get(annotations, Tool.Readonly), Context.get(annotations, Tool.Destructive)]
+    }
+    for (const name of ["pages", "tabs", "snapshot", "find", "screenshot", "history", "expect"] as const) {
+      assert.deepStrictEqual(hints(name), [true, false], name)
+    }
+    for (const name of ["newPage", "next", "await", "route", "dialog", "control", "release", "scroll"] as const) {
+      assert.deepStrictEqual(hints(name), [false, false], name)
+    }
+    for (const name of ["goto", "back", "click", "fill", "press", "select"] as const) {
+      assert.deepStrictEqual(hints(name), [false, true], name)
+    }
   })
+
+  it("gives a client a screenshot as an image, with the digest as text", () => {
+    const structuredContent = { outcome: { mediaType: "image/png", data: "iVBORw0K" }, sinceLast: ["navigated"] }
+    const answered = new McpSchema.CallToolResult({
+      structuredContent,
+      content: [{ type: "text", text: JSON.stringify(structuredContent) }]
+    })
+    const shown = Mcp.asImage(answered)
+    assert.instanceOf(shown, McpSchema.CallToolResult)
+    const [image, text] = (shown as McpSchema.CallToolResult).content
+    assert.deepStrictEqual(image, {
+      type: "image",
+      mimeType: "image/png",
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
+    })
+    assert.deepStrictEqual(text, { type: "text", text: JSON.stringify({ sinceLast: ["navigated"] }) })
+    // The bytes cross once, as the image
+    assert.deepStrictEqual((shown as McpSchema.CallToolResult).structuredContent, {
+      outcome: { mediaType: "image/png" },
+      sinceLast: ["navigated"]
+    })
+    // A failure is as it was
+    const failed = new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text: "{}" }] })
+    assert.strictEqual(Mcp.asImage(failed), failed)
+  })
+
+  const parse = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) =>
+    Mcp.parse(argv, 7, env).pipe(Effect.provide(NodeServices.layer))
+
+  it.effect("uses explicit session flags before environment defaults, and takes nothing after --", () =>
+    Effect.gen(function*() {
+      for (const flag of [["-s", "shop"], ["--session", "shop"], ["--session=shop"]]) {
+        for (const argv of [[...flag, "mcp"], ["mcp", ...flag]]) {
+          assert.deepStrictEqual(yield* parse(argv, { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "shop" })
+        }
+        assert.deepStrictEqual(yield* parse(["mcp", ...flag, "--start"], {}), {
+          _tag: "Start",
+          session: "shop",
+          start: ["start", "--name", "shop", "--owner-pid", "7"]
+        })
+      }
+      // What follows -- is an operand, which mcp takes none of, never a session flag
+      const literal = yield* Effect.exit(parse(["mcp", "--", "--session=other"], { STRIDER_SESSION: "env" }))
+      assert.isTrue(literal._tag === "Failure")
+    }))
+
+  it.effect("serves a session it is named, or one it starts, which ends with it unless kept", () =>
+    Effect.gen(function*() {
+      assert.deepStrictEqual(yield* parse(["mcp", "-s", "shop"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["-s", "shop", "mcp"], {}), { _tag: "Serve", session: "shop" })
+      assert.deepStrictEqual(yield* parse(["mcp"], { STRIDER_SESSION: "env" }), { _tag: "Serve", session: "env" })
+      assert.strictEqual((yield* parse(["mcp"], {}))?._tag, "Invalid")
+      assert.deepStrictEqual(
+        yield* parse(["mcp", "--start", "--chromium", "/bin/chromium", "--viewport", "1440x1000"], {}),
+        {
+          _tag: "Start",
+          session: "mcp-7",
+          start: [
+            "start",
+            "--name",
+            "mcp-7",
+            "--chromium",
+            "/bin/chromium",
+            "--viewport",
+            "1440x1000",
+            "--owner-pid",
+            "7"
+          ]
+        }
+      )
+      assert.deepStrictEqual(
+        yield* parse(["mcp", "--start", "--keep", "--name", "kept", "--firefox", "/bin/firefox"], {}),
+        {
+          _tag: "Start",
+          session: "kept",
+          start: ["start", "--name", "kept", "--firefox", "/bin/firefox"]
+        }
+      )
+      assert.deepStrictEqual(
+        yield* parse(
+          [
+            "mcp",
+            "--start",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--capture",
+            "strict",
+            "--secret",
+            "pw=PW"
+          ],
+          {}
+        ),
+        {
+          _tag: "Start",
+          session: "mcp-7",
+          start: [
+            "start",
+            "--name",
+            "mcp-7",
+            "--chromium",
+            "/bin/chromium",
+            "--idle",
+            "5 minutes",
+            "--capture",
+            "strict",
+            "--secret",
+            "pw=PW",
+            "--owner-pid",
+            "7"
+          ]
+        }
+      )
+    }))
 })
 
 describe("strider export test", () => {
   const launched = { _tag: "Launch", backend: "chromium", executablePath: "/usr/bin/chromium" } as const
-  const tool = (name: string, params: Record<string, unknown>, result?: string): ExportTest.Step => ({
-    _tag: "Tool",
-    tool: name,
-    params,
-    target: undefined,
-    result
+  it("keeps startup sizing and replaces overrides across page renames", () => {
+    const { text, placeholders } = ExportTest.render({
+      name: "sized",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      viewport: { width: 1440, height: 1000 },
+      steps: [
+        { _tag: "NewPage", page: "main", url: undefined },
+        { _tag: "Viewport", page: "main", viewport: { width: 800, height: 600 } },
+        { _tag: "Rename", from: "main", to: "shop" },
+        { _tag: "Viewport", page: "shop", viewport: { width: 640, height: 480 } }
+      ]
+    })
+    assert.deepStrictEqual(placeholders, [])
+    assert.include(text, "emulation: { viewport: { width: 1440, height: 1000 } }")
+    assert.include(text, "const mainViewport = yield* main.emulate({ viewport: { width: 800, height: 600 } })")
+    assert.include(
+      text,
+      "const shopViewport = yield* shop.emulate({ viewport: { width: 640, height: 480 } })\n        yield* mainViewport.remove"
+    )
   })
+  it("exports the detected WebKit attachment layer", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "WebKit.layerAttach(\"http://localhost:9222/\")")
+    assert.include(text, "@usestrider/browser/webkit")
+    assert.include(text, "const context = yield* (yield* Browser.Browser).defaultContext.control")
+  })
+  // WebKit.layerAttach requires a WebSocketConstructor, which NodeServices.layer doesn't provide
+  it("exports a WebKit attachment that provides its WebSocket constructor", () => {
+    const { text } = ExportTest.render({
+      name: "remote",
+      browser: { _tag: "Attach", backend: "webkit", endpoint: "http://localhost:9222/" },
+      secrets: {},
+      state: undefined,
+      steps: []
+    })
+    assert.include(text, "NodeSocket.layerWebSocketConstructor")
+  })
+  const tool = <K extends Tools.ToolName>(name: K, params: Tools.Params<K>, result?: string): ExportTest.Step => {
+    const call: Tools.Call = Tools.call(name, params)
+    return { _tag: "Tool", ...call, target: undefined, result }
+  }
 
   it("marks a tab the session took with control, until its release, which a test takes itself", () => {
     const { placeholders, text } = ExportTest.render({
@@ -153,8 +365,14 @@ describe("strider export test", () => {
     const exported = (steps: ReadonlyArray<ExportTest.Step>) =>
       ExportTest.render({ name: "shop", browser: launched, secrets: {}, state: undefined, steps }).text
     const opened: ExportTest.Step = { _tag: "NewPage", page: "main", url: undefined }
-    for (const name of Object.keys(BrowserToolkit.toolkit.tools)) {
-      const step: ExportTest.Step = { _tag: "Tool", tool: name, params, target: `locator("#field")`, result: "w1" }
+    for (const name of Tools.ToolName.literals) {
+      // One set of parameters that every tool's statement finds what it needs in
+      const step: ExportTest.Step = {
+        _tag: "Tool",
+        ...Tools.call(name, params as Tools.Params<typeof name> & typeof params),
+        target: `locator("#field")`,
+        result: "w1"
+      }
       const text = exported([opened, step])
       if (reads.includes(name)) assert.strictEqual(text, exported([opened]), `${name} is a read`)
       else assert.notStrictEqual(text, exported([opened]), `${name} has no statement`)
@@ -220,11 +438,11 @@ describe("strider export test", () => {
     })
     assert.include(
       text,
-      `const r1 = yield* main.route("**/analytics/**", () => Effect.succeed(Route.abort()))\n`
+      `const r1 = yield* main.route("**/analytics/**", () => Route.abort())\n`
     )
     assert.include(text, `const r2 = yield* Dialog.handle(main, Dialog.dismissAll)\n`)
     // One the session kept on ends with the test's scope, so it needs no name
-    assert.include(text, `        yield* main.route("**/ads/**", () => Effect.succeed(Route.abort()))\n`)
+    assert.include(text, `        yield* main.route("**/ads/**", () => Route.abort())\n`)
     assert.include(text, `        yield* r1.remove\n        yield* r2.remove\n`)
   })
 
@@ -670,4 +888,45 @@ describe("strider export test's recorder", () => {
     recorder.popup({ id: "D", name: "p3", opener: "A", openerName: "shop" })
     assert.deepStrictEqual(recorder.steps, [{ _tag: "Segment", file: "pay.ts", pages: ["p1", "p2", "p3"] }])
   })
+})
+
+describe("CLI viewport overrides", () => {
+  it.effect("releases replaced scopes and preserves the last override on capability failure", () =>
+    Effect.gen(function*() {
+      const active = new Set<number>()
+      const unsupported = new Declaration.DeclarationError({
+        declaration: "Page.emulate",
+        diagnostics: Operation.diagnostics(Operation.idNow()),
+        reason: new Reason.Unsupported({ capability: "emulation.viewport", backend: "test", hint: "unavailable" })
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const owner = { scope: yield* Effect.scope, viewports: new Map<string, Scope.Closeable>() }
+        const page = {
+          id: "page",
+          emulate: Effect.fnUntraced(
+            function*(settings: { readonly viewport?: { readonly width: number } | undefined }) {
+              const width = settings.viewport!.width
+              if (width === 999) return yield* Effect.fail(unsupported)
+              active.add(width)
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  active.delete(width)
+                })
+              )
+              return { remove: Effect.void }
+            }
+          )
+        }
+        yield* Daemon.setViewport(owner, page, { width: 800, height: 600 })
+        for (const width of [900, 1000, 1100]) {
+          yield* Daemon.setViewport(owner, page, { width, height: 600 })
+          assert.deepStrictEqual([...active], [width])
+          assert.strictEqual(owner.viewports.size, 1)
+        }
+        const failed = yield* Daemon.setViewport(owner, page, { width: 999, height: 600 }).pipe(Effect.flip)
+        assert.strictEqual(failed, unsupported)
+        assert.deepStrictEqual([...active], [1100])
+      }))
+      assert.strictEqual(active.size, 0)
+    }))
 })

@@ -13,8 +13,11 @@
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
  * `PromptBlocking` when the page has one nothing will decide.
  */
+import * as Cache from "effect/Cache"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as FileSystem from "effect/FileSystem"
 import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
@@ -34,6 +37,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import type * as Clock from "./clock.ts"
 import * as Engine from "./engine.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -42,7 +46,7 @@ import * as Operation from "./operation.ts"
 export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
 
 /** Whether the backend makes no worlds, as stock WebKit's inspector doesn't (QUIRKS.md, Q194). */
-const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
+const makesNoWorlds = (runtime: { readonly model: Model.Model }): Effect.Effect<boolean> =>
   Effect.map(
     SubscriptionRef.get(runtime.model.adapter.capabilities),
     (capabilities) =>
@@ -50,7 +54,7 @@ const makesNoWorlds = (runtime: Runtime): Effect.Effect<boolean> =>
   )
 
 /** The world the engine runs in: its own, or the page's where the backend makes no worlds. */
-export const engineWorld = (runtime: Runtime): Effect.Effect<Adapter.World> =>
+export const engineWorld = (runtime: { readonly model: Model.Model }): Effect.Effect<Adapter.World> =>
   Effect.map(makesNoWorlds(runtime), (none): Adapter.World => none ? { _tag: "Main" } : utilityWorld)
 
 /**
@@ -84,6 +88,10 @@ export interface Runtime {
   readonly fileSystem: Option.Option<FileSystem.FileSystem>
   /** Effect's `Path`, which a relative local file path is resolved with. */
   readonly path: Option.Option<Path.Path>
+  /** Where the engine is installed, per document (`makeEngineRealms`). */
+  readonly engineRealms: EngineRealms
+  /** The page clocks installed, by the page or context that owns each. */
+  readonly timelines: Clock.Timelines
   /**
    * A navigation's outcome as `goto` reports it (`navigation.ts`), for `PageNavigation`, which can't import `Page`
    * without a load cycle.
@@ -93,7 +101,7 @@ export interface Runtime {
     navigation: PageNavigation.Id,
     frame: Target.NavigableId,
     url: Option.Option<Url.Url>,
-    at: string,
+    at: Url.Url,
     outcome: Adapter.NavigationOutcome,
     id: Diagnostics.OperationId
   ) => Effect.Effect<PageNavigation.PageNavigation, Page.PageError>
@@ -127,8 +135,10 @@ export const promptBlocking = (prompt: Model.UndecidedPrompt, dispatched: boolea
  * ends the operation at once rather than at its deadline.
  */
 export const promptBlocked = (page: Model.PageEntry, dispatched = false) =>
-  SubscriptionRef.changes(page.state).pipe(
-    Stream.filterMap(Filter.fromPredicateOption((state) => state._tag === "Open" ? state.undecided : Option.none())),
+  page.state.changes.pipe(
+    Stream.filterMap(
+      Filter.fromPredicateOption(({ status }) => status._tag === "Open" ? status.undecided : Option.none())
+    ),
     Stream.runHead,
     Effect.flatMap(Option.match({
       onNone: () => Effect.never,
@@ -143,12 +153,13 @@ const gone = (target: Target.Description, reason: Target.CloseReason, id: Diagno
 
 /** A page's open state, waiting while it is still opening; a closed page is gone. */
 export const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
-  SubscriptionRef.changes(page.state).pipe(
-    Stream.filter((state) => state._tag !== "Opening"),
+  page.state.changes.pipe(
+    Stream.map((state) => state.status),
+    Stream.filter((status) => status._tag !== "Opening"),
     Stream.runHead,
-    Effect.flatMap((state): Effect.Effect<Extract<Model.PageState, { _tag: "Open" }>, SendFailure> => {
+    Effect.flatMap((state): Effect.Effect<Extract<Model.PageStatus, { _tag: "Open" }>, SendFailure> => {
       if (Option.isNone(state)) {
-        return Effect.fail(gone({ _tag: "Page", id: page.id }, { _tag: "PageClosed", by: "browser" }, id))
+        return Effect.fail(gone({ _tag: "Page", id: page.id }, new Target.Vanished({}), id))
       }
       const value = state.value
       return value._tag === "Open"
@@ -156,7 +167,7 @@ export const openState = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
         : Effect.fail(
           gone(
             { _tag: "Page", id: page.id },
-            value._tag === "Closed" ? value.reason : { _tag: "PageClosed", by: "browser" },
+            value._tag === "Closed" ? value.reason : new Target.Vanished({}),
             id
           )
         )
@@ -179,18 +190,46 @@ const call = (
     userActivation: false
   })
 
-/** The realm of a document's utility world, with the engine installed. */
-const engineRealm = Effect.fnUntraced(function*(runtime: Runtime, document: Target.DocumentId) {
-  const known = runtime.model.engineRealms.get(document)
-  if (known !== undefined) return known
-  const realm = yield* runtime.model.adapter.realm(document, yield* engineWorld(runtime))
-  const installed = yield* call(runtime, realm, Engine.install, [])
-  if (installed._tag === "Exception") {
-    return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))
-  }
-  runtime.model.engineRealms.set(document, realm)
-  return realm
-})
+/** The most documents whose engine's realm is remembered at once; a document forgotten installs it again, once. */
+const maxEngineRealms = 1000
+
+/** The realm of each document's engine world, the engine installed in it once, however many ask at once. */
+export type EngineRealms = Cache.Cache<Target.DocumentId, Target.RealmId, Adapter.AdapterError | Deadline.Timeout>
+
+/**
+ * The runtime's memo of where the engine is installed, a `Cache`, so concurrent requests to one document share one
+ * install. The install runs apart from the operation that asked first, so another's deadline isn't the first's,
+ * and each caller waits for it until its own (`engineRealm`). A failed install isn't kept: the next request tries
+ * again. An entry that goes stale, its realm gone or its engine missing, is invalidated by the request that finds
+ * it so, which installs again.
+ */
+export const makeEngineRealms = (model: Model.Model): Effect.Effect<EngineRealms> =>
+  Cache.makeWith(
+    Effect.fnUntraced(function*(document: Target.DocumentId) {
+      const realm = yield* model.adapter.realm(document, yield* engineWorld({ model }))
+      const installed = yield* model.adapter.evaluate(realm, {
+        functionDeclaration: Engine.install,
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      })
+      if (installed._tag === "Exception") {
+        return yield* Effect.die(new Error(`The engine didn't install: ${installed.text}`))
+      }
+      return realm
+    }, Operation.detached),
+    { capacity: maxEngineRealms, timeToLive: (exit) => Exit.isSuccess(exit) ? Duration.infinity : Duration.zero }
+  )
+
+/** The realm of a document's engine, with the engine installed, waited for until the operation's deadline. */
+const engineRealm = (runtime: Runtime, document: Target.DocumentId) =>
+  Effect.flatMap(Operation.current, (record) => {
+    const installed = Cache.get(runtime.engineRealms, document)
+    return Option.isNone(record)
+      ? installed
+      : record.value.bound(installed, () => Option.some("The engine wasn't installed in the page before the deadline"))
+  })
 
 /** One iframe on the way to a frame's document. */
 export interface Hop {
@@ -287,8 +326,7 @@ const callEngine = (
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
-        runtime.model.engineRealms.delete(document)
-        return Effect.succeed(Option.none<Adapter.RemoteResult>())
+        return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none<Adapter.RemoteResult>())
       }
       return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
@@ -298,11 +336,28 @@ const callEngine = (
         if (result._tag === "Exception") return Effect.die(new Error(`The engine threw: ${result.text}`))
         if (result.value.type === "string" && result.value.value === Engine.missing) {
           // A realm that lost its engine, as a reused realm can: install again
-          runtime.model.engineRealms.delete(document)
-          return Effect.succeedNone
+          return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
         }
         return Effect.succeed(Option.some(result.value))
       }
+    }))
+  )
+
+/**
+ * The engine's answer, decoded. One that isn't an answer the engine gives fails as `IncompatibleResponse`: where
+ * the engine shares the page's world (stock WebKit), a page's script can call back in its place.
+ */
+const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
+  Engine.decodeResponse(text).pipe(
+    Effect.mapError((error): SendFailure => ({
+      _tag: "Reason",
+      reason: new Reason.BackendFailure({
+        kind: "IncompatibleResponse",
+        method: "engine",
+        hint:
+          `The query engine's answer isn't one it gives, so a page script may have answered in its place: ${error.message}`,
+        cause: error
+      })
     }))
   )
 
@@ -315,14 +370,19 @@ const elementIn = (
   runtime: Runtime,
   document: Target.DocumentId,
   steps: ReadonlyArray<Engine.Step>,
-  frame: { readonly scroll: boolean } | null,
+  frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
   callEngine(
     runtime,
     document,
     Engine.element,
-    JSON.stringify({ steps, frame: frame !== null, scroll: frame?.scroll ?? false }),
+    JSON.stringify({
+      steps,
+      frame: frame !== null,
+      scroll: frame?.scroll ?? false,
+      ...(frame?.validationSteps === undefined ? {} : { validationSteps: frame.validationSteps })
+    }),
     id
   ).pipe(
     Effect.flatMap(Option.match({
@@ -332,8 +392,9 @@ const elementIn = (
           return Effect.succeed(Option.some<Element>({ _tag: "Found", node: value.node }))
         }
         if (value.type === "string") {
-          return Effect.succeed(
-            Option.some<Element>({ _tag: "Response", response: JSON.parse(value.value) as Engine.Response })
+          return Effect.map(
+            decode(value.value),
+            (response) => Option.some<Element>({ _tag: "Response", response })
           )
         }
         return Effect.die(new Error("The engine's element came back without a node binding"))
@@ -354,7 +415,8 @@ const route = (
   top: Target.DocumentId,
   frames: ReadonlyArray<ReadonlyArray<Engine.Step>>,
   scroll: boolean,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  validationSteps: ReadonlyArray<Engine.Step>
 ): Effect.Effect<Option.Option<Route>, SendFailure> =>
   Effect.gen(function*() {
     let document = top
@@ -364,7 +426,10 @@ const route = (
       if (Option.isSome(stale)) {
         return Option.some<Route>({ _tag: "Answer", routed: { document, hops }, response: stale.value })
       }
-      const found = yield* elementIn(runtime, document, steps, { scroll }, id)
+      const found = yield* elementIn(runtime, document, steps, {
+        scroll,
+        ...(hops.length === 0 ? { validationSteps } : {})
+      }, id)
       if (Option.isNone(found)) {
         return Option.none()
       }
@@ -422,7 +487,7 @@ const routing = <A>(
           onSome: Effect.succeed
         }))
       )
-      const routed = yield* route(runtime, open.document.id, frames, scroll, id)
+      const routed = yield* route(runtime, open.document.id, frames, scroll, id, steps)
       if (Option.isNone(routed)) continue
       const answered = yield* answer(routed.value, last)
       if (Option.isSome(answered)) return answered.value
@@ -448,27 +513,84 @@ export const sendRouted = (
 ): Effect.Effect<Answer, SendFailure> =>
   Effect.raceFirst(
     // An action's frames are scrolled into view on its way, so they render (QUIRKS.md, Q110)
-    routing(runtime, page, stepsOf(request), request.op === "act", id, at, (route, last) => {
-      if (route._tag === "Answer") return Effect.succeedSome({ response: route.response, routed: route.routed })
-      const routed = route.routed
-      const stale = replaced(routed.document, last)
-      if (route._tag === "Entered" && Option.isSome(stale)) return Effect.succeedSome({ response: stale.value, routed })
-      return callEngine(
-        runtime,
-        routed.document,
-        Engine.run,
-        JSON.stringify(retarget(request, last, route._tag === "Missing")),
-        id
-      ).pipe(
-        Effect.flatMap(Option.match({
-          onNone: () => Effect.succeedNone,
-          onSome: (value) =>
-            value.type === "string"
-              ? Effect.succeedSome({ response: JSON.parse(value.value) as Engine.Response, routed })
-              : Effect.die(new Error("The engine answered with something other than text"))
-        }))
-      )
-    }),
+    routing(
+      runtime,
+      page,
+      stepsOf(request),
+      request.op === "act",
+      id,
+      at,
+      Effect.fnUntraced(function*(route: Route, last: ReadonlyArray<Engine.Step>) {
+        if (route._tag === "Answer") return Option.some({ response: route.response, routed: route.routed })
+        const routed = route.routed
+        const stale = replaced(routed.document, last)
+        if (route._tag === "Entered" && Option.isSome(stale)) return Option.some({ response: stale.value, routed })
+        let clip: Engine.Clip | undefined
+        if (
+          route._tag === "Entered" && request.op === "act" &&
+          ((request.action._tag === "Point" && request.action.position === null) || request.checks.receivesPointer)
+        ) {
+          // Read each ancestor in its own document: this also works across origin and process boundaries.
+          for (const hop of routed.hops) {
+            const answer = yield* sendToDocument(runtime, page, hop.document, {
+              op: "frame",
+              steps: hop.steps,
+              scroll: request.checks.inViewport,
+              point: null,
+              ...(clip === undefined ? {} : { clip })
+            }, id)
+            if (Option.isNone(answer)) return Option.none()
+            if (answer.value._tag === "NoMatch") {
+              return Option.some({
+                routed,
+                response: {
+                  _tag: "NotReady" as const,
+                  reason: { _tag: "NoMatch" as const },
+                  history: [{ _tag: "NoMatch" as const }],
+                  scrolled: false,
+                  checked: true
+                }
+              })
+            }
+            if (answer.value._tag !== "Frame") return Option.some({ response: answer.value, routed })
+            if (answer.value.scrolled) {
+              return Option.some({
+                routed,
+                response: {
+                  _tag: "NotReady" as const,
+                  reason: { _tag: "OutsideViewport" as const },
+                  history: [{ _tag: "OutsideViewport" as const }],
+                  scrolled: true,
+                  checked: true
+                }
+              })
+            }
+            clip = answer.value.viewport
+          }
+        }
+        return yield* callEngine(
+          runtime,
+          routed.document,
+          Engine.run,
+          JSON.stringify(
+            retarget(
+              request.op === "act" && clip !== undefined ? { ...request, clip } : request,
+              last,
+              route._tag === "Missing"
+            )
+          ),
+          id
+        ).pipe(
+          Effect.flatMap(Option.match({
+            onNone: () => Effect.succeedNone,
+            onSome: (value) =>
+              value.type === "string"
+                ? Effect.map(decode(value.value), (response) => Option.some({ response, routed }))
+                : Effect.die(new Error("The engine answered with something other than text"))
+          }))
+        )
+      })
+    ),
     promptBlocked(page)
   )
 
@@ -495,17 +617,34 @@ export const sendToDocument = (
 ): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
   Effect.raceFirst(
     Effect.suspend(() =>
-      runtime.model.documents.has(document)
+      Option.isSome(runtime.model.document(document))
         ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
-          Effect.map(
-            Option.flatMap((value) =>
-              value.type === "string" ? Option.some(JSON.parse(value.value) as Engine.Response) : Option.none()
-            )
+          Effect.flatMap((value) =>
+            Option.isSome(value) && value.value.type === "string"
+              ? Effect.asSome(decode(value.value.value))
+              : Effect.succeedNone
           )
         )
         : Effect.succeedNone
     ),
     promptBlocked(page)
+  )
+
+/**
+ * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
+ * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
+ * caller's uninterruptible finalizer. A gone document needs no release.
+ */
+export const releaseInDocument = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "disarm" }>,
+  id: Diagnostics.OperationId
+): Effect.Effect<void, SendFailure> =>
+  Effect.suspend(() =>
+    Option.isSome(runtime.model.document(document))
+      ? Effect.asVoid(callEngine(runtime, document, Engine.run, JSON.stringify(request), id))
+      : Effect.void
   )
 
 /** The one match, by its node binding and where it is, or the engine's answer for why there is none. */
@@ -544,12 +683,10 @@ export const element = (
   )
 
 /** Waits for a page to end, as a failure: raced against an operation, it ends the operation with `TargetGone`. */
-export const pageEnded = (page: Model.PageEntry, id: Diagnostics.OperationId) =>
-  Effect.flatMap(Deferred.await(page.closed), (reason) =>
-    Effect.fail(
-      new Target.TargetGone({
-        target: { _tag: "Page", id: page.id },
-        reason,
-        diagnostics: Operation.diagnostics(id)
-      })
-    ))
+export const pageEnded = (page: Model.PageEntry) =>
+  Effect.flatMap(
+    Deferred.await(page.closed),
+    (reason) =>
+      Effect.flatMap(Operation.currentDiagnostics, (diagnostics) =>
+        Effect.fail(new Target.TargetGone({ target: { _tag: "Page", id: page.id }, reason, diagnostics })))
+  )

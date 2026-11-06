@@ -17,10 +17,13 @@
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
  *   HTML-AAM, and computes the accessible name under accname 1.2.
- * - **Actions** check at each animation frame, in the page, until the checks pass or the round's cap runs out
- *   (CONCEPTS.md §8): visible, enabled, notInert, inViewport (scrolling into view once), stable across
- *   `frames` frames, and receivesPointer at the action point.
+ * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
+ *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
+ *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
+ *   the action point. Actions without a stability check still await a rendering update.
  */
+
+import * as Schema from "effect/Schema"
 
 /** How a query matches text. */
 export type TextMatcher =
@@ -34,6 +37,12 @@ export type Step =
     readonly role: string
     readonly name: TextMatcher | null
     readonly includeHidden: boolean
+    readonly level?: number | undefined
+    readonly checked?: boolean | undefined
+    readonly pressed?: boolean | undefined
+    readonly expanded?: boolean | undefined
+    readonly selected?: boolean | undefined
+    readonly disabled?: boolean | undefined
   }
   | { readonly _tag: "Text"; readonly matcher: TextMatcher }
   | { readonly _tag: "Label"; readonly matcher: TextMatcher }
@@ -57,7 +66,7 @@ export type Step =
   | { readonly _tag: "Or"; readonly other: ReadonlyArray<Step> }
   /**
    * A frame boundary: the steps before it find an iframe, and those after it resolve in
-   * the iframe's document. L1 splits a locator's steps at each one, so the engine never sees it.
+   * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
   /**
@@ -78,21 +87,25 @@ export interface Checks {
   readonly receivesPointer: boolean
 }
 
-/** Why an element isn't ready, as CONCEPTS.md §8 names it. */
-export type NotReady =
-  | { readonly _tag: "NoMatch" }
-  | { readonly _tag: "NotVisible" }
-  | { readonly _tag: "Disabled" }
-  | { readonly _tag: "ReadOnly" }
-  | { readonly _tag: "Inert" }
-  | { readonly _tag: "BlockedByModal"; readonly dialog: string }
-  | { readonly _tag: "OutsideViewport" }
-  | { readonly _tag: "NotStable" }
-  | { readonly _tag: "NoRenderingOpportunity" }
-  | { readonly _tag: "Covered"; readonly by: string }
+/** Why a target or its action preparation isn't ready. */
+export const NotReady = Schema.Union([
+  Schema.TaggedStruct("NoMatch", {}),
+  Schema.TaggedStruct("NotVisible", {}),
+  Schema.TaggedStruct("Disabled", {}),
+  Schema.TaggedStruct("ReadOnly", {}),
+  Schema.TaggedStruct("Inert", {}),
+  Schema.TaggedStruct("BlockedByModal", { dialog: Schema.String }),
+  Schema.TaggedStruct("OutsideViewport", {}),
+  Schema.TaggedStruct("NotStable", {}),
+  Schema.TaggedStruct("NoRenderingOpportunity", {}),
+  Schema.TaggedStruct("Covered", { by: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
-  | { readonly _tag: "Intercepted"; readonly by: string }
-  | { readonly _tag: "NoSuchOption"; readonly option: string }
+  Schema.TaggedStruct("Intercepted", { by: Schema.String }),
+  Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A different text control held focus before preparing the target for insertion. */
+  Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
+])
+export type NotReady = typeof NotReady.Type
 
 /** An option of a `<select>`, by value, label or index. */
 export type Choice =
@@ -125,7 +138,7 @@ export type Read =
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked" }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
@@ -158,7 +171,8 @@ export type PatternChildren =
   | { readonly _tag: "Unchecked" }
 
 /** Why a ref no longer points at its node (`Locator.StaleRef`). */
-export type Stale = "Replaced" | "Detached" | "Suspended" | "BindingLost" | "OtherSnapshot"
+export const Stale = Schema.Literals(["Replaced", "Detached", "Suspended", "BindingLost", "OtherSnapshot"])
+export type Stale = typeof Stale.Type
 
 /** A node of a document's accessibility tree. */
 export interface SnapNode {
@@ -171,29 +185,79 @@ export interface SnapNode {
       readonly evidence: ReadonlyArray<string>
     }
   readonly name:
-    | { readonly _tag: "Accessible"; readonly value: string }
-    | { readonly _tag: "Inferred"; readonly value: string; readonly from: string }
+    | {
+      readonly _tag: "Accessible"
+      readonly value: string
+      readonly from?: "text" | undefined
+      readonly fieldContent?: boolean | undefined
+    }
+    | {
+      readonly _tag: "Inferred"
+      readonly value: string
+      readonly from: string
+      readonly fieldContent?: boolean | undefined
+    }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  readonly editable?: boolean | undefined
+  readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
   /** An iframe, whose frame's tree L1 stitches in. */
   readonly frame: boolean
 }
 
+export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
+  ref: Schema.NullOr(Schema.String),
+  role: Schema.Union([
+    Schema.TaggedStruct("Aria", { role: Schema.String }),
+    Schema.TaggedStruct("Inferred", {
+      role: Schema.Literals(["clickable", "editable", "focusable"]),
+      evidence: Schema.Array(Schema.String)
+    })
+  ]),
+  name: Schema.Union([
+    Schema.TaggedStruct("Accessible", {
+      value: Schema.String,
+      from: Schema.optional(Schema.Literal("text")),
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
+    Schema.TaggedStruct("Inferred", {
+      value: Schema.String,
+      from: Schema.String,
+      fieldContent: Schema.optional(Schema.Boolean)
+    }),
+    Schema.TaggedStruct("None", {})
+  ]),
+  states: Schema.Array(Schema.String),
+  editable: Schema.optional(Schema.Boolean),
+  validationMessage: Schema.NullOr(Schema.String),
+  children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
+  frame: Schema.Boolean
+})
+
 /** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
-export type Final =
-  | { readonly _tag: "WrongElement"; readonly expected: string; readonly element: string }
-  | { readonly _tag: "NotEditable"; readonly element: string }
-  | { readonly _tag: "Refused"; readonly element: string; readonly value: string }
+export const Final = Schema.Union([
+  Schema.TaggedStruct("WrongElement", { expected: Schema.String, element: Schema.String }),
+  Schema.TaggedStruct("NotEditable", { element: Schema.String }),
+  Schema.TaggedStruct("Refused", { element: Schema.String, value: Schema.String })
+])
+export type Final = typeof Final.Type
+
+const Clip = Schema.Struct({ left: Schema.Number, top: Schema.Number, right: Schema.Number, bottom: Schema.Number })
+export type Clip = typeof Clip.Type
 
 /** A request to the engine. */
 export type Request =
+  | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
+  | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
     readonly steps: ReadonlyArray<Step>
     readonly checks: Checks
+    /** Visible bounds inherited from parent frames, in this document’s viewport coordinates. */
+    readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
     readonly action: Action
@@ -202,6 +266,8 @@ export type Request =
      * round only checks, and answers the point and what it read.
      */
     readonly apply: boolean
+    /** Capture stability for immediate revalidation, or consume the returned token. Expires at the next frame. */
+    readonly stability?: string
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
@@ -224,6 +290,7 @@ export type Request =
     readonly op: "frame"
     readonly steps: ReadonlyArray<Step>
     readonly scroll: boolean
+    readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
   }
   /**
@@ -234,6 +301,7 @@ export type Request =
     readonly op: "snapshot"
     readonly steps: ReadonlyArray<Step> | null
     readonly interactivity: boolean
+    readonly provenance?: boolean | undefined
     readonly depth: number | null
   }
   /** Why a locator matches nothing: the nearest match of its steps, and close names. */
@@ -244,88 +312,100 @@ export type Request =
   | { readonly op: "html" }
 
 /** A candidate of an ambiguous match. */
-export interface Candidate {
-  readonly description: string
-  readonly visible: boolean
-}
+export const Candidate = Schema.Struct({ description: Schema.String, visible: Schema.Boolean })
+export type Candidate = typeof Candidate.Type
 
-/** What the engine answers. */
-export type Response =
-  | { readonly _tag: "Count"; readonly count: number }
-  | { readonly _tag: "Visible"; readonly count: number; readonly visible: boolean }
-  | {
-    readonly _tag: "Ready"
-    readonly element: string
-    readonly scrolled: boolean
+const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number })
+
+/**
+ * What the engine answers, decoded from the JSON it returns: where the engine shares the page's world, as on stock
+ * WebKit, a page's script can answer in its place, so nothing it says is taken on trust.
+ */
+export const Response = Schema.Union([
+  Schema.TaggedStruct("Validation", { lines: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("Count", { count: Schema.Number }),
+  Schema.TaggedStruct("Visible", { count: Schema.Number, visible: Schema.Boolean }),
+  Schema.TaggedStruct("Ready", {
+    element: Schema.String,
+    scrolled: Schema.Boolean,
+    /** Stability evidence for an immediate check of the same element and rectangle. */
+    stability: Schema.optionalKey(Schema.String),
+    /** Locally reachable default candidates for parent hit tests. */
+    candidates: Schema.optionalKey(Schema.Array(Point)),
     /** The action point, for `Point`. */
-    readonly point: { readonly x: number; readonly y: number } | null
+    point: Schema.NullOr(Point),
     /** Whether an HTML drag would start from it: it or an ancestor is `draggable`. */
-    readonly draggable: boolean
+    draggable: Schema.Boolean,
     /** For `Checked`: whether it is checked. */
-    readonly checked: boolean | null
+    checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    readonly fill: "type" | "set" | null
-  }
-  | {
-    readonly _tag: "NotReady"
-    readonly reason: NotReady
+    fill: Schema.NullOr(Schema.Literals(["type", "set"]))
+  }),
+  Schema.TaggedStruct("NotReady", {
+    reason: NotReady,
     /** Each reason seen this round, de-duplicated in order. */
-    readonly history: ReadonlyArray<NotReady>
-    readonly scrolled: boolean
+    history: Schema.Array(NotReady),
+    scrolled: Schema.Boolean,
     /**
      * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
      * was still settling, saw nothing wrong, `reason` included.
      */
-    readonly checked: boolean
-  }
-  | { readonly _tag: "Final"; readonly final: Final }
-  | { readonly _tag: "Guarded"; readonly blocked: string | null }
-  | { readonly _tag: "Read"; readonly value: string | boolean | null }
-  | { readonly _tag: "NoMatch" }
-  | {
-    readonly _tag: "Expected"
-    readonly passed: boolean
+    checked: Schema.Boolean
+  }),
+  Schema.TaggedStruct("Final", { final: Final }),
+  Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
+  Schema.TaggedStruct("NoMatch", {}),
+  Schema.TaggedStruct("Expected", {
+    passed: Schema.Boolean,
     /** What the last check saw, for the expectation's history. */
-    readonly observed: unknown
+    observed: Schema.Unknown,
     /** Whether it re-checked in the page after a change. */
-    readonly changed: boolean
-  }
-  | { readonly _tag: "Strict"; readonly candidates: ReadonlyArray<Candidate>; readonly count: number }
-  | { readonly _tag: "InvalidSelector"; readonly selector: string; readonly message: string }
-  | { readonly _tag: "Title"; readonly title: string }
-  | {
-    readonly _tag: "Roles"
-    readonly roles: ReadonlyArray<{ readonly role: string | null; readonly name: string }>
-  }
-  | {
-    readonly _tag: "Frame"
+    changed: Schema.Boolean
+  }),
+  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("InvalidSelector", {
+    selector: Schema.String,
+    message: Schema.String,
+    kind: Schema.optionalKey(Schema.Literal("role"))
+  }),
+  Schema.TaggedStruct("Title", { title: Schema.String }),
+  Schema.TaggedStruct("Roles", {
+    roles: Schema.Array(Schema.Struct({ role: Schema.NullOr(Schema.String), name: Schema.String }))
+  }),
+  Schema.TaggedStruct("Frame", {
     /** The iframe's content box, in this document's viewport. */
-    readonly origin: { readonly x: number; readonly y: number }
+    origin: Point,
+    /** Visible content bounds, in the child viewport’s coordinates. */
+    viewport: Clip,
     /** Whether it was scrolled into view. */
-    readonly scrolled: boolean
+    scrolled: Schema.Boolean,
     /** What covers the iframe at the point given, or `null` when the iframe itself is hit there. */
-    readonly covered: string | null
+    covered: Schema.NullOr(Schema.String),
     /** This document's scroll offset. */
-    readonly scroll: { readonly x: number; readonly y: number }
-  }
-  | { readonly _tag: "Snapshot"; readonly root: SnapNode; readonly generation: number }
-  | {
-    readonly _tag: "Explained"
+    scroll: Point
+  }),
+  Schema.TaggedStruct("Snapshot", { root: SnapNode, generation: Schema.Number }),
+  Schema.TaggedStruct("Explained", {
     /** Whether the steps match something now, so there is nothing to explain. */
-    readonly matched: boolean
+    matched: Schema.Boolean,
     /** The text of the longest matching prefix's first match, two levels deep. */
-    readonly nearest: string | null
+    nearest: Schema.NullOr(Schema.String),
     /** Elements under it whose role is the last step's and whose name is close to its name. */
-    readonly suggestions: ReadonlyArray<{ readonly role: string; readonly name: string }>
+    suggestions: Schema.Array(Schema.Struct({ role: Schema.String, name: Schema.String })),
     /** How many of the steps matched. */
-    readonly prefix: number
-  }
-  | {
-    readonly _tag: "Rect"
-    readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
-    readonly scroll: { readonly x: number; readonly y: number }
-  }
-  | { readonly _tag: "StaleRef"; readonly why: Stale }
+    prefix: Schema.Number
+  }),
+  Schema.TaggedStruct("Rect", {
+    rect: Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number }),
+    scroll: Point
+  }),
+  Schema.TaggedStruct("StaleRef", { why: Stale })
+])
+export type Response = typeof Response.Type
+
+/** Decodes the engine's answer: the JSON text it returns. */
+export const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(Response))
 
 /**
  * A snapshot tree as text: indented YAML, one line per node. Self-contained, so the engine
@@ -341,6 +421,7 @@ export function renderText(root: SnapNode): string {
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
     for (const state of node.states) out += ` [${state}]`
+    if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
     if (node.role._tag === "Inferred") out += ` [inferred: ${node.role.evidence.join(", ")}]`
     if (node.name._tag === "Inferred") out += ` [name from: ${node.name.from}]`
@@ -779,17 +860,19 @@ export function engine(render: (root: SnapNode) => string) {
     return !element.checkVisibility({ visibilityProperty: true })
   }
 
-  /** CONCEPTS.md §8, Visible. */
-  const visible = (element: Element): boolean => {
+  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some(visible)
+      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
     }
-    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) {
+    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
     }
     const rect = element.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0
   }
+
+  const visible = (element: Element): boolean => rendered(element, true)
 
   // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
 
@@ -800,6 +883,7 @@ export function engine(render: (root: SnapNode) => string) {
     /** Computing another element's name, not the root's. */
     readonly traversal: boolean
     readonly includeHidden: boolean
+    readonly contribution: { fieldContent: boolean }
   }
 
   const byId = (element: Element, id: string): Element | null => {
@@ -812,6 +896,7 @@ export function engine(render: (root: SnapNode) => string) {
     role === "slider" || role === "spinbutton"
 
   const embeddedValue = (element: Element, role: string | null): string => {
+    if (element instanceof HTMLInputElement && element.type === "password") return ""
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       if (role === "slider" || role === "spinbutton") {
         return element.getAttribute("aria-valuetext") ?? element.getAttribute("aria-valuenow") ?? element.value
@@ -836,12 +921,26 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? ""
+    if (node.nodeType === Node.TEXT_NODE) {
+      const value = node.nodeValue ?? ""
+      if (value !== "" && inField(node)) context.contribution.fieldContent = true
+      return value
+    }
     if (!(node instanceof Element)) return ""
     return nameOfElement(node, context)
   }
 
+  // Propagate only the chosen, nonempty name. Failed naming alternatives must not taint a public label.
   const nameOfElement = (element: Element, context: NameContext): string => {
+    if (!provenance) return nameOfElementValue(element, context)
+    const previous = context.contribution.fieldContent
+    context.contribution.fieldContent = false
+    const value = nameOfElementValue(element, context)
+    context.contribution.fieldContent = previous || (context.contribution.fieldContent && value.trim() !== "")
+    return value
+  }
+
+  const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     context.visited.add(element)
     // 2A: hidden, unless referenced or asked for
@@ -860,7 +959,11 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     // 2E: an embedded control inside another element's name contributes its value
-    if (context.traversal && embeddedControlRole(role)) return embeddedValue(element, role)
+    if (context.traversal && embeddedControlRole(role)) {
+      const value = embeddedValue(element, role)
+      if (value.trim() !== "") context.contribution.fieldContent = true
+      return value
+    }
     // 2C: aria-label
     const label = element.getAttribute("aria-label") ?? ""
     if (label.trim() !== "") return label
@@ -879,7 +982,11 @@ export function engine(render: (root: SnapNode) => string) {
         content += inline ? name : ` ${name} `
       }
       content += pseudoContent(element, "::after")
-      if (content.trim() !== "") return content
+      if (content.trim() !== "") {
+        if (provenance && !context.traversal && !context.labelledBy) namesFromContent.add(element)
+        if (inField(element)) context.contribution.fieldContent = true
+        return content
+      }
     }
     // 2I: the tooltip, then a placeholder (HTML-AAM)
     const title = element.getAttribute("title") ?? ""
@@ -894,18 +1001,30 @@ export function engine(render: (root: SnapNode) => string) {
   const nativeName = (element: Element, context: NameContext): string => {
     if (element instanceof HTMLInputElement) {
       if (element.type === "submit" || element.type === "reset" || element.type === "button") {
-        return element.value !== "" ? element.value : element.type === "submit" ? "Submit" : element.type === "reset"
+        const value = element.value !== "" ?
+          element.value :
+          element.type === "submit" ?
+          "Submit" :
+          element.type === "reset"
           ? "Reset"
           : ""
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
       }
-      if (element.type === "image") return element.alt !== "" ? element.alt : element.value
+      if (element.type === "image") {
+        const value = element.alt !== "" ? element.alt : element.value
+        if (value !== "" && inField(element)) context.contribution.fieldContent = true
+        return value
+      }
     }
     const labels = labelsOf(element)
     if (labels.length > 0) {
       return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
-      return element.getAttribute("alt") ?? ""
+      const alt = element.getAttribute("alt") ?? ""
+      if (alt.trim() !== "" && inField(element)) context.contribution.fieldContent = true
+      return alt
     }
     const first = (selector: string) => Array.from(element.children).find((child) => child.matches(selector))
     if (element instanceof HTMLFieldSetElement) {
@@ -922,18 +1041,25 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (element instanceof SVGSVGElement) {
       const title = first("title")
-      return title === undefined ? "" : title.textContent ?? ""
+      if (title === undefined) return ""
+      if (textContainsField(title)) context.contribution.fieldContent = true
+      return title.textContent ?? ""
     }
     return ""
   }
 
+  let provenance = false
+  const namesFromFields = new Set<Element>()
+  const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
+    const contribution = { fieldContent: false }
     const name = collapse(
-      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden })
+      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
+    if (provenance && contribution.fieldContent) namesFromFields.add(element)
     nameCache.set(element, name)
     return name
   }
@@ -942,6 +1068,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   interface InvalidSelector {
     readonly invalidSelector: true
+    readonly kind?: "role" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1039,7 +1166,13 @@ export function engine(render: (root: SnapNode) => string) {
       case "Role":
         return under.filter((element) =>
           roleOf(element) === step.role && (step.includeHidden || !hiddenFromAccessibility(element)) &&
-          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden)))
+          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden))) &&
+          (step.level === undefined || levelOf(element) === step.level) &&
+          (step.checked === undefined || checkedState(element).state === step.checked) &&
+          (step.pressed === undefined || pressedOf(element) === step.pressed) &&
+          (step.expanded === undefined || expandedOf(element) === step.expanded) &&
+          (step.selected === undefined || selectedOf(element) === step.selected) &&
+          (step.disabled === undefined || disabledOf(element) === step.disabled)
         )
       case "Label":
         return under.filter((element) =>
@@ -1071,11 +1204,49 @@ export function engine(render: (root: SnapNode) => string) {
     return elementsUnder(document).filter((element) => set.has(element))
   }
 
+  /** Validate the whole query before searching, including branches whose scope may be empty. */
+  const validateSteps = (steps: ReadonlyArray<Step>): void => {
+    for (const step of steps) {
+      switch (step._tag) {
+        case "Role": {
+          const supported = {
+            level: LEVEL_ROLES,
+            checked: CHECKABLE_ROLES,
+            pressed: PRESSED_ROLES,
+            expanded: EXPANDED_ROLES,
+            selected: SELECTED_ROLES
+          }
+          for (const key of ["level", "checked", "pressed", "expanded", "selected"] as const) {
+            const roles = supported[key]
+            if (step[key] !== undefined && !roles.has(step.role)) {
+              throw {
+                invalidSelector: true,
+                kind: "role",
+                selector: `getByRole(${JSON.stringify(step.role)}, { ${key}: ${step[key]} })`,
+                message: `"${key}" is only supported for roles: ${Array.from(roles).sort().join(", ")}`
+              } satisfies InvalidSelector
+            }
+          }
+          break
+        }
+        case "Filter":
+          if (step.has !== null) validateSteps(step.has)
+          if (step.hasNot !== null) validateSteps(step.hasNot)
+          break
+        case "And":
+        case "Or":
+          validateSteps(step.other)
+          break
+      }
+    }
+  }
+
   /** The matches of a locator's steps, from the document. */
   const resolve = (
     steps: ReadonlyArray<Step>,
     from: ReadonlyArray<Document | Element> = [document]
   ): Array<Element> => {
+    validateSteps(steps)
     let current: ReadonlyArray<Document | Element> = from
     for (const step of steps) {
       switch (step._tag) {
@@ -1134,25 +1305,65 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  const ariaDisabled = (element: Element): boolean => {
+    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+      if (current.getAttribute("aria-disabled") === "true") return true
+    }
+    return false
+  }
+
   const enabled = (element: Element): boolean => {
     if (element.matches(":disabled")) return false
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.getAttribute("aria-disabled") === "true") return false
-    }
-    return true
+    return !ariaDisabled(element)
+  }
+
+  const disabledOf = (element: Element): boolean => {
+    if (ariaDisabled(element)) return true
+    const native = element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLOptionElement || element instanceof HTMLOptGroupElement ||
+      element instanceof HTMLFieldSetElement
+    if (!native) return false
+    if (element.hasAttribute("disabled")) return true
+    if (element instanceof HTMLOptionElement && element.closest("optgroup[disabled]") !== null) return true
+    // Role filters use explicit native rules: :disabled differs between browsers for options and optgroups.
+    const fieldset = element.closest("fieldset[disabled]")
+    if (fieldset === null) return false
+    const legend = Array.from(fieldset.children).find((child) => child instanceof HTMLLegendElement)
+    return legend === undefined || !legend.contains(element)
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
-  const TYPED = new Set(["", "text", "search", "email", "password", "tel", "url", "number"])
+  const TYPED = new Set(["text", "search", "email", "password", "tel", "url", "number"])
 
   const typed = (element: Element): element is HTMLInputElement | HTMLTextAreaElement =>
     element instanceof HTMLTextAreaElement ||
-    (element instanceof HTMLInputElement && TYPED.has(element.getAttribute("type")?.toLowerCase() ?? ""))
+    (element instanceof HTMLInputElement && TYPED.has(element.type))
 
   const SET = new Set(["date", "datetime-local", "month", "week", "time", "color", "range"])
 
   const settable = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && SET.has(element.type)
+
+  const invalidNumberFill = (element: Element, value: string): boolean =>
+    element instanceof HTMLInputElement && element.type === "number" && value !== "" &&
+    (!/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) ||
+      !Number.isFinite(Number(value)))
+
+  // Validate on a detached copy so refusal never writes the live input. Keep constraints and the
+  // value attribute, which can supply a range's step base. Both sides of focus use this same rule.
+  const fillCandidate = (element: HTMLInputElement, value: string): HTMLInputElement | undefined => {
+    if (!settable(element)) return undefined
+    const candidate = element.cloneNode(false) as HTMLInputElement
+    candidate.value = value
+    const accepted = element.type === "range"
+      ? /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value) &&
+        Number.isFinite(Number(value)) && candidate.valueAsNumber === Number(value)
+      : element.type === "color"
+      ? candidate.value === value.toLowerCase()
+      : candidate.value !== "" || value === ""
+    return accepted ? candidate : undefined
+  }
 
   const contentEditable = (element: Element): element is HTMLElement =>
     element instanceof HTMLElement && element.isContentEditable
@@ -1175,15 +1386,135 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
-  /** Whether it is checked, or `null` when it isn't a checkbox, a radio or an ARIA checkable. */
-  const checkedOf = (element: Element): boolean | null => {
+  /** One read for queries and actions; actions retain their boolean view of mixed state. */
+  const checkedState = (element: Element): {
+    readonly state: boolean | "mixed" | null
+    readonly checked: boolean | null
+  } => {
     if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
-      return element.checked
+      return { state: element.indeterminate ? "mixed" : element.checked, checked: element.checked }
     }
     const role = roleOf(element)
-    if (role === null || !CHECKABLE_ROLES.has(role)) return null
-    const state = element.getAttribute(role === "option" || role === "treeitem" ? "aria-selected" : "aria-checked")
-    return state === null ? (role === "option" || role === "treeitem" ? null : false) : state === "true"
+    if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
+    const state = element.getAttribute("aria-checked")
+    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
+      return { state: null, checked: null }
+    }
+    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+  }
+
+  const checkedOf = (element: Element): boolean | null => checkedState(element).checked
+
+  const PRESSED_ROLES = new Set(["button"])
+  const LEVEL_ROLES = new Set(["heading", "listitem", "row", "treeitem"])
+  const SELECTED_ROLES = new Set(["gridcell", "option", "row", "tab", "rowheader", "columnheader", "treeitem"])
+  const EXPANDED_ROLES = new Set([
+    "application",
+    "button",
+    "checkbox",
+    "combobox",
+    "gridcell",
+    "link",
+    "listbox",
+    "menuitem",
+    "row",
+    "rowheader",
+    "tab",
+    "treeitem",
+    "columnheader",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "switch"
+  ])
+
+  const levelOf = (element: Element): number => {
+    if (/^h[1-6]$/.test(element.localName)) return Number(element.localName.slice(1))
+    if (!LEVEL_ROLES.has(roleOf(element) ?? "")) return 0
+    const value = Number(element.getAttribute("aria-level"))
+    return Number.isInteger(value) && value >= 1 ? value : 0
+  }
+
+  const pressedOf = (element: Element): boolean | "mixed" => {
+    if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
+    const value = element.getAttribute("aria-pressed")?.toLowerCase()
+    return value === "mixed" ? "mixed" : value === "true"
+  }
+
+  const expandedOf = (element: Element): boolean | undefined => {
+    if (element instanceof HTMLDetailsElement) return element.open
+    if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
+    const value = element.getAttribute("aria-expanded")?.toLowerCase()
+    return value === undefined ? undefined : value === "true"
+  }
+
+  const selectedOf = (element: Element): boolean => {
+    if (element instanceof HTMLOptionElement) return element.selected
+    return SELECTED_ROLES.has(roleOf(element) ?? "") &&
+      element.getAttribute("aria-selected")?.toLowerCase() === "true"
+  }
+
+  const LABEL_WIDGET_ROLES = new Set([
+    "button",
+    "checkbox",
+    "combobox",
+    "grid",
+    "gridcell",
+    "link",
+    "listbox",
+    "menu",
+    "menubar",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "radiogroup",
+    "scrollbar",
+    "searchbox",
+    "separator",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "tablist",
+    "textbox",
+    "tree",
+    "treegrid",
+    "treeitem"
+  ])
+
+  const interactiveLabelDescendant = (element: Element): boolean => {
+    const role = roleOf(element)
+    return element.matches(
+      "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
+    ) || (
+      element.namespaceURI === "http://www.w3.org/2000/svg" && element.localName === "a" &&
+      element.hasAttributeNS("http://www.w3.org/1999/xlink", "href")
+    ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
+  }
+
+  /** Association stays in the DOM; slots can add refusals without choosing another label. */
+  const checkedForAction = (element: Element): boolean | null => {
+    const own = checkedOf(element)
+    if (own !== null) return own
+    let label: Element | null = element
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    if (label === null || label.control === null) return null
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
+      ancestor = ancestor.parentElement
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
+    }
+    for (
+      let ancestor: Element | null = element;
+      ancestor !== null && ancestor !== label;
+      ancestor = ancestor.assignedSlot ?? composedParent(ancestor)
+    ) {
+      if (interactiveLabelDescendant(ancestor)) return null
+    }
+    return checkedOf(label.control)
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1211,24 +1542,78 @@ export function engine(render: (root: SnapNode) => string) {
       : null
   }
 
-  const inViewport = (element: Element): boolean => {
-    const rect = element.getBoundingClientRect()
-    const width = Math.min(rect.right, innerWidth) - Math.max(rect.left, 0)
-    const height = Math.min(rect.bottom, innerHeight) - Math.max(rect.top, 0)
-    return width > 0 && height > 0 && width * height > 0.99
+  /** Geometric bounds only; the browser's hit test determines whether ancestors or overlays block a centre. */
+  const viewportBounds = (inherited?: Clip): Clip => ({
+    left: Math.max(0, inherited?.left ?? 0),
+    top: Math.max(0, inherited?.top ?? 0),
+    right: Math.min(innerWidth, inherited?.right ?? innerWidth),
+    bottom: Math.min(innerHeight, inherited?.bottom ?? innerHeight)
+  })
+
+  const fragments = (element: Element, inherited?: Clip): Array<Clip> => {
+    const bounds = viewportBounds(inherited)
+    const result: Array<Clip> = []
+    for (const rect of element.getClientRects()) {
+      const left = Math.max(bounds.left, rect.left)
+      const top = Math.max(bounds.top, rect.top)
+      const right = Math.min(bounds.right, rect.right)
+      const bottom = Math.min(bounds.bottom, rect.bottom)
+      if (right > left && bottom > top) result.push({ left, top, right, bottom })
+    }
+    return result
   }
 
-  /** The action point, in viewport CSS pixels: the padding box's centre, or `position` from its top left. */
-  const actionPoint = (element: Element, position: { readonly x: number; readonly y: number } | null) => {
+  const visibleFragment = (element: Element, inherited?: Clip): Clip | null => fragments(element, inherited)[0] ?? null
+
+  const inViewport = (element: Element): boolean => visibleFragment(element) !== null
+
+  /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
+  const scrollToFragments = (element: Element, inherited?: Clip) => {
+    const rect = element.getBoundingClientRect()
+    const bounds = viewportBounds(inherited)
+    element.scrollIntoView({
+      block: rect.height > bounds.bottom - bounds.top ? "start" : "center",
+      inline: rect.width > bounds.right - bounds.left ? "start" : "center",
+      behavior: "instant"
+    })
+  }
+
+  /** Keep integer-coordinate backends inside the fragment whenever it contains an integer point. */
+  const fragmentCenter = (min: number, max: number): number => {
+    const center = (min + max) / 2
+    const rounded = Math.round(center)
+    if (rounded >= max && Math.floor(center) >= min) return Math.floor(center)
+    return center
+  }
+
+  /** Probe centres only when requested; retain the first geometric point for a Covered result if none reaches. */
+  const actionPoints = (
+    element: Element,
+    position: { readonly x: number; readonly y: number } | null,
+    clip: Clip | undefined,
+    receivesPointer: boolean
+  ) => {
+    if (position === null) {
+      let first: { x: number; y: number } | null = null
+      const points: Array<{ x: number; y: number }> = []
+      for (const rect of fragments(element, clip)) {
+        const point = { x: fragmentCenter(rect.left, rect.right), y: fragmentCenter(rect.top, rect.bottom) }
+        first ??= point
+        if (!receivesPointer) return [point]
+        const hit = hitTarget(point.x, point.y)
+        if (hit !== null && composedContains(element, hit)) {
+          if (clip === undefined) return [point]
+          points.push(point)
+        }
+      }
+      return points.length > 0 ? points : first === null ? [] : [first]
+    }
     const rect = element.getBoundingClientRect()
     const style = getComputedStyle(element)
-    const left = rect.left + parseFloat(style.borderLeftWidth)
-    const top = rect.top + parseFloat(style.borderTopWidth)
-    const width = rect.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
-    const height = rect.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
-    return position === null
-      ? { x: left + width / 2, y: top + height / 2 }
-      : { x: left + position.x, y: top + position.y }
+    return [{
+      x: rect.left + parseFloat(style.borderLeftWidth) + position.x,
+      y: rect.top + parseFloat(style.borderTopWidth) + position.y
+    }]
   }
 
   /** What the pointer would hit at a point, through open shadow roots. */
@@ -1259,10 +1644,17 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Focuses an element and selects its contents, so text inserted next replaces them. */
   const selectContents = (element: HTMLElement) => {
-    element.focus()
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus()
       element.select()
       return
+    }
+    if (document.designMode === "on") {
+      window.focus()
+    } else {
+      let host = element
+      while (host.parentElement?.isContentEditable) host = host.parentElement
+      host.focus()
     }
     const selection = getSelection()
     if (selection === null) return
@@ -1338,7 +1730,18 @@ export function engine(render: (root: SnapNode) => string) {
 
   // ── Actions ──
 
+  let stabilitySequence = 0
+  let stability: {
+    readonly token: string
+    readonly element: Element
+    readonly rect: DOMRect
+    readonly frames: number
+  } | null = null
+
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
+    // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
+    let previous = stability !== null && request.stability === stability.token ? stability : null
+    stability = null
     const end = now() + request.cap
     const history: Array<NotReady> = []
     const seen = new Set<string>()
@@ -1353,6 +1756,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     let scrolled = false
     let frames = 0
+    let sampled = false
     // The rects of one element across frames, for the stable check
     let tracked: Element | null = null
     let rects: Array<DOMRect> = []
@@ -1360,15 +1764,19 @@ export function engine(render: (root: SnapNode) => string) {
     while (true) {
       const left = end - now()
       if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
-      if (!(await nextFrame(left))) {
-        // A round the deadline cut too short for any page to render says nothing about rendering
-        if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-        return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+      // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
+      // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
+      // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
+      if (sampled || !(request.checks.stable > 0)) {
+        if (!(await nextFrame(left))) {
+          // A round the deadline cut too short for any page to render says nothing about rendering
+          if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+          return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+        }
+        frames++
       }
-      frames++
-      rawText.clear()
-      roleCache.clear()
-      nameCache.clear()
+      sampled = true
+      clearTreeCaches()
       const found = resolve(request.steps)
       if (found.length > 1) return strict(found)
       const element = found[0]
@@ -1402,31 +1810,42 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const checks = request.checks
+      const evidence = previous
+      previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !visible(element)) reason = { _tag: "NotVisible" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-      else if (checks.inViewport && !inViewport(element)) {
+      else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
         reason = { _tag: "OutsideViewport" }
         if (!scrolled) {
-          element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+          scrollToFragments(element, request.clip)
           scrolled = true
         }
       } else if (checks.stable > 0) {
-        rects.push(element.getBoundingClientRect())
+        const rect = element.getBoundingClientRect()
+        rects.push(rect)
         if (rects.length > checks.stable + 1) rects.shift()
-        if (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!))) {
+        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
+          sameRect(evidence.rect, rect)
+        if (!unchanged && (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!)))) {
           reason = { _tag: "NotStable" }
         }
       }
       const position = action._tag === "Point" ? action.position : null
-      if (reason === null && element !== undefined && checks.receivesPointer) {
-        const point = actionPoint(element, position)
-        const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) {
-          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+      const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+        ? actionPoints(element, position, request.clip, checks.receivesPointer)
+        : []
+      const point = points[0] ?? null
+      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+        if (point === null) reason = { _tag: "OutsideViewport" }
+        else if (checks.receivesPointer) {
+          const hit = hitTarget(point.x, point.y)
+          if (hit === null || !composedContains(element, hit)) {
+            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+          }
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -1436,7 +1855,48 @@ export function engine(render: (root: SnapNode) => string) {
         )
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
-      if (reason === null && element !== undefined) return ready(element, action, request.apply, scrolled)
+      if (reason === null && element !== undefined) {
+        if (
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        ) {
+          const active = deepActive()
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            note({ _tag: "PreparingFocus", from: describe(active) })
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            rects = []
+            continue
+          }
+        }
+        let response = ready(element, action, request.apply, scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
+          }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: rects[rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
+        }
+      }
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
       if (reason!._tag !== "NotStable" || rects.length === checks.stable + 1) note(reason!)
@@ -1445,7 +1905,14 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Does what the action asks of the element, now that its checks pass. */
-  const ready = (element: Element, action: Action, apply: boolean, scrolled: boolean): Response => {
+  const ready = (
+    element: Element,
+    action: Action,
+    apply: boolean,
+    scrolled: boolean,
+    point: { x: number; y: number } | null,
+    checks: Checks
+  ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1462,7 +1929,7 @@ export function engine(render: (root: SnapNode) => string) {
           if (current.getAttribute("draggable") === "true") draggable = true
         }
         if (apply && action.guard) arm(element)
-        return { ...answer, point: actionPoint(element, action.position), draggable }
+        return { ...answer, point, draggable }
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
@@ -1478,13 +1945,29 @@ export function engine(render: (root: SnapNode) => string) {
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
+        if (invalidNumberFill(element, action.value)) {
+          return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+        }
         if (settable(element)) {
-          element.focus()
-          element.value = action.value
-          // A value the input refuses, such as "soon" for a date, leaves it otherwise
-          if (element.value !== action.value) {
+          if (fillCandidate(element, action.value) === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
+          element.focus()
+          if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
+          if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
+          // Focus handlers can change the type or its constraints. Use the current state before writing.
+          if (TYPED.has(element.type)) {
+            if (invalidNumberFill(element, action.value)) {
+              return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+            }
+            selectContents(element)
+            return { ...answer, fill: "type" }
+          }
+          const candidate = fillCandidate(element, action.value)
+          if (candidate === undefined) {
+            return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
+          }
+          element.value = candidate.value
           fire(element, "input")
           fire(element, "change")
           return { ...answer, fill: "set" }
@@ -1532,7 +2015,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = checkedOf(element)
+        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
@@ -1545,9 +2028,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     if (expectation._tag === "Title") {
       const title = collapse(document.title)
       return { passed: expected(expectation.expected, title), observed: title }
@@ -1718,9 +2199,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    const selectable = role === "option" || role === "treeitem" || role === "tab" || role === "gridcell" ||
-      role === "row"
-    if (!selectable && checkedOf(element) === true) states.push("checked")
+    if (checkedOf(element) === true) states.push("checked")
     if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
     if (
       element.getAttribute("aria-selected") === "true" ||
@@ -1729,12 +2208,24 @@ export function engine(render: (root: SnapNode) => string) {
     if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
     if (element.getAttribute("aria-pressed") === "true") states.push("pressed")
+    if (validationMessageOf(element) !== null) states.push("invalid")
     return states
+  }
+
+  const validationMessageOf = (element: Element): string | null => {
+    if (
+      (element instanceof HTMLInputElement || element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement || element instanceof HTMLButtonElement ||
+        element instanceof HTMLFieldSetElement || element instanceof HTMLOutputElement) &&
+      element.willValidate && !element.validity.valid
+    ) return element.validationMessage
+    return null
   }
 
   /** What makes an element with no role look interactive. */
   const evidenceOf = (element: Element): Array<string> => {
     const evidence: Array<string> = []
+    if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
     // `cursor` is inherited: only the element that sets it counts
     if (
@@ -1752,12 +2243,94 @@ export function engine(render: (root: SnapNode) => string) {
 
   const clip = (text: string) => text.length > 80 ? `${text.slice(0, 80)}…` : text
 
+  const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "listbox", "slider", "spinbutton", "editable"])
+  const fieldKinds = new Map<Element, boolean>()
+  const fieldOf = (element: Element): boolean => {
+    const cached = fieldKinds.get(element)
+    if (cached !== undefined) return cached
+    const field = FIELD_ROLES.has(roleOf(element) ?? "") || element instanceof HTMLSelectElement ||
+      typed(element) || settable(element) || contentEditable(element)
+    fieldKinds.set(element, field)
+    return field
+  }
+
+  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  const fieldParent = (node: Node): Node | null => {
+    if ((node instanceof Element || node instanceof Text) && node.assignedSlot !== null) return node.assignedSlot
+    return node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+  }
+
+  const fieldAncestry = new Map<Node, boolean>()
+  const inField = (node: Node): boolean => {
+    if (!provenance) return false
+    const cached = fieldAncestry.get(node)
+    if (cached !== undefined) return cached
+    const path: Array<Node> = []
+    let field = false
+    for (let current: Node | null = node; current !== null; current = fieldParent(current)) {
+      const known = fieldAncestry.get(current)
+      if (known !== undefined) {
+        field = known
+        break
+      }
+      path.push(current)
+      if (current instanceof Element && fieldOf(current)) {
+        field = true
+        break
+      }
+    }
+    // Cache negative paths too: nested clickables must not repeat a full ancestor walk per contributor.
+    for (const ancestor of path) fieldAncestry.set(ancestor, field)
+    return field
+  }
+
+  const fieldText = new Map<Element, boolean>()
+  // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
+  const textContainsField = (element: Element): boolean => {
+    if (!provenance) return false
+    const cached = fieldText.get(element)
+    if (cached !== undefined) return cached
+    const field = textOfNode(element).trim() !== "" && (inField(element) ||
+      flatChildNodes(element).some((child) =>
+        child instanceof Element
+          ? textContainsField(child)
+          : child.nodeType === Node.TEXT_NODE && (child.nodeValue ?? "").trim() !== "" && inField(child)
+      ))
+    fieldText.set(element, field)
+    return field
+  }
+
+  const clearTreeCaches = (): void => {
+    rawText.clear()
+    roleCache.clear()
+    nameCache.clear()
+    namesFromContent.clear()
+    namesFromFields.clear()
+    provenance = false
+    fieldKinds.clear()
+    fieldAncestry.clear()
+    fieldText.clear()
+  }
+
   /** An inferred node's name: its accessible name, or where one can be read from. */
   const inferredName = (element: Element): SnapNode["name"] => {
     const accessible = accessibleName(element, false)
-    if (accessible !== "") return { _tag: "Accessible", value: accessible }
+    if (accessible !== "") {
+      return {
+        _tag: "Accessible",
+        value: accessible,
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
+      }
+    }
     const text = textOf(element)
-    if (text !== "") return { _tag: "Inferred", value: clip(text), from: "text" }
+    if (text !== "") {
+      return {
+        _tag: "Inferred",
+        value: clip(text),
+        from: "text",
+        ...(textContainsField(element) ? { fieldContent: true } : {})
+      }
+    }
     const title = collapse(element.getAttribute("title") ?? "")
     if (title !== "") return { _tag: "Inferred", value: title, from: "title" }
     const placeholder = collapse(
@@ -1767,10 +2340,24 @@ export function engine(render: (root: SnapNode) => string) {
     if (placeholder !== "") return { _tag: "Inferred", value: placeholder, from: "placeholder" }
     const image = element.querySelector("img[alt]")
     const alt = collapse(image?.getAttribute("alt") ?? "")
-    if (alt !== "") return { _tag: "Inferred", value: alt, from: "alt" }
+    if (alt !== "") {
+      return {
+        _tag: "Inferred",
+        value: alt,
+        from: "alt",
+        ...(image !== null && inField(image) ? { fieldContent: true } : {})
+      }
+    }
     const previous = element.previousElementSibling
     const nearby = previous === null ? "" : textOf(previous)
-    if (nearby !== "" && nearby.length <= 40) return { _tag: "Inferred", value: nearby, from: "nearbyLabel" }
+    if (nearby !== "" && nearby.length <= 40) {
+      return {
+        _tag: "Inferred",
+        value: nearby,
+        from: "nearbyLabel",
+        ...(previous !== null && textContainsField(previous) ? { fieldContent: true } : {})
+      }
+    }
     return { _tag: "None" }
   }
 
@@ -1779,6 +2366,7 @@ export function engine(render: (root: SnapNode) => string) {
     role: { _tag: "Aria", role: "text" },
     name: { _tag: "Accessible", value },
     states: [],
+    validationMessage: null,
     children: [],
     frame: false
   })
@@ -1827,7 +2415,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (evidence.length > 0) {
         inferred = {
           _tag: "Inferred",
-          role: evidence.includes("contentEditable")
+          role: evidence.includes("password") || evidence.includes("contentEditable")
             ? "editable"
             : evidence.includes("cursorPointer") || evidence.includes("onclickAttribute")
             ? "clickable"
@@ -1848,11 +2436,17 @@ export function engine(render: (root: SnapNode) => string) {
     frame: boolean
   ): SnapNode => {
     const accessible = accessibleName(element, false)
-    const name: SnapNode["name"] = role._tag === "Inferred"
+    const field = provenance && fieldOf(element)
+    const name: SnapNode["name"] = role._tag === "Inferred" && !role.evidence.includes("password")
       ? inferredName(element)
       : accessible === ""
       ? { _tag: "None" }
-      : { _tag: "Accessible", value: accessible }
+      : {
+        _tag: "Accessible",
+        value: accessible,
+        ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
+        ...(namesFromFields.has(element) ? { fieldContent: true } : {})
+      }
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -1864,6 +2458,8 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(field ? { editable: true } : {}),
+      validationMessage: validationMessageOf(element),
       children,
       frame
     }
@@ -1881,6 +2477,7 @@ export function engine(render: (root: SnapNode) => string) {
       role: { _tag: "Aria", role: "document" },
       name: title === "" ? { _tag: "None" } : { _tag: "Accessible", value: title },
       states: [],
+      validationMessage: null,
       children: document.documentElement === null || (walk.depth !== null && walk.depth < 1)
         ? []
         : childrenOf(document.documentElement, 1, walk),
@@ -1889,6 +2486,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const snapshot = (request: Extract<Request, { op: "snapshot" }>): Response => {
+    provenance = request.provenance === true
     const walk: Walk = { interactivity: request.interactivity, depth: request.depth }
     if (request.steps === null) return { _tag: "Snapshot", root: documentNode(walk), generation }
     const found = resolve(request.steps)
@@ -2008,20 +2606,26 @@ export function engine(render: (root: SnapNode) => string) {
   const element = (text: string): Element | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
+      /** The complete query, before frame routing splits it. */
+      readonly validationSteps?: ReadonlyArray<Step>
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
     }
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     let found: Array<Element>
     try {
+      if (request.validationSteps !== undefined) validateSteps(request.validationSteps)
       found = resolve(request.steps)
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
@@ -2051,8 +2655,8 @@ export function engine(render: (root: SnapNode) => string) {
     const iframe = found[0]
     if (iframe === undefined) return { _tag: "NoMatch" }
     let scrolled = false
-    if (request.scroll && !inViewport(iframe)) {
-      iframe.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+    if (request.scroll && visibleFragment(iframe, request.clip) === null) {
+      scrollToFragments(iframe, request.clip)
       scrolled = true
     }
     const rect = iframe.getBoundingClientRect()
@@ -2066,16 +2670,68 @@ export function engine(render: (root: SnapNode) => string) {
       const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
       if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
     }
-    return { _tag: "Frame", origin, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+    const bounds = viewportBounds(request.clip)
+    const viewport = {
+      left: Math.max(bounds.left, origin.x) - origin.x,
+      top: Math.max(bounds.top, origin.y) - origin.y,
+      right: Math.min(bounds.right, rect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)) -
+        origin.x,
+      bottom:
+        Math.min(bounds.bottom, rect.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)) -
+        origin.y
+    }
+    return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+  }
+
+  // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
+  // without probing validity or changing page behavior. Each call owns its listeners and deduplication.
+  const validationObservers = new Map<string, () => Array<string>>()
+  const observeValidation = (token: string, full: boolean) => {
+    validationObservers.get(token)?.()
+    const roots: Array<Document | ShadowRoot> = [document]
+    for (const element of elementsUnder(document)) {
+      if (element.shadowRoot !== null) roots.push(element.shadowRoot)
+    }
+    const found = new Map<Element, string>()
+    const listener = (event: Event) => {
+      const element = event.target
+      if (!(element instanceof Element) || found.has(element)) return
+      const message = validationMessageOf(element)
+      if (message === null) return
+      rawText.clear()
+      roleCache.clear()
+      nameCache.clear()
+      const name = full ? accessibleName(element, true) : ""
+      found.set(
+        element,
+        `${roleOf(element)}${name === "" ? "" : ` ${JSON.stringify(name)}`} validationMessage=${
+          JSON.stringify(full ? message : "•••")
+        }`
+      )
+    }
+    for (const root of roots) root.addEventListener("invalid", listener, true)
+    validationObservers.set(token, () => {
+      for (const root of roots) root.removeEventListener("invalid", listener, true)
+      validationObservers.delete(token)
+      return Array.from(found.values())
+    })
   }
 
   const run = async (text: string): Promise<string> => {
     const request = JSON.parse(text) as Request
-    rawText.clear()
-    roleCache.clear()
-    nameCache.clear()
+    clearTreeCaches()
     try {
       switch (request.op) {
+        case "validationStart":
+          observeValidation(request.token, request.full)
+          return JSON.stringify({ _tag: "Validation", lines: [] } satisfies Response)
+        case "validationStop":
+          return JSON.stringify(
+            {
+              _tag: "Validation",
+              lines: validationObservers.get(request.token)?.() ?? []
+            } satisfies Response
+          )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
         case "visible": {
@@ -2123,7 +2779,12 @@ export function engine(render: (root: SnapNode) => string) {
     } catch (error) {
       if (isInvalidSelector(error)) {
         return JSON.stringify(
-          { _tag: "InvalidSelector", selector: error.selector, message: error.message } satisfies Response
+          {
+            _tag: "InvalidSelector",
+            selector: error.selector,
+            message: error.message,
+            ...(error.kind === undefined ? {} : { kind: error.kind })
+          } satisfies Response
         )
       }
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)

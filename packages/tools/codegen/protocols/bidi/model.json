@@ -12579,7 +12579,28 @@
       "params": "script#CallFunctionParameters",
       "result": "script#CallFunctionResult",
       "traits": {
-        "status": "stable"
+        "status": "stable",
+        "createsResource": true,
+        "release": [
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/result/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          },
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/exceptionDetails/exception/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          }
+        ]
       }
     },
     "script#disown": {
@@ -12597,7 +12618,28 @@
       "params": "script#EvaluateParameters",
       "result": "script#EvaluateResult",
       "traits": {
-        "status": "stable"
+        "status": "stable",
+        "createsResource": true,
+        "release": [
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/result/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          },
+          {
+            "method": "script.disown",
+            "param": "handles",
+            "from": "/exceptionDetails/exception/handle",
+            "list": true,
+            "paramsFrom": {
+              "/target/realm": "/realm"
+            }
+          }
+        ]
       }
     },
     "script#getRealms": {

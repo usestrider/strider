@@ -164,6 +164,12 @@ export interface Mouse {
    * modifier held or asked for, it fails with `Unsupported` on a backend whose pointer can't carry one
    * (`input.pointerModifiers`).
    *
+   * **Gotchas**
+   *
+   * On Chromium, a click sent before the page has rendered is lost, and it still succeeds. `page.goto` returns at
+   * commit by default, so a click straight after it can be lost: wait for `load` and for something on the page
+   * first, or click a locator, which checks its element before it clicks.
+   *
    * **Example** (Opening a canvas's context menu)
    *
    * ```ts import.meta.vitest

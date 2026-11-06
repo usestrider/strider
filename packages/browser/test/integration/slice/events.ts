@@ -227,7 +227,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             yield* page.close()
             const error = yield* waiting.pipe(Effect.flip)
             assert(Target.isTargetGone(error), String(error))
-            assert.deepStrictEqual(error.reason, { _tag: "PageClosed", by: "command" })
+            assert.deepStrictEqual(error.reason, new Target.PageClosed({ by: "command" }))
           }))
         }), timeout)
 
@@ -281,8 +281,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
               yield* page.goto(url)
               yield* Dialog.handle(
                 page,
-                (dialog) =>
-                  dialog._tag === "Unknown" ? Effect.succeed(dialog.respond("typed")) : Dialog.acceptAll(dialog)
+                (dialog) => dialog._tag === "Unknown" ? dialog.respond("typed") : Dialog.acceptAll(dialog)
               )
               const decisions = yield* AutoResolution.next(page)
               yield* page.getByText("Ask").click()
@@ -350,7 +349,10 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage({ dialogs: "leaveOpen" })
             yield* page.goto(url)
+            const clicked = Date.now()
             const error = yield* page.getByText("Ask").click().pipe(Effect.flip)
+            // The page can't confirm a release while its dialog is open, so the click doesn't wait to try
+            assert.isBelow(Date.now() - clicked, 1000)
             assert(Locator.isLocatorError(error), String(error))
             assert(error.reason._tag === "PromptBlocking", String(error))
             assert.strictEqual(error.reason.kind, (yield* supports("prompts.kind")) ? "confirm" : "unknown")

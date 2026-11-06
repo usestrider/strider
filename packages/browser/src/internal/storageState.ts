@@ -17,6 +17,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -36,31 +37,38 @@ import * as Storage from "./storage.ts"
 
 // ── In the page ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** One origin's storage as the page gives it: entries, and databases with encoded records. */
-interface Read {
-  readonly local: ReadonlyArray<readonly [string, string]>
-  readonly indexedDb: ReadonlyArray<{
-    readonly name: string
-    readonly version: number
-    readonly stores: ReadonlyArray<{
-      readonly name: string
-      readonly keyPath: string | ReadonlyArray<string> | null
-      readonly autoIncrement: boolean
-      readonly indexes: ReadonlyArray<{
-        readonly name: string
-        readonly keyPath: string | ReadonlyArray<string>
-        readonly unique: boolean
-        readonly multiEntry: boolean
-      }>
-      readonly records: ReadonlyArray<{ readonly key: unknown; readonly value: unknown }>
-    }>
-  }>
-}
+const KeyPath = Schema.Union([Schema.String, Schema.Array(Schema.String)])
 
-/** What `readOrigin` answers: the storage, or what it couldn't encode, and where. */
-type ReadAnswer =
-  | { readonly _tag: "Read"; readonly read: Read }
-  | { readonly _tag: "Unencodable"; readonly database: string; readonly store: string; readonly what: string }
+/** One origin's storage as the page gives it: entries, and databases with encoded records. */
+const Read = Schema.Struct({
+  local: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
+  indexedDb: Schema.Array(Schema.Struct({
+    name: Schema.String,
+    version: Schema.Number,
+    stores: Schema.Array(Schema.Struct({
+      name: Schema.String,
+      keyPath: Schema.NullOr(KeyPath),
+      autoIncrement: Schema.Boolean,
+      indexes: Schema.Array(Schema.Struct({
+        name: Schema.String,
+        keyPath: KeyPath,
+        unique: Schema.Boolean,
+        multiEntry: Schema.Boolean
+      })),
+      records: Schema.Array(Schema.Struct({ key: Schema.Unknown, value: Schema.Unknown }))
+    }))
+  }))
+})
+
+type Read = typeof Read.Type
+
+/** What `readOrigin` answers, as JSON text: the storage, or what it couldn't encode, and where. */
+const ReadAnswer = Schema.fromJsonString(Schema.Union([
+  Schema.TaggedStruct("Read", { read: Read }),
+  Schema.TaggedStruct("Unencodable", { database: Schema.String, store: Schema.String, what: Schema.String })
+]))
+
+type ReadAnswer = typeof ReadAnswer.Type
 
 /**
  * Reads the document's origin storage, as JSON text. Self-contained: its source is evaluated in the page.
@@ -344,17 +352,16 @@ const contextError = (reason: UserContext.UserContextErrorReason, id: Diagnostic
 const evaluationFailure = (operation: string, id: Diagnostics.OperationId) => (failure: Evaluation.Failure) =>
   contextError(
     failure._tag === "Gone"
-      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.error.message })
+      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
       : failure._tag === "Deadline"
       ? new Reason.BackendFailure({
         kind: "Rejected",
         method: operation,
-        metadata: {},
         hint: "The page didn't answer before the deadline"
       })
       : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
       ? failure.reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: failure.reason.message }),
+      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
     id,
     operation
   )
@@ -370,37 +377,45 @@ interface Source {
   readonly topLevelOrigin: string
 }
 
+/**
+ * Whether a cookie's domain and a host are one, or one is a subdomain of the other, so the host is sent the cookie.
+ * A saved state is narrowed by hosts rather than `siteOf`, whose last two labels would make `shop.co.uk` every
+ * `.co.uk` cookie.
+ */
+export const related = (domain: string, host: string): boolean => {
+  const bare = domain.replace(/^\./, "")
+  return bare === host || bare.endsWith(`.${host}`) || host.endsWith(`.${bare}`)
+}
+
 /** One document per origin and partition, of the documents open in the context's pages and frames. */
-const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context: UserContext.Id) {
+const sourcesOf = Effect.fnUntraced(function*(
+  runtime: Runtime.Runtime,
+  context: UserContext.Id,
+  hosts: ReadonlyArray<string> | undefined
+) {
   const sources = new Map<string, Source>()
-  for (const page of runtime.model.pages.values()) {
+  for (const page of yield* runtime.model.pages.get) {
     if (page.context !== context) continue
-    const state = yield* SubscriptionRef.get(page.state)
+    const { frames, status: state } = yield* page.state.get
     if (state._tag !== "Open") continue
-    let top: URL
-    try {
-      top = new URL(state.url)
-    } catch {
-      continue
-    }
-    const topSite = siteOf(top)
+    const top = URL.parse(state.url)
+    if (top === null) continue
+    if (hosts !== undefined && !hosts.some((host) => related(top.hostname, host))) continue
+    // A page that isn't on a site, such as about:blank, has no site to key a frame's partition by
+    const topSite = Schema.decodeUnknownOption(Url.Site)(siteOf(top))
+    if (Option.isNone(topSite)) continue
     const documents = [
       state.document.id,
-      ...(yield* SubscriptionRef.get(page.tree)).frames.flatMap((frame) => Option.toArray(frame.document))
+      ...frames.flatMap((frame) => Option.toArray(frame.document))
     ]
     for (const document of documents) {
-      const entry = runtime.model.documents.get(document)
-      if (entry === undefined) continue
-      let url: URL
-      try {
-        url = new URL(entry.url)
-      } catch {
-        continue
-      }
-      if (url.protocol !== "http:" && url.protocol !== "https:") continue
-      const partition: CookieJar.PartitionKey = siteOf(url) === topSite
+      const entry = runtime.model.document(document)
+      if (Option.isNone(entry)) continue
+      const url = URL.parse((yield* entry.value.state.get).url)
+      if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) continue
+      const partition: CookieJar.PartitionKey = siteOf(url) === topSite.value
         ? { _tag: "Unpartitioned" }
-        : { _tag: "Partitioned", topLevelSite: Url.Site.make(topSite), crossSiteAncestor: Option.some(true) }
+        : { _tag: "Partitioned", topLevelSite: topSite.value, crossSiteAncestor: Option.some(true) }
       const key = `${url.origin} ${partition._tag === "Partitioned" ? partition.topLevelSite : ""}`
       if (!sources.has(key)) sources.set(key, { document, origin: url.origin, partition, topLevelOrigin: top.origin })
     }
@@ -408,8 +423,8 @@ const sourcesOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, context:
   return [...sources.values()]
 })
 
-/** `context.exportStorageState`. */
-export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =>
+/** `context.exportStorageState`, narrowed to the state of `hosts` when given (`related`). */
+export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, hosts?: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     const operation = "UserContext.exportStorageState"
     const { id } = yield* Operation.record
@@ -423,7 +438,6 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
             : new Reason.BackendFailure({
               kind: "Rejected",
               method: operation,
-              metadata: {},
               hint: mapped.error.message
             }),
           id,
@@ -432,7 +446,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
       })
     )
     const origins: Array<typeof StorageState.OriginState.Type> = []
-    for (const source of yield* sourcesOf(runtime, context)) {
+    for (const source of yield* sourcesOf(runtime, context, hosts)) {
       const text = yield* Effect.gen(function*() {
         const realm = yield* Evaluation.documentRealm(
           runtime,
@@ -458,7 +472,19 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
         Effect.mapError(evaluationFailure(operation, id))
       )
       if (Option.isNone(text)) continue
-      const answer = JSON.parse(text.value as string) as ReadAnswer
+      const answer = yield* Schema.decodeUnknownEffect(ReadAnswer)(text.value).pipe(
+        Effect.mapError((error) =>
+          contextError(
+            new Reason.BackendFailure({
+              kind: "IncompatibleResponse",
+              method: operation,
+              hint: `${source.origin}: the page's storage didn't read as expected (${error.message})`
+            }),
+            id,
+            operation
+          )
+        )
+      )
       if (answer._tag === "Unencodable") {
         return yield* Effect.fail(contextError(
           new Reason.Unsupported({
@@ -491,7 +517,14 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id) =
         }))
       })
     }
-    return new StorageState.StorageState({ cookies: cookies.map(Storage.fromAdapter), origins })
+    const kept = cookies.map(Storage.fromAdapter).filter((cookie) =>
+      hosts === undefined || hosts.some((host) =>
+        related(cookie.domain, host) ||
+        (cookie.partitionKey._tag === "Partitioned" &&
+          related(new URL(cookie.partitionKey.topLevelSite).hostname, host))
+      )
+    )
+    return new StorageState.StorageState({ cookies: kept, origins })
   }).pipe(Operation.named("UserContext.exportStorageState", { attributes: { "browser.context.id": context } }))
 
 // ── Import ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -555,7 +588,6 @@ export const applyState = (
           : new Reason.BackendFailure({
             kind: "Rejected",
             method: operation,
-            metadata: {},
             hint: mapped.error.message
           }),
         id,
@@ -581,8 +613,7 @@ export const applyState = (
         )
       )
       const { entry } = Handles.page(page)
-      const html = (body: string) =>
-        Effect.succeed(Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" })))
+      const html = (body: string) => Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" }))
       for (const [index, origin] of origins.entries()) {
         const seed = `${origin.origin}${seedPath}/${index}`
         yield* context.route(seed, () => html("<!DOCTYPE html><title>storage state</title>")).pipe(
@@ -598,7 +629,6 @@ export const applyState = (
               new Reason.BackendFailure({
                 kind: "Rejected",
                 method: operation,
-                metadata: {},
                 hint: `Writing ${origin.origin}'s storage failed: ${
                   String((failure as { message?: string }).message ?? failure)
                 }`
@@ -610,7 +640,7 @@ export const applyState = (
         let document: Target.DocumentId
         if (origin.partition._tag === "Unpartitioned") {
           yield* page.goto(seed, { waitUntil: "load" }).pipe(Effect.mapError(write))
-          const state = yield* SubscriptionRef.get(entry.state)
+          const state = (yield* entry.state.get).status
           if (state._tag !== "Open") return yield* Effect.fail(write(new Error("the page closed")))
           document = state.document.id
         } else {
@@ -672,4 +702,4 @@ const asReason = (reason: { readonly _tag: string; readonly message: string }, o
   reason._tag === "InvalidInput" || reason._tag === "NotPermitted" || reason._tag === "Unsupported" ||
     reason._tag === "BackendFailure"
     ? reason as UserContext.UserContextErrorReason
-    : new Reason.BackendFailure({ kind: "Rejected", method: operation, metadata: {}, hint: reason.message })
+    : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: reason.message })

@@ -3,17 +3,31 @@
  * resynchronization and overload. The fold here stands in for an adapter's model.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Input from "@usestrider/browser/cdp/Input"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
-import { Protocol } from "@usestrider/browser/protocol"
+import { Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
+import type * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import * as Condition from "../src/Condition.ts"
+import * as Deadline from "../src/Deadline.ts"
+import * as Expect from "../src/Expect.ts"
+import * as Adapter from "../src/internal/adapter.ts"
+import * as BidiWire from "../src/internal/bidiWire.ts"
+import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
+import * as Ingestion from "../src/internal/ingestion.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as WebKitWire from "../src/internal/webkitWire.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 interface Recorder {
@@ -89,7 +103,373 @@ const reasonOf = <A>(exit: Exit.Exit<A, Protocol.ProtocolError>) => {
   return error.value.reason
 }
 
+/** Only the reply timer advances time; operation-bound timers stay pending so they cannot hide an early reply. */
+const earlyReplyClock = () => {
+  let nanos = 1_000_000_000n
+  let sleeps = 0
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => Number(nanos) / 1e6,
+    currentTimeMillis: Effect.sync(() => Number(nanos) / 1e6),
+    currentTimeNanosUnsafe: () => nanos,
+    currentTimeNanos: Effect.sync(() => nanos),
+    monotonicTimeNanosUnsafe: () => nanos,
+    monotonicTimeNanos: Effect.sync(() => nanos),
+    sleep: (duration) =>
+      Effect.sync(() => {
+        const asked = Duration.toNanos(duration)
+        assert(asked._tag === "Some")
+        nanos += sleeps++ === 0 ? asked.value - 400_000n : asked.value
+      })
+  }
+  const reply = BrowserClock.fromClock(clock)
+  return {
+    clock,
+    reply,
+    operation: { now: reply.now, sleep: () => Effect.never } satisfies BrowserClock.BrowserClock,
+    sleeps: () => sleeps
+  }
+}
+
+describe("ProtocolClient reply deadlines", () => {
+  it.effect("does not report NoReply when its timer fires before the command deadline", () =>
+    Effect.gen(function*() {
+      const timer = earlyReplyClock()
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { replyClock: timer.clock })
+      const at = timer.reply.now() + 250 * 1e6
+      const error = yield* client.root.send(Page.enable()).pipe(
+        Effect.provideService(Protocol.CommandTimeout, Duration.millis(250)),
+        Effect.flip
+      )
+      assert.strictEqual(error.reason._tag, "NoReply")
+      assert.isAtLeast(timer.reply.now(), at, "NoReply must wait for the monotonic deadline")
+      assert.isAbove(timer.sleeps(), 1)
+    }))
+
+  for (const shorter of [false, true]) {
+    it.effect(
+      shorter
+        ? "preserves a shorter explicit subject deadline after an early reply timer"
+        : "turns an inherited deadline into ExpectationFailed after an early reply timer",
+      () =>
+        Effect.gen(function*() {
+          const timer = earlyReplyClock()
+          const browser = yield* makeBrowser
+          const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { replyClock: timer.clock })
+          const noReplyAt: Array<number> = []
+          const adapter = BoundedAdapter.make({
+            cookies: () =>
+              client.root.send(Page.enable()).pipe(
+                Effect.mapError((error) => {
+                  if (error.reason._tag === "NoReply") noReplyAt.push(timer.reply.now())
+                  return new Adapter.AdapterError({ reason: { _tag: "Protocol", error } })
+                })
+              )
+          } as unknown as Adapter.AdapterConnection)
+          const started = timer.reply.now()
+          const subject = adapter.cookies("context" as never).pipe(Operation.named("subject"))
+          const error = yield* Expect.that(
+            shorter ? subject.pipe(Deadline.within("100 millis")) : subject,
+            Condition.make("never", () => false)
+          ).pipe(
+            Deadline.within("250 millis"),
+            Effect.provideService(BrowserClock.CurrentClock, timer.operation),
+            Effect.flip
+          )
+          if (shorter) {
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.phase, "resolving")
+            assert.strictEqual(error.operation, "Expect.that")
+          } else {
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.deepStrictEqual(error.history.map((entry) => entry.value), [
+              { error: "a check was still running at the deadline" }
+            ])
+          }
+          assert.deepStrictEqual(noReplyAt, [started + (shorter ? 100 : 250) * 1e6])
+          assert.isAbove(timer.sleeps(), 1, "the protocol timer must re-check its clock")
+        })
+    )
+  }
+})
+
 describe("ProtocolClient", () => {
+  const click = () =>
+    ["mouseMoved", "mousePressed", "mouseReleased"].map((type) =>
+      Input.dispatchMouseEvent({ type: type as "mouseMoved" | "mousePressed" | "mouseReleased", x: 10, y: 20 })
+    )
+
+  for (const terminal of ["success", "failure", "sessionEnded"] as const) {
+    it.effect(`reports an abandoned resource command's ${terminal} exactly once`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+        const session = yield* attach(browser, client, "S1")
+        const outcomes: Array<string> = []
+        const waiting = yield* Effect.forkScoped(
+          session.send(Page.startScreencast()).pipe(
+            Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+              outcomes.push(outcome)
+            }),
+            Protocol.withLateReplyHandler(() => Effect.void)
+          )
+        )
+        const command = yield* browser.next
+        yield* Fiber.interrupt(waiting)
+        assert.deepStrictEqual(outcomes, [])
+        if (terminal === "sessionEnded") {
+          yield* browser.receive({ method: "Target.detachedFromTarget", params: { sessionId: "S1", targetId: "T-S1" } })
+        } else {
+          yield* browser.receive(
+            terminal === "success"
+              ? { id: command.id, sessionId: "S1", result: {} }
+              : { id: command.id, sessionId: "S1", error: { code: -32000, message: "rejected" } }
+          )
+        }
+        yield* browser.delivered
+        assert.deepStrictEqual(outcomes, [terminal])
+        yield* browser.receive({ id: command.id, sessionId: "S1", result: {} })
+        yield* browser.receive({ method: "Target.detachedFromTarget", params: { sessionId: "S1", targetId: "T-S1" } })
+        yield* browser.delivered
+        assert.deepStrictEqual(outcomes, [terminal])
+      }))
+  }
+
+  it.effect("does not overwrite a reply outcome when its transport write fails afterward", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const written = yield* Deferred.make<void, Transport.TransportError>()
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: (message) => browser.transport.send(message).pipe(Effect.andThen(Deferred.await(written)))
+      }, CdpWire.wire)
+      const outcomes: Array<string> = []
+      const waiting = yield* Effect.forkScoped(Effect.exit(
+        client.root.send(Page.startScreencast()).pipe(
+          Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+            outcomes.push(outcome)
+          })
+        )
+      ))
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* browser.delivered
+      yield* Deferred.fail(
+        written,
+        new Transport.TransportError({
+          reason: new Transport.ConnectionLost({ initiator: "remote", description: "write failed after reply" })
+        })
+      )
+      assert(Exit.isFailure(yield* Fiber.join(waiting)))
+      assert.deepStrictEqual(outcomes, ["success"])
+    }))
+
+  it.effect("records a successful command outcome before its waiter consumes the result", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const outcomes: Array<string> = []
+      const waiting = yield* Effect.forkScoped(
+        client.root.send(Page.startScreencast()).pipe(
+          Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
+            outcomes.push(outcome)
+          }),
+          Effect.tap(() => Effect.sync(() => assert.deepStrictEqual(outcomes, ["success"])))
+        )
+      )
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(waiting)
+    }))
+
+  it.effect("reports success and error reply receipt sequences only to the requesting hook", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const receipts: Array<number> = []
+      const observe = (received: number) => {
+        receipts.push(received)
+      }
+      yield* browser.receive({ method: "Page.loadEventFired", params: { timestamp: 0 } })
+      yield* browser.delivered
+      const success = yield* Effect.forkScoped(
+        client.root.sendSequenced(Page.enable()).pipe(
+          Effect.provideService(ProtocolClient.ReplyReceived, observe)
+        )
+      )
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      assert.strictEqual((yield* Fiber.join(success)).received, 2)
+      assert.deepStrictEqual(receipts, [2])
+      const without = yield* Effect.forkScoped(client.root.sendSequenced(Page.enable()))
+      yield* browser.receive({ id: (yield* browser.next).id, result: {} })
+      assert.strictEqual((yield* Fiber.join(without)).received, 3)
+      assert.deepStrictEqual(receipts, [2])
+      const failure = yield* Effect.forkScoped(
+        client.root.send(Page.enable()).pipe(
+          Effect.provideService(ProtocolClient.ReplyReceived, observe),
+          Effect.exit
+        )
+      )
+      yield* browser.receive({ id: (yield* browser.next).id, error: { code: -32000, message: "native failure" } })
+      assert.strictEqual(reasonOf(yield* Fiber.join(failure))._tag, "Rejected")
+      assert.deepStrictEqual(receipts, [2, 4])
+    }))
+
+  it.effect("orders transport sends even when one suspends, and waits for every out-of-order reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mouseMoved") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(attempts, ["mouseMoved"])
+      yield* Deferred.succeed(proceed, undefined)
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      assert.deepStrictEqual(sent.map((message) => message.params?.type), [
+        "mouseMoved",
+        "mousePressed",
+        "mouseReleased"
+      ])
+      for (const message of sent.slice(1).reverse()) yield* browser.receive({ id: message.id, result: {} })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* browser.receive({ id: sent[0]!.id, result: {} })
+      yield* Fiber.join(fiber)
+    }))
+
+  it.effect("a rejected reply still lets every send finish, so a press never goes without its release", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const first = yield* browser.next
+      yield* Deferred.await(entered)
+      yield* browser.receive({ id: first.id, error: { code: -32000, message: "rejected" } })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* Deferred.succeed(proceed, undefined)
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "Rejected")
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }))
+
+  it.effect("a partial transport failure stops unsent commands and abandons earlier replies", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            return yield* Effect.fail(
+              new Transport.TransportError({
+                reason: new Transport.ConnectionLost({ initiator: "remote", description: "send failed" })
+              })
+            )
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const first = yield* browser.next
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "SessionEnded")
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
+      yield* browser.receive({ id: first.id, result: {} })
+      yield* browser.delivered
+      assert.strictEqual(yield* browser.pending, 0)
+    }))
+
+  it.effect("interruption during a suspended send finishes every send, then stops waiting", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const proceed = yield* Deferred.make<void>()
+      const attempts: Array<string> = []
+      const client = yield* ProtocolClient.make({
+        ...browser.transport,
+        send: Effect.fnUntraced(function*(message: string) {
+          const type = JSON.parse(message).params.type
+          attempts.push(type)
+          if (type === "mousePressed") {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(proceed)
+          }
+          yield* browser.transport.send(message)
+        })
+      }, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const interrupted = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.isUndefined(interrupted.pollUnsafe())
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
+      yield* Deferred.succeed(proceed, undefined)
+      yield* Fiber.join(interrupted)
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }))
+
+  it.effect("interruption while waiting for replies abandons them all without poisoning the next command", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      yield* Fiber.interrupt(fiber)
+      for (const message of sent) yield* browser.receive({ id: message.id, result: {} })
+      const next = yield* client.root.send(Page.enable()).pipe(Effect.forkChild)
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(next)
+    }))
+
+  it.effect("an ordered batch timeout abandons all replies without poisoning the next command", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const fiber = yield* client.root.sendOrdered(click()).pipe(
+        Protocol.withCommandTimeout("200 millis"),
+        Effect.forkChild
+      )
+      const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
+      assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "NoReply")
+      for (const message of sent) yield* browser.receive({ id: message.id, result: {} })
+      const next = yield* client.root.send(Page.enable()).pipe(Effect.forkChild)
+      const command = yield* browser.next
+      yield* browser.receive({ id: command.id, result: {} })
+      yield* Fiber.join(next)
+      assert.strictEqual(yield* browser.pending, 0)
+    }))
+
   it.effect("folds an event before publishing it", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
@@ -301,6 +681,46 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(ProtocolClient.valuesAt(result, "/result/*/get/objectId"), ["B"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({ targetId: "T" }, "/targetId"), ["T"])
       assert.deepStrictEqual(ProtocolClient.valuesAt({}, "/exceptionDetails/exception/objectId"), [])
-      assert.strictEqual(ProtocolClient.utf8Length("aé😀"), 1 + 2 + 4)
+      // Code generation validates pointers with their JSON-pointer escapes decoded, so they must be followed the same way
+      assert.deepStrictEqual(ProtocolClient.valuesAt({ "a/b": { "c~d": "E" } }, "/a~1b/c~0d"), ["E"])
+      assert.strictEqual(Ingestion.utf8Length("aé😀"), 1 + 2 + 4)
     }))
+})
+
+describe("Wire.decode", () => {
+  const wires = { cdp: CdpWire.wire, bidi: BidiWire.wire, webkit: WebKitWire.wire }
+  const fromTarget = (message: string) =>
+    JSON.stringify({ pageProxyId: "5", method: "Target.dispatchMessageFromTarget", params: { targetId: "t", message } })
+
+  it("fails, without throwing, on a message that isn't a JSON object, on every wire", () => {
+    for (const [name, wire] of Object.entries(wires)) {
+      for (const message of ["{", "[]", "1", "null"]) {
+        assert(Result.isFailure(wire.decode(message)), `${name} decodes ${message}`)
+      }
+    }
+  })
+
+  it("fails on an envelope that is neither a reply nor an event, saying why", () => {
+    assert.deepStrictEqual(
+      CdpWire.wire.decode("{\"id\":1,\"error\":\"nope\"}"),
+      Result.fail("reply 1 has a malformed error")
+    )
+    assert.deepStrictEqual(BidiWire.wire.decode("{\"type\":\"other\"}"), Result.fail("an envelope of type other"))
+    assert(Result.isFailure(WebKitWire.wire.decode(fromTarget("{"))))
+  })
+
+  it("unwraps a WebKit target's event to its session", () => {
+    const decoded = WebKitWire.wire.decode(
+      fromTarget(JSON.stringify({ method: "Page.loadEventFired", params: { timestamp: 1 } }))
+    )
+    assert.deepStrictEqual(
+      decoded,
+      Result.succeed<ProtocolClient.Incoming>({
+        _tag: "Event",
+        key: WebKitWire.targetKey("5", "t"),
+        method: "Page.loadEventFired",
+        params: { timestamp: 1 }
+      })
+    )
+  })
 })

@@ -7,12 +7,13 @@
  */
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import { now } from "./adapter.ts"
-import { isAbsolute } from "./paths.ts"
+import { dirname, isAbsolute } from "./paths.ts"
 import type * as Runtime from "./runtime.ts"
 
 /** The monotonic clock, anchored to wall time when a recording starts. */
@@ -54,7 +55,7 @@ export const resolve = (
   })
 }
 
-/** Writes a file, which its directory must already hold room for: nothing is created on the way. */
+/** Writes a file, creating the directories on the way to it. */
 export const write = (
   runtime: Runtime.Runtime,
   path: FilePath.Local,
@@ -62,11 +63,22 @@ export const write = (
 ): Effect.Effect<FilePath.Local, WriteFailure> =>
   Option.match(runtime.fileSystem, {
     onNone: () => Effect.fail({ path, hint: "The browser's layer was built without Effect's FileSystem" }),
-    onSome: (fs) =>
-      fs.writeFile(path, content).pipe(
-        Effect.as(path),
-        Effect.mapError((error): WriteFailure => ({ path, hint: error.message, cause: error }))
+    onSome: (fs) => {
+      const directory = dirname(path)
+      return fs.makeDirectory(directory, { recursive: true }).pipe(
+        Effect.mapError((error): WriteFailure => ({
+          path,
+          hint: `Its directory ${directory} couldn't be created: ${error.message}`,
+          cause: error
+        })),
+        Effect.andThen(
+          fs.writeFile(path, content).pipe(
+            Effect.mapError((error): WriteFailure => ({ path, hint: error.message, cause: error }))
+          )
+        ),
+        Effect.as(path)
       )
+    }
   })
 
 /** A zip of files, deflated but for those already compressed. */
@@ -79,35 +91,9 @@ export const zip = (
     })
   )).pipe(
     Stream.pipeThroughChannel(Zip.encode()),
-    Stream.runCollect,
-    Effect.map((chunks) => {
-      const all = Array.from(chunks)
-      const bytes = new Uint8Array(all.reduce((size, chunk) => size + chunk.length, 0))
-      let at = 0
-      for (const chunk of all) {
-        bytes.set(chunk, at)
-        at += chunk.length
-      }
-      return bytes
-    }),
+    Stream.mkUint8Array,
     Effect.mapError((error): WriteFailure => ({ path: "", hint: `The zip couldn't be encoded: ${error.message}` }))
   )
 
-const extensions: Readonly<Record<string, string>> = {
-  "text/html": "html",
-  "text/css": "css",
-  "text/plain": "txt",
-  "text/javascript": "js",
-  "application/javascript": "js",
-  "application/json": "json",
-  "image/png": "png",
-  "image/jpeg": "jpeg",
-  "image/gif": "gif",
-  "image/svg+xml": "svg",
-  "image/webp": "webp",
-  "font/woff2": "woff2",
-  "font/woff": "woff"
-}
-
-/** A file extension for a MIME type; `bin` for one not listed. */
-export const extension = (mimeType: string): string => extensions[mimeType.split(";")[0]!.trim().toLowerCase()] ?? "bin"
+/** A file extension for a MIME type, as Effect's `Mime` gives it; `bin` for one it doesn't know. */
+export const extension = (mimeType: string): string => Option.getOrElse(Mime.getExtension(mimeType), () => "bin")

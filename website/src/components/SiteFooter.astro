@@ -1,0 +1,62 @@
+---
+// The cover's ivory at the end of every page, in its dark inks even on night paper.
+import Mark from "./Mark.astro"
+---
+
+<footer class="site-footer border-t border-ink">
+  <div class="mx-auto max-w-6xl px-6 pt-10 pb-20 md:px-14 md:pt-12">
+    <div class="grid gap-10 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:gap-16">
+      <div>
+        <a class="inline-flex items-center gap-3 font-display text-[2rem] leading-none" href="/">
+          <Mark size={32} /> Strider
+        </a>
+        <p class="mt-4 max-w-64 text-[1.05rem] text-labels">Browser automation, typed end to end.</p>
+      </div>
+      <div class="grid grid-cols-2 gap-8">
+        <nav aria-labelledby="footer-docs">
+          <h2 class="label" id="footer-docs">Documentation</h2>
+          <ul class="mt-3 space-y-2 font-sans text-sm">
+            <li><a href="/docs">Guide</a></li>
+            <li><a href="/docs/scenarios">Scenarios</a></li>
+            <li><a href="/docs/api">API reference</a></li>
+            <li><a href="/sitemap">Sitemap</a></li>
+          </ul>
+        </nav>
+        <nav aria-labelledby="footer-project">
+          <h2 class="label" id="footer-project">Project</h2>
+          <ul class="mt-3 space-y-2 font-sans text-sm">
+            <li><a href="https://github.com/usestrider/strider">GitHub</a></li>
+            <li><a href="https://github.com/usestrider/strider/issues">Report an issue</a></li>
+            <li><a href="https://github.com/usestrider/strider/blob/main/LICENSE">MIT license</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+    <div class="mt-10 flex flex-wrap justify-between gap-x-8 gap-y-3 border-t border-[var(--hairline)] pt-4 font-mono text-[0.7rem] text-labels">
+      <p>TypeScript · Chromium · Firefox · WebKit</p>
+      <p>Built with <a class="underline underline-offset-4" href="https://effect.website">Effect</a>.</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    --paper: var(--plate);
+    --ink: #1a1a1a;
+    --labels: var(--plate-labels);
+    --hairline: rgb(26 26 26 / 0.22);
+    background: var(--paper);
+    color: var(--ink);
+    color-scheme: light;
+  }
+
+  a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  a:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 4px;
+  }
+</style>

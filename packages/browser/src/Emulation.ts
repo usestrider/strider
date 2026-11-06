@@ -6,6 +6,13 @@
  * untouched. Removing an override restores the previous value when it's known and your access allows, and a page's
  * overrides win over its context's.
  *
+ * On Chromium, releasing the last viewport override clears emulation and waits for the original renderer dimensions
+ * within a fresh `Deadline.DefaultBudget` (30 seconds by default). It measures in an isolated world; page-defined
+ * globals cannot supply the dimensions. A missing baseline does not prevent applying a viewport. If the original
+ * dimensions are unknown, a restore fails, or the wait reaches its deadline, cleanup logs a warning and continues
+ * without failing the scope. An ended session is quiet. A native window resize or navigation during the override
+ * can prevent verification of the original dimensions.
+ *
  * @stability unstable
  * @since 0.1.0
  */
@@ -15,11 +22,41 @@ import * as Schema from "effect/Schema"
 /**
  * Schema for a BCP 47 locale, such as `de-DE`.
  *
+ * **Details**
+ *
+ * It decodes a string that `Intl.getCanonicalLocales` accepts as one language tag, and keeps it as written. `"de-DE"`
+ * and `"zh-Hant-TW"` pass; `"not a locale"` and `""` fail.
+ *
+ * **Example** (Checking a string)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser"
+ * import { Result, Schema } from "effect"
+ *
+ * const ok = Emulation.Locale.make("de-DE") // an Emulation.Locale
+ * const bad = Schema.decodeUnknownResult(Emulation.Locale)("not a locale") // a failed Result
+ * console.log(ok, Result.isFailure(bad))
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const Locale = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/Locale"))
+export const Locale = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (input: string) => {
+        try {
+          return Intl.getCanonicalLocales(input).length === 1
+        } catch {
+          return false
+        }
+      },
+      { expected: "a BCP 47 language tag, such as de-DE" }
+    )
+  ),
+  Schema.brand("~@usestrider/browser/Emulation/Locale")
+)
 
 /**
  * A BCP 47 locale, such as `de-DE`.
@@ -33,11 +70,42 @@ export type Locale = typeof Locale.Type
 /**
  * Schema for an IANA time zone, such as `Europe/Berlin`.
  *
+ * **Details**
+ *
+ * It decodes a name that `Intl.DateTimeFormat` accepts as a `timeZone`, and keeps it as written. `"Asia/Tokyo"` and
+ * `"UTC"` pass; `"Mars/Olympus"` fails.
+ *
+ * **Example** (Checking a string)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser"
+ * import { Result, Schema } from "effect"
+ *
+ * const ok = Emulation.TimeZoneId.make("Europe/Berlin") // an Emulation.TimeZoneId
+ * const bad = Schema.decodeUnknownResult(Emulation.TimeZoneId)("Mars/Olympus") // a failed Result
+ * console.log(ok, Result.isFailure(bad))
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const TimeZoneId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Emulation/TimeZoneId"))
+export const TimeZoneId = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (input: string) => {
+        try {
+          new Intl.DateTimeFormat(undefined, { timeZone: input })
+          return true
+        } catch {
+          return false
+        }
+      },
+      { expected: "an IANA time zone, such as Europe/Berlin" }
+    )
+  ),
+  Schema.brand("~@usestrider/browser/Emulation/TimeZoneId")
+)
 
 /**
  * An IANA time zone, such as `Europe/Berlin`.
@@ -50,6 +118,19 @@ export type TimeZoneId = typeof TimeZoneId.Type
 
 /**
  * The viewport, in CSS pixels.
+ *
+ * **Details**
+ *
+ * Launched stock WebKit sizes a native window and confirms the page dimensions immediately and on resize
+ * events for up to five seconds, capped by the operation deadline. A final measurement at that limit can still
+ * succeed; otherwise `Reason.ViewportMismatch` records requested and measured sizes. A confirmation is an
+ * observation, and later window-manager or user changes can change the size again.
+ *
+ * Failed changes attempt confirmed restoration under a separate five-second cleanup budget; restoration
+ * failure remains visible as a defect alongside the original failure. Ordinary scope release is non-failing:
+ * confirmed gone pages need no restoration, and other release failures produce warnings. Cleanup reserves its
+ * final second for measurement within the same five-second budget. Creation defaults are confirmed when a
+ * page is created by an operation. Popup defaults are attempted but unconfirmed until explicitly emulated.
  *
  * **Example** (A phone-sized page)
  *

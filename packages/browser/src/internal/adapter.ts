@@ -5,7 +5,9 @@
  *   model, in L1's ids, delivered to a sink in receive order, before the events are published. L1's fold
  *   applies them to its entities and never sees a protocol event.
  * - **Ids.** The adapter mints every id when it first correlates something, per connection, and keeps the
- *   tables that map them to protocol ids. An id from another connection is `Foreign`.
+ *   tables that map them to protocol ids. An id this connection minted whose target has ended is `Gone`: L1 can
+ *   name one in the moment between its end and L1 hearing of it. Only an id this connection never minted is
+ *   `Foreign`, which is a bug in L1 (`adapterKit.ts`, Ids).
  * - **Operations.** Everything L1 asks of a backend, in L1's ids: contexts and pages, navigation, realms and
  *   evaluation, input, obligations, declarations, capture, storage, permissions, bodies and files.
  *
@@ -28,13 +30,18 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
+import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
+import type * as CdpConnection from "../protocol/CdpConnection.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import type * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
+import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BrowserClock from "./browserClock.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -98,8 +105,7 @@ export const makeIds = (): Ids => {
 }
 
 /** Now, on the live monotonic clock, in nanoseconds. */
-export const now = (): MonotonicInstant.MonotonicInstant =>
-  Math.round(performance.now() * 1e6) as MonotonicInstant.MonotonicInstant
+export const now: () => MonotonicInstant.MonotonicInstant = BrowserClock.now
 
 // ── Facts ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -116,6 +122,7 @@ export type PageOrigin =
 export type DocumentCreatedBy =
   | { readonly _tag: "InitialBlank" }
   | { readonly _tag: "Navigation"; readonly navigation: PageNavigation.Id }
+  | { readonly _tag: "UnattributedErrorPage" }
   | { readonly _tag: "ErrorPage"; readonly navigation: PageNavigation.Id }
   | { readonly _tag: "Restored"; readonly navigation: PageNavigation.Id; readonly from: Target.DocumentId }
   | { readonly _tag: "Adopted" }
@@ -209,7 +216,7 @@ export type Fact =
     readonly context: UserContext.Id
     readonly kind: "tab" | "popup"
     readonly origin: PageOrigin
-    readonly url: string
+    readonly url: Url.Url
   }
   | { readonly _tag: "PageReady"; readonly page: Target.NavigableId }
   | { readonly _tag: "PageInitializationFailed"; readonly page: Target.NavigableId; readonly description: string }
@@ -229,7 +236,7 @@ export type Fact =
     readonly _tag: "DocumentCommitted"
     readonly document: Target.DocumentId
     readonly navigable: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly origin: string
     readonly createdBy: DocumentCreatedBy
     /** The document it replaced, which ended with `DocumentReplaced`. */
@@ -239,7 +246,7 @@ export type Fact =
   | {
     readonly _tag: "DocumentUrlChanged"
     readonly document: Target.DocumentId
-    readonly url: string
+    readonly url: Url.Url
     readonly navigation: PageNavigation.Id
     readonly via: "fragment" | "historyApi"
   }
@@ -263,7 +270,7 @@ export type Fact =
       | {
         readonly _tag: "Worker"
         readonly worker: WorkerKind
-        readonly url: string
+        readonly url: Url.Url
         readonly page: Option.Option<Target.NavigableId>
         /** The worker's context, when the backend says: a page's, or a shared or service worker's own. */
         readonly context: Option.Option<UserContext.Id>
@@ -275,7 +282,7 @@ export type Fact =
     readonly _tag: "NavigationStarted"
     readonly navigation: PageNavigation.Id
     readonly navigable: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly initiatedAs: InitiatedAs
   }
   | {
@@ -283,6 +290,12 @@ export type Fact =
     readonly navigation: PageNavigation.Id
     readonly outcome: NavigationOutcome
     readonly evidence: string
+  }
+  /** Associates an already observed error document with an already ended navigation; never commits it again. */
+  | {
+    readonly _tag: "ErrorDocumentAttributed"
+    readonly document: Target.DocumentId
+    readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
@@ -315,7 +328,7 @@ export type Fact =
     readonly _tag: "ConnectionOpened"
     readonly connection: NetworkConnection.Id
     readonly kind: NetworkConnection.Kind
-    readonly url: string
+    readonly url: Url.Url
     readonly navigable: Option.Option<Target.NavigableId>
   }
   | {
@@ -341,7 +354,7 @@ export type Fact =
     readonly _tag: "DownloadStarted"
     readonly download: Download.Id
     readonly page: Target.NavigableId
-    readonly url: string
+    readonly url: Url.Url
     readonly suggestedFilename: string
   }
   | {
@@ -387,8 +400,12 @@ export type RemoteValue =
     readonly handle?: HandleId | undefined
     readonly value?: ReadonlyArray<readonly [RemoteValue | string, RemoteValue]> | undefined
   }
-  | { readonly type: "regexp"; readonly value: { readonly pattern: string; readonly flags?: string | undefined } }
-  | { readonly type: "date"; readonly value: string }
+  | {
+    readonly type: "regexp"
+    readonly handle?: HandleId | undefined
+    readonly value: { readonly pattern: string; readonly flags?: string | undefined }
+  }
+  | { readonly type: "date"; readonly handle?: HandleId | undefined; readonly value: string }
   | {
     readonly type: "node"
     readonly handle?: HandleId | undefined
@@ -436,8 +453,9 @@ export interface EvaluationCall {
   /** `"value"` serializes the result; `"handle"` keeps objects as handles the caller must release. */
   readonly result: "value" | "handle"
   /**
-   * The object group a handle result joins: `releaseHandles` given every handle of a group releases them in one
-   * command (QUIRKS.md, Q132).
+   * A backend hint: the object group a handle result joins, so that `releaseHandles` given every handle of a group
+   * releases them in one command (QUIRKS.md, Q132). It changes how handles are released, never what they are: a
+   * backend without groups (BiDi) ignores it, and L1 still releases each handle it holds.
    */
   readonly group?: string | undefined
   /** Grants transient user activation for the call. */
@@ -698,6 +716,7 @@ export interface Cookie {
 
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<{ readonly server: string; readonly bypass: ReadonlyArray<string> }>
   readonly acceptInsecureCerts: boolean
 }
@@ -741,6 +760,14 @@ export type TargetDescription = Target.Description
 
 /** Why an adapter operation failed, beyond the protocol's own errors. */
 export type AdapterErrorReason =
+  | Reason.BackendFailure
+  | Page.CaptureInvalidated
+  | {
+    readonly _tag: "ViewportMismatch"
+    readonly requested: { readonly width: number; readonly height: number }
+    readonly actual: { readonly width: number; readonly height: number }
+    readonly hint: string
+  }
   | { readonly _tag: "Gone"; readonly target: TargetDescription; readonly reason: Target.CloseReason }
   | { readonly _tag: "Unsupported"; readonly capability: string; readonly hint: string }
   | { readonly _tag: "Foreign"; readonly id: string }
@@ -751,6 +778,12 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
+      case "BackendFailure":
+        return reason.message
+      case "CaptureInvalidated":
+        return reason.message
+      case "ViewportMismatch":
+        return `Viewport ${reason.requested.width}x${reason.requested.height} was not confirmed; measured ${reason.actual.width}x${reason.actual.height} (${reason.hint})`
       case "Gone":
         return `${reason.target._tag} gone: ${reason.reason._tag}`
       case "Unsupported":
@@ -791,13 +824,41 @@ export interface ConnectOptions {
    * Whether this connection owns the whole browser, as when it launched it. An owned browser pauses every new
    * page before its scripts run; an attached one pauses only frames and workers of pages it controls.
    */
+  readonly claimClient?: Effect.Effect<CdpConnection.CdpConnection, AdapterError, Scope.Scope> | undefined
+  readonly browserIdentity?: string | undefined
   readonly ownership: "launched" | "attached"
 }
 
 /** One connected backend: what L1 asks of it. */
+export interface ClaimIdentity {
+  readonly browser: string
+  readonly context: string
+  readonly tab: string
+}
+
+export interface Claims {
+  /** Dismisses only the identified live prompt on its original session; never accepts. */
+  readonly dismiss: (page: Target.NavigableId, prompt: Dialog.PromptId) => Effect.Effect<boolean, AdapterError>
+  readonly dialogs: (
+    page: Target.NavigableId
+  ) => Effect.Effect<ReadonlyArray<{ readonly kind: Page.Prompt["kind"]; readonly message: string }>, AdapterError>
+  readonly browser: string
+  readonly page: (page: Target.NavigableId) => Effect.Effect<ClaimIdentity, AdapterError>
+  readonly context: (context: UserContext.Id) => Effect.Effect<string, AdapterError>
+  readonly findPage: (identity: ClaimIdentity) => Effect.Effect<Target.NavigableId | undefined, AdapterError>
+  readonly findContext: (context: string) => Effect.Effect<UserContext.Id | undefined, AdapterError>
+}
+
 export interface AdapterConnection {
+  readonly ownership: "launched" | "attached"
+  readonly claims?: Claims | undefined
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
+  /**
+   * A backend hint, which no operation depends on: how widely the backend pauses new targets before their
+   * scripts run (PROTOCOL.md, Pause-on-start granularity). Whatever it says, a page is ready, with the declarations
+   * in force, when `createPage` returns; what a backend can't pause is in its capabilities (`pauseOnStart.*`).
+   */
   readonly pauseScope: PauseScope
   /** The default context: it exists for the whole connection. */
   readonly defaultContext: UserContext.Id
@@ -808,9 +869,17 @@ export interface AdapterConnection {
   readonly createUserContext: (
     options: UserContextOptions
   ) => Effect.Effect<UserContext.Id, AdapterError>
+  /**
+   * Removes a context, returning once the browser has answered; its end, after its pages', is `UserContextRemoved`,
+   * which L1 waits for (`Model.remove`). A second call while the removal is under way does nothing.
+   */
   readonly removeUserContext: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   /** Creates a page and waits until it is ready: initialized, with the declarations in force. */
   readonly createPage: (context: UserContext.Id) => Effect.Effect<Target.NavigableId, AdapterError>
+  /**
+   * Closes a page, returning once the browser has answered, or once the command is sent where the reply waits on a
+   * beforeunload prompt; its end is the page's fact, which L1 waits for.
+   */
   readonly closePage: (
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
@@ -870,6 +939,13 @@ export interface AdapterConnection {
   ) => Effect.Effect<RegistrationId, AdapterError, Scope.Scope>
 
   // Capture, storage, network, files
+  /** Optional document guard, enclosing L1 preparation as well as native dispatch. */
+  readonly captureGuard?: {
+    readonly run: <A, E, R>(
+      page: Target.NavigableId,
+      effect: Effect.Effect<A, E, R>
+    ) => Effect.Effect<A, E | AdapterError, R>
+  } | undefined
   readonly screenshot: (
     page: Target.NavigableId,
     options: ScreenshotOptions

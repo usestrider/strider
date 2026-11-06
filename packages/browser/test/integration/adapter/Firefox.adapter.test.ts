@@ -8,7 +8,7 @@ import * as BidiWire from "../../../src/internal/bidiWire.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import { assertPinned, firefox } from "../browsers.ts"
 import { fixtures, record } from "../record.ts"
-import { conformance } from "./conformance.ts"
+import { conformance, viewportRestoration } from "./conformance.ts"
 import { engine } from "./engine.ts"
 import type { Backend } from "./harness.ts"
 
@@ -28,4 +28,5 @@ const backend: Backend = {
 }
 
 conformance(backend)
+viewportRestoration(backend)
 engine(backend)

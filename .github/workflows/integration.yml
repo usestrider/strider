@@ -63,13 +63,58 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install
         run: nix develop --command pnpm install --frozen-lockfile
+      # Ubuntu's core handler is given a fixed huge limit, whatever the process's own, so a crashed renderer stays
+      # dumping past the crash tests' deadlines: %c gives it the real one
+      - name: Respect core limits
+        run: |
+          sudo sysctl -w "kernel.core_pattern=$(sed 's/ 9223372036854775808 / %c /' /proc/sys/kernel/core_pattern)"
+          cat /proc/sys/kernel/core_pattern
       - name: Integration tests
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # The integration tests attach nothing (TestRun is for programs' tests), so the log is what a failure keeps
+      # Failure-only protocol and owned browser process traces accompany the log.
       - name: Keep the log
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-log
-          path: integration.log
+          path: |
+            integration.log
+            .data/integration-failures/
+          include-hidden-files: true
+          retention-days: 14
+
+  integration-macos:
+    needs: [changed, integration]
+    # Keep macOS findings visible even when Linux fails; respect the nightly unchanged-main gate.
+    if: always() && needs.changed.outputs.run == 'true' && needs.integration.result != 'cancelled'
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Without this, setup-node caches the packageManager's store, which needs pnpm before it's installed
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install pnpm
+        run: npm install --global pnpm@12.9.0
+      - name: Install TLS fixture tool
+        run: brew install openssl@3
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
+      - name: macOS Chromium and Firefox integration tests
+        run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
+      - name: Keep the macOS log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-macos-log
+          path: |
+            integration-macos.log
+            .data/integration-failures/
+          include-hidden-files: true
           retention-days: 14

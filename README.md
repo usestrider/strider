@@ -1,144 +1,351 @@
 # Strider
 
-*Design stage, revision 5 (2026-10-18). The protocol layer is built for the CDP, BiDi and WebKit backends, and the slices run through all three layers on each: launch, open a page, navigate, click and expect; every event module, through one mechanism; every action, read and expectation, with the keyboard and the mouse; and every declaration: routes, init scripts, emulation, grants and the page clock (Status).*
+Browser automation for [Effect](https://effect.website): scripts, tests and agents that drive Chromium, Firefox or
+WebKit. Strider speaks each browser's protocol directly (the Chrome DevTools Protocol, WebDriver BiDi and WebKit's
+inspector protocol), so it drives browsers as they're installed, with no driver or patched build beside them.
 
-The package is `@usestrider/browser` (the `usestrider` org on npm and GitHub), and the command-line tool is `strider`.
+**Documentation: [usestrider.dev](https://usestrider.dev)**
 
-An Effect-native browser automation library that speaks browser protocols directly (CDP first, then WebDriver BiDi, then the WebKit inspector protocol). It is not a better Playwright. The aim is better browser automation, written in better TypeScript with Effect, and better for agents. Prior art, Playwright included, is evidence of what works and what breaks, never a reason on its own. Its priorities, in order:
-
-1. **Ergonomics, for people and for agents.** Call sites read like the task; mistakes are hard to write; errors explain themselves.
-2. **Correctness under concurrency and interruption.** Scoped lifetimes, typed end reasons, no hangs, no silent replays.
-3. **Breadth.** Several backends behind one model, with capabilities stated per instance.
-4. **Performance and stealth.** Features are enabled on demand, and stealth is an architectural option.
-
-## Documents
-
-Each layer document has the same shape: purpose, top data models, interface sketch, key contracts, open questions. They aim for similar depth, and none contains implementation detail. These documents keep the decisions, not the debate. The principles and architectural decisions behind them, with the alternatives rejected, are in [docs/decisions.md](docs/decisions.md).
-
-| Layer | Document | What it covers |
-|---|---|---|
-| — | [README.md](README.md) | goals, principles, cross-cutting decisions, guarantees |
-| L2 | [API.md](API.md) | the public API: entry points, pages, locators, actions, expectations, state and events, network, clock, agents, testing, errors, call sites |
-| L1 | [CONCEPTS.md](CONCEPTS.md) | the native browser model: identities, data models, lifetimes, contracts |
-| — | [packages/browser/](packages/browser/) | the package: the whole public API as declarations (the sketch), 48 modules plus subpaths, Effect's JSDoc contract on every declaration, type tests, runtime tests, type-checked examples and acceptance scenarios; [INDEX.md](packages/browser/INDEX.md) lists every declaration (`pnpm all`) |
-| — | [packages/tools/](packages/tools/) | private tools: the vendored JSDoc checker, the example check, the API reference dataset, barrel codegen |
-| — | [website/](website/) | the documentation site, in Astro as effect.website is: guides, and the API reference rendered from the packages' sources and JSDoc |
-| — | [.agents/AGENTS.md](.agents/AGENTS.md) | instructions for agents working in this repository: layout, checks, conventions |
-| — | [CLI.md](CLI.md) | the command line: named sessions, commands, files, storage and forks, export |
-| L0 | [PROTOCOL.md](PROTOCOL.md) | transports, protocol clients, code generation, ingestion, backend adapters, capabilities |
-| — | [PROBES.md](PROBES.md) | conformance probes, hazard coverage, deterministic model tests |
-| — | [QUIRKS.md](QUIRKS.md) | weird behaviors found while building, browsers' and our own; closed, with new findings filed on the Rookery board |
-| — | [research/](research/) | prior-art notes (historical evidence) |
-| — | [docs/](docs/) | [decisions.md](docs/decisions.md): the principles and architectural decisions, and why; [conventions.md](docs/conventions.md): the Effect conventions the code follows |
-| — | [upstream/](upstream/) | drafts of proposals for upstream projects, for the maintainer to post |
-
-```
-L2  API       Browser · UserContext · Page · Locator · Expect · Watchable · event modules · Route · PageClock · Trace · Har · BrowserToolkit · TestRun · CurrentSession
-L1  Model     ids · navigables · documents · realms · navigations · requests · obligations · declarations · readiness
-L0  Protocol  transports · sessions · generated commands and events · ingestion · backend adapters · capabilities
+```sh
+pnpm add @usestrider/browser effect @effect/platform-node
 ```
 
-Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees call-site conveniences; L0 never decides policy.
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Layer } from "effect"
 
-## Principles
+const BrowserLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium"
+}).pipe(
+  Layer.provide(NodeServices.layer)
+)
 
-1. **Spec identity, not protocol identity.** The public model is keyed by navigable, document, realm, navigation and request, with ids minted by the library. Protocol ids (CDP targets, sessions, execution contexts) change on process swaps and stay inside the adapters.
-2. **Lifetimes are scopes with typed end reasons.** Three separate decisions govern every remote resource: how much we may do to it (access), whether we may destroy it (release policy), and which scope cleans it up (cleanup group). Anything with a lifecycle is acquired into a `Scope`.
-3. **Interruption stops waiting; it never pretends to cancel.** No protocol can cancel an in-flight command. Interrupting abandons the reply and runs compensations (release held input, resolve paused requests). Whether a mutation reached the browser is recorded as evidence.
-4. **State is folded before it is published.** Events update the model in order before anyone observes them. Losing integrity (overload, an undecodable lifecycle event) is an explicit failure, never a silent drop.
-5. **Waits look forward; reads look back.** A wait sees only what happens after it starts, so to catch what an action causes, start waiting before the action. What already happened is a separate read of a bounded log, never mixed into a wait. A wait that started too late says so in its timeout.
-6. **Obligations get exactly one decision.** Paused requests, dialogs and file choosers get one locally selected decision, a default when handlers fail, and tracked remote acknowledgement.
-7. **Capabilities belong to instances.** A missing capability is a typed `Unsupported` reason or a missing method, never a silent no-op.
-8. **Protocol features are demand-driven.** Domains and subscriptions are reference-counted (an `RcMap`), so a stealth configuration that never enables `Runtime` remains possible.
-9. **Declarations are acknowledged, timed and composed by fixed rules.** Init scripts, routes, overrides and clocks state the timing they need and fail rather than degrade. One precedence rule orders settings and handlers, and an ordered bundle orders scripts.
-10. **Small error channels, rich evidence.** An ordinary call fails with `TargetGone`, `Timeout` or its module's error. Detail lives in a `reason`, a class with its own fields, and a shared diagnostic envelope.
-11. **Secrets are protected in diagnostics, and export is explicit.** `Redacted` goes in, classified fields come out wrapped, and secret-bearing exports are deliberate operations.
-12. **If it doesn't have to be a function, it's a value.** A member with nothing to configure is a value: an `Effect` for operations (`page.title`, `tab.inspect`, `context.newPage`) or a property for pure derivations (`locator.first`). Settings are a trailing `options` parameter, as in Effect's own modules, so actions are calls (`button.click()`, `button.click({ button: "right" })`). Cross-cutting settings such as deadlines are dual combinators, not option fields. Anything with a lifecycle requires `Scope`.
-13. **Immutable by default; mutable state lives in a `Ref` and is read through an `Effect`.** Entities are immutable identity plus one `SubscriptionRef` of state. Snapshots, events and errors are immutable. Nothing that can change is exposed as a plain field, so every read happens at the moment its effect runs. A plain field on a live handle or entity is a claim that it never changes, so it carries a one-line justification.
-14. **Brand liberally.** Ids and meaningful strings and numbers are branded types with validating schemas, each in the module that owns it (`Url.Url`, `Url.Pattern`, `NetworkResponse.StatusCode`, `FilePath.Local`/`FilePath.Remote`, `Pixels.Css`, `Download.Id`, …). Outputs are always branded. Tokens are accepted back only in branded or opaque form, and are checked against their origin when used. These are produced values that only mean something relative to where they came from: ids, snapshot refs, registration handles. Other inputs require the brand where meanings could be confused, and otherwise parse plain strings at the boundary.
-15. **Unions of valid models; `Option` for what's truly optional.** Fields that only make sense together form a tagged union of valid shapes, so impossible states can't be built. Genuinely optional values are `Option`, never `?:`, `undefined` or `null`. Input option bags keep `?:` for "use the default", written `?: T | undefined` as Effect writes it, and their mutually exclusive alternatives are unions.
-16. **State is watchable; each event type is a module.** A `Watchable` reads now, streams changes (conflated, starting from the current value) and waits level-triggered. An event module (`Popup`, `Download`, `NetworkResponse`, …) has three verbs: `next` (subscribe now, await the first match later) and `stream` (every match from now on) subscribe eagerly; `history` reads a bounded log and never waits. Events report and handlers decide, and seeing an event acquires nothing.
-17. **No public fibers, no writable `Deferred`s or `Ref`s.** Callers own concurrency (`Effect.forkScoped`). The library exposes only read-only views of what it latches and stores.
-18. **Names encode behavior.** Verbs act, `read*`/`is*`/nouns read once, `Expect.to*` retries, `next`/`stream` subscribe to events, `handle` registers a deciding handler, `new*` creates, `*With(f)` takes a function, `with*` configures any effect, `layer*` provides a service (grammar in API.md).
-19. **Every scoped acquisition returns a handle.** Never `void`: registrations have `remove` and, where useful, state such as `hits`.
-20. **Every effect ends.** Waits run under the operation deadline, open-ended things are `Stream`s, and lifetime signals (`closed`) are the only exception.
-21. **Every error reason carries a hint.** The rendered message says what to do next.
-22. **One way to do each thing.** No aliases or parallel mechanisms. A convenience is allowed only at the dominant call site, and is documented as its expansion.
-23. **Explicit over implicit.** Nothing hidden may change behavior or add waiting: no magic delays, grace periods or heuristic windows by default. Such behavior is asked for in code (an `Expect`, a `waitFor`, a `next`, a named option). Helpers that make explicit behavior simpler are welcome, but they stay opt-in. Every default is stated where it is declared and recorded in the operation's span, and no helper changes a default on your behalf. Actionability waiting is the documented, adjustable contract of each action, not a heuristic.
+const program = Effect.scoped(Effect.gen(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com")
+  yield* page.getByRole("button", {
+    name: "Add to cart"
+  }).click()
+  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
+})).pipe(Effect.provide(BrowserLive))
+```
 
-## Cross-cutting decisions
+A launch runs the executable you name; Strider never finds or installs a browser.
+[`strider browsers`](https://usestrider.dev/docs/installation#a-browser) lists the browsers on your machine.
 
-### Access, ownership and cleanup
+## Why Strider
 
-| Resource | Access | Release policy | Cleanup group |
-|---|---|---|---|
-| Launched browser | control | close the process, then delete its temporary profile | the `Browser` layer |
-| Context or page created by the library | control | close / remove | the `Scope` it was acquired in |
-| Popup of an owned page | control | close | the `Scope` that acquired its opener |
-| Attached browser | — | disconnect only | the `Browser` layer |
-| Discovered page or the default context | observe; upgrade with `inspect` or `control` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
-| Popup of a leave-open page | observe | leave open | none |
+### Browser workflows that compose
 
-- **Access is typed.** `ObservedPage` exposes state and events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots and screenshots. `Page` adds input, navigation, main-world evaluation and declarations. Calling a control method on an inspected page is a compile error.
-- **Wider effects need wider access.** A declaration whose physical effect is wider than its target, such as a browser-global intercept on BiDi, needs explicit wider access. Without it the call fails with `NotPermitted`.
+Browser jobs use the same concurrency, services and scopes as the rest of your Effect application.
+Run up to two jobs at once here, with each job closing its page and isolated context on success, failure or interruption:
 
-### One deadline per operation
+```ts
+import { Browser, Deadline } from "@usestrider/browser"
+import { Effect } from "effect"
 
-Each user-visible operation has one monotonic deadline covering everything it does: queueing for input, setting up observation, resolving the locator, actionability, dispatch and the postcondition. Every command it sends the browser waits for its reply until that deadline, a cookie read or a declaration as much as a click. An explicit `Deadline.within` encloses everything inside it, and nested calls can only shorten it; an operation with no enclosing deadline gets the default budget (30 seconds, `Deadline.withDefaultBudget`). Cleanup gets its own bounded budget. Deadlines run on the clock the browser runs on: a real browser's live clock even inside `TestClock` tests, and Effect's clock for `Browser.layerTest`, whose timeline runs on it, and every option accepts `Duration.Input`.
+const pageTitle = Effect.fn("pageTitle")(function*(url: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(url)
+  return yield* page.title
+}, Effect.scoped) // Close this job's page and context when it ends.
 
-An operation started inside another is a step of it, and a `Timeout` that leaves an operation is the operation's own,
-in the phase of the step that ran out, with its steps as evidence. A program's own helpers are operations the same
-way, through `Operation.fn` and `Operation.named`: one deadline for the helper, a span named for it, and a `Timeout`
-that says how far it got.
+const titles = Effect.forEach(
+  [
+    "https://shop.example.com/products",
+    "https://shop.example.com/cart",
+    "https://shop.example.com/orders"
+  ],
+  pageTitle,
+  {
+    concurrency: 2
+  }
+).pipe(Deadline.within("30 seconds"))
+```
 
-### Errors
+The [deadline](https://usestrider.dev/docs/deadlines) is one budget for the whole batch, shared by the operations inside it.
+Provide a browser layer as in the opening example; the same jobs can run in a script, a service or a test.
 
-| Family | Tag | Meaning |
-|---|---|---|
-| Lifetime | `TargetGone{target, reason}` | Something the operation needed ended. `reason` is a `CloseReason`: page closed, frame detached, document replaced, connection lost, and so on |
-| Deadline | `Timeout{operation, phase}` | `phase` is `resolving \| waitingForCondition \| dispatchedUnconfirmed \| postcondition \| waitingForEvent` |
-| Module | one per module: `LocatorError`, `PageError`, `DownloadError`, `DeclarationError`, `SubscriptionError`, `ResponseError`, `ExpectationFailed`, … | `reason` is a class: the module's own (`StrictViolation`, `NavigationFailed`) or one shared from `Reason` (`InvalidInput`, `NotPermitted{required}`, `Unsupported{capability}`, `BackendFailure`) |
+### Typed failures
 
-- **Evidence.** Every failure carries the same diagnostic envelope: operation id, dispatch state (`NotSent | MayHaveBeenSent | Acknowledged`), per-step progress, the last observation and cleanup notes. A caller asking "did my click happen?" reads the evidence. Nothing is retried automatically once a mutation may have reached the page.
-- **Two different "can't" reasons.** `NotPermitted` means "you haven't granted the access this needs", and the fix is a different call. `Unsupported` means "this backend cannot do it", and the fix is a different backend. Both are `Reason` classes that every module's error can carry, so they never add tags, and one check works across modules: `Effect.catchReason(tag, "Unsupported", …)` for any module's tag.
-- **Defects are bugs only.** Defects are reserved for programming and invariant failures. External backend failures stay typed, and caller-supplied error and requirement types pass through every combinator unchanged.
+When a step is optional, recover from the specific failure you expect and let unexpected failures reach the caller.
+This invoice step returns `None` when PDF generation reports `Unsupported`, as it does on WebKit;
+timeouts, closed pages and other failures still propagate:
 
-### Diagnostics and secrets
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
 
-- **Redaction.** Secret inputs accept `Redacted`, and sketches read them with `Config.Redacted`. Credential, cookie and typed-text fields are classified as sensitive even when passed as plain strings. Classified fields are never rendered in spans, logs, errors or snapshots. A URL in a span attribute is rendered under the preset when the span opens, and requests and responses implement Effect's `Redactable`, so Effect's own logging and inspection show their URLs under the preset in the current fiber's context, in user code too; encoded as data, they keep them whole.
-- **Presets.** Diagnostics come in two presets, set through a `Context.Reference`:
-  - `local`: URLs whole, and titles; classified fields stripped.
-  - `strict`: a URL's origin and path, each query value `REDACTED`, with no fragment or user info, and no titles; for production, exported traces and agents.
+const invoicePdf = Effect.fn("invoicePdf")(function*(page: Page.Page) {
+  return yield* page.pdf().pipe(
+    Effect.map(Option.some),
+    Effect.catchReason(
+      "PageError",
+      "Unsupported",
+      () => Effect.succeed(Option.none())
+    )
+  )
+})
+```
 
-  `strict` is the default everywhere, tests included; `Diagnostics.withPreset("local")` selects the other.
-- **Raw content.** Bodies, console output, DOM snapshots and screenshots can contain secrets the page echoed. They need an explicit capture policy before leaving the process. There is no claim of taint tracking.
+[Errors](https://usestrider.dev/docs/errors) also carry diagnostic details and hints, such as which elements matched an ambiguous locator
+and how to narrow it.
 
-### Observability
+### Events as streams
 
-- **Spans.** Every user-visible operation opens one span, as Effect's `HttpClient` opens one per request, named like `Locator.click` with attributes in OpenTelemetry's style (`browser.operation`, `browser.page.id`, a redacted `url.full`, `error.type`). Attempts, readiness observations and automatically resolved dialogs become span events, so each operation carries its step-by-step log as structured data. Everything beneath an operation is `Effect.fnUntraced`, and protocol commands get child spans only when `Browser.TraceProtocolCommands` is on, because they are a hot path. `Browser.SpanNameGenerator` and `Browser.TracerDisabledWhen` rename or suppress spans. `effect/observability` exports them over OTLP, and `effect/devtools` shows them live.
-- **Metrics.** `Metric`s count operations by verb and outcome, actionability attempts per action, `Timeout`s by phase, `EventOverflow`s, protocol commands by method and latency, and obligations decided by policy. They export through `effect/observability` (OTLP or Prometheus).
-- **Wording.** "No matching event observed" is never reported as "the action had no effect".
+[Browser events](https://usestrider.dev/docs/events/events#streams) are Effect Streams: transform and consume them with the usual Stream operators.
+A scoped consumer runs in the background and stops when its scope closes.
 
-## Guarantees at a glance
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
 
-| Area | Guaranteed | Given a capability | Best-effort | Unknown until probed |
-|---|---|---|---|---|
-| Identity | Library ids stable within a connection across process swaps; explicit refs never silently rebind | — | Correlating a restored back/forward-cache document with its earlier epoch | Backend id continuity (probes 2, 3) |
-| Lifetimes | Typed end reason for every lifetime; destruction only of owned resources; interruption stays interruption | Prompt notice of remote ends | — | Detach events for orphaned frames (probe 8) |
-| Access | Typed access levels; wider physical effects need wider access | Scoped pause-on-start (PROTOCOL.md) | — | Pause granularity per backend (probe 22) |
-| Navigation | Outcomes only with evidence, otherwise `Timeout{phase: postcondition}` | Back/forward-cache `Restored`, prerender `Activated` | Detecting browsing-context-group switches | Missing terminal events (probe 4) |
-| Declarations | Acknowledged or failed; requested timing met or `Unsupported`; fixed composition rules | Before-author-script timing | Restoring external state | Popup inheritance (probe 18) |
-| Obligations | One decision; fallback only while pending; no contradictory second decision | Acknowledged remote resolution | — | Behavior on connection loss (probe 19) |
-| Input | Serialized per page; bounded release of held input on interruption | Trusted input; evaluation with user activation | Release after transport loss | — |
-| Readiness | Every predicate yields `Ready` or `NotReady{reason}` within the deadline | Rendering-based predicates | — | Stable-frame cadence (probe 10) |
-| Errors | Small typed families with evidence; caller `E`/`R` preserved | — | — | — |
-| Secrets | Wrapped and classified fields never rendered; explicit export | — | Capture-policy sanitization | — |
+const logErrors = Effect.fn("logErrors")(function*(page: Page.Page) {
+  const errors = yield* ConsoleMessage.stream(page, {
+    level: "error"
+  })
+  yield* errors.pipe(
+    Stream.map((message) => message.text),
+    Stream.runForEach(Effect.logError),
+    Effect.forkScoped // Stop logging when the caller's scope closes.
+  )
+})
+```
+
+### Responses decoded with schemas
+
+A successful HTTP status does not tell you whether the server returned the data your program needs.
+Decode the response with an Effect Schema so the next step gets validated, typed data:
+
+```ts
+import { NetworkResponse, Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+import { HttpIncomingMessage } from "effect/http"
+
+const Order = Schema.Struct({
+  id: Schema.String,
+  total: Schema.Number
+})
+
+const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+  const nextOrder = yield* NetworkResponse.next(page, {
+    url: "**/api/orders",
+    method: "POST",
+    body: HttpIncomingMessage.schemaBodyJson(Order)
+  })
+  yield* page.getByRole("button", {
+    name: "Place order"
+  }).click()
+  const response = yield* nextOrder
+  return response.body.id // A string from the decoded Order; invalid bodies fail.
+})
+```
+
+[Response subscriptions](https://usestrider.dev/docs/events/network#decoding-bodies) collect and decode the body only when you ask for it.
+
+### Browser operations in your traces
+
+A slow application workflow can spend its time in browser actions as well as your own code.
+Every browser operation creates a span beneath your `Effect.fn` step, so your configured Effect tracer shows them together:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+  yield* page.goto("https://shop.example.com/cart")
+  yield* page.getByRole("button", {
+    name: "Pay"
+  }).click()
+})
+// The checkout span contains Page.goto and Locator.click spans.
+// Each browser span carries its page and operation details.
+```
+
+Use [Effect DevTools or an OTLP exporter](https://usestrider.dev/docs/tools/recordings#spans) to view those spans.
+You can also [record the page](https://usestrider.dev/docs/tools/recordings#traces) for Playwright's trace viewer.
+
+## Working with existing browsers and agents
+
+Give a shell-based agent Strider's [usage guide](https://usestrider.dev/docs/agents/cli#agent-usage) as context: it explains sessions, page targets,
+event waits and reusable login state, with command examples for the installed version:
+
+```sh
+pnpx @usestrider/cli agent instructions
+```
+
+The command runs without a browser or session. It can also [generate a skill](https://usestrider.dev/docs/agents/cli#agent-usage) from the same guide.
+
+### Inspecting a tab before taking control
+
+A tool attached to your browser may need to read a tab you are using without changing it.
+[Inspection access](https://usestrider.dev/docs/pages/attaching#access-levels) gives it a page type with reads, snapshots and screenshots;
+clicking or navigating requires explicitly taking control:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
+  const page = yield* tab.inspect // ReadonlyPage: no click or goto methods.
+  return {
+    title: yield* page.title,
+    snapshot: yield* page.snapshot()
+  }
+}, Effect.scoped) // Release inspection access; leave the existing tab open.
+```
+
+### The CLI
+
+A shell-based agent can inspect a page, act on it and check the result in separate commands while the browser stays open.
+The [`strider` CLI](https://usestrider.dev/docs/agents/cli) gives each session and page a name, so every command says which browser and tab it uses:
+
+```sh
+pnpm add -g @usestrider/cli
+
+strider start --name shop --chromium /usr/bin/chromium
+strider -s shop page new --name main https://shop.example.com
+strider -s shop -p main snapshot
+strider -s shop -p main click 'role=button[name="Add to cart"]'
+strider -s shop -p main expect 'text="1 item"' visible
+strider -s shop stop
+```
+
+Commands report their outcome and what happened since the last call, such as a failed request or a new popup.
+A failed check exits with a nonzero status, so scripts can act on it too.
+
+Log in once and [save the login state](https://usestrider.dev/docs/agents/cli#sessions-and-state), then reuse it for later jobs even after the login session has ended.
+Refresh this saved state when you sign in again, for example at the start of the day:
+
+```sh
+# APP_PASSWORD is set in the environment.
+strider start --name login --chromium /usr/bin/chromium \
+  --secret password=APP_PASSWORD
+strider -s login page new --name main https://shop.example.com/login
+strider -s login -p main fill 'label=Email' 'ada@example.com'
+strider -s login -p main fill 'label=Password' '%password%'
+strider -s login -p main click 'role=button[name="Sign in"]'
+strider -s login -p main expect 'text=Welcome' visible
+strider -s login state save ./auth/shop.state
+strider -s login stop
+```
+
+Start each task from that file while the saved login is valid. Each session gets its own copy of the cookies, localStorage and IndexedDB,
+so multiple agents can work concurrently without sharing browser tabs. An agent checking orders starts its own session:
+
+```sh
+strider start --name orders --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s orders page new --name main https://shop.example.com/orders
+strider -s orders -p main expect 'role=heading[name="Orders"]' visible
+```
+
+Another agent can use the same saved login to check the profile in a separate session:
+
+```sh
+strider start --name profile --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s profile page new --name main https://shop.example.com/profile
+strider -s profile -p main expect 'role=heading[name="Profile"]' visible
+```
+
+For a still-running login session, `--fork login` copies its state directly without a file.
+Stop each task's session when its work is done, for example `strider -s orders stop`; the saved state file remains for the next task.
+
+### The Effect toolkit
+
+Give an agent a browser task through `effect/ai`, with the [toolkit](https://usestrider.dev/docs/agents/toolkit) executing its tool calls.
+Each call returns its outcome, events since the previous call, and structured failures with hints, so the agent can choose its next step:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Config, Effect } from "effect"
+import { Chat } from "effect/ai"
+
+const signIn = Effect.fn("signIn")(function*() {
+  const context = yield* Browser.newContext()
+  const toolkit = yield* BrowserToolkit.make({
+    context,
+    secrets: {
+      password: yield* Config.Redacted("APP_PASSWORD")
+    },
+    capture: CapturePolicy.strict
+  })
+
+  const chat = yield* Chat.fromPrompt(
+    "On app.example.com, sign in as ada@example.com with %password%. " +
+      "Check that the account page opens and report whether sign-in succeeded."
+  )
+
+  // Run browser tools, then let the model read the results and choose its next step.
+  // Stop when it answers without calling tools.
+  return yield* chat.generateText({
+    prompt: [],
+    toolkit,
+    concurrency: 1
+  }).pipe(
+    Effect.repeat({
+      until: (turn) => turn.toolCalls.length === 0
+    }),
+    Effect.map((turn) => turn.text) // Return the final turn's text.
+  )
+}, Effect.scoped) // Close the agent's context and pages when the task ends.
+```
+
+The caller supplies the browser and language-model layers.
+The agent refers to the password as `%password%`; the tool substitutes its value when it runs.
+The [capture policy](https://usestrider.dev/docs/agents/toolkit#capture-policy) controls what page content is sent to the model.
+
+### MCP tools
+
+An agent that calls tools can use the same browser operations through [MCP](https://usestrider.dev/docs/agents/cli#mcp).
+With pnpm installed, this configuration runs the CLI through `pnpx`, starts a browser session for the MCP client,
+and closes it when the server exits:
+
+```json
+{
+  "mcpServers": {
+    "strider": {
+      "command": "pnpx",
+      "args": [
+        "@usestrider/cli",
+        "mcp",
+        "--start",
+        "--chromium",
+        "/usr/bin/chromium",
+        "--capture",
+        "strict"
+      ]
+    }
+  }
+}
+```
+
+This is the configuration for clients that use `mcpServers`; it selects the same strict capture policy as the toolkit example.
+To share a `shop` session you started with `pnpx @usestrider/cli start --name shop --chromium /usr/bin/chromium --capture strict`, replace `args` with `["@usestrider/cli", "mcp", "-s", "shop"]`;
+you can inspect and act on the same pages from either interface.
+
+[Introduction](https://usestrider.dev/docs) · [Coming from Playwright](https://usestrider.dev/docs/playwright) ·
+[Choosing a browser](https://usestrider.dev/docs/browsers/choosing)
 
 ## Status
 
-Built through all three layers on Chromium (CDP), Firefox (WebDriver BiDi) and stock WebKit (WebKitGTK and WPE, launched through their MiniBrowser or attached through their remote inspector). What a backend can't do is in its capability table; what isn't built is marked in the layer documents.
+Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox and WebKit, and what a browser can't
+do fails with `Unsupported`, naming the capability. The packages are on npm:
 
-- **The packages:** `@usestrider/browser`, with the CLI (`strider`) and the agent toolkit, and `@usestrider/vitest`. Neither is published. Both are under the MIT license ([LICENSE](LICENSE)); `@usestrider/browser`'s generated protocol modules and keyboard layouts also carry their sources' notices ([THIRD_PARTY_NOTICES.md](packages/browser/THIRD_PARTY_NOTICES.md)). `pnpm pack-check` checks what would be published.
-- **Tests:** `pnpm all` runs the checks that need no browser. `pnpm test:integration` runs the adapter conformance suite and the slices in the Nix environment (`flake.nix`), against Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1. CI runs `pnpm all`, the build and the package check on every pull request and every push to `main`, and the integration tests nightly when `main` has changed, or on demand.
-- **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](packages/scenarios/RESULTS.md).
-- **Upstream:** drafted reports and proposals for browsers and Effect are in `upstream/`, not yet sent.
+| Package                                   | What it's for                              |
+| ----------------------------------------- | ------------------------------------------ |
+| [`@usestrider/browser`](packages/browser) | The library and its backends               |
+| [`@usestrider/vitest`](packages/vitest)   | The Vitest adapter                         |
+| [`@usestrider/cli`](packages/cli)         | The `strider` command, to install globally |
+
+## Contributing
+
+Report bugs and ask for features in [GitHub Issues](https://github.com/usestrider/strider/issues).
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to build and test Strider.
+
+## License
+
+[MIT](LICENSE). The generated protocol modules and keyboard layouts also carry their sources' notices
+([THIRD_PARTY_NOTICES.md](packages/browser/THIRD_PARTY_NOTICES.md)).

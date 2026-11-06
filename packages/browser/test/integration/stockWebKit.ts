@@ -21,10 +21,10 @@ const freePort = Effect.callback<number>((resume) => {
 })
 
 /** An X server of its own, on a display it picks (`-displayfd`), for the scope: its display's number. */
-export const startXvfb = Effect.fnUntraced(function*(dir: string) {
+export const startXvfb = Effect.fnUntraced(function*(dir: string, screen = "1280x800x24") {
   const xvfb = yield* Launch.spawn(
     webkitgtk.xvfb,
-    ["-displayfd", "2", "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
+    ["-displayfd", "2", "-screen", "0", screen, "-nolisten", "tcp"],
     dir,
     {}
   )
@@ -98,10 +98,10 @@ export const startMiniBrowserForAutomation = Effect.fnUntraced(function*() {
  * An X server for the scope, which this process's environment names (`DISPLAY`), so a browser `WebKit.layer`
  * launches opens its window there, as a program's would.
  */
-export const useXvfb = Effect.fnUntraced(function*() {
+export const useXvfb = Effect.fnUntraced(function*(screen?: string) {
   const fs = yield* FileSystem.FileSystem
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-xvfb-" })
-  const display = yield* startXvfb(dir)
+  const display = yield* startXvfb(dir, screen)
   const before = { display: process.env["DISPLAY"], backend: process.env["GDK_BACKEND"] }
   process.env["DISPLAY"] = `:${display}`
   process.env["GDK_BACKEND"] = "x11"

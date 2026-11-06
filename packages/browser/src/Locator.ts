@@ -40,11 +40,131 @@ const TypeId = "~@usestrider/browser/Locator"
 /**
  * Settings for `getByRole`.
  *
+ * **Details**
+ *
+ * State filters must be supported by the requested role. Unsupported combinations fail when the
+ * locator is used, including when its scope matches nothing or a frame is missing; construction does not throw.
+ * Locator operations fail with `LocatorError` whose reason is `InvalidInput` for `"selector"`.
+ * Expectations fail with `ExpectationFailed`, as they do for invalid CSS selectors.
+ * `disabled` is supported for every role.
+ *
+ * On stock WebKit, use `includeHidden: true` for native options, which the current visibility
+ * rules exclude; `checkVisibility` reports false for these options.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface RoleOptions {
+  /**
+   * Match a native heading level (1–6), or a positive integer from aria-level on heading, listitem, row
+   * or treeitem. Native headings take precedence over aria-level.
+   *
+   * **Example** (Filter by level)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("heading", { level: 2 })
+   * ```
+   *
+   * @default any level
+   */
+  readonly level?: number | undefined
+  /**
+   * Match a native checkbox or radio, or aria-checked on checkbox, radio, switch, menuitemcheckbox,
+   * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
+   * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
+   * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
+   * roles they match false, as do all other values except "mixed".
+   *
+   * **Example** (Filter by checked)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("checkbox", { checked: true })
+   * ```
+   *
+   * @default any checked state
+   */
+  readonly checked?: boolean | undefined
+  /**
+   * Match aria-pressed on buttons. Mixed matches neither boolean; absent or invalid values match false.
+   *
+   * **Example** (Filter by pressed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { pressed: true })
+   * ```
+   *
+   * @default any pressed state
+   */
+  readonly pressed?: boolean | undefined
+  /**
+   * Match aria-expanded on roles that support expansion, or the open state of details with a supported role.
+   * Absent ARIA values match neither boolean; present values other than case-insensitive "true" match false.
+   *
+   * **Example** (Filter by expanded)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { expanded: false })
+   * ```
+   *
+   * @default any expanded state
+   */
+  readonly expanded?: boolean | undefined
+  /**
+   * Match a native option’s selected property or aria-selected on gridcell, option, row, tab, rowheader,
+   * columnheader or treeitem. Absent or invalid ARIA values match false.
+   *
+   * **Example** (Filter by selected)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("tab", { selected: true })
+   * ```
+   *
+   * @default any selected state
+   */
+  readonly selected?: boolean | undefined
+  /**
+   * Match native disabled controls (including disabled fieldsets and optgroups) or inherited
+   * aria-disabled. An option inherits native disabled state from its optgroup or fieldset, but not its select.
+   * These explicit native rules give the same filter matches across browsers; enabled reads, expectations
+   * and action checks still use the browser's `:disabled` result and can differ for options and optgroups.
+   * Unlike Playwright, the disabled `<fieldset>` element itself also matches; aria-disabled is
+   * case-sensitive, applies on any role, and false on a descendant does not cancel a disabled ancestor.
+   *
+   * **Example** (Filter by disabled)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   *
+   * declare const page: Page.Page
+   *
+   * const target = page.getByRole("button", { disabled: false })
+   * ```
+   *
+   * @default any disabled state
+   */
+  readonly disabled?: boolean | undefined
+
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
    * is used as given.
@@ -260,6 +380,11 @@ export interface FilterOptions {
   readonly hasNotText?: string | RegExp | undefined
   /**
    * Keep only visible elements, or only hidden ones.
+   *
+   * **Details**
+   *
+   * An element with `opacity: 0` on itself or any ancestor counts as hidden: `visible: true` excludes it,
+   * and `visible: false` includes it.
    */
   readonly visible?: boolean | undefined
 }
@@ -507,7 +632,8 @@ export interface ReadonlyLocator
    */
   readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Whether the one match is visible now; `false` when nothing matches.
+   * Whether the one match is visible now; `false` when nothing matches or the element has `opacity: 0` on
+   * itself or any ancestor.
    *
    * **Example** (Dismissing a banner only when it shows)
    *
@@ -539,6 +665,15 @@ export interface ReadonlyLocator
   readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Whether the one match is checked now.
+   *
+   * **Details**
+   *
+   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
+   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
+   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
+   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
+   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
+   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
    *
    * **Example** (Reading a preference)
    *
@@ -620,6 +755,16 @@ export interface ReadonlyLocator
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many.
  *
+ * An action needs its element reachable; visible means a person can see it. Actions accept `opacity: 0` on
+ * the element or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits,
+ * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
+ * not make an action wait for a fade-in.
+ *
+ * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
+ * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
+ * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
+ * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
+ *
  * **Example** (Clicking a button that keeps pulsing)
  *
  * ```ts import.meta.vitest
@@ -679,8 +824,16 @@ export interface ActionOptions {
 export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
+   * With no position, client rectangles are clipped by the viewport and all parent frames.
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
+   * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
+   * Candidates are produced anew under the input permit.
+   * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
+   * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
+   * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
+   * even when actionability checks are disabled.
    *
-   * @default the centre of the padding box
+   * @default the first reachable fragment centre, or the first geometric centre when receivesPointer is disabled
    */
   readonly position?: Mouse.Point | undefined
   /**
@@ -717,8 +870,10 @@ export interface ClickOptions extends PointerOptions {
 export interface DragOptions extends PointerOptions {
   /**
    * Where to drop, from the top left of the target's padding box.
+   * The target is checked without `receivesPointer`: its default is the first geometric fragment centre,
+   * even when covered. It follows the same viewport/frame clipping and rounding rules as `position`.
    *
-   * @default the centre of the target's padding box
+   * @default the centre of the target's first nonempty client rectangle after viewport and parent-frame clipping
    */
   readonly targetPosition?: Mouse.Point | undefined
   /**
@@ -830,6 +985,11 @@ export interface Locator extends ReadonlyLocator {
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
    *   `input.pointerModifiers`, an action with modifiers fails with `Unsupported` before anything is sent.
    *
+   * **Gotchas**
+   *
+   * On stock WebKit, a `mousedown` handler that opens a dialog causes the browser to lose the `mouseup` and
+   * `click` events, even though this operation can succeed.
+   *
    * **Example** (Adding to the cart)
    *
    * ```ts import.meta.vitest
@@ -906,8 +1066,28 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * If it's already checked, nothing is sent. Otherwise it clicks, then reads the state again: a click that didn't
-   * check it fails with `StateUnchanged{expected: "checked"}`. Any other element fails at once with `WrongElement`.
+   * Checked state follows `isChecked`, including its supported ARIA roles and optional checkability. If
+   * it's already checked, nothing is sent. Otherwise it clicks and reads the state again; a click that
+   * didn't check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked
+   * state takes precedence. Otherwise a selected label, or an ordinary descendant's nearest DOM label,
+   * supplies its associated control. The selected element remains the click target and position origin.
+   *
+   * Association follows DOM parents without crossing a shadow root and uses only the label's control,
+   * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
+   * ancestors and ancestors added by slots in open shadow roots, stopping before the associated DOM
+   * label. Interactive ancestors above that label are outside this guard.
+   *
+   * Fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
+   * links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
+   * with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid, gridcell,
+   * link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
+   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
+   * and treeitem. Refusal is `WrongElement` before input, even when the associated control already
+   * matches. Missing or non-checkable associations also fail with `WrongElement`.
+   *
+   * Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow
+   * root can receive input before the action fails with `StateUnchanged`. Public `isChecked` and checked
+   * expectations still read only the selected element's own state.
    *
    * **Example** (Accepting the terms)
    *
@@ -922,8 +1102,34 @@ export interface Locator extends ReadonlyLocator {
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
-   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as `click`. It
-   * works as `check` does, failing with `StateUnchanged{expected: "unchecked"}`.
+   * Unchecks a checkbox or an ARIA checkable, and confirms it became unchecked. Checks: the same as
+   * `click`.
+   *
+   * **Details**
+   *
+   * It follows `check`, using the checked state and optional checkability described by `isChecked`. The
+   * selected element's own checked state takes precedence. Otherwise a selected label, or an ordinary
+   * descendant's nearest DOM label, supplies its associated control. The selected element remains the
+   * click target and position origin. If already unchecked, nothing is sent. Otherwise it clicks and
+   * reads the state again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays
+   * checked.
+   *
+   * Association follows DOM parents without crossing a shadow root and uses only the label's control,
+   * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
+   * ancestors and ancestors added by slots in open shadow roots, stopping before the associated DOM
+   * label. Interactive ancestors above that label are outside this guard.
+   *
+   * Fallback refuses buttons, inputs, selects, textareas, details, summaries, frames, embeds, objects,
+   * links with href (including SVG links with namespaced xlink:href), images with usemap, audio/video
+   * with controls, editable content and ARIA widget roles: button, checkbox, combobox, grid, gridcell,
+   * link, listbox, menu, menubar, menuitem, menuitemcheckbox, menuitemradio, option, radio, radiogroup,
+   * scrollbar, searchbox, separator, slider, spinbutton, switch, tab, tablist, textbox, tree, treegrid
+   * and treeitem. Refusal is `WrongElement` before input, even when the associated control already
+   * matches. Missing or non-checkable associations also fail with `WrongElement`.
+   *
+   * Slot-added controls can be inspected only in open shadow roots. A control inside a closed shadow
+   * root can receive input before the action fails with `StateUnchanged`. Public `isChecked` and checked
+   * expectations still read only the selected element's own state.
    *
    * **Example** (Opting out of offers)
    *
@@ -994,9 +1200,25 @@ export interface Locator extends ReadonlyLocator {
    * - A text input, a textarea or a `contenteditable` element is focused and its contents selected from an
    *   isolated world of Strider's, then the value is inserted as text, as an input method would.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range` and their kin) has it set from that
-   *   world, with `input` and `change` dispatched; a value it refuses fails with `InvalidInput`.
+   *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
+   *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
+   *   or rounding, fails with `InvalidInput` without changing the value or dispatching those events.
+   *   Validation runs before and after focus; changes made by a focus handler remain on refusal.
    * - An element that can't be edited fails at once with `NotEditable`. A read-only one is waited for, and a
    *   timeout reports it as `ReadOnly`.
+   * - The value must be a string, including inside `Redacted`; other runtime values fail with `InvalidInput`
+   *   before contacting the browser.
+   * - A number input takes an empty string to clear, or a finite HTML floating-point string: an optional minus,
+   *   digits with an optional fractional part (or a leading decimal point and digits), and an optional exponent
+   *   such as `1e2`. Whitespace, a leading plus, a trailing decimal point, hexadecimal and non-finite values fail
+   *   with `InvalidInput` before focus, selection or mutation. The input's min, max and step don't restrict fill.
+   * - In a design-mode document, filling a non-input target blurs a different active input or textarea,
+   *   including one inside open shadow roots. The target is resolved and its effective checks run again
+   *   after blur handlers, before selection. If refocusing prevents preparation until the deadline,
+   *   the timeout reports focus preparation in its history.
+   * - Firefox cannot focus inputs in top-level design-mode documents. Filling one is unsupported:
+   *   native typing can insert into the document body instead. Strider does not change design mode
+   *   or synthesize input to work around this browser limitation.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    *
    * **Example** (Choosing a delivery date)
@@ -1037,6 +1259,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Accepts a string or a `Redacted` string; any other value fails with `InvalidInput` before contacting the browser.
    * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
    * errors.
    *
@@ -1084,8 +1307,13 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * A local file that doesn't exist fails with `FileUnreadable` before anything is sent, and any element but a
-   * file input with `WrongElement`.
+   * Launched browsers read local paths directly; relative paths require the captured Effect `Path` service.
+   * Attached browsers transfer local files through captured `FileSystem` and `Path` services. A local read failure
+   * is `FileUnreadable`; an element other than a file input is `WrongElement`. Launched local paths can combine
+   * with remote paths; attached local files can combine with bytes. Mixing native paths and transferred files
+   * fails with `InvalidInput` before changing selection. Multiple files for an input without `multiple` also
+   * fail with `InvalidInput` before selection or events change. An empty list clears the input. Stock WebKit currently appends native paths on
+   * multiple inputs rather than replacing an existing selection. See `FileInput.local` for deployment caveats.
    *
    * **Example** (Uploading a receipt)
    *

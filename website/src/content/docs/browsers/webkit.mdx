@@ -25,7 +25,7 @@ Linux only. Safari on macOS and iOS isn't supported. WPE isn't tested.
 
 `WebKit.layer` takes WebKitGTK's or WPE's MiniBrowser; any other executable fails with
 [`InvalidInput`](/docs/errors#three-kinds-of-failure). It isn't on `PATH`: it's under the port's directory, such as
-`/usr/libexec/webkitgtk-6.0/MiniBrowser`. [`npx strider browsers`](/docs/installation#a-browser) finds it.
+`/usr/libexec/webkitgtk-6.0/MiniBrowser`. [`strider browsers`](/docs/installation#a-browser) finds it.
 
 A launch needs:
 
@@ -58,6 +58,17 @@ WEBKIT_PATH=/usr/libexec/webkitgtk-6.0/MiniBrowser xvfb-run -a node checkout.ts
 
 Each context is a browser process with its own ephemeral profile, about 0.6 seconds to start. The default context
 is the first tab's. [Launch profiles](/docs/browsers/chromium#launching) don't apply to WebKit.
+
+Launching requires Linux with readable `/proc/<pid>/net/tcp` and `/proc/<pid>/fd` for the spawned process. Strider
+checks that this PID holds the same inspector listener before and after connecting, before sending any command.
+A wrapper must exec MiniBrowser rather than only fork it. Other operating systems and unverifiable ownership
+refuse launch with `ConnectionFailed`. A procfs read failure stops ownership attempts and closes any rejected
+connection, then waits for a child exit event within the remaining launch deadline. If no exit is observed,
+refusal retains the original access error. A child exit observed during startup reports `ProcessExited`, with
+an exit code when available and stderr collected within that same deadline. If an exited wrapper leaves descendants holding stderr open, reporting `ProcessExited` can consume the remaining launch budget. An ordinary readiness timeout uses
+the `handshake` stage; explicit ownership and access refusals use `refused`. Both errors explain the applicable
+launch requirements and the attach alternative; use [`WebKit.layerAttach`](#attaching) with an externally managed
+inspector HTTP endpoint instead.
 
 ## Attaching
 
@@ -159,21 +170,19 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
     switch (dialog._tag) {
       case "Unknown":
         if (dialog.message.includes("type DELETE")) {
-          return Effect.succeed(dialog.respond("DELETE"))
+          return dialog.respond("DELETE")
         }
-        return Effect.succeed(
-          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
-        )
+        return dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+
       case "Confirm":
-        return Effect.succeed(
-          dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
-        )
+        return dialog.message.includes("delete") ? dialog.accept : dialog.dismiss
+
       case "Prompt":
-        return Effect.succeed(dialog.respond("DELETE"))
+        return dialog.respond("DELETE")
       case "Alert":
-        return Effect.succeed(dialog.accept)
+        return dialog.accept
       case "BeforeUnload":
-        return Effect.succeed(dialog.leave)
+        return dialog.leave
     }
   })
   yield* page.getByRole("button", { name: "Delete account" }).click()

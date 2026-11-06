@@ -11,21 +11,13 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as Declaration from "./Declaration.ts"
-import * as Access from "./internal/access.ts"
-import type * as Adapter from "./internal/adapter.ts"
-import * as Events from "./internal/events.ts"
-import * as Filters from "./internal/filters.ts"
-import * as Handlers from "./internal/handlers.ts"
-import * as Handles from "./internal/handles.ts"
-import type * as Model from "./internal/model.ts"
-import * as Operation from "./internal/operation.ts"
+import * as DialogImpl from "./internal/dialog.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -51,7 +43,12 @@ export type PromptId = typeof PromptId.Type
 const DecisionTypeId = "~@usestrider/browser/Dialog/Decision"
 
 /**
- * How a dialog is answered: one of a `Pending` dialog's decisions, which a handler returns.
+ * How a dialog is answered: the value produced by the Effect a handler returns.
+ *
+ * **Details**
+ *
+ * A `Pending` dialog offers Effects that produce these decisions. Return one directly from a handler,
+ * or use `return yield*` after other work in a generator.
  *
  * @stability unstable
  * @category models
@@ -112,23 +109,32 @@ export type Dialog = typeof Dialog.Type
  *   prompt with `text`; any other dialog refuses it, and the context's `dialogs` policy decides, as when a handler
  *   fails.
  *
+ * Each decision is an Effect: return it directly from a handler, or use `return yield*` after other work in a
+ * generator. Its result is the decision the handler machinery sends to the browser.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export type Pending =
-  | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Decision }
-  | Extract<Dialog, { readonly _tag: "Confirm" }> & { readonly accept: Decision; readonly dismiss: Decision }
-  | Extract<Dialog, { readonly _tag: "Prompt" }> & {
-    readonly accept: Decision
-    respond(text: string): Decision
-    readonly dismiss: Decision
+  | Extract<Dialog, { readonly _tag: "Alert" }> & { readonly accept: Effect.Effect<Decision> }
+  | Extract<Dialog, { readonly _tag: "Confirm" }> & {
+    readonly accept: Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
   }
-  | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & { readonly leave: Decision; readonly stay: Decision }
+  | Extract<Dialog, { readonly _tag: "Prompt" }> & {
+    readonly accept: Effect.Effect<Decision>
+    respond(text: string): Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
+  }
+  | Extract<Dialog, { readonly _tag: "BeforeUnload" }> & {
+    readonly leave: Effect.Effect<Decision>
+    readonly stay: Effect.Effect<Decision>
+  }
   | Extract<Dialog, { readonly _tag: "Unknown" }> & {
-    readonly accept: Decision
-    respond(text: string): Decision
-    readonly dismiss: Decision
+    readonly accept: Effect.Effect<Decision>
+    respond(text: string): Effect.Effect<Decision>
+    readonly dismiss: Effect.Effect<Decision>
   }
 
 /**
@@ -155,97 +161,6 @@ export interface Filter {
    */
   readonly kind?: Kind | ReadonlyArray<Kind> | undefined
 }
-
-// ── Implementation ──
-
-/** A decision, carrying what the adapter sends. */
-interface DecisionImpl extends Decision {
-  readonly decision: Adapter.Decision
-}
-
-const decision = (decision: Adapter.Decision): Decision => {
-  const made: DecisionImpl = { [DecisionTypeId]: DecisionTypeId, decision }
-  return made
-}
-
-const accepted = decision({ _tag: "Accept", promptText: Option.none() })
-const dismissed = decision({ _tag: "Dismiss" })
-
-const kinds: Record<Model.PromptEvent["kind"], Kind> = {
-  alert: "Alert",
-  confirm: "Confirm",
-  prompt: "Prompt",
-  beforeunload: "BeforeUnload",
-  unknown: "Unknown"
-}
-
-const toDialog = (prompt: Model.PromptEvent): Dialog => {
-  const id = prompt.prompt
-  switch (prompt.kind) {
-    case "alert":
-      return { _tag: "Alert", id, message: prompt.message }
-    case "confirm":
-      return { _tag: "Confirm", id, message: prompt.message }
-    case "prompt":
-      return { _tag: "Prompt", id, message: prompt.message, defaultValue: prompt.defaultValue }
-    case "beforeunload":
-      return { _tag: "BeforeUnload", id }
-    case "unknown":
-      return { _tag: "Unknown", id, message: prompt.message }
-  }
-}
-
-const toPending = (prompt: Model.PromptEvent): Pending => {
-  const dialog = toDialog(prompt)
-  switch (dialog._tag) {
-    case "Alert":
-      return { ...dialog, accept: accepted }
-    case "Confirm":
-      return { ...dialog, accept: accepted, dismiss: dismissed }
-    case "Prompt":
-      return {
-        ...dialog,
-        accept: accepted,
-        respond: (text) => decision({ _tag: "Accept", promptText: Option.some(text) }),
-        dismiss: dismissed
-      }
-    case "BeforeUnload":
-      return { ...dialog, leave: accepted, stay: dismissed }
-    case "Unknown":
-      return {
-        ...dialog,
-        accept: accepted,
-        respond: (text) => decision({ _tag: "Accept", promptText: Option.some(text) }),
-        dismiss: dismissed
-      }
-  }
-}
-
-const accepts = (filter: Filter | undefined) => {
-  const wanted = filter?.kind === undefined ? undefined : new Set<Kind>(
-    typeof filter.kind === "string" ? [filter.kind] : filter.kind
-  )
-  return (entry: Events.Entry<Model.PromptEvent>) => wanted === undefined || wanted.has(kinds[entry.value.kind])
-}
-
-// A backend that reports no dialogs, as attached stock WebKit's inspector doesn't, refuses to wait for one
-const subscribe = <A, E, R>(
-  target: Page.ObservedPage,
-  operation: string,
-  subscribe: (events: Events.Channel<Model.PromptEvent>) => Effect.Effect<A, E, R>
-): Effect.Effect<A, E | Subscription.SubscriptionError, R> =>
-  Effect.suspend(() => {
-    const behind = Handles.page(target)
-    return Filters.requires(behind.runtime, operation, "prompts").pipe(
-      Effect.andThen(subscribe(behind.entry.events.dialog))
-    )
-  })
-
-const kind = (operation: string): Events.Kind<Model.PromptEvent, Dialog> => ({
-  operation,
-  noun: "a dialog",
-  deliver: toDialog
-})
 
 /**
  * Subscribes to dialogs and returns the wait: an effect that gives the first match, the same each time it runs.
@@ -282,10 +197,7 @@ export const next = <PE = never, PR = never>(
   Effect.Effect<Dialog, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  subscribe(target, "Dialog.next", (events) => Events.next(kind("Dialog.next"), events, accepts(filter), where)).pipe(
-    Operation.named("Dialog.next")
-  )
+> => DialogImpl.next(target, filter, where)
 
 /**
  * Subscribes to dialogs and emits every match from now on. Seeing a dialog doesn't decide it.
@@ -322,8 +234,7 @@ export const stream = <PE = never, PR = never>(
   Stream.Stream<Dialog, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> =>
-  subscribe(target, "Dialog.stream", (events) => Events.stream(kind("Dialog.stream"), events, accepts(filter), where))
+> => DialogImpl.stream(target, filter, where)
 
 /**
  * Reads the dialogs still in the page's event log; never waits.
@@ -354,8 +265,7 @@ export const stream = <PE = never, PR = never>(
 export const history = (
   target: Page.ObservedPage,
   filter?: Filter | undefined
-): Effect.Effect<Subscription.History<Dialog>, Subscription.SubscriptionError> =>
-  subscribe(target, "Dialog.history", (events) => Events.history(kind("Dialog.history"), events, accepts(filter)))
+): Effect.Effect<Subscription.History<Dialog>, Subscription.SubscriptionError> => DialogImpl.history(target, filter)
 
 /**
  * Registers a handler that decides the page's dialogs while its scope lives.
@@ -385,7 +295,7 @@ export const history = (
  *     page,
  *     (dialog) =>
  *       dialog._tag === "Confirm"
- *         ? Effect.succeed(dialog.accept)
+ *         ? dialog.accept
  *         : Dialog.dismissAll(dialog)
  *   )
  *   yield* page.getByRole("button", { name: "Delete account" }).click()
@@ -403,27 +313,7 @@ export const handle = <E, R>(
   page: Page.Page,
   handler: (dialog: Pending) => Effect.Effect<Decision, E, R>
 ): Effect.Effect<Declaration.HandlerRegistration, Declaration.DeclarationError | Target.TargetGone, Scope.Scope | R> =>
-  Effect.suspend(() => {
-    const { entry, grant, runtime } = Handles.page(page)
-    return Access.check(grant).pipe(
-      Effect.andThen(Handlers.requires(runtime, "Dialog.handle", "prompts")),
-      Effect.andThen(Handlers.register({
-        page: entry,
-        handlers: entry.promptHandlers,
-        handler,
-        pending: toPending,
-        decision: (chosen) =>
-          isDecision(chosen) && "decision" in chosen
-            ? Effect.succeed((chosen as DecisionImpl).decision)
-            : Effect.die(new Error("Dialog.handle: the handler returned something that isn't a Dialog decision")),
-        noun: (prompt) => prompt.kind,
-        operation: "Dialog.handle.handled.waitFor",
-        name: "Dialog.handle",
-        fallback: "the context's policy"
-      })),
-      Effect.flatMap(Access.track(grant))
-    )
-  })
+  DialogImpl.handle(page, handler)
 
 /**
  * A handler that accepts every dialog: accept for `Alert`, `Confirm`, `Prompt` (with its default value) and
@@ -446,7 +336,7 @@ export const handle = <E, R>(
  * @since 0.1.0
  */
 export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
-  Effect.succeed(dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept)
+  dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept
 
 /**
  * A handler that declines every dialog: dismiss for `Confirm`, `Prompt` and `Unknown`, accept for `Alert` (its
@@ -470,6 +360,4 @@ export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
  * @since 0.1.0
  */
 export const dismissAll = (dialog: Pending): Effect.Effect<Decision> =>
-  Effect.succeed(
-    dialog._tag === "BeforeUnload" ? dialog.stay : dialog._tag === "Alert" ? dialog.accept : dialog.dismiss
-  )
+  dialog._tag === "BeforeUnload" ? dialog.stay : dialog._tag === "Alert" ? dialog.accept : dialog.dismiss

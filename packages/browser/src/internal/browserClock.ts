@@ -10,7 +10,6 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
-import { now } from "./adapter.ts"
 
 /** How a browser's time is read and waited on. */
 export interface BrowserClock {
@@ -20,17 +19,38 @@ export interface BrowserClock {
   readonly sleep: (millis: number) => Effect.Effect<void>
 }
 
+/**
+ * `millis` on `clock`, read by `now`. The wait ends once `now` has moved the whole `millis`: Node's timers count
+ * whole milliseconds, so one can fire a fraction of a millisecond before the monotonic time it was set for, and
+ * whatever then reads the time left would find a deadline that its timer said had passed still ahead.
+ */
+const sleepOn = (clock: Clock.Clock, now: () => number) => (millis: number): Effect.Effect<void> => {
+  const until = (at: number): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const left = (at - now()) / 1e6
+      return left > 0 ? Effect.andThen(clock.sleep(Duration.millis(left)), until(at)) : Effect.void
+    })
+  return Effect.suspend(() => {
+    const at = now() + millis * 1e6
+    return Effect.andThen(clock.sleep(Duration.millis(millis)), until(at))
+  })
+}
+
 /** A browser's clock from an Effect `Clock`'s monotonic time. */
-export const fromClock = (clock: Clock.Clock): BrowserClock => ({
-  now: () => Number(clock.monotonicTimeNanosUnsafe()) as MonotonicInstant.MonotonicInstant,
-  sleep: (millis) => clock.sleep(Duration.millis(millis))
-})
+export const fromClock = (clock: Clock.Clock): BrowserClock => {
+  const now = () => Number(clock.monotonicTimeNanosUnsafe()) as MonotonicInstant.MonotonicInstant
+  return { now, sleep: sleepOn(clock, now) }
+}
 
 /** Effect's live `Clock`, which `TestClock` doesn't replace for whoever holds it. */
 const liveClock: Clock.Clock = Clock.Clock.defaultValue()
 
-/** The live monotonic clock: a real browser's, read as `Adapter.now` reads it. */
-export const live: BrowserClock = { now, sleep: fromClock(liveClock).sleep }
+/** Now, on the live monotonic clock, in nanoseconds. */
+export const now = (): MonotonicInstant.MonotonicInstant =>
+  Math.round(performance.now() * 1e6) as MonotonicInstant.MonotonicInstant
+
+/** The live monotonic clock: a real browser's. */
+export const live: BrowserClock = { now, sleep: sleepOn(liveClock, now) }
 
 /**
  * Runs `self` with the live clock as its `Clock`, so its timers and schedules run in real time under `TestClock`:
@@ -62,6 +82,8 @@ export const sleep = (millis: number): Effect.Effect<void> =>
   Effect.flatMap(Effect.service(CurrentClock), (clock) => clock.sleep(millis))
 
 /** `self`'s value, or `None` after `millis` on `clock`: `Effect.timeoutOption` on that clock. */
+// Deliberately not `Effect.timeoutOption`, which sleeps on the fiber's `Clock`: under `TestClock` a real browser's
+// wait would never end. The race sleeps on the browser's clock instead, the live one for a real browser
 export const timeoutOn = (clock: BrowserClock, millis: number) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
   Effect.raceFirst(Effect.asSome(self), Effect.as(clock.sleep(millis), Option.none()))
 

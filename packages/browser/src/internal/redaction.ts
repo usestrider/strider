@@ -12,16 +12,13 @@ import * as Diagnostics from "../Diagnostics.ts"
  */
 export const url = (url: string, preset: Diagnostics.Preset): string => {
   if (preset === "local") return url
-  try {
-    const parsed = new URL(url)
-    parsed.username = ""
-    parsed.password = ""
-    parsed.hash = ""
-    for (const key of new Set(parsed.searchParams.keys())) parsed.searchParams.set(key, "REDACTED")
-    return parsed.href
-  } catch {
-    return "REDACTED"
-  }
+  const parsed = URL.parse(url)
+  if (parsed === null) return "REDACTED"
+  parsed.username = ""
+  parsed.password = ""
+  parsed.hash = ""
+  for (const key of new Set(parsed.searchParams.keys())) parsed.searchParams.set(key, "REDACTED")
+  return parsed.href
 }
 
 /**

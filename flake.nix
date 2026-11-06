@@ -55,17 +55,20 @@
         {
           # The toolchain, for the standard checks, which run anywhere, and sops, which the docs' deploy decrypts its
           # readers with
-          default = pkgs.mkShellNoCC { packages = toolchain ++ [ pkgs.sops ]; };
+          default = pkgs.mkShellNoCC { packages = toolchain ++ [ pkgs.sops pkgs.bun ]; };
 
           # The machine the browser integration tests see, the same wherever they run. `pnpm test:integration`
           # enters it with `--ignore-environment`, so nothing else of the host's reaches them: no display, no
           # user configuration, no variables but these.
           integration = pkgs.mkShellNoCC {
-            packages = toolchain;
+            # ffmpeg for Chromium video recordings
+            packages = toolchain ++ [ pkgs.ffmpeg-headless ];
             # What the tests check that they run in
             STRIDER_ENVIRONMENT = "nix-integration";
             # The browsers, and nothing else looked up
             STRIDER_CHROMIUM = lib.getExe pinnedBrowsers.chromium;
+            STRIDER_FFMPEG = lib.getExe pkgs.ffmpeg-headless;
+            STRIDER_FFPROBE = lib.getExe' pkgs.ffmpeg-headless "ffprobe";
             STRIDER_FIREFOX = lib.getExe pinnedBrowsers.firefox;
             STRIDER_WEBKITGTK = "${pinnedBrowsers.webkitgtk}/libexec/webkitgtk-6.0/MiniBrowser";
             # The MiniBrowser isn't wrapped: GIO finds a TLS backend only where this says, or HTTPS fails with
@@ -94,6 +97,9 @@
               # An empty home of its own, deleted on exit, so no profile or cache of the user's is read
               export HOME="$(mktemp -d -t strider-home-XXXXXX)"
               trap 'rm -rf "$HOME"' EXIT
+              # No core dumps: a renderer that crashes, as a test crashes one, would otherwise hang while the host
+              # writes its core, about 35 s on two cores, and only then would the browser say the page crashed
+              ulimit -c 0
             '';
           };
         }

@@ -1,6 +1,7 @@
 ---
 import { Font } from "astro:assets"
 import BackToTop from "../components/BackToTop.astro"
+import SiteFooter from "../components/SiteFooter.astro"
 import "../styles/global.css"
 
 interface Props {
@@ -9,6 +10,11 @@ interface Props {
 }
 
 const { title, description } = Astro.props
+const pageTitle = title === "Strider" ? title : `${title} · Strider`
+// A link preview, on every page: the page's title and description over the one image, from public/. Its URL is the one
+// the host serves, with a trailing slash, since it redirects to that
+const pageUrl = new URL(Astro.url.pathname.replace(/\/?$/, "/"), Astro.site)
+const previewImage = new URL("/og.png", Astro.site)
 ---
 
 <!doctype html>
@@ -16,8 +22,21 @@ const { title, description } = Astro.props
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title === "Strider" ? title : `${title} · Strider`}</title>
+    <title>{pageTitle}</title>
     {description !== undefined && description !== "" && <meta name="description" content={description} />}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Strider" />
+    <meta property="og:title" content={pageTitle} />
+    {description !== undefined && description !== "" && <meta property="og:description" content={description} />}
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:image" content={previewImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Strider: browser automation, typed end to end, with an engraving of a great blue heron"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/heron.svg" type="image/svg+xml" />
     <Font cssVariable="--font-garamond" preload />
     <Font cssVariable="--font-source-serif" preload />
@@ -53,6 +72,7 @@ const { title, description } = Astro.props
   </head>
   <body>
     <slot />
+    <SiteFooter />
     <BackToTop />
     <script>
       document.addEventListener("click", (event) => {

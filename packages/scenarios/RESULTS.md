@@ -1,6 +1,6 @@
 # Strider and Playwright, side by side
 
-*Written by `pnpm scenarios` on 2026-10-27: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `dd98cc7` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 6.6 5.9 5.4 at the end. Timings are each scenario's wall time over 10 runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
+*Written by `pnpm scenarios` on 2026-11-05: Chrome/155.0.8059.79, the integration environment's, driven headless by Strider at `c732173` and by Playwright 1.64.1 through `playwright-core`, whose own browsers are never installed; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 8.2 4.7 5.0 at the end. Timings are each scenario's wall time over 10 scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
 
 ## Scenarios
 
@@ -8,18 +8,41 @@ Each scenario is written with each library as its own documentation would write 
 
 | Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |
 |---|---|---|---|---|---|
-| The README's program | 184 ms (p90 205 ms) | 110 ms (p90 117 ms) | ✓ `Added to cart` | ✓ `Added to cart` | 7 / 11 |
-| A login reused through storage state | 436 ms (p90 453 ms) | 297 ms (p90 318 ms) | ✓ `Signed in` | ✓ `Signed in` | 15 / 24 |
-| A popup with a dialog inside it | 329 ms (p90 334 ms) | 154 ms (p90 199 ms) | ✓ `Allowed` | ✓ `Allowed` | 11 / 15 |
-| A route that blocks analytics | 74 ms (p90 80 ms) | 77 ms (p90 93 ms) | ✓ `analytics blocked` | ✓ `analytics blocked` | 7 / 11 |
-| A file upload, from bytes | 101 ms (p90 116 ms) | 81 ms (p90 91 ms) | ✓ `receipt.txt:4` | ✓ `receipt.txt:4` | 9 / 15 |
-| A response's body, from a click | 194 ms (p90 200 ms) | 115 ms (p90 118 ms) | ✓ `tea × 1` | ✓ `tea × 1` | 15 / 15 |
-| Waiting for the navigation a click causes | 243 ms (p90 252 ms) | 168 ms (p90 192 ms) | ✓ `Orders` | ✓ `Orders` | 8 / 11 |
-| A HAR recorded, then replayed | 153 ms (p90 169 ms) | 155 ms (p90 176 ms) | ✓ `42 sold` | ✓ `42 sold` | 17 / 21 |
-| The Internet's login, replayed | 347 ms (p90 360 ms) | 244 ms (p90 246 ms) | ✓ `Secure Area` | ✓ `Secure Area` | 13 / 15 |
-| The Internet's dynamic controls, replayed | 3260 ms (p90 3296 ms) | 3416 ms (p90 3424 ms) | ✓ `Strider` | ✓ `Strider` | 14 / 15 |
+| The README's program | 97 ms (p90 112 ms); 10/10 successful | 99 ms (p90 101 ms); 10/10 successful | ✓ `Added to cart` | ✓ `Added to cart` | 7 / 11 |
+| A login reused through storage state | 323 ms (p90 332 ms); 10/10 successful | 263 ms (p90 272 ms); 10/10 successful | ✓ `Signed in` | ✓ `Signed in` | 15 / 24 |
+| A popup with a dialog inside it | 149 ms (p90 162 ms); 10/10 successful | 150 ms (p90 154 ms); 10/10 successful | ✓ `Allowed` | ✓ `Allowed` | 11 / 15 |
+| A route that blocks analytics | 71 ms (p90 74 ms); 10/10 successful | 73 ms (p90 77 ms); 10/10 successful | ✓ `analytics blocked` | ✓ `analytics blocked` | 7 / 11 |
+| A file upload, from bytes | 100 ms (p90 105 ms); 10/10 successful | 74 ms (p90 77 ms); 10/10 successful | ✓ `receipt.txt:4` | ✓ `receipt.txt:4` | 9 / 15 |
+| A response's body, from a click | 109 ms (p90 111 ms); 10/10 successful | 115 ms (p90 117 ms); 10/10 successful | ✓ `tea × 1` | ✓ `tea × 1` | 15 / 15 |
+| Waiting for the navigation a click causes | 156 ms (p90 170 ms); 10/10 successful | 166 ms (p90 177 ms); 10/10 successful | ✓ `Orders` | ✓ `Orders` | 8 / 11 |
+| A HAR recorded, then replayed | 140 ms (p90 147 ms); 10/10 successful | 135 ms (p90 146 ms); 10/10 successful | ✓ `42 sold` | ✓ `42 sold` | 17 / 21 |
+| The Internet's login, replayed | 253 ms (p90 263 ms); 10/10 successful | 237 ms (p90 248 ms); 10/10 successful | ✓ `Secure Area` | ✓ `Secure Area` | 13 / 15 |
+| The Internet's dynamic controls, replayed | –; 0/10 successful | –; 0/10 successful | failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page) | failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load" | 14 / 15 |
 
-**Launch:** a browser launched and a first page loaded, 5 times: Strider 257 ms (p90 481 ms), Playwright 144 ms (p90 163 ms).
+Timing counts are successful/attempted repetitions; failed attempts are excluded from statistics. Initial outcomes above are retained separately.
+
+- The Internet's dynamic controls, replayed, strider, timed repetition 1: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, playwright, timed repetition 1: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, playwright, timed repetition 2: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, strider, timed repetition 2: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, strider, timed repetition 3: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, playwright, timed repetition 3: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, playwright, timed repetition 4: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, strider, timed repetition 4: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, strider, timed repetition 5: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, playwright, timed repetition 5: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, playwright, timed repetition 6: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, strider, timed repetition 6: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, strider, timed repetition 7: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, playwright, timed repetition 7: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, playwright, timed repetition 8: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, strider, timed repetition 8: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, strider, timed repetition 9: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+- The Internet's dynamic controls, replayed, playwright, timed repetition 9: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, playwright, timed repetition 10: failed: page.goto: net::ERR_FAILED at https://the-internet.herokuapp.com/dynamic_controls Call log: - navigating to "https://the-internet.herokuapp.com/dynamic_controls", waiting until "load"
+- The Internet's dynamic controls, replayed, strider, timed repetition 10: failed: Page.goto: Navigation to https://the-internet.herokuapp.com/dynamic_controls failed: net::ERR_FAILED (The browser couldn't load the page)
+
+**Launch:** a browser launched and a first page loaded, 5 times: Strider 213 ms (p90 454 ms), Playwright 127 ms (p90 138 ms).
 
 ## What a waiting expectation costs the page (Q82)
 
@@ -27,10 +50,10 @@ Strider evaluates a waiting expectation at every animation frame (QUIRKS.md, Q82
 
 | | Renderer CPU per second |
 |---|---|
-| Strider, idle | 286 ms (p90 319 ms) |
-| Strider, `Expect.toBeVisible` waiting | 327 ms (p90 341 ms) |
-| Playwright, idle | 270 ms (p90 277 ms) |
-| Playwright, `locator.waitFor()` waiting | 297 ms (p90 314 ms) |
+| Strider, idle | 266 ms (p90 269 ms) |
+| Strider, `Expect.toBeVisible` waiting | 284 ms (p90 294 ms) |
+| Playwright, idle | 280 ms (p90 393 ms) |
+| Playwright, `locator.waitFor()` waiting | 296 ms (p90 335 ms) |
 
 ## What an interceptor installed costs a load (Q103)
 
@@ -38,14 +61,14 @@ Strider keeps Chromium's `Fetch` interceptor enabled on every page, with a patte
 
 | | Load |
 |---|---|
-| Strider, no route (its interceptor is always installed, Q103) | 123 ms (p90 131 ms) |
-| Strider, a route matching nothing on the page | 140 ms (p90 184 ms) |
-| Playwright, no route | 84 ms (p90 105 ms) |
-| Playwright, a route matching nothing on the page | 127 ms (p90 150 ms) |
+| Strider, no route (its interceptor is always installed, Q103) | 122 ms (p90 130 ms) |
+| Strider, a route matching nothing on the page | 121 ms (p90 131 ms) |
+| Playwright, no route | 82 ms (p90 86 ms) |
+| Playwright, a route matching nothing on the page | 120 ms (p90 129 ms) |
 
 ## What each leaves for a page to see
 
-What a page's own script reads about the browser driving it, the signals bot protection looks for (`/tells` in `src/site.ts`), headless, as each launches by default:
+What a page's own script reads about the browser driving it (`/tells` in `src/site.ts`), headless, as each launches by default:
 
 | | Strider | Playwright |
 |---|---|---|
@@ -66,8 +89,8 @@ What a page's own script reads about the browser driving it, the signals bot pro
 The arguments each launched Chromium with:
 
 ```
-Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.SOHYbR/strider-chromium-lbRw4J about:blank
-Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.SOHYbR/playwright_chromiumdev_profile-yDUhlO --remote-debugging-pipe --no-startup-window
+Strider:    --no-first-run --no-default-browser-check --no-service-autorun --disable-sync --disable-component-update --disable-background-networking --disable-default-apps --disable-client-side-phishing-detection --disable-domain-reliability --disable-breakpad --disable-hang-monitor --disable-prompt-on-repost --disable-component-extensions-with-background-pages --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication --enable-features=CDPScreenshotNewSurface --metrics-recording-only --password-store=basic --use-mock-keychain --headless --remote-debugging-pipe --user-data-dir=/tmp/nix-shell.pl2ayS/strider-chromium-yZrC5x about:blank
+Playwright: --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/nix-shell.pl2ayS/playwright_chromiumdev_profile-AOxEhp --remote-debugging-pipe --no-startup-window
 ```
 
 ## The code
@@ -184,7 +207,7 @@ const popupPlaywright = async (browser: Playwright.Browser, origin: string) => {
 ```ts
 const blockStrider = Effect.fn("block")(function*(origin: string) {
   const page = yield* Browser.newPage()
-  yield* page.route(`${origin}/analytics/**`, () => Effect.succeed(Route.abort()))
+  yield* page.route(`${origin}/analytics/**`, () => Route.abort())
   yield* page.goto(`${origin}/tracked`)
   yield* page.getByText("analytics blocked").pipe(Expect.toBeVisible)
   return yield* page.locator("#out").readText

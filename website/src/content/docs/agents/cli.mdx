@@ -1,12 +1,38 @@
 ---
 title: Strider CLI
-description: Commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
+description: A usage guide for agent context and skills, commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
 order: 3
 ---
 
-A program's browser closes when the program ends. `strider`, the command-line tool that comes with
-`@usestrider/browser`, keeps one open in a named session between commands, so a shell, a script or an agent can
-drive it one step at a time.
+```sh
+pnpm add -g @usestrider/cli
+```
+
+A program's browser closes when the program ends. `strider`, the command-line tool, keeps one open in a named session
+between commands, so a shell, a script or an agent can drive it one step at a time. It runs on Node, or on Bun where
+there is no Node. `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
+
+## Agent usage
+
+Individual help pages describe syntax; `strider agent instructions` explains how sessions, page targets, event waits,
+results and saved logins work together, with examples an agent can use as context:
+
+```sh
+strider agent instructions
+```
+
+It prints Markdown for the installed version without starting a browser or connecting to a session.
+
+The same guide can be saved as a skill. `--skill` adds the name and description that a skill loader needs;
+it uses the same usage text, so there is only one guide to maintain:
+
+```sh
+mkdir -p .agents/skills/strider
+strider agent instructions --skill > .agents/skills/strider/SKILL.md
+```
+
+Regenerate saved context or the skill after upgrading Strider. The output describes CLI usage; MCP clients still
+use their tools' schemas for argument names.
 
 ## Commands
 
@@ -55,8 +81,6 @@ filled label=Email on main · 17 ms
   command.
 - A `page new` that fails, on a name that's taken or a URL that doesn't load, leaves no page behind, so the name is
   free to try again.
-- In a project, run it as `npx strider`; these examples write `strider`. `strider --help` lists the commands, and
-  `strider <command> --help` each one's arguments.
 
 ## Waits across commands
 
@@ -174,13 +198,13 @@ strider -s login -p main fill 'label=Email' "ada@example.com"
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-mkdir -p auth && strider -s login state save ./auth/shop.state
+strider -s login state save ./auth/shop.state
 strider start --name later --chromium /usr/bin/chromium --state ./auth/shop.state
 strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
 
 ```
-saved the session's state to /home/ada/shop/auth/shop.state, readable by you alone
+saved 3 cookies and 1 origin for shop.example.com to /home/ada/shop/auth/shop.state, readable by you alone
 ```
 
 ## Managing sessions
@@ -191,13 +215,47 @@ A session's browser runs until the session stops, so list what's running and sto
 | ---------------------------------------------- | ---------------------------------------------------------------------------- |
 | [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
 | `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
-| `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1h` |
+| `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1 hour` |
 | `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
-A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, deleted when it stops. A
-session idle for an hour stops itself; `start --idle "30 minutes"` changes that.
+A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
+`<OS temp directory>/strider-<uid>/<name>/` when the runtime directory is unset, deleted when it stops. A
+session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout with whitespace normalized to spaces, so you can copy it into `--idle` with quotes.
 
+Session roots and session directories must belong to your Unix user, have no group or other permissions, and
+cannot be symlinks. Ancestors must be owned by you or root and prevent replacement by other users; root-owned
+sticky directories such as /tmp are allowed. Trusted ancestor aliases, including macOS's /tmp and /var, are
+resolved with the same checks on the target ancestry. Unsafe existing directories are refused without changing
+their permissions. Missing parents are created privately. The CLI session service requires Unix ownership metadata.
+
+The old fallback, `<OS temp directory>/strider`, is never searched or migrated. Before upgrading, stop old daemons
+with the old CLI, then restart sessions with the new CLI. Inspect old directories and their ownership before
+removing them separately; do not copy sockets or locks into the new root. The internal socket is now named
+`sock`, so stop old daemons in XDG_RUNTIME_DIR too; socket files are not migrated. Validated ancestor aliases
+retain their short spelling for socket paths. Session names still allow 32 characters, but unusually long
+runtime paths can exceed the OS Unix socket path limit.
+
+If you have already upgraded with an old daemon still running, use the older CLI to stop it if available,
+with the same runtime-directory environment it used before the upgrade. The new CLI cannot use its old socket.
+Otherwise, stop sending it commands and wait for its configured `--idle` timeout: the default is `1 hour`, but
+an explicit value at startup takes precedence, and further commands reset its idle timer.
+
+For manual termination, treat the old session's `lock` as a lead, not proof of process identity. Independently
+verify that its `pid` still belongs to your account's Strider daemon for that session: inspect its owner,
+command line and session arguments, and compare its process start time with the lock's `startedAt` (Unix epoch
+milliseconds). A stale PID may now identify another process; neither a matching process name nor a live PID
+alone is enough. If identity is uncertain, use the old CLI or wait instead. Only after verifying identity,
+request termination of that daemon with your OS process tools (for example, SIGTERM) and wait for it to exit.
+
+After the daemon and the browser it launched have exited, inspect and remove only identified leftovers you
+own in the old session directory, then restart the session with the new CLI. Do not remove a live profile,
+trust a lock from an unsafe old shared directory without independent checks, or copy old locks or sockets
+into the new session. The old shared fallback is never reclaimed automatically.
+
+A client killed during startup can leave a private `.start-*` directory. Listings and named prune exclude it.
+After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
+directories; prune does not sweep startup entries.
 
 ## Attaching
 
@@ -216,6 +274,21 @@ N1  https://mail.example.com/inbox · 2 ms
 mail at https://mail.example.com/inbox, controlled until strider release -p mail · 2 ms
 ```
 
+`state save` takes only the held tabs' state from the browser: the cookies their hosts are sent, and the storage of
+tabs open on them. `--site` adds a domain and its subdomains, such as a sign-in provider's, and `--all` saves
+every login in the browser. With tabs in several contexts, `-p` names one:
+
+```sh
+strider -s mine state save ./auth/mail.state
+strider -s mine state save ./auth/mail.state --site okta.com
+strider -s mine state save ./auth/browser.state --all
+strider -s mine -p mail state save ./auth/mail.state
+```
+
+```
+saved 14 cookies and 1 origin for mail.example.com to /home/ada/auth/mail.state, readable by you alone
+```
+
 Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging
 endpoint or a WebDriver BiDi endpoint, such as Firefox's; it can't reach stock WebKit, which a program reaches with
 [`WebKit.layerAttach`](/docs/browsers/webkit#attaching).
@@ -224,42 +297,45 @@ endpoint or a WebDriver BiDi endpoint, such as Firefox's; it can't reach stock W
 
 A command does one thing and returns. A segment is a program, so it can decide as it goes: catch a failure, loop
 over a list, or work in a popup the moment it opens. It runs in the live session: a TypeScript file whose default
-export is an `Effect` that finds pages by name through [`CurrentSession`](/docs/api/browser/cli/CurrentSession):
+export is made with `Segment.make`. Its callback finds pages by name through [`CurrentSession`](/docs/api/browser/cli/CurrentSession):
 
 ```ts title="pay.ts"
 import { Deadline, Popup } from "@usestrider/browser"
-import { CurrentSession } from "@usestrider/browser/cli"
-import { Effect } from "effect"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
 
-export default Effect.gen(function*() {
-  const session = yield* CurrentSession.CurrentSession
-  const shop = yield* session.page("main")
-  const popups = yield* Popup.next(shop)
-  yield* shop.getByText("Pay").click()
-  const popup = yield* popups
-  yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
-  yield* popup.getByRole("button", { name: "Pay" }).click()
-  // Some cards ask the bank to confirm; most don't
-  yield* popup.getByRole("button", { name: "Confirm with my bank" }).click().pipe(
-    Deadline.within("5 seconds"),
-    Effect.catchTag("Timeout", () => Effect.void)
-  )
-  return { popup }
-})
+export default Segment.make(
+  Schema.Record(Schema.String, Schema.Never),
+  Effect.fnUntraced(function*() {
+    const session = yield* CurrentSession.CurrentSession
+    const shop = yield* session.page("main")
+    const popups = yield* Popup.next(shop)
+    yield* shop.getByText("Pay").click()
+    const popup = yield* popups
+    yield* popup.getByLabel("Card number").fill("4242 4242 4242 4242")
+    yield* popup.getByRole("button", { name: "Pay" }).click()
+    // Some cards ask the bank to confirm; most don't
+    yield* popup.getByRole("button", { name: "Confirm with my bank" }).click().pipe(
+      Deadline.within("5 seconds"),
+      Effect.catchTag("Timeout", () => Effect.void)
+    )
+    return { popup }
+  })
+)
 ```
 
 `strider run` doesn't type-check, so run your project's `tsc` first, against the same `@usestrider/browser` version
 as the `strider` running the session:
 
 ```sh
-npx tsc --noEmit && strider -s shop run pay.ts
+pnpm tsc --noEmit && strider -s shop run pay.ts
 strider -s shop pages
 strider -s shop -p p1 page name card
 strider -s shop -p card snapshot
 ```
 
 ```
-ran /home/ada/shop/pay.ts; popup is p1
+ran /home/ada/shop/pay.ts → {"popup":"p1"}
 main  https://shop.example.com/cart
 p1  https://pay.example.com/card
 (0 ms)
@@ -269,36 +345,100 @@ p1 is now card
 - A segment runs in its own scope: its [routes](/docs/events/routes),
   [handlers](/docs/events/kinds#dialogs-and-file-choosers) and waits end with it.
 - Pages it returns are named into the session as a page opened without a name is, `p1` and on: `ran` says which
-  name each key got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
+  name each returned page got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
   opener owns it, and a page the segment opened itself closes with the segment.
 - To keep a page it opened, call [`session.keep`](/docs/api/browser/cli/CurrentSession#CurrentSession.keep). For a
   page you know you want, `page new --name orders <url>` is simpler; a segment keeps one it opens partway through:
 
 ```ts title="orders.ts"
-import { CurrentSession } from "@usestrider/browser/cli"
-import { Effect } from "effect"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
 
-export default Effect.gen(function*() {
-  const session = yield* CurrentSession.CurrentSession
-  const orders = yield* session.context.newPage
-  yield* orders.goto("https://shop.example.com/orders")
-  yield* session.keep(orders, "orders")
-})
+export default Segment.make(
+  Schema.Record(Schema.String, Schema.Never),
+  Effect.fnUntraced(function*() {
+    const session = yield* CurrentSession.CurrentSession
+    const orders = yield* session.context.newPage
+    yield* orders.goto("https://shop.example.com/orders")
+    yield* session.keep(orders, "orders")
+  })
+)
 ```
+
+### Typed arguments and return values
+
+A schema lets one segment handle different inputs and validates them before its callback acts on the browser.
+Define the callback with `Effect.fnUntraced`: its arguments are decoded, so here `count` is a number even though
+its command-line input is a string.
+
+```ts title="read.ts"
+import { CurrentSession, Segment } from "@usestrider/browser/cli"
+import { Effect, Schema } from "effect"
+
+export default Segment.make(
+  Schema.Struct({
+    page: Schema.String,
+    count: Schema.NumberFromString.check(Schema.isInt())
+  }),
+  Effect.fnUntraced(function*(args) {
+    const session = yield* CurrentSession.CurrentSession
+    const page = yield* session.page(args.page)
+    return { title: yield* page.title, count: args.count }
+  })
+)
+```
+
+```sh
+strider -s shop run read.ts --arg page=main --arg count=2 --json
+```
+
+```json
+{
+  "file": "/home/ada/shop/read.ts",
+  "value": { "title": "Shop", "count": 2 },
+  "handles": {},
+  "durationMs": 12
+}
+```
+
+Use `Schema.Record(Schema.String, Schema.Never)` to reject all arguments; `Schema.Struct({})` is permissive.
+A plain `Effect` default export must be wrapped in
+`Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() { return yield* effect }))`. Duplicate arguments, unknown keys and schema errors stop the
+command before its callback runs.
+
+An argument beginning with `@` reads JSON from a file relative to your shell's working directory. For a segment
+whose schema includes a `payload` field, pass `--arg payload=@payload.json`. Use `--arg tag=@@literal` to pass
+`@literal` as text. A JSON file supplies parsed values, so its schema can use `Schema.Number` directly.
+
+`run` prints its return value. Plain output truncates previews after 4,096 characters with a note; `--json` keeps
+the full captured value. Pages become names, with their IDs in `handles`. Values JSON cannot represent use type
+tags: for example, `undefined` is `{"type":"undefined"}` and a bigint is `{"type":"bigint","value":"42"}`.
+Dates and regular expressions retain their type tags; maps contain key/value pairs and sets contain arrays.
+Cycles and unsupported return values fail with a path and a hint. Read a `JSHandle` before returning its value.
+
+Named secrets are concealed in output. With `--capture strict`, arbitrary return data is masked as `•••` because
+its source field is no longer known. Direct page handles and the `handles` table remain available. Failures go to
+stderr; `--json` includes the error tag, reason and hint when available, the failed phase, the browser operation
+when known, and elapsed milliseconds. Strict capture masks failure messages and hints too. Earlier actions stay
+done when a segment fails.
+
+Imports resolve from the segment's directory. Keep segment files in the project with the same Strider and Effect
+versions as the daemon. A file in `/tmp` cannot automatically use that project's `node_modules`.
 
 ## MCP
 
 An MCP client, such as an editor's agent, calls tools, not a shell. `strider mcp` serves a session's commands as
-tools over the Model Context Protocol; add it to your MCP client's servers:
+tools over the Model Context Protocol. The [agent usage guide](#agent-usage) explains the shared session and
+event behavior; the MCP tool schemas describe their arguments. Add the server to your MCP client:
 
 ```json
 {
   "mcpServers": {
-    "strider": { "command": "npx", "args": ["strider", "mcp", "-s", "shop"] }
+    "strider": { "command": "strider", "args": ["mcp", "-s", "shop"] }
   }
 }
 ```
 
 With `-s`, the agent shares a session with your shell, so you can watch and act on its pages. With
-`["strider", "mcp", "--start", "--chromium", "/usr/bin/chromium"]`, the client gets a session of its own, ending
+`["mcp", "--start", "--chromium", "/usr/bin/chromium"]`, the client gets a session of its own, ending
 with it.

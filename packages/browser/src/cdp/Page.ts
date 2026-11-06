@@ -272,7 +272,7 @@ export const BackForwardCacheNotRestoredExplanationTree = /*#__PURE__*/ Schema.s
     explanations: Schema.Array(BackForwardCacheNotRestoredExplanation),
     children: Schema.Array(BackForwardCacheNotRestoredExplanationTree)
   }).annotate({ identifier: "Page.BackForwardCacheNotRestoredExplanationTree" })
-) as any as Schema.Codec<BackForwardCacheNotRestoredExplanationTree>
+) as any as Schema.Codec<BackForwardCacheNotRestoredExplanationTree, unknown>
 
 /**
  * List of not restored reasons for back-forward cache.
@@ -960,7 +960,7 @@ export const FrameResourceTree = /*#__PURE__*/ Schema.suspend(() =>
     childFrames: Schema.optional(Schema.Array(FrameResourceTree)),
     resources: Schema.Array(FrameResource)
   }).annotate({ identifier: "Page.FrameResourceTree" })
-) as any as Schema.Codec<FrameResourceTree>
+) as any as Schema.Codec<FrameResourceTree, unknown>
 
 /**
  * Information about the Frame hierarchy.
@@ -992,7 +992,7 @@ export const FrameTree = /*#__PURE__*/ Schema.suspend(() =>
     frame: Frame,
     childFrames: Schema.optional(Schema.Array(FrameTree))
   }).annotate({ identifier: "Page.FrameTree" })
-) as any as Schema.Codec<FrameTree>
+) as any as Schema.Codec<FrameTree, unknown>
 
 /**
  * `GatedAPIFeatures` values.
@@ -2360,7 +2360,7 @@ export const BackForwardCacheNotUsedParams = /*#__PURE__*/ Schema.suspend(() =>
     notRestoredExplanations: Schema.Array(BackForwardCacheNotRestoredExplanation),
     notRestoredExplanationsTree: Schema.optional(BackForwardCacheNotRestoredExplanationTree)
   }).annotate({ identifier: "Page.BackForwardCacheNotUsedParams" })
-) as any as Schema.Codec<BackForwardCacheNotUsedParams>
+) as any as Schema.Codec<BackForwardCacheNotUsedParams, unknown>
 
 /**
  * Capture page screenshot.
@@ -2815,7 +2815,7 @@ export const FrameAttachedParams = /*#__PURE__*/ Schema.suspend(() =>
     parentFrameId: FrameId,
     stack: Schema.optional(Runtime.StackTrace)
   }).annotate({ identifier: "Page.FrameAttachedParams" })
-) as any as Schema.Codec<FrameAttachedParams>
+) as any as Schema.Codec<FrameAttachedParams, unknown>
 
 /**
  * Fired when frame has been detached from its parent.
@@ -3369,7 +3369,7 @@ export const GetFrameTreeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     frameTree: FrameTree
   }).annotate({ identifier: "Page.GetFrameTreeResult" })
-) as any as Schema.Codec<GetFrameTreeResult>
+) as any as Schema.Codec<GetFrameTreeResult, unknown>
 
 /**
  * `getInstallabilityErrors.Result`.
@@ -3649,7 +3649,7 @@ export const GetResourceTreeResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     frameTree: FrameResourceTree
   }).annotate({ identifier: "Page.GetResourceTreeResult" })
-) as any as Schema.Codec<GetResourceTreeResult>
+) as any as Schema.Codec<GetResourceTreeResult, unknown>
 
 /**
  * Accepts or dismisses a JavaScript initiated dialog (alert, confirm, prompt, or onbeforeunload).
@@ -5836,7 +5836,7 @@ export const startScreencast: Protocol.CommandDef<"Page.startScreencast", StartS
     "Page.startScreencast",
     StartScreencastParams,
     undefined,
-    { status: "experimental" }
+    { status: "experimental", createsResource: true }
   )
 
 /**

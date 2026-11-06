@@ -199,7 +199,7 @@ export const AssociatedCookie = /*#__PURE__*/ Schema.suspend(() =>
     blockedReasons: Schema.Array(CookieBlockedReason),
     exemptionReason: Schema.optional(CookieExemptionReason)
   }).annotate({ identifier: "Network.AssociatedCookie" })
-) as any as Schema.Codec<AssociatedCookie>
+) as any as Schema.Codec<AssociatedCookie, unknown>
 
 /**
  * Authorization challenge for HTTP status code 401 or 407.
@@ -303,7 +303,7 @@ export const AuthChallengeResponse = /*#__PURE__*/ Schema.suspend(() =>
     username: Schema.optional(Schema.String),
     password: Schema.optional(Schema.RedactedFromValue(Schema.String))
   }).annotate({ identifier: "Network.AuthChallengeResponse" })
-) as any as Schema.Codec<AuthChallengeResponse>
+) as any as Schema.Codec<AuthChallengeResponse, unknown>
 
 /**
  * The decision on what to do in response to the authorization challenge.  Default means
@@ -436,7 +436,7 @@ export const BlockedSetCookieWithReason = /*#__PURE__*/ Schema.suspend(() =>
     cookieLine: Schema.String,
     cookie: Schema.optional(Cookie)
   }).annotate({ identifier: "Network.BlockedSetCookieWithReason" })
-) as any as Schema.Codec<BlockedSetCookieWithReason>
+) as any as Schema.Codec<BlockedSetCookieWithReason, unknown>
 
 /**
  * Information about the cached resource.
@@ -793,7 +793,7 @@ export const Cookie = /*#__PURE__*/ Schema.suspend(() =>
     partitionKey: Schema.optional(CookiePartitionKey),
     partitionKeyOpaque: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "Network.Cookie" })
-) as any as Schema.Codec<Cookie>
+) as any as Schema.Codec<Cookie, unknown>
 
 /**
  * Types of reasons why a cookie may not be sent with a request.
@@ -946,7 +946,7 @@ export const CookieParam = /*#__PURE__*/ Schema.suspend(() =>
     sourcePort: Schema.optional(Schema.Int),
     partitionKey: Schema.optional(CookiePartitionKey)
   }).annotate({ identifier: "Network.CookieParam" })
-) as any as Schema.Codec<CookieParam>
+) as any as Schema.Codec<CookieParam, unknown>
 
 /**
  * cookiePartitionKey object
@@ -1956,7 +1956,7 @@ export const ExemptedSetCookieWithReason = /*#__PURE__*/ Schema.suspend(() =>
     cookieLine: Schema.String,
     cookie: Cookie
   }).annotate({ identifier: "Network.ExemptedSetCookieWithReason" })
-) as any as Schema.Codec<ExemptedSetCookieWithReason>
+) as any as Schema.Codec<ExemptedSetCookieWithReason, unknown>
 
 /**
  * Request / response headers as keys / values of JSON object.
@@ -2052,7 +2052,7 @@ export const Initiator = /*#__PURE__*/ Schema.suspend(() =>
     columnNumber: Schema.optional(Schema.Number),
     requestId: Schema.optional(RequestId)
   }).annotate({ identifier: "Network.Initiator" })
-) as any as Schema.Codec<Initiator>
+) as any as Schema.Codec<Initiator, unknown>
 
 /**
  * Type of this initiator.
@@ -4217,7 +4217,7 @@ export const DirectTCPSocketCreatedParams = /*#__PURE__*/ Schema.suspend(() =>
     timestamp: MonotonicTime,
     initiator: Schema.optional(Initiator)
   }).annotate({ identifier: "Network.DirectTCPSocketCreatedParams" })
-) as any as Schema.Codec<DirectTCPSocketCreatedParams>
+) as any as Schema.Codec<DirectTCPSocketCreatedParams, unknown>
 
 /**
  * Fired when direct_socket.TCPSocket connection is opened.
@@ -4397,7 +4397,7 @@ export const DirectUDPSocketCreatedParams = /*#__PURE__*/ Schema.suspend(() =>
     timestamp: MonotonicTime,
     initiator: Schema.optional(Initiator)
   }).annotate({ identifier: "Network.DirectUDPSocketCreatedParams" })
-) as any as Schema.Codec<DirectUDPSocketCreatedParams>
+) as any as Schema.Codec<DirectUDPSocketCreatedParams, unknown>
 
 /**
  * `directUDPSocketJoinedMulticastGroup.Params`.
@@ -4873,7 +4873,7 @@ export const GetCookiesResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     cookies: Schema.Array(Cookie)
   }).annotate({ identifier: "Network.GetCookiesResult" })
-) as any as Schema.Codec<GetCookiesResult>
+) as any as Schema.Codec<GetCookiesResult, unknown>
 
 /**
  * Returns post data sent with the request. Returns an error when no data was sent with the request.
@@ -5468,7 +5468,7 @@ export const RequestWillBeSentParams = /*#__PURE__*/ Schema.suspend(() =>
     hasUserGesture: Schema.optional(Schema.Boolean),
     renderBlockingBehavior: Schema.optional(RenderBlockingBehavior)
   }).annotate({ identifier: "Network.RequestWillBeSentParams" })
-) as any as Schema.Codec<RequestWillBeSentParams>
+) as any as Schema.Codec<RequestWillBeSentParams, unknown>
 
 /**
  * Fired when additional information about a requestWillBeSent event is available from the
@@ -5535,7 +5535,7 @@ export const RequestWillBeSentExtraInfoParams = /*#__PURE__*/ Schema.suspend(() 
     siteHasCookieInOtherPartition: Schema.optional(Schema.Boolean),
     appliedNetworkConditionsId: Schema.optional(Schema.String)
   }).annotate({ identifier: "Network.RequestWillBeSentExtraInfoParams" })
-) as any as Schema.Codec<RequestWillBeSentExtraInfoParams>
+) as any as Schema.Codec<RequestWillBeSentExtraInfoParams, unknown>
 
 /**
  * Fired when resource loading priority is changed
@@ -5747,7 +5747,7 @@ export const ResponseReceivedExtraInfoParams = /*#__PURE__*/ Schema.suspend(() =
     cookiePartitionKeyOpaque: Schema.optional(Schema.Boolean),
     exemptedCookies: Schema.optional(Schema.Array(ExemptedSetCookieWithReason))
   }).annotate({ identifier: "Network.ResponseReceivedExtraInfoParams" })
-) as any as Schema.Codec<ResponseReceivedExtraInfoParams>
+) as any as Schema.Codec<ResponseReceivedExtraInfoParams, unknown>
 
 /**
  * Searches for given string in response content.
@@ -6015,7 +6015,7 @@ export const SetCookieParams = /*#__PURE__*/ Schema.suspend(() =>
     sourcePort: Schema.optional(Schema.Int),
     partitionKey: Schema.optional(CookiePartitionKey)
   }).annotate({ identifier: "Network.SetCookieParams" })
-) as any as Schema.Codec<SetCookieParams>
+) as any as Schema.Codec<SetCookieParams, unknown>
 
 /**
  * Sets a cookie with the given cookie data; may overwrite equivalent cookies if they exist.
@@ -6091,7 +6091,7 @@ export const SetCookiesParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     cookies: Schema.Array(CookieParam)
   }).annotate({ identifier: "Network.SetCookiesParams" })
-) as any as Schema.Codec<SetCookiesParams>
+) as any as Schema.Codec<SetCookiesParams, unknown>
 
 /**
  * Specifies whether to always send extra HTTP headers with the requests from this page.
@@ -6406,7 +6406,7 @@ export const WebSocketCreatedParams = /*#__PURE__*/ Schema.suspend(() =>
     url: Schema.String,
     initiator: Schema.optional(Initiator)
   }).annotate({ identifier: "Network.WebSocketCreatedParams" })
-) as any as Schema.Codec<WebSocketCreatedParams>
+) as any as Schema.Codec<WebSocketCreatedParams, unknown>
 
 /**
  * Fired when WebSocket message error occurs.
@@ -6702,7 +6702,7 @@ export const WebTransportCreatedParams = /*#__PURE__*/ Schema.suspend(() =>
     timestamp: MonotonicTime,
     initiator: Schema.optional(Initiator)
   }).annotate({ identifier: "Network.WebTransportCreatedParams" })
-) as any as Schema.Codec<WebTransportCreatedParams>
+) as any as Schema.Codec<WebTransportCreatedParams, unknown>
 
 /**
  * Clears browser cache.

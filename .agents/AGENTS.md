@@ -7,13 +7,13 @@ and stock WebKit, and every member the API declares is built. One declared befor
 
 ## Layout
 
-- Design documents are at the root: `README.md` (goals, principles, status), `API.md` (L2, the public API),
-  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0), `CLI.md` and `PROBES.md`. `QUIRKS.md` and `ISSUES.md`
-  are closed records: their entries stay citable (`QUIRKS.md, Q12`, `ISSUES.md, I3`), but nothing is added to them.
-  New findings are issues on the Rookery board (Issues, below).
+- Design documents are at the root: `docs/design.md` (goals, principles, status), `API.md` (L2, the public API),
+  `CONCEPTS.md` (L1, the native model), `PROTOCOL.md` (L0) and `CLI.md`. `QUIRKS.md` is a closed record: its entries
+  stay citable (`QUIRKS.md, Q12`), but nothing is added to it.
+  New findings are issues (Issues, below).
 - `docs/decisions.md` holds the principles and architectural decisions, with their reasons and the alternatives
-  rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds prior-art notes, a record of its
-  time: don't rewrite it. `upstream/` holds drafts of proposals for other projects, which the maintainer posts.
+  rejected; `docs/conventions.md` holds the Effect conventions. `research/` holds the two notes on Playwright's trace
+  format that the code cites.
 - `packages/browser` is the published package:
   - `src/`: one module per file, exported as namespaces. `src/index.ts` and each subpath's `index.ts` are generated.
     `src/internal/` is implementation that no subpath exports, such as the protocol client, each backend's wire,
@@ -23,13 +23,19 @@ and stock WebKit, and every member the API declares is built. One declared befor
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
-    `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
-    machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
+    `test/integration/`: the browser integration tests. The full Linux suite runs in the Nix environment that fixes
+    the machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
-    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
-    say so; a browser of another version fails them too. Extra arguments go to Vitest
+    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). The Linux
+    entry point rejects other environments; a browser of another version fails the tests too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
+    On Apple Silicon macOS, `pnpm test:integration:macos --no-file-parallelism` downloads the separately pinned
+    Chrome for Testing and Firefox builds in `test/integration/browsers.macos.json`, verifies their SHA-256 hashes,
+    and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
+    WebKitGTK, Xvfb, Linux host settings and the other integration suites remain Linux-only. macOS traffic
+    recording is refused; its fonts and display come from the host, not Nix. Its first CI run is pending.
+    `scripts/integration-macos.md` describes the entry point and its CI job.
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
     the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
@@ -38,16 +44,25 @@ and stock WebKit, and every member the API declares is built. One declared befor
     drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
-  - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. Both packages,
-    like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
+  - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
+    packages, like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
+- `packages/cli`: published as `@usestrider/cli`, the `strider` command to install globally: a small launcher that runs
+  `@usestrider/browser`'s command on Node, or on Bun where there's no Node. It exists to list that package and
+  `@effect/platform-node` as real dependencies, so a global install links them.
 - `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
   environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
+  `test/upstream/` ports selected public Playwright suites using pinned fixtures and notices in `upstream/`.
+  `pnpm test:upstream` runs their Playwright baselines and Strider ports; `pnpm benchmark:upstream` records repeated
+  per-case timings in `.data/upstream/runs/`; `pnpm benchmark:compare <before> <after>` compares saved generations.
+  `--output` keeps a run outside the worktree. The larger diagnostic suites expose known failures; only the validated Vite
+  and Astro cases also run in `pnpm test:integration`. Keep failures visible, and track findings as issues.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
   the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
   and guide block (`code.json`).
-- `packages/tools/utils`: barrel codegen; `clean`, which `pnpm build` runs first, so no earlier build's output is
+- `packages/tools/utils`: barrel codegen; `readme`, which writes `packages/browser/README.md` from the root's, so never
+  edit that one; `clean`, which `pnpm build` runs first, so no earlier build's output is
   published; and `pack-check`, which checks what the published packages would be: each one packed, installed in a
   project of its own with only its peers, imported under Node and type-checked under `nodenext`, with its MIT
   `LICENSE`.
@@ -63,7 +78,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
   request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
-  `main` has changed, and on demand, keeping the log of a failed run.
+  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site from `main`; `release.yml`, run by hand, publishes to npm
+  the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
   type-checked as the JSDoc examples are. The API reference is rendered from the dataset `pnpm api-reference` writes,
@@ -95,9 +111,14 @@ Use the narrowest check that covers the change:
 | A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
 | The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
 | The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
 | Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
+
+Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
+`integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
+`packages/browser/test/integration/failureTrace.ts`.
 
 ## Conventions
 
@@ -139,6 +160,12 @@ then `**Example** (Title)` sections, each one `` ```ts import.meta.vitest `` fen
 is `unstable`, or `experimental` for what rests on an upstream proposal or an in-flight module, and `@since` is
 `0.1.0`.
 
+Choose changeset bumps using [the release policy](../.changeset/README.md#release-policy). Stability determines the
+bump: `unstable` fixes and additions are patches, and breaks are minors; `experimental` changes are patches even
+when breaking; stable or unclassified APIs follow strict semver. The CLI's public contracts are explicitly
+`unstable`, including when their implementation lives under `internal/`. Use the highest required bump per affected
+package.
+
 JSDoc is what the API reference and editors show, so write it for someone using Strider, who has none of the design
 documents. Say what a declaration does and what happens, in plain words; cite no review, principle, rule, quirk
 number or section of a design document, and leave out how the API got here. A summary must read right the first
@@ -156,19 +183,34 @@ the guide reads as one. The `review-guides` skill checks all four.
 Review and fix in a loop: find what's wrong, fix it, check again. Don't write a review up as a document or commit
 one. Ask the maintainer in conversation when a change needs their decision. When the work settles a principle or an
 architectural decision, state it in the layer document it belongs to, with its reasons and the alternatives rejected
-in `docs/decisions.md`; what was found wrong along the way stays in the commits and Rookery's issues.
+in `docs/decisions.md`; what was found wrong along the way stays in the commits and the issues.
 Keep the documents at even depth and never cut detail to balance them.
 Playwright and other prior art are evidence of what works, not a template.
 
+`docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
+later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
+for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
+edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
+the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+fix, a test, or a change that follows an existing decision needs no entry.
+
 ## Issues
 
-Work that isn't done in the change at hand goes on the Rookery board, never into a Markdown file: a bug you found, a
-browser behaving oddly or differently from the others, a compromise in Strider it forced, a probe to run, an open
-question, a follow-up. File it with `rookery issue new --title "…" --body "…"`, and leave it unassigned: assigning
-an agent queues a run, which is the maintainer's call. The body says what it is, where it was seen (with the browser
-builds), what Strider does now, and what to reconsider or decide. Use `--parent` for work that belongs to a larger
-issue and `--blocked-by` for what must come first. Search first (`rookery issue list --search "…"`), and comment on an existing issue
-(`rookery comment ROOK-12 --body "…"`) rather than filing it twice. Cite an issue by its key (`ROOK-51`) in commits and code comments.
+Work that isn't done in the change at hand goes in an issue, never into a Markdown file: a bug you found, a browser
+behaving oddly or differently from the others, a compromise in Strider it forced, a probe to run, an open question, a
+follow-up. The body says what it is, where it was seen (with the browser builds), what Strider does now, and what to
+reconsider or decide. Search first, and comment on an existing issue rather than filing it twice.
+
+- **Anyone else:** use GitHub. File with `gh issue create --title "…" --body "…"`, search with
+  `gh issue list --search "…"`, and comment with `gh issue comment 12 --body "…"`. The repository is public, so write
+  for anyone to read.
+- **The maintainer's own agents,** where the `clutch` command is on your `PATH`: use the private Clutch board. File with
+  `clutch issue new --title "…" --body "…"`, and leave it unassigned: assigning an agent queues a run, which is the
+  maintainer's call. Use `--parent` for work that belongs to a larger issue and `--blocked-by` for what must come
+  first. Search with `clutch issue list --search "…"`, and comment with `clutch comment <issue> --body "…"`.
+
+Commits and code comments cite GitHub issues by number (`#51`). Everything public has to make sense to someone who
+can't open the board, so a comment explains the behavior itself.
 
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,

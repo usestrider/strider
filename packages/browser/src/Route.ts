@@ -2,8 +2,9 @@
  * Routes intercept a page's or context's requests, and a route's handler decides what happens to each one.
  *
  * A route works at one phase: before the request is sent (the default), when its response starts or at an
- * authentication challenge. Its handler returns a `Decision` valid at that phase. A handler that fails, is
- * interrupted, runs out of time or returns a decision the backend can't apply gets the default, `continue`, and
+ * authentication challenge. Its handler returns an Effect that produces a `Decision` valid at that phase. A
+ * handler that fails, is interrupted, runs out of time or returns a decision the backend can't apply gets the
+ * default, `continue`, and
  * its failure is logged. A fulfilled response is an `HttpServerResponse`, and a change to a request is a function
  * of `HttpClientRequest`. The page's routes are asked before its context's, the most recent first.
  *
@@ -14,7 +15,7 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Headers from "effect/http/Headers"
 import type * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -50,12 +51,14 @@ const DecisionTypeId = RouteDecision.TypeId
 export type Phase = "request" | "response" | "auth"
 
 /**
- * What happens to an intercepted request: a decision valid at the phases `P`.
+ * What happens to an intercepted request: the value produced by a handler's Effect, valid at the phases `P`.
  *
  * **Details**
  *
- * A decision valid at more phases fits where fewer are asked for: `Route.continue`, valid at every phase, fits
- * any handler, while `Route.provideCredentials` fits only an `auth` route's.
+ * A decision valid at more phases is assignable where fewer are required: `Decision<Phase>` is assignable to
+ * `Decision<"request">`, while `Decision<"auth">` is not. `Route.continue` produces a decision valid at every
+ * phase; `Route.provideCredentials` returns an Effect producing a decision valid at `auth`. With an explicit
+ * `phase` option, a route handler must produce a decision compatible with that phase.
  *
  * @stability unstable
  * @category models
@@ -116,7 +119,7 @@ export interface Paused {
    *         Effect.tap((body) =>
    *           Console.log(Option.map(body, (bytes) => new TextDecoder().decode(bytes)))
    *         ),
-   *         Effect.as(Route.continue)
+   *         Effect.andThen(Route.continue)
    *       )
    *   )
    * })
@@ -164,7 +167,7 @@ export interface ResponsePhase extends Paused {
    *   yield* page.route(
    *     "https://app.example.com/api/plan",
    *     ({ responseBody }) =>
-   *       Effect.map(responseBody, (bytes) => {
+   *       Effect.flatMap(responseBody, (bytes) => {
    *         const text = new TextDecoder().decode(bytes).replace("Free", "Pro")
    *         return Route.fulfill(
    *           HttpServerResponse.text(text, { contentType: "application/json" })
@@ -197,14 +200,20 @@ export interface AuthPhase extends Paused {
  * @category models
  * @since 0.1.0
  */
-export type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>
+export type Intercepted<P extends Phase = Phase> = {
+  readonly request: RequestPhase
+  readonly response: ResponsePhase
+  readonly auth: AuthPhase
+}[P]
 
 /**
  * A route handler: decides what happens to each request paused at its phase.
  *
  * **Details**
  *
- * A failure `E` is logged, and the default decision, `continue`, applies.
+ * A failure `E` is logged, and the default decision, `continue`, applies. A handler valid at more phases
+ * can be used where fewer phases are selected: it accepts all of their inputs and returns decisions valid
+ * at every selected phase.
  *
  * @stability unstable
  * @category models
@@ -223,7 +232,8 @@ export type Handler<E, R, P extends Phase = "request"> = (
  */
 export interface Options<P extends Phase = "request"> {
   /**
-   * Which phase the route sees.
+   * Which phase the route sees. Response-only handlers require an explicit `"response"`, and authentication
+   * handlers require an explicit `"auth"`. If this may be omitted, the handler must also handle `"request"`.
    *
    * @default "request"
    */
@@ -231,7 +241,7 @@ export interface Options<P extends Phase = "request"> {
 }
 
 // A value, so its export needs a binding at run time
-const _continue: Decision<Phase> = RouteDecision.make({ _tag: "Continue" })
+const _continue: Effect.Effect<Decision<Phase>> = Effect.succeed(RouteDecision.make({ _tag: "Continue" }))
 
 export {
   /**
@@ -250,7 +260,8 @@ export {
    * const logApiCalls = Effect.fn("logApiCalls")(function*(page: Page.Page) {
    *   yield* page.route(
    *     "https://shop.example.com/api/**",
-   *     ({ request }) => Effect.as(Console.log(request.method, request.url), Route.continue)
+   *     ({ request }) =>
+   *       Effect.andThen(Console.log(request.method, request.url), Route.continue)
    *   )
    * })
    * ```
@@ -308,7 +319,7 @@ export interface ResponseChange {
  * const tagApiCalls = Effect.fn("tagApiCalls")(function*(page: Page.Page) {
  *   yield* page.route(
  *     "https://shop.example.com/api/**",
- *     () => Effect.succeed(Route.continueWith(HttpClientRequest.setHeader("x-test", "1")))
+ *     () => Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))
  *   )
  * })
  * ```
@@ -324,11 +335,9 @@ export interface ResponseChange {
  *   yield* page.route(
  *     "https://shop.example.com/static/**",
  *     ({ response }) =>
- *       Effect.succeed(
- *         Route.continueWith({
- *           headers: Headers.set(response.headers, "cache-control", "max-age=60")
- *         })
- *       ),
+ *       Route.continueWith({
+ *         headers: Headers.set(response.headers, "cache-control", "max-age=60")
+ *       }),
  *     { phase: "response" }
  *   )
  * })
@@ -339,18 +348,20 @@ export interface ResponseChange {
  * @since 0.1.0
  */
 export const continueWith: {
-  (change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest): Decision<"request">
-  (change: ResponseChange): Decision<"response">
+  (
+    change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
+  ): Effect.Effect<Decision<"request">>
+  (change: ResponseChange): Effect.Effect<Decision<"response">>
 } = ((
   change: ((request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) | ResponseChange
 ) =>
   typeof change === "function"
-    ? RouteDecision.make({ _tag: "ContinueWith", change })
-    : RouteDecision.make({
+    ? Effect.succeed(RouteDecision.make({ _tag: "ContinueWith", change }))
+    : Effect.succeed(RouteDecision.make({
       _tag: "ContinueResponse",
       status: change.status,
       headers: change.headers === undefined ? undefined : Headers.fromInput(change.headers)
-    })) as never
+    }))) as never
 
 /**
  * Answers the request with a response, without contacting the server; at the `response` phase, replaces the
@@ -375,7 +386,7 @@ export const continueWith: {
  * const stubUser = Effect.fn("stubUser")(function*(page: Page.Page) {
  *   yield* page.route(
  *     "https://shop.example.com/api/user",
- *     () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" })))
+ *     () => Route.fulfill(HttpServerResponse.jsonUnsafe({ name: "Ada" }))
  *   )
  * })
  * ```
@@ -384,8 +395,9 @@ export const continueWith: {
  * @category constructors
  * @since 0.1.0
  */
-export const fulfill = (response: HttpServerResponse.HttpServerResponse): Decision<"request" | "response"> =>
-  RouteDecision.make({ _tag: "Fulfill", response })
+export const fulfill = (
+  response: HttpServerResponse.HttpServerResponse
+): Effect.Effect<Decision<"request" | "response">> => Effect.succeed(RouteDecision.make({ _tag: "Fulfill", response }))
 
 /**
  * A network error code to fail a request with.
@@ -427,7 +439,7 @@ export type AbortReason =
  * const blockImages = Effect.fn("blockImages")(function*(page: Page.Page) {
  *   yield* page.route(
  *     "https://shop.example.com/images/**",
- *     () => Effect.succeed(Route.abort())
+ *     () => Route.abort()
  *   )
  *   yield* page.goto("https://shop.example.com")
  * })
@@ -437,8 +449,8 @@ export type AbortReason =
  * @category constructors
  * @since 0.1.0
  */
-export const abort = (reason?: AbortReason | undefined): Decision<"request" | "response"> =>
-  RouteDecision.make({ _tag: "Abort", reason: reason ?? "failed" })
+export const abort = (reason?: AbortReason | undefined): Effect.Effect<Decision<"request" | "response">> =>
+  Effect.succeed(RouteDecision.make({ _tag: "Abort", reason: reason ?? "failed" }))
 
 /**
  * Passes the request to the next matching route, or lets the default decide when there is none.
@@ -454,11 +466,9 @@ export const abort = (reason?: AbortReason | undefined): Decision<"request" | "r
  *   yield* page.route(
  *     "https://shop.example.com/api/cart",
  *     ({ request }) =>
- *       Effect.succeed(
- *         request.method === "POST"
- *           ? Route.fulfill(HttpServerResponse.empty())
- *           : Route.fallthrough
- *       )
+ *       request.method === "POST"
+ *         ? Route.fulfill(HttpServerResponse.empty())
+ *         : Route.fallthrough
  *   )
  * })
  * ```
@@ -467,7 +477,7 @@ export const abort = (reason?: AbortReason | undefined): Decision<"request" | "r
  * @category constructors
  * @since 0.1.0
  */
-export const fallthrough: Decision<Phase> = RouteDecision.make({ _tag: "Fallthrough" })
+export const fallthrough: Effect.Effect<Decision<Phase>> = Effect.succeed(RouteDecision.make({ _tag: "Fallthrough" }))
 
 /**
  * Settings for `fromHar`.
@@ -547,12 +557,10 @@ export const fromHar: (
  *   yield* page.route(
  *     "https://app.example.com/**",
  *     () =>
- *       Effect.succeed(
- *         Route.provideCredentials({
- *           username: "ada",
- *           password: Redacted.make("hunter2")
- *         })
- *       ),
+ *       Route.provideCredentials({
+ *         username: "ada",
+ *         password: Redacted.make("hunter2")
+ *       }),
  *     { phase: "auth" }
  *   )
  *   yield* page.goto("https://app.example.com/admin")
@@ -566,7 +574,8 @@ export const fromHar: (
 export const provideCredentials = (credentials: {
   readonly username: string
   readonly password: Redacted.Redacted<string>
-}): Decision<"auth"> => RouteDecision.make({ _tag: "ProvideCredentials", ...credentials })
+}): Effect.Effect<Decision<"auth">> =>
+  Effect.succeed(RouteDecision.make({ _tag: "ProvideCredentials", ...credentials }))
 
 /**
  * The handle `route` returns.
@@ -589,7 +598,7 @@ export interface Registration extends Declaration.Registration {
    * const stubProducts = Effect.fn("stubProducts")(function*(page: Page.Page) {
    *   const stub = yield* page.route(
    *     "https://shop.example.com/api/products",
-   *     () => Effect.succeed(Route.fulfill(HttpServerResponse.jsonUnsafe([])))
+   *     () => Route.fulfill(HttpServerResponse.jsonUnsafe([]))
    *   )
    *   yield* page.goto("https://shop.example.com")
    *   yield* stub.hits.waitFor((hits) => hits > 0)

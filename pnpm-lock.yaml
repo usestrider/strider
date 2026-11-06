@@ -230,6 +230,18 @@ importers:
         specifier: ^4.0.6
         version: 4.0.6
 
+  packages/cli:
+    dependencies:
+      '@effect/platform-node':
+        specifier: ^4.0.6
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
+      '@usestrider/browser':
+        specifier: workspace:^
+        version: link:../browser
+      effect:
+        specifier: ^4.0.6
+        version: 4.0.6
+
   packages/scenarios:
     devDependencies:
       '@effect/platform-node':
@@ -241,12 +253,21 @@ importers:
       '@usestrider/browser':
         specifier: workspace:^
         version: link:../browser
+      astro:
+        specifier: 7.4.2
+        version: 7.4.2(@astrojs/markdown-remark@7.3.4)(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
       effect:
         specifier: ^4.0.6
         version: 4.0.6
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/tools/codegen:
     dependencies:
@@ -352,6 +373,9 @@ importers:
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      '@usestrider/browser':
+        specifier: workspace:^
+        version: link:../packages/browser
       alchemy:
         specifier: 2.0.0-beta.84
         version: 2.0.0-beta.84(@effect/platform-node@4.0.6(effect@4.0.6)(redis@6.3.0))(@effect/vitest@4.0.6(effect@4.0.6)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))))(effect@4.0.6)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))(ws@8.22.0)

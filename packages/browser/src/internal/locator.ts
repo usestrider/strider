@@ -42,7 +42,7 @@ import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
-import type * as Model from "./model.ts"
+import type { Locate, Owner } from "./locatorOwner.ts"
 import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
@@ -131,6 +131,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
       return "The element is read-only"
     case "NoSuchOption":
       return `The select has no option with that ${reason.option}`
+    case "PreparingFocus":
+      return `Focus was being moved from ${reason.from} before filling the target`
   }
 }
 
@@ -150,14 +152,6 @@ export const staleRef = (why: Engine.Stale): Locator.StaleRef =>
   })
 
 const LocatorTypeId = "~@usestrider/browser/Locator"
-
-/** The page a locator belongs to, and the grant it was made under. */
-export interface Owner {
-  readonly runtime: Runtime.Runtime
-  readonly page: Model.PageEntry
-  /** `None` for a page controlled for its life. */
-  readonly grant: Option.Option<Access.Grant>
-}
 
 /**
  * An HTML drag the page dispatches, run in the isolated world with the element and the
@@ -208,12 +202,16 @@ const syntheticDrag = (
   return accepted ? "dropped" : "refused"
 }
 
-export class LocatorImpl implements Locator.Locator {
+/** How a snapshot of this owner's page makes the locator for a ref. */
+export const locatorOn = (owner: Owner): Locate => (steps, label) => new LocatorImpl(owner, steps, label)
+
+export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   readonly [LocatorTypeId] = LocatorTypeId as typeof LocatorTypeId
   readonly owner: Owner
   readonly steps: ReadonlyArray<Engine.Step>
   readonly label: Option.Option<string>
   constructor(owner: Owner, steps: ReadonlyArray<Engine.Step>, label: Option.Option<string> = Option.none()) {
+    super()
     this.owner = owner
     this.steps = steps
     this.label = label
@@ -366,9 +364,10 @@ export class LocatorImpl implements Locator.Locator {
       yield* Access.check(this.owner.grant)
       const record = yield* Operation.record
       const id = record.id
-      const taken = yield* Snapshots.take(this.owner, this.steps, options, id, record.budget.at).pipe(
-        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
-      )
+      const taken = yield* Snapshots.take(this.owner, locatorOn(this.owner), this.steps, options, id, record.budget.at)
+        .pipe(
+          Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+        )
       if (taken._tag === "Taken") return taken.snapshot as Snapshot.Snapshot<Locator.Locator>
       if (taken.response._tag === "NoMatch") {
         return yield* Effect.fail(this.error(
@@ -546,7 +545,19 @@ export class LocatorImpl implements Locator.Locator {
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {
-    const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
+    const value = Redacted.isRedacted(text) ? Redacted.value(text) : text
+    if (typeof value !== "string") {
+      return Effect.fail(this.error(
+        "Locator.pressSequentially",
+        new Reason.InvalidInput({
+          input: "text",
+          expected: "a string or Redacted string",
+          hint: "PressSequentially requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
+    const characters = Array.from(value)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
     return this.act(
       "Locator.pressSequentially",
@@ -597,26 +608,24 @@ export class LocatorImpl implements Locator.Locator {
       (_ready, _io, record) =>
         Effect.gen({ self: this }, function*() {
           const id = record.id
-          const given = yield* FileInputImpl.partition(list, "files").pipe(
+          const given = yield* FileInputImpl.prepare(owner.runtime, list).pipe(
             Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
           )
-          const paths: Array<string> = []
-          for (const file of given._tag === "Paths" ? given.files : []) {
-            const path = yield* FileInputImpl.path(owner.runtime, file).pipe(
-              Effect.mapError((reason) => this.error("Locator.setInputFiles", reason, id))
-            )
-            const fs = owner.runtime.fileSystem
-            if (FileInputImpl.source(file)._tag === "Local" && Option.isSome(fs)) {
-              const exists = yield* fs.value.exists(path).pipe(Effect.orElseSucceed(() => false))
+          if (given._tag === "Paths" && Option.isSome(owner.runtime.fileSystem)) {
+            for (let index = 0; index < list.length; index++) {
+              if (FileInputImpl.source(list[index]!)._tag !== "Local") continue
+              const path = given.files[index]!
+              const exists = yield* owner.runtime.fileSystem.value.exists(path).pipe(Effect.orElseSucceed(() => false))
               if (!exists) {
-                return yield* Effect.fail(this.error(
-                  "Locator.setInputFiles",
-                  new Locator.FileUnreadable({ path, hint: "No file is at that path on this machine" }),
-                  id
-                ))
+                return yield* Effect.fail(
+                  this.error(
+                    "Locator.setInputFiles",
+                    new Locator.FileUnreadable({ path, hint: "No file is at that path on this machine" }),
+                    id
+                  )
+                )
               }
             }
-            paths.push(path)
           }
           const budget = record.budget
           const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
@@ -641,7 +650,18 @@ export class LocatorImpl implements Locator.Locator {
             ))
             return "done" as const
           }
-          yield* owner.runtime.model.adapter.setInputFiles(found.node, paths).pipe(
+          yield* FileInputImpl.validateCount(owner.runtime, found.node, given.files.length, {
+            page: Option.some(owner.page),
+            at: budget.at,
+            id
+          }).pipe(Effect.mapError((failure) =>
+            failure._tag === "Gone"
+              ? failure.error
+              : failure._tag === "Deadline"
+              ? record.timeout(Option.none())
+              : this.error("Locator.setInputFiles", failure.reason, id)
+          ))
+          yield* owner.runtime.model.adapter.setInputFiles(found.node, given.files).pipe(
             Effect.mapError((error) => this.adapterFailure("Locator.setInputFiles", error, id))
           )
           return "done" as const
@@ -829,7 +849,7 @@ export class LocatorImpl implements Locator.Locator {
           new Reason.InvalidInput({
             input: "value",
             expected: `a value ${final.element} takes`,
-            hint: "The input refused the value; a date input takes a date such as 2026-10-23"
+            hint: "Use a value the input accepts, such as a finite number for number inputs or 2026-10-23 for dates"
           }),
           id
         )
@@ -844,7 +864,7 @@ export class LocatorImpl implements Locator.Locator {
         expected: "a UI Events key value, such as \"Enter\" or \"a\", or one character",
         hint: `${JSON.stringify(key)} isn't a key`
       }),
-      Operation.operationId()
+      Operation.idNow()
     )
   }
 
@@ -953,7 +973,7 @@ export class LocatorImpl implements Locator.Locator {
       operation,
       new Reason.InvalidInput({
         input: "selector",
-        expected: "a CSS selector",
+        expected: response.kind === "role" ? "a role query with supported state filters" : "a CSS selector",
         hint: `${JSON.stringify(response.selector)}: ${response.message}`
       }),
       id
@@ -968,7 +988,7 @@ export class LocatorImpl implements Locator.Locator {
     return other
   }
 
-  /** The action point of the one match, now: a drag's target, which must be visible and reachable. */
+  /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
   pointOf(position: Mouse.Point | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
@@ -1006,11 +1026,12 @@ export class LocatorImpl implements Locator.Locator {
     })
   }
 
-  /** `check` and `uncheck`: nothing when it is already so; else a click, and the state read again. */
+  /** `check` and `uncheck`: nothing when it is already so; else a pointer action, checking the result unless trial. */
   private setChecked(operation: string, checked: boolean, options: Locator.PointerOptions | undefined) {
     const expected = checked ? "checked" : "unchecked"
     return Effect.gen({ self: this }, function*() {
-      const now = yield* this.isChecked.pipe(
+      const read = this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
+      const now = yield* read.pipe(
         Effect.catchIf(
           (error): error is Locator.LocatorError => Locator.isLocatorError(error) && error.reason._tag === "NoMatch",
           () => Effect.succeed(undefined)
@@ -1022,7 +1043,8 @@ export class LocatorImpl implements Locator.Locator {
         options,
         (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
       )
-      const after = yield* this.isChecked
+      if (options?.trial === true) return
+      const after = yield* read
       if (after !== checked) {
         return yield* Effect.fail(this.error(
           operation,
@@ -1046,6 +1068,17 @@ export class LocatorImpl implements Locator.Locator {
     options: Locator.ActionOptions | undefined
   ) {
     const text = Redacted.isRedacted(value) ? Redacted.value(value) : value
+    if (typeof text !== "string") {
+      return Effect.fail(this.error(
+        operation,
+        new Reason.InvalidInput({
+          input: "value",
+          expected: "a string or Redacted string",
+          hint: "Fill requires text"
+        }),
+        Operation.idNow()
+      ))
+    }
     return this.act(
       operation,
       options,
@@ -1160,7 +1193,11 @@ export class LocatorImpl implements Locator.Locator {
     checks: { readonly inViewport: boolean; readonly receivesPointer: boolean },
     id: Diagnostics.OperationId
   ): Effect.Effect<
-    | { readonly _tag: "Point"; readonly point: { x: number; y: number }; readonly origin: { x: number; y: number } }
+    | {
+      readonly _tag: "Point"
+      readonly point: { x: number; y: number }
+      readonly origin: { x: number; y: number }
+    }
     | { readonly _tag: "NotReady"; readonly reason: Engine.NotReady },
     Runtime.SendFailure
   > {
@@ -1208,7 +1245,7 @@ export class LocatorImpl implements Locator.Locator {
         /** Sends input to the page, into the frame the element is in. */
         readonly send: (
           events: ReadonlyArray<Adapter.InputEvent>
-        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
       },
@@ -1226,18 +1263,28 @@ export class LocatorImpl implements Locator.Locator {
       const id = record.id
       const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
+      const reuseStability = checks.stable > 0 &&
+        (operation === "Locator.click" || operation === "Locator.check" || operation === "Locator.uncheck")
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
         action._tag === "Select"
-      const round = (cap: number, apply: boolean) =>
+      const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
           if (apply && inRound) record.markSent()
           return Runtime.sendRouted(
             owner.runtime,
             owner.page,
-            { op: "act", steps: this.steps, checks, cap, action, apply },
+            {
+              op: "act",
+              steps: this.steps,
+              checks,
+              cap,
+              action,
+              apply,
+              ...(stability === undefined ? {} : { stability })
+            },
             id,
             budget.at
           )
@@ -1295,19 +1342,29 @@ export class LocatorImpl implements Locator.Locator {
               if (answer.routed.hops.length === 0 || response.point === null) {
                 return Option.some<Ready>({ response, routed: answer.routed, origin: { x: 0, y: 0 } })
               }
-              const translated = yield* this.translate(answer.routed, response.point, checks, id).pipe(
-                Effect.mapError((failure) =>
-                  failure._tag === "Deadline"
-                    ? failure
-                    : this.sendFailure(operation, failure, record)
+              const points = checks.receivesPointer && action._tag === "Point" && action.position === null &&
+                  response.candidates !== undefined && response.candidates.length > 0
+                ? response.candidates
+                : [response.point]
+              let covered: Engine.NotReady | undefined
+              for (const point of points) {
+                const translated = yield* this.translate(answer.routed, point, checks, id).pipe(
+                  Effect.mapError((failure) =>
+                    failure._tag === "Deadline" ? failure : this.sendFailure(operation, failure, record)
+                  )
                 )
-              )
-              if (translated._tag === "NotReady") return notReady(translated.reason)
-              return Option.some<Ready>({
-                response: { ...response, point: translated.point },
-                routed: answer.routed,
-                origin: translated.origin
-              })
+                if (translated._tag === "NotReady") {
+                  if (translated.reason._tag !== "Covered") return notReady(translated.reason)
+                  covered ??= translated.reason
+                  continue
+                }
+                return Option.some<Ready>({
+                  response: { ...response, point: translated.point },
+                  routed: answer.routed,
+                  origin: translated.origin
+                })
+              }
+              return notReady(covered!)
             }
             default:
               return yield* this.unmatched(operation, response, id)
@@ -1325,7 +1382,6 @@ export class LocatorImpl implements Locator.Locator {
                 new Reason.BackendFailure({
                   kind: "Rejected",
                   method: "input",
-                  metadata: {},
                   hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
                     "gesture, so the page's input state is unknown"
                 }),
@@ -1355,58 +1411,60 @@ export class LocatorImpl implements Locator.Locator {
                     id,
                     failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : { _tag: "MayHaveBeenSent" }
                   )
-                  : this.error(
-                    operation,
-                    new Reason.BackendFailure({ kind: "Rejected", method: "input", metadata: {}, hint: "deadline" }),
-                    id,
-                    { _tag: "MayHaveBeenSent" }
-                  )
+                  : timedOut()
               )
             )
           }
         )
-      while (true) {
-        const left = record.left()
-        if (left <= 0) return yield* Effect.fail(timedOut())
-        const first = yield* round(Runtime.roundCap(left), false).pipe(
-          Effect.flatMap(settle),
-          Effect.catch((failure) =>
-            failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+      // A round that reached the deadline is the action's own Timeout, with what the record saw
+      const attempts = Effect.gen({ self: this }, function*() {
+        while (true) {
+          const left = record.left()
+          if (left <= 0) return yield* Effect.fail(timedOut())
+          const first = yield* round(Runtime.roundCap(left), false, reuseStability ? "capture" : undefined).pipe(
+            Effect.flatMap(settle)
           )
-        )
-        if (Option.isNone(first)) continue
-        // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
-        const outcome = yield* owner.page.input.withPermit(Effect.gen({ self: this }, function*() {
-          const apply = options?.trial !== true
-          const answer = yield* round(Runtime.roundCap(record.left()), apply).pipe(
-            Effect.catch((failure) =>
-              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
+          if (Option.isNone(first)) continue
+          // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
+          const underPermit = Effect.fnUntraced(function*(this: LocatorImpl, stability?: string) {
+            const apply = options?.trial !== true
+            const answer = yield* round(Runtime.roundCap(record.left()), apply, stability)
+            const disarm = this.disarm(answer.routed.document, id)
+            const again = yield* settle(answer).pipe(
+              // A guard the round armed comes off when the point outside its frame wasn't ready
+              Effect.tap((ready) =>
+                Option.isNone(ready) && apply && answer.response._tag === "Ready"
+                  ? Effect.ignore(disarm)
+                  : Effect.void
+              )
             )
-          )
-          const disarm = this.disarm(answer.routed.document, id)
-          const again = yield* settle(answer).pipe(
-            Effect.catch((failure) =>
-              failure._tag === "Deadline" ? Effect.fail(timedOut(failure.hint)) : Effect.fail(failure)
-            ),
-            // A guard the round armed comes off when the point outside its frame wasn't ready
-            Effect.tap((ready) =>
-              Option.isNone(ready) && apply && answer.response._tag === "Ready" ? Effect.ignore(disarm) : Effect.void
-            )
-          )
-          if (Option.isNone(again)) return "again" as const
-          // A trial stops at the last check, holding the permit as the action would
-          if (options?.trial === true) return "done" as const
-          const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
-          if (done === "done") return "done" as const
-          // The guard stopped the gesture before the page saw it: nothing happened, so check again
-          record.markNotSent()
-          record.observe(done.retry)
-          return "again" as const
-        })).pipe((permitted) => record.bound(permitted, () => hint()))
-        if (outcome === "done") return
-      }
+            if (Option.isNone(again)) return "again" as const
+            // A trial stops at the last check, holding the permit as the action would
+            if (options?.trial === true) return "done" as const
+            const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
+            if (done === "done") return "done" as const
+            // The guard stopped the gesture before the page saw it: nothing happened, so check again
+            record.markNotSent()
+            record.observe(done.retry)
+            return "again" as const
+          }).bind(this)
+          const permitted = Effect.gen(function*() {
+            if (reuseStability) {
+              const immediate = yield* owner.page.input.withPermitsIfAvailable(1)(
+                underPermit(first.value.response.stability)
+              )
+              if (Option.isSome(immediate)) return immediate.value
+            }
+            // Queued input always takes new stability samples, even if the page hasn't rendered while waiting.
+            return yield* owner.page.input.withPermit(underPermit())
+          })
+          const outcome = yield* record.bound(permitted, () => hint())
+          if (outcome === "done") return
+        }
+      })
+      return yield* attempts.pipe(Effect.catchTag("Deadline", (failure) => Effect.fail(timedOut(failure.hint))))
     }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(owner.page, Operation.operationId())),
+      Effect.raceFirst(Runtime.pageEnded(owner.page)),
       Operation.named(operation, {
         attributes: {
           "browser.locator": this.description,
@@ -1435,14 +1493,11 @@ export class LocatorImpl implements Locator.Locator {
   pipe() {
     return pipeArguments(this, arguments)
   }
-  toString() {
+  override toString() {
     return `Locator(${this.description})`
   }
   toJSON() {
     return { _id: "Locator", page: this.owner.page.id, locator: this.description }
-  }
-  [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
   }
 }
 

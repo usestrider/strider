@@ -5,6 +5,9 @@ import tailwindcss from "@tailwindcss/vite"
 import expressiveCode from "astro-expressive-code"
 import { defineConfig, fontProviders } from "astro/config"
 import { fileURLToPath } from "node:url"
+import { sitemap } from "./src/features/sitemap.ts"
+
+const site = "https://usestrider.dev"
 
 // The API reference dataset, which `pnpm reference` writes at the repository's root
 process.env["STRIDER_REFERENCE_DATA"] ??= fileURLToPath(new URL("../.data/api-reference/", import.meta.url))
@@ -14,13 +17,13 @@ process.env["STRIDER_SCENARIOS_SOURCE"] ??= fileURLToPath(
 )
 
 export default defineConfig({
-  site: "https://usestrider.dev",
+  site,
   trailingSlash: "never",
   devToolbar: { enabled: false },
   markdown: {
     processor: unified({ rehypePlugins: [rehypeHeadingIds] })
   },
-  integrations: [expressiveCode(), mdx()],
+  integrations: [expressiveCode(), mdx(), sitemap(site)],
   // Self-hosted from Fontsource, as effect.website hosts its fonts: EB Garamond for titles, Source Serif 4 for reading,
   // IBM Plex Sans for navigation and labels, and IBM Plex Mono for code
   fonts: [

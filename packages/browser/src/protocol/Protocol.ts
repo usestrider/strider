@@ -66,6 +66,8 @@ export interface Release {
   readonly method: string
   readonly param: string
   readonly from: string
+  /** Maps non-overlapping parameter pointers to singular reply pointers, without wildcards. A missing source skips this release. */
+  readonly paramsFrom?: Readonly<Record<string, string>> | undefined
   readonly list?: true | undefined
 }
 
@@ -492,7 +494,7 @@ export interface ProtocolSession {
  * @category tags
  * @since 0.1.0
  */
-export const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession> = Context.Service(
+export const ProtocolSession: Context.Service<ProtocolSession, ProtocolSession> = Context.Service<ProtocolSession>(
   "@usestrider/browser/protocol/Protocol/ProtocolSession"
 )
 

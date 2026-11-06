@@ -7,6 +7,9 @@
     "./packages/*/test/**/*.ts",
     "./packages/*/scenarios/**/*.ts",
     "./packages/scenarios/src/**/*.ts",
+    "./packages/scenarios/benchmark/**/*.ts",
+    "./packages/scenarios/upstream/sources.json",
+    "./packages/browser/test/integration/browsers.json",
     "./packages/tools/*/test/**/*.ts"
   ],
   "exclude": ["**/node_modules/**", "**/dist/**"],
@@ -27,6 +30,7 @@
       "@usestrider/browser/cdp": ["./packages/browser/src/cdp/index.ts"],
       "@usestrider/browser/chromium": ["./packages/browser/src/chromium/index.ts"],
       "@usestrider/browser/cli": ["./packages/browser/src/cli/index.ts"],
+      "@usestrider/browser/experimental": ["./packages/browser/src/experimental/index.ts"],
       "@usestrider/browser/firefox": ["./packages/browser/src/firefox/index.ts"],
       "@usestrider/browser/protocol": ["./packages/browser/src/protocol/index.ts"],
       "@usestrider/browser/test": ["./packages/browser/src/test/index.ts"],

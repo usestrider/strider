@@ -4,11 +4,7 @@
  * With `STRIDER_RECORD` naming a directory, `record` wraps a transport so that a few samples of each method are
  * appended to `<directory>/<fixture>.ndjson`: every event with its parameters, every reply with the command it
  * answers, and every error reply with what the backend's table made of it. Without it, the transport is
- * returned as it is. Set `STRIDER_RECORD_TRACE=1` too to retain every raw message, with its direction and UTC
- * timestamp, in a separate `<fixture>.trace.ndjson` file for investigating delivery and deadlines.
- * Public WebKit layers also record inspector socket chunks as base64 in `<fixture>.socket.trace.ndjson`;
- * concatenate decoded chunks per connection and direction before reading their frames.
- * Recording appends to the file, so run the integration tests one file at a time, with an
+ * returned as it is. Recording appends to the file, so run the integration tests one file at a time, with an
  * absolute directory, since the Nix environment starts elsewhere:
  *
  * ```sh
@@ -16,12 +12,11 @@
  * ```
  */
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
-import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import type { Classification, Wire, WireError } from "../../src/internal/protocolClient.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
-import type * as SocketConnector from "../../src/protocol/SocketConnector.ts"
 import type * as Transport from "../../src/protocol/Transport.ts"
 import { pins } from "./pins.ts"
 
@@ -62,10 +57,12 @@ export const record = (
   fixture: string,
   options?: { readonly made?: ((method: string) => boolean) | undefined }
 ): Transport.Transport => {
+  if (process.env["STRIDER_ENVIRONMENT"] === "macos-integration" && process.env["STRIDER_RECORD"]) {
+    throw new Error("macOS traffic recording is disabled: drift fixtures belong to Linux")
+  }
   const directory = process.env["STRIDER_RECORD"]
   if (directory === undefined || directory === "") return transport
   const file = `${directory}/${fixture}.ndjson`
-  const trace = traceMessages(fixture)
   const samples = new Map<string, Set<string>>()
   const sample = (entry: Entry, text: string) => {
     const key = `${entry.kind} ${entry.method}`
@@ -88,7 +85,6 @@ export const record = (
   }
   const methods = new Map<number, string>()
   const sent = (text: string) => {
-    trace?.("send", text)
     let message = JSON.parse(text) as { id?: unknown; method?: unknown; params?: { message?: unknown } }
     while (typeof message.method === "string" && wrappers.has(message.method)) {
       if (typeof message.params?.message !== "string") return
@@ -97,8 +93,10 @@ export const record = (
     if (typeof message.id === "number" && typeof message.method === "string") methods.set(message.id, message.method)
   }
   const received = (text: string) => {
-    trace?.("receive", text)
-    const incoming = wire.decode(text)
+    const decoded = wire.decode(text)
+    // The client ends the connection on a malformed message; there is nothing to record
+    if (Result.isFailure(decoded)) return
+    const incoming = decoded.success
     switch (incoming._tag) {
       case "Event":
         return keep({ kind: "event", method: incoming.method, params: incoming.params })
@@ -119,50 +117,5 @@ export const record = (
     send: (message) => Effect.andThen(Effect.sync(() => sent(message)), transport.send(message)),
     messages: transport.messages.pipe(Stream.tap((text) => Effect.sync(() => received(text)))),
     closed: transport.closed
-  }
-}
-
-/** Complete, opt-in wire evidence; a connection ID separates concurrent transports. */
-const traceMessages = (fixture: string) => {
-  const directory = process.env["STRIDER_RECORD"]
-  if (!directory || process.env["STRIDER_RECORD_TRACE"] !== "1") return undefined
-  fs.mkdirSync(directory, { recursive: true })
-  const connection = randomUUID()
-  return (direction: "send" | "receive", message: string) => {
-    fs.appendFileSync(
-      `${directory}/${fixture}.trace.ndjson`,
-      JSON.stringify({ at: new Date().toISOString(), connection, direction, message }) + "\n"
-    )
-  }
-}
-
-/** Records the public WebKit layer's inspector socket as base64 chunks, preserving framing. */
-export const traceInspectorSocket = (socket: SocketConnector.Connection): SocketConnector.Connection => {
-  const trace = traceMessages(`${fixtures.webkitStock}.socket`)
-  if (trace === undefined) return socket
-  const keep = (direction: "send" | "receive", chunk: Uint8Array | string) =>
-    trace(
-      direction,
-      Buffer.from(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk).toString("base64")
-    )
-  return {
-    ...socket,
-    pull: socket.pull.pipe(Effect.tap((chunks) =>
-      Effect.sync(() => {
-        for (const chunk of chunks) keep("receive", chunk)
-      })
-    )),
-    write: (chunk) =>
-      socket.write(chunk).pipe(Effect.tap(() =>
-        Effect.sync(() => {
-          if (typeof chunk === "string" || chunk instanceof Uint8Array) keep("send", chunk)
-        })
-      )),
-    writeAll: (chunks) =>
-      socket.writeAll(chunks).pipe(Effect.tap(() =>
-        Effect.sync(() => {
-          for (const chunk of chunks) keep("send", chunk)
-        })
-      ))
   }
 }

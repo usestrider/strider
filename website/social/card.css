@@ -1,0 +1,106 @@
+/* What the link-preview images share: the site's palette and type, from the same Fontsource files the site hosts */
+@font-face {
+  font-family: "EB Garamond";
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/eb-garamond:vf@5.3.0/latin-wght-normal.woff2") format("woff2");
+  font-weight: 400 800;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/ibm-plex-sans@5.3.0/latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/ibm-plex-mono@5.3.0/latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+:root {
+  --paper: #fbfaf6;
+  --ink: #1a1a1a;
+  --band: #1558c8;
+  --firefox: #c43e0a;
+  --webkit: #0b7a8a;
+}
+html,
+body {
+  overflow: hidden;
+}
+body {
+  position: relative;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+.display {
+  font-family: "EB Garamond", serif;
+  font-weight: 400;
+}
+.label {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.engines {
+  display: flex;
+  gap: 30px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 21px;
+}
+.engines span {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.engines i {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+.engines .chromium {
+  background: var(--band);
+}
+.engines .firefox {
+  background: var(--firefox);
+}
+.engines .webkit {
+  background: var(--webkit);
+}
+.band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--band);
+  color: #fff;
+}
+.band h2 {
+  line-height: 1.05;
+  letter-spacing: -0.005em;
+}
+.foot {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  color: #fff;
+}
+.title {
+  position: absolute;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.sub {
+  position: absolute;
+}
+.heron {
+  position: absolute;
+  filter: brightness(1.02);
+  mix-blend-mode: multiply;
+}

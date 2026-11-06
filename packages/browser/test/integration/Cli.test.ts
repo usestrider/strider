@@ -6,20 +6,48 @@
  * mistakes a command can make fail at once, with an exit code of their own.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
+import { WebKit } from "@usestrider/browser/webkit"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
+import * as http from "node:http"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Daemon from "../../src/internal/cli/daemon.ts"
+import * as WebKitStockTransport from "../../src/internal/webkitStockTransport.ts"
 import { site } from "./adapter/harness.ts"
-import { chromium, firefox } from "./browsers.ts"
-import { firefoxAttachable } from "./slice/attaching.ts"
+import { chromium, firefox, webkitgtk } from "./browsers.ts"
+import { chromiumAttachable, firefoxAttachable } from "./slice/attaching.ts"
+import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
+
+/** Browser-reported target identities, independent of whether its HTTP server still answers. */
+const inspectorTargetIds = (endpoint: string, backend: "Chromium" | "stock WebKit") =>
+  Effect.promise(async () => {
+    const response = await fetch(new URL(backend === "Chromium" ? "/json/list" : "/", endpoint))
+    assert.strictEqual(response.status, 200)
+    return backend === "Chromium"
+      ? ((await response.json()) as ReadonlyArray<{ readonly id: string }>).map((target) => target.id)
+      : [...WebKitStockTransport.pagesOf(await response.text())]
+  })
 
 const timeout = 120_000
 const bin = new URL("../../src/bin/strider.ts", import.meta.url).pathname
 const fixtures = new URL("../fixtures/segments/", import.meta.url).pathname
+
+const segmentImports = `
+import * as Effect from ${JSON.stringify(import.meta.resolve("effect/Effect"))}
+import * as Schema from ${JSON.stringify(import.meta.resolve("effect/Schema"))}
+import { CurrentSession, Segment } from ${JSON.stringify(new URL("../../src/cli/index.ts", import.meta.url).href)}
+`
 
 /** A run of `strider`, with the environment given: its exit code and output. */
 const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
@@ -30,6 +58,12 @@ const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
       { env: { ...process.env, ...env }, timeout: 90_000 },
       (error, out, err) => {
         const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1
+        if (env["STRIDER_VIEWPORT_DIAGNOSTIC"]) {
+          fs.appendFileSync(
+            path.join(env["STRIDER_VIEWPORT_DIAGNOSTIC"], "children.ndjson"),
+            JSON.stringify({ args, code, out: String(out), err: String(err) }) + "\n"
+          )
+        }
         resume(Effect.succeed({ code, out: String(out), err: String(err) }))
       }
     )
@@ -112,6 +146,580 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  for (const capture of ["local", "strict"]) {
+    it.live(
+      `prints segment values and validates typed arguments with ${capture} capture`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const env = { ...environment(), SEGMENT_SECRET: "return-secret" }
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "segments", ...args)
+          const file = path.join(env.XDG_RUNTIME_DIR, "segment.ts")
+          const write = (body: string) => fs.writeFileSync(file, segmentImports + body)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            "segments",
+            "--chromium",
+            chromium.executable,
+            "--capture",
+            capture,
+            "--secret",
+            "token=SEGMENT_SECRET"
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.succeed({status:200, body:\"return-secret\"}))"
+            )
+            const plain = yield* run("run", file)
+            assert.strictEqual(plain.code, 0, plain.err)
+            assert.include(plain.out, capture === "local" ? "→ {\"status\":200,\"body\":\"%token%\"}" : "→ \"•••\"")
+            const printed = yield* run("--json", "run", file)
+            assert.strictEqual(printed.code, 0, printed.err)
+            const result = JSON.parse(printed.out)
+            assert.deepStrictEqual(result.value, capture === "local" ? { status: 200, body: "%token%" } : "•••")
+            assert.deepStrictEqual(result.handles, {})
+            assert.strictEqual(result.file, file)
+            assert.isAtLeast(result.durationMs, 0)
+            assert.notInclude(printed.out, "return-secret")
+            const unexpected = yield* run("run", file, "--arg", "unexpected=yes", "--json")
+            assert.strictEqual(unexpected.code, 15, unexpected.err)
+
+            yield* run("page", "new", "--name", "main", "about:blank")
+            write(
+              `export default Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() {
+            const session = yield* CurrentSession.CurrentSession
+            return yield* session.page("main")
+          }))`
+            )
+            const handle = yield* run("run", file, "--json")
+            assert.strictEqual(handle.code, 0, handle.err)
+            assert.strictEqual(JSON.parse(handle.out).value, "main")
+            assert.strictEqual(JSON.parse(handle.out).handles.main.type, "page")
+            assert.include((yield* run("run", file)).out, "→ main")
+
+            write(`export default Segment.make(Schema.Struct({
+            tag: Schema.String, count: Schema.NumberFromString.check(Schema.isInt()), payload: Schema.Struct({ id: Schema.Number })
+          }), Effect.fnUntraced(function*(args) {
+            const session = yield* CurrentSession.CurrentSession
+            const page = yield* session.page("main")
+            yield* page.goto("data:text/html,<title>callback ran</title>")
+            return args
+          }))`)
+            const payload = path.join(env.XDG_RUNTIME_DIR, "payload.json")
+            fs.writeFileSync(payload, "{\"id\":42}")
+            fs.writeFileSync(`${payload}.invalid`, "{broken")
+            for (
+              const args of [
+                [],
+                ["--arg", "tag=update", "--arg", "count=bad", "--arg", `payload=@${payload}`],
+                ["--arg", "count=1", "--arg", "count=2"],
+                ["--arg", "bad"],
+                ["--arg", `payload=@${payload}.invalid`],
+                [
+                  "--arg",
+                  `payload=@${payload}.missing`
+                ],
+                ["--arg", "tag=update", "--arg", "count=2", "--arg", `payload=@${payload}`, "--arg", "typo=yes"]
+              ]
+            ) {
+              const invalid = yield* run("run", file, "--json", ...args)
+              assert.strictEqual(invalid.code, 15, JSON.stringify({ args, ...invalid }))
+              assert.strictEqual(JSON.parse(invalid.err).phase, "arguments")
+            }
+            assert.include((yield* run("pages")).out, "about:blank")
+            const args = yield* run(
+              "run",
+              file,
+              "--arg",
+              "tag=@@update=Unit",
+              "--arg",
+              "count=2",
+              "--arg",
+              `payload=@${path.relative(process.cwd(), payload)}`,
+              "--json"
+            )
+            assert.strictEqual(args.code, 0, args.err)
+            assert.deepStrictEqual(
+              JSON.parse(args.out).value,
+              capture === "local" ? { tag: "@update=Unit", count: 2, payload: { id: 42 } } : "•••"
+            )
+
+            write(
+              `export default Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() {
+            const session = yield* CurrentSession.CurrentSession
+            const page = yield* session.page("main")
+            yield* page.goto("data:text/html,<title>earlier step</title>")
+            return yield* page.getByText("missing").readText
+          }))`
+            )
+            const failed = yield* run("run", file, "--json")
+            assert.strictEqual(failed.code, 10, failed.err)
+            const failure = JSON.parse(failed.err)
+            assert.strictEqual(failure.error, "LocatorError")
+            assert.strictEqual(failure.reason, "NoMatch")
+            assert.strictEqual(failure.phase, "execute")
+            assert.include(failure.step, "readText")
+            assert.isString(failure.hint)
+            assert.include((yield* run("pages")).out, "earlier")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.sync(() => { const value = {}; value.self = value; return value }))"
+            )
+            const cycle = yield* run("run", file, "--json")
+            assert.strictEqual(cycle.code, 1, cycle.err)
+            assert.strictEqual(JSON.parse(cycle.err).error, "NotSerializable")
+            assert.strictEqual(JSON.parse(cycle.err).phase, "serialize")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.die(new Error(\"return-secret\")))"
+            )
+            const defect = yield* run("run", file, "--json")
+            assert.strictEqual(defect.code, 1)
+            assert.strictEqual(JSON.parse(defect.err).phase, "execute")
+            assert.notInclude(defect.err, "return-secret")
+
+            write("export default Effect.void")
+            const legacy = yield* run("run", file, "--json")
+            assert.strictEqual(legacy.code, 15)
+            assert.strictEqual(JSON.parse(legacy.err).phase, "load")
+            if (capture === "local") assert.include(legacy.err, "Segment.make")
+
+            write(
+              "export default Segment.make(Schema.Record(Schema.String, Schema.Never), () => Effect.succeed(\"x\".repeat(5000)))"
+            )
+            const large = yield* run("run", file)
+            assert.strictEqual(large.code, 0, large.err)
+            if (capture === "local") assert.include(large.out, "truncated")
+            const full = yield* run("run", file, "--json")
+            assert.strictEqual(full.code, 0, full.err)
+            assert.strictEqual(JSON.parse(full.out).value, capture === "local" ? "x".repeat(5000) : "•••")
+          } finally {
+            yield* run("stop")
+          }
+        })).pipe(Effect.provide(NodeServices.layer)),
+      timeout
+    )
+  }
+  it.live(
+    "refuses viewport sizing on inspector-only stock WebKit without replacing prior scope",
+    () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const served = yield* site
+          const launched = yield* startMiniBrowser(served.origin)
+          const services = yield* Layer.build(
+            WebKit.layerAttach(launched.endpoint).pipe(
+              Layer.provide(NodeSocket.layerWebSocketConstructor)
+            )
+          )
+          const browser = yield* Browser.Browser.pipe(Effect.provideContext(services))
+          const page = yield* (yield* browser.pages)[0]!.control
+          const before = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
+          const previous = yield* Scope.make()
+          let closed = false
+          yield* Scope.addFinalizer(
+            previous,
+            Effect.sync(() => {
+              closed = true
+            })
+          )
+          const owner = { scope: yield* Effect.scope, viewports: new Map([[page.id, previous]]) }
+          yield* Scope.addFinalizer(owner.scope, Scope.close(previous, Exit.void))
+          const error = yield* Daemon.setViewport(owner, page, { width: 800, height: 600 }).pipe(Effect.flip)
+          assert.strictEqual(error._tag, "DeclarationError")
+          if (error._tag !== "DeclarationError") return assert.fail("Expected a capability refusal")
+          assert.strictEqual(error.reason._tag, "Unsupported")
+          if (error.reason._tag === "Unsupported") assert.strictEqual(error.reason.capability, "emulation.viewport")
+          assert.strictEqual(owner.viewports.get(page.id), previous)
+          assert.isFalse(closed)
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), before)
+        }).pipe(Effect.provide(NodeServices.layer))
+      ),
+    timeout
+  )
+
+  for (
+    const [backend, executable] of [["chromium", chromium.executable], ["firefox", firefox.executable], [
+      "webkit",
+      webkitgtk.executable
+    ]] as const
+  ) {
+    for (const capture of ["local", "strict"]) {
+      it.live(
+        `${backend} discovers password controls with ${capture} capture`,
+        () =>
+          Effect.scoped(
+            Effect.gen(function*() {
+              if (backend === "webkit") yield* useXvfb("1920x1200x24")
+              const server = http.createServer((_, response) => {
+                response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+                response.end(
+                  `<input type="password" value="private-unlabeled"><label>Account password<input type="password" value="private-labeled"></label><label>Code<input id="code" type="password" role="textbox" value="private-explicit"></label><button aria-labelledby="code">Show</button>`
+                )
+              })
+              yield* Effect.acquireRelease(
+                Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+                () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+              )
+              const { port } = server.address() as { readonly port: number }
+              const env = environment()
+              const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "passwords", ...args)
+              const started = yield* strider(
+                env,
+                "start",
+                "--name",
+                "passwords",
+                "--capture",
+                capture,
+                `--${backend}`,
+                executable
+              )
+              assert.strictEqual(started.code, 0, started.err)
+              try {
+                const opened = yield* run("page", "new", "--name", "form", `http://127.0.0.1:${port}/form`)
+                assert.strictEqual(opened.code, 0, opened.err)
+                const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+                const snapshot = yield* page("snapshot")
+                const all = yield* page("--json", "find", "")
+                const found = yield* page("--json", "find", "Password")
+                const labeled = yield* page("--json", "find", "Account password")
+                for (const result of [snapshot, all, found, labeled]) {
+                  assert.strictEqual(result.code, 0, result.err)
+                  assert.notInclude(result.out, "private-unlabeled")
+                  assert.notInclude(result.out, "private-labeled")
+                  assert.notInclude(result.out, "private-explicit")
+                }
+                for (
+                  const [query, extra, expected] of [
+                    ["password", ["--exact"], 2],
+                    ["Password", ["--exact"], 0],
+                    ["Account password", ["--exact"], 1],
+                    ["password", ["--role", "textbox"], 0],
+                    ["password", ["--role", "editable"], 2],
+                    ["private-unlabeled", [], 0],
+                    ["private-labeled", [], 0],
+                    ["private-explicit", [], 0]
+                  ] as const
+                ) {
+                  const result = yield* page("--json", "find", query, ...extra)
+                  assert.strictEqual(result.code, 0, result.err)
+                  assert.lengthOf(JSON.parse(result.out).outcome.value, expected, result.out)
+                }
+                const matches = JSON.parse(found.out).outcome.value as ReadonlyArray<unknown>
+                assert.strictEqual(
+                  matches.length,
+                  2,
+                  JSON.stringify({ snapshot: snapshot.out, all: all.out, found: found.out, labeled: labeled.out })
+                )
+              } finally {
+                yield* run("stop")
+              }
+            }).pipe(Effect.provide(NodeServices.layer))
+          ),
+        timeout
+      )
+    }
+
+    it.live(`${backend} preserves startup and repeated page viewports`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          if (backend === "webkit") yield* useXvfb("1920x1200x24")
+          const diagnostic = backend === "webkit" ? process.env["STRIDER_RECORD"] : undefined
+          const env = {
+            ...environment(),
+            ...(diagnostic === undefined ? {} : {
+              STRIDER_VIEWPORT_DIAGNOSTIC: diagnostic,
+              NODE_OPTIONS: `--import=${new URL("../fixtures/segments/viewport-wire.mjs", import.meta.url).pathname}`
+            })
+          }
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "sized", ...args)
+          const started = yield* strider(
+            env,
+            "start",
+            "--name",
+            "sized",
+            `--${backend}`,
+            executable,
+            "--viewport",
+            "1440x1000"
+          )
+          assert.strictEqual(started.code, 0, started.err)
+          let browserPids: Array<number> = []
+          try {
+            const ledger = path.join(env.XDG_STATE_HOME, "strider", "ledger")
+            const records = fs.readdirSync(ledger).map((file) =>
+              JSON.parse(fs.readFileSync(path.join(ledger, file), "utf8"))
+            )
+            const owned = records.flatMap((record) => record.items).filter((item) => item._tag === "Browser")
+            // Stock WebKit owns the initial browser and the context's automation process.
+            assert.isAtLeast(owned.length, 1)
+            browserPids = owned.map((item) => item.pid)
+            assert.include(started.out, "requested viewport default 1440x1000")
+            const served = yield* site
+            const html =
+              `<p id="size"></p><script>function size() { document.querySelector('#size').textContent = innerWidth + 'x' + innerHeight }; onresize = size; size()</script>`
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+            for (const name of ["first", "second"]) {
+              assert.strictEqual((yield* run("page", "new", "--name", name, url)).code, 0)
+              const checked = yield* run("-p", name, "expect", "css=#size", "visible", "--text", "1440x1000")
+              if (diagnostic !== undefined) {
+                const measured = yield* run("run", path.join(fixtures, "viewport-dimensions.ts"))
+                fs.appendFileSync(
+                  path.join(diagnostic, "measurements.ndjson"),
+                  JSON.stringify({ name, measured, listing: yield* run("pages") }) + "\n"
+                )
+              }
+              assert.strictEqual(checked.code, 0, JSON.stringify({ name, ...checked }))
+            }
+            for (const size of ["800x600", "1200x900", "640x480"]) {
+              const resized = yield* run("-p", "first", "page", "viewport", size)
+              assert.strictEqual(resized.code, 0, resized.err)
+              assert.strictEqual((yield* run("-p", "first", "expect", "css=#size", "visible", "--text", size)).code, 0)
+            }
+            for (const size of ["0x600", "-1x600", "1.5x600", "800X600", "9007199254740992x600"]) {
+              assert.notStrictEqual((yield* run("-p", "first", "page", "viewport", size)).code, 0)
+            }
+            assert.strictEqual(
+              (yield* run("-p", "first", "expect", "css=#size", "visible", "--text", "640x480")).code,
+              0
+            )
+            assert.strictEqual(
+              (yield* run("-p", "second", "expect", "css=#size", "visible", "--text", "1440x1000")).code,
+              0
+            )
+            const file = path.join(env.XDG_RUNTIME_DIR, "sized.test.ts")
+            assert.strictEqual((yield* run("export", "test", file)).code, 0)
+            const exported = fs.readFileSync(file, "utf8")
+            assert.include(exported, "emulation: { viewport: { width: 1440, height: 1000 } }")
+            assert.include(exported, "width: 640, height: 480")
+            assert.notInclude(exported, "9007199254740992")
+          } finally {
+            if (diagnostic !== undefined) {
+              fs.cpSync(env.XDG_RUNTIME_DIR, path.join(diagnostic, "runtime"), {
+                recursive: true,
+                filter: (file) => !fs.lstatSync(file).isSocket()
+              })
+              fs.cpSync(env.XDG_STATE_HOME, path.join(diagnostic, "state"), { recursive: true })
+            }
+            const stopped = yield* run("stop")
+            if (diagnostic !== undefined) {
+              fs.writeFileSync(
+                path.join(diagnostic, "cleanup.json"),
+                JSON.stringify({
+                  stopped,
+                  browserPids,
+                  alive: browserPids.filter((pid) => {
+                    try {
+                      process.kill(pid, 0)
+                      return true
+                    } catch {
+                      return false
+                    }
+                  })
+                })
+              )
+            }
+            assert.strictEqual(stopped.code, 0, stopped.err)
+          }
+          const deadline = Date.now() + 5000
+          const alive = (browserPid: number) => {
+            try {
+              process.kill(browserPid, 0)
+              return true
+            } catch {
+              return false
+            }
+          }
+          while (browserPids.some(alive) && Date.now() < deadline) yield* Effect.sleep("10 millis")
+          for (const browserPid of browserPids) {
+            assert.isFalse(alive(browserPid), `owned ${backend} process ${browserPid} survived stop`)
+          }
+          assert.notInclude((yield* strider(env, "sessions")).out, "sized")
+          const invalid = yield* strider(
+            env,
+            "start",
+            "--name",
+            "invalid",
+            `--${backend}`,
+            executable,
+            "--viewport",
+            "0x600"
+          )
+          assert.notStrictEqual(invalid.code, 0)
+          assert.include(invalid.err, "positive integer CSS pixels")
+          assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "invalid")))
+        }).pipe(Effect.provide(NodeServices.layer))
+      ), timeout)
+  }
+
+  it.live("starts a stock WebKit session, drives a page, refuses download waits, and stops", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        yield* useXvfb()
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const session = (...args: ReadonlyArray<string>) => run("-s", "webkit", ...args)
+        const removed = yield* Deferred.make<void>()
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "webkit")
+        try {
+          const started = yield* run("start", "--name", "webkit", "--webkit", webkitgtk.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              fs.watch(path.dirname(directory), () => {
+                if (!fs.existsSync(directory)) Deferred.doneUnsafe(removed, Exit.void)
+              })
+            ),
+            (watcher) => Effect.sync(() => watcher.close())
+          )
+          assert.include(started.out, "focus system")
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent(`<button onclick="this.textContent = 'Done'">Go</button>`)
+          }`
+          const opened = yield* session("page", "new", "--name", "home", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const clicked = yield* session("-p", "home", "click", "role=button[name=\"Go\"]")
+          assert.strictEqual(clicked.code, 0, clicked.err)
+          const checked = yield* session("-p", "home", "expect", "css=button", "visible", "--text", "Done")
+          assert.strictEqual(checked.code, 0, checked.err)
+          const download = yield* session("-p", "home", "next", "download")
+          assert.notStrictEqual(download.code, 0, download.out)
+          assert.include(download.err, "SubscriptionError")
+          assert.include(download.err, "downloads is unsupported")
+        } finally {
+          yield* session("stop")
+        }
+        // Stop acknowledges the request before the daemon finishes releasing its resources.
+        yield* Deferred.await(removed).pipe(Effect.timeout("10 seconds"))
+        assert.isFalse(fs.existsSync(directory))
+        assert.strictEqual((yield* session("pages")).code, 20)
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+  for (const idle of ["15 minutes", "90.125 seconds", "Infinity"]) {
+    it.live(`accepts the idle duration printed by start and sessions (${idle})`, () =>
+      Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run(
+          "start",
+          "--name",
+          "original",
+          "--chromium",
+          chromium.executable,
+          "--idle",
+          idle
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const listed = yield* run("sessions")
+          assert.strictEqual(listed.code, 0, listed.err)
+          const fromStart = /idle timeout (.+)$/m.exec(started.out)?.[1]
+          const fromSessions = /idle .+ of (.+)$/m.exec(listed.out)?.[1]
+          assert.isDefined(fromStart, started.out)
+          assert.isDefined(fromSessions, listed.out)
+          assert.strictEqual(fromStart, idle)
+          assert.strictEqual(fromSessions, idle)
+          const results = []
+          for (const [name, idle] of [["from-start", fromStart!], ["from-sessions", fromSessions!]]) {
+            const reused = yield* run("start", "--name", name!, "--chromium", chromium.executable, "--idle", idle!)
+            results.push({ source: name, idle, code: reused.code, err: reused.err })
+          }
+          assert.deepStrictEqual(results.map(({ code }) => code), [0, 0], JSON.stringify(results))
+        } finally {
+          for (const name of ["original", "from-start", "from-sessions"]) {
+            yield* run("-s", name, "stop")
+          }
+        }
+      }), timeout)
+  }
+
+  for (const position of ["before", "after"] as const) {
+    it.live(`stops a session with -s ${position} the subcommand`, () =>
+      Effect.gen(function*() {
+        const env = { ...environment(), STRIDER_SESSION: "" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run("start", "--name", "checkout", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          // A different environment default must never override an explicit routing flag.
+          for (const flags of [["-s", "checkout"], ["--session", "checkout"], ["--session=checkout"]]) {
+            for (const args of [[...flags, "pages"], ["pages", ...flags]]) {
+              const listed = yield* strider({ ...env, STRIDER_SESSION: "wrong-session" }, ...args)
+              assert.strictEqual(listed.code, 0, listed.err)
+            }
+          }
+          const stopped = yield* run(
+            ...(position === "before" ? ["-s", "checkout", "stop"] : ["stop", "-s", "checkout"])
+          )
+          // The stop reply precedes the daemon closing its browser and deleting its directory.
+          yield* Effect.sleep("1 second")
+          const remaining = yield* run("sessions")
+          assert.strictEqual(stopped.code, 0, `${stopped.err}Sessions after stop: ${remaining.out}`)
+          assert.include(stopped.out, "stopping checkout")
+          assert.strictEqual(remaining.code, 0, remaining.err)
+          assert.notInclude(remaining.out, "checkout")
+          assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "checkout")))
+        } finally {
+          yield* run("-s", "checkout", "stop")
+          yield* Effect.sleep("1 second")
+          fs.rmSync(env.XDG_RUNTIME_DIR, { recursive: true, force: true })
+          fs.rmSync(env.XDG_STATE_HOME, { recursive: true, force: true })
+        }
+      }), timeout)
+  }
+
+  it.live("prints an idle duration given with a newline on one line that can be reused", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+      // The duration parser accepts any whitespace between the number and the unit
+      const started = yield* run(
+        "start",
+        "--name",
+        "newline",
+        "--chromium",
+        chromium.executable,
+        "--idle",
+        "15\nminutes"
+      )
+      assert.strictEqual(started.code, 0, started.err)
+      try {
+        const listed = yield* run("sessions")
+        assert.strictEqual(listed.code, 0, listed.err)
+        const fromStart = /idle timeout (.+)$/m.exec(started.out)?.[1]
+        const fromSessions = /idle .+ of (.+)$/m.exec(listed.out)?.[1]
+        const results = []
+        for (const [name, idle] of [["from-start", fromStart], ["from-sessions", fromSessions]]) {
+          const reused = yield* run("start", "--name", name!, "--chromium", chromium.executable, "--idle", idle ?? "")
+          results.push({ source: name, idle, code: reused.code, err: reused.err })
+        }
+        assert.deepStrictEqual(results.map(({ code }) => code), [0, 0], JSON.stringify(results))
+      } finally {
+        for (const name of ["newline", "from-start", "from-sessions"]) {
+          yield* run("-s", name, "stop")
+        }
+      }
+    }), timeout)
+
+  it.live("rejects an invalid idle duration with an example", () =>
+    Effect.gen(function*() {
+      const result = yield* strider(
+        environment(),
+        "start",
+        "--name",
+        "invalid-idle",
+        "--chromium",
+        chromium.executable,
+        "--idle",
+        "15m"
+      )
+      assert.strictEqual(result.code, 15)
+      assert.strictEqual(result.err, "InvalidInput: --idle 15m isn't a duration, such as \"30 minutes\"\n")
+    }), timeout)
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
@@ -129,7 +737,7 @@ describe("strider", () => {
         "password=SECRET_PW"
       )
       assert.strictEqual(started.code, 0, started.err)
-      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1h/)
+      assert.match(started.out, /^session shop · .* at .* · focus emulated · idle timeout 1 hour/)
       try {
         assert.strictEqual((yield* run("-s", "shop", "page", "new", "--name", "shop", url)).code, 0)
         const snapshot = yield* shop("snapshot")
@@ -178,8 +786,8 @@ describe("strider", () => {
         assert.include((yield* shop("--json", "pages")).out, `"page":"shop"`)
         // A segment: run in the session, its returned page named into it
         const segment = yield* run("-s", "shop", "run", path.join(fixtures, "open-popup.ts"))
-        assert.match(segment.out, /^ran .*open-popup\.ts; popup is p\d+/, segment.err)
-        const returned = /popup is (p\d+)/.exec(segment.out)![1]!
+        assert.match(segment.out, /^ran .*open-popup\.ts → \{"popup":"p\d+"\}/, segment.err)
+        const returned = /"popup":"(p\d+)"/.exec(segment.out)![1]!
         assert.strictEqual((yield* run("-s", "shop", "-p", returned, "expect", "css=p", "visible")).code, 0)
         const missing = yield* run("-s", "shop", "run", path.join(fixtures, "missing-page.ts"))
         assert.notStrictEqual(missing.code, 0)
@@ -224,11 +832,11 @@ describe("strider", () => {
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
-        // State for a program, and a test of what ran
-        const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
+        // State for a program, and a test of what ran, into directories that don't exist yet
+        const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
         assert.strictEqual(fs.statSync(state).mode & 0o777, 0o600)
-        const test = path.join(env.XDG_RUNTIME_DIR, "shop.test.ts")
+        const test = path.join(env.XDG_RUNTIME_DIR, "tests", "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")
         // The test's context is made as the session's was, with every page rendering
@@ -254,7 +862,7 @@ describe("strider", () => {
           ].join("\n")
         )
         // The route the session removed ends where it did, through its handle; the dialog handler it kept doesn't
-        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Effect.succeed(Route.fulfill(`)
+        assert.include(exported, `const r1 = yield* shop.route("**/api/status", () => Route.fulfill(`)
         assert.include(exported, `yield* r1.remove\n`)
         assert.include(exported, `        yield* Dialog.handle(shop, Dialog.dismissAll)\n`)
         // The page the segment returned is its placeholder's to declare
@@ -349,7 +957,8 @@ describe("strider", () => {
           }
         } finally {
           // A daemon killed outright leaves its directory, listed until pruned
-          process.kill(Number.parseInt(fs.readFileSync(lock, "utf8"), 10), "SIGKILL")
+          // Its lock names it by its process id and when it started
+          process.kill(JSON.parse(fs.readFileSync(lock, "utf8")).pid, "SIGKILL")
         }
         yield* Effect.sleep("500 millis")
         assert.match((yield* run("sessions")).out, /first  left behind by a session that didn't end cleanly/)
@@ -461,10 +1070,19 @@ describe("strider", () => {
           const answers = yield* mcp(env, ["-s", "tools", "mcp"], [
             ...handshake,
             { jsonrpc: "2.0", id: 2, method: "tools/list" },
-            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } }
-          ], 3)
+            { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pages", arguments: {} } },
+            { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "screenshot", arguments: { page: "shop" } } }
+          ], 4)
           const listedTools = answers.find((answer) => answer.id === 2)?.result?.tools?.map((tool: any) => tool.name)
           assert.includeMembers(listedTools ?? [], ["click", "find", "control"])
+          // A screenshot crosses once, as an image: its structured result leaves the bytes out, as its schema does
+          const shotSchema = answers.find((answer) => answer.id === 2)?.result?.tools?.find((tool: any) =>
+            tool.name === "screenshot"
+          )?.outputSchema
+          assert.notProperty(shotSchema?.properties?.outcome?.properties ?? {}, "data")
+          const shot = answers.find((answer) => answer.id === 4)?.result
+          assert.strictEqual(shot?.content?.[0]?.type, "image")
+          assert.deepStrictEqual(shot?.structuredContent?.outcome, { mediaType: "image/png" })
           const pages = JSON.stringify(answers.find((answer) => answer.id === 3)?.result)
           assert.include(pages, "shop")
           assert.include(pages, "kept")
@@ -474,6 +1092,646 @@ describe("strider", () => {
       })),
     timeout
   )
+
+  it.live(
+    "enforces strict capture through CLI commands and MCP tools",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const served = yield* site
+        const secret = "strict-private-field"
+        const consoleText = "strict-private-console"
+        const url = `${served.origin}/fixture?html=${
+          encodeURIComponent(
+            `<div id="note" role="textbox" aria-label="Note" contenteditable="true"></div><button onclick="console.error('${consoleText}')">Log</button>`
+          )
+        }`
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "strict", ...args)
+        const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "strict",
+          "--capture",
+          "strict",
+          "--chromium",
+          chromium.executable
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const opened = yield* run("page", "new", "--name", "form", url)
+          assert.strictEqual(opened.code, 0, opened.err)
+          const filled = yield* page("fill", "css=#note", secret)
+          assert.strictEqual(filled.code, 0, filled.err)
+          const logged = yield* page("click", "role=button[name=\"Log\"]")
+          assert.strictEqual(logged.code, 0, logged.err)
+
+          const snapshot = yield* page("snapshot")
+          assert.strictEqual(snapshot.code, 0, snapshot.err)
+          assert.include(snapshot.out, "textbox \"Note\"")
+          assert.include(snapshot.out, "text: \"•••\"")
+          assert.notInclude(snapshot.out, secret)
+          const artifacts = path.join(env.XDG_RUNTIME_DIR, "strider", "strict", "artifacts")
+          const before = fs.readdirSync(artifacts)
+          const screenshot = yield* page("screenshot")
+          assert.strictEqual(screenshot.code, 17, screenshot.err)
+          assert.include(screenshot.err, "The capture policy sends no screenshots")
+          assert.deepStrictEqual(fs.readdirSync(artifacts), before)
+
+          let history = yield* page("history", "console", "--level", "error")
+          for (let attempt = 0; attempt < 50 && !history.out.includes("console error (text not sent)"); attempt++) {
+            yield* Effect.sleep("100 millis")
+            history = yield* page("history", "console", "--level", "error")
+          }
+          assert.strictEqual(history.code, 0, history.err)
+          assert.include(history.out, "console error (text not sent)")
+          assert.notInclude(history.out, consoleText)
+          // The digest of events since the last command also leaves console text out, whichever command carries it
+          for (const result of [logged, snapshot, screenshot]) {
+            assert.notInclude(result.out + result.err, consoleText)
+          }
+
+          // Call separately: the MCP helper sends each batch concurrently, so no call depends on another here.
+          for (
+            const [name, args] of [
+              ["snapshot", { page: "form" }],
+              ["screenshot", { page: "form" }],
+              ["history", { page: "form", kind: "console", level: "error" }]
+            ] as const
+          ) {
+            const answers = yield* mcp(env, ["-s", "strict", "mcp"], [
+              ...handshake,
+              { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }
+            ], 2)
+            const answer = answers.find((answer) => answer.id === 2)
+            assert.isUndefined(answer?.error, JSON.stringify(answer))
+            const result = answer?.result
+            assert.isDefined(result, JSON.stringify(answers))
+            const output = JSON.stringify(result)
+            assert.notInclude(output, consoleText)
+            if (name === "snapshot") {
+              assert.isNotTrue(result.isError, output)
+              assert.include(output, "Note")
+              assert.include(output, "•••")
+              assert.notInclude(output, secret)
+            } else if (name === "screenshot") {
+              assert.isTrue(result.isError, output)
+              assert.include(output, "NotPermitted")
+              assert.include(output, "The capture policy sends no screenshots")
+              assert.isFalse(result.content.some((content: any) => content.type === "image"))
+            } else {
+              assert.isNotTrue(result.isError, output)
+              assert.include(output, "console error (text not sent)")
+            }
+          }
+        } finally {
+          const stopped = yield* run("stop")
+          assert.strictEqual(stopped.code, 0, stopped.err)
+        }
+      })),
+    timeout
+  )
+
+  for (const backend of ["chromium", "firefox", "webkit"] as const) {
+    for (const capture of ["strict", "local"]) {
+      it.live(
+        `masks all of an editable field's content with ${capture} capture on ${backend}`,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            if (backend === "webkit") yield* useXvfb()
+            const server = http.createServer((_, response) => {
+              response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+              response.end(
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
+              )
+            })
+            yield* Effect.acquireRelease(
+              Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+              () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+            )
+            const { port } = server.address() as { readonly port: number }
+            const url = `http://127.0.0.1:${port}/form`
+            const env = environment()
+            const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+            const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+            const started = yield* strider(
+              env,
+              "start",
+              "--name",
+              capture,
+              "--capture",
+              capture,
+              `--${backend}`,
+              backend === "chromium"
+                ? chromium.executable
+                : backend === "firefox"
+                ? firefox.executable
+                : webkitgtk.executable
+            )
+            assert.strictEqual(started.code, 0, started.err)
+            try {
+              const opened = yield* run("page", "new", "--name", "form", url)
+              assert.strictEqual(opened.code, 0, opened.err)
+              const snapshot = yield* page("snapshot")
+              assert.strictEqual(snapshot.code, 0, snapshot.err)
+              assert.include(snapshot.out, "textbox \"Rich\"")
+              const found = yield* page("--json", "find", "")
+              assert.strictEqual(found.code, 0, found.err)
+              const contents = [
+                "rich-heading",
+                "rich-link",
+                "rich-button",
+                "rich-image",
+                "roleless-field",
+                "labeled-private",
+                "article-private",
+                "paragraph-private",
+                "heading-private"
+              ]
+              const check = (output: string, find = false) => {
+                if (capture === "strict") {
+                  assert.deepStrictEqual(contents.filter((content) => output.includes(content)), [], output)
+                  assert.include(output, "•••")
+                } else {
+                  for (
+                    const content of find
+                      ? contents.filter((content) =>
+                        !["labeled-private", "article-private", "paragraph-private"].includes(content)
+                      )
+                      : contents
+                  ) assert.include(output, content)
+                }
+              }
+              check(snapshot.out)
+              check(found.out, true)
+              for (const query of ["rich-heading", "article-private", "paragraph-private", "heading-private"]) {
+                const guessed = yield* page("--json", "find", query)
+                assert.strictEqual(guessed.code, 0, guessed.err)
+                assert.strictEqual(JSON.parse(guessed.out).outcome.value.length > 0, capture === "local", guessed.out)
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: { name: "find", arguments: { page: "form", query } }
+                }], 2)
+                const result = answers.find((answer) => answer.id === 2)?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(answers))
+                assert.strictEqual(result.structuredContent.outcome.length > 0, capture === "local")
+              }
+              const labeled = yield* page("--json", "find", "Article", "--role", "article")
+              assert.strictEqual(JSON.parse(labeled.out).outcome.value.length, 1, labeled.out)
+              const thrown = yield* page("click", "role=button[name=\"Throw\"]")
+              assert.strictEqual(thrown.code, 0, thrown.err)
+              const exceptions = yield* page("--json", "history", "exception")
+              assert.strictEqual(exceptions.code, 0, exceptions.err)
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(thrown.out + exceptions.out, text)
+                }
+                assert.match(exceptions.out, /uncaught.*at [0-9]/)
+              } else assert.include(exceptions.out, "exception-private")
+              const clickedAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "tools/call",
+                params: { name: "click", arguments: { page: "form", target: "role=button[name=\"Throw\"]" } }
+              }], 2)
+              const clickedResult = clickedAnswers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(clickedResult?.isError, JSON.stringify(clickedAnswers))
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(JSON.stringify(clickedResult), text)
+                }
+              }
+              const historyAnswers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "tools/call",
+                params: { name: "history", arguments: { page: "form", kind: "exception" } }
+              }], 2)
+              const historyResult = JSON.stringify(historyAnswers.find((answer) => answer.id === 2)?.result)
+              if (capture === "strict") {
+                for (const text of ["exception-private", "exception-name-private", "exception-stack-private"]) {
+                  assert.notInclude(historyResult, text)
+                }
+                assert.match(historyResult, /uncaught.*at [0-9]/)
+              } else assert.include(historyResult, "exception-private")
+              const matches = JSON.parse(found.out).outcome.value as Array<
+                { ref: string; role: string; name: string; path: string }
+              >
+              assert.includeMembers(matches.map((match) => match.name), ["Rich", "Labeled"])
+              const link = matches.find((match) => match.role === "link")!
+              assert.isDefined(link)
+              assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+              const button = matches.find((match) => match.role === "button")!
+              assert.match(button.ref, /^e\d+$/)
+              const clicked = yield* page("click", button.ref)
+              assert.strictEqual(clicked.code, 0, clicked.err)
+              const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
+              assert.strictEqual(checked.code, 0, checked.err)
+
+              for (const name of ["snapshot", "find"] as const) {
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                  ...handshake,
+                  {
+                    jsonrpc: "2.0",
+                    id: 2,
+                    method: "tools/call",
+                    params: {
+                      name,
+                      arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
+                    }
+                  }
+                ], 2)
+                const answer = answers.find((answer) => answer.id === 2)
+                assert.isUndefined(answer?.error, JSON.stringify(answer))
+                assert.isDefined(answer?.result, JSON.stringify(answers))
+                assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
+                const output = JSON.stringify(answer.result)
+                check(output, name === "find")
+                assert.include(output, "Rich")
+                assert.include(output, "Labeled")
+                if (name === "find") {
+                  const matches = answer.result.structuredContent.outcome
+                  const link = matches.find((match: any) => match.role === "link")
+                  assert.include(link.path, capture === "strict" ? "heading \"•••\"" : "rich-heading")
+                  assert.match(link.ref, /^e\d+$/)
+                }
+              }
+            } finally {
+              const stopped = yield* run("stop")
+              assert.strictEqual(stopped.code, 0, stopped.err)
+            }
+          })).pipe(Effect.provide(NodeServices.layer)),
+        timeout
+      )
+    }
+  }
+
+  for (const backend of ["chromium", "firefox", "webkit"] as const) {
+    for (const capture of ["strict", "local"]) {
+      it.live(
+        `keeps editable content out of other nodes' names with ${capture} capture on ${backend}`,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            if (backend === "webkit") yield* useXvfb()
+            const pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+            // Each private string reaches the name of a node other than the field itself: an ancestor named from
+            // its content, a clickable element, an empty field named from the field before it, an image's alt.
+            const html = `<title>probe</title>
+<h2><span contenteditable="true">heading-descendant-private</span></h2>
+<a href="#x"><span contenteditable="plaintext-only">link-descendant-private</span></a>
+<table><tr><td><input aria-label="Card" value="cell-value-private"></td></tr></table>
+<input id="referenced" aria-label="Referenced" value="reference-value-private"><button aria-labelledby="referenced"></button>
+<div onclick="void 0"><span contenteditable="true">clickable-descendant-private</span></div>
+<p contenteditable="true">nearby-private</p><div contenteditable="true"></div>
+<div contenteditable="true"><img alt="image-alt-private" src="${pixel}"></div>
+<select aria-label="Plan"><option id="chosen-option" selected>option-private</option></select><button aria-labelledby="chosen-option"></button>
+<div role="textbox" aria-label="Rich"><span id="inside-aria">aria-descendant-private</span></div><button aria-labelledby="inside-aria"></button>
+<div onclick="void 0"><div role="textbox" aria-label="Inner"><img alt="aria-image-private" src="${pixel}"></div></div>
+<h4><span contenteditable="true"><b aria-label="descendant-label-private">x</b></span></h4>
+<h5><span contenteditable="true"><b title="descendant-title-private"></b></span></h5>
+<h6><span contenteditable="true" aria-label="public-field-label">field-root-private</span></h6>
+<h3>public-heading</h3>
+<div>public-nearby</div><div contenteditable="true"></div>`
+            const server = http.createServer((_, response) => {
+              response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+              response.end(html)
+            })
+            yield* Effect.acquireRelease(
+              Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+              () => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+            )
+            const { port } = server.address() as { readonly port: number }
+            const env = environment()
+            const run = (...args: ReadonlyArray<string>) => strider(env, "-s", capture, ...args)
+            const page = (...args: ReadonlyArray<string>) => run("-p", "form", ...args)
+            const started = yield* strider(
+              env,
+              "start",
+              "--name",
+              capture,
+              "--capture",
+              capture,
+              `--${backend}`,
+              backend === "chromium"
+                ? chromium.executable
+                : backend === "firefox"
+                ? firefox.executable
+                : webkitgtk.executable
+            )
+            assert.strictEqual(started.code, 0, started.err)
+            try {
+              const opened = yield* run("page", "new", "--name", "form", `http://127.0.0.1:${port}/form`)
+              assert.strictEqual(opened.code, 0, opened.err)
+              const snapshot = yield* page("snapshot")
+              assert.strictEqual(snapshot.code, 0, snapshot.err)
+              const shown: Array<string> = []
+              const matched: Array<string> = []
+              const contents = [
+                "heading-descendant-private",
+                "link-descendant-private",
+                "cell-value-private",
+                "reference-value-private",
+                "clickable-descendant-private",
+                "nearby-private",
+                "image-alt-private",
+                "option-private",
+                "aria-descendant-private",
+                "aria-image-private",
+                "descendant-label-private",
+                "descendant-title-private",
+                "field-root-private"
+              ]
+              for (const content of [...contents, "public-field-label", "public-heading", "public-nearby"]) {
+                if (snapshot.out.includes(content)) shown.push(content)
+                const found = yield* page("--json", "find", content)
+                assert.strictEqual(found.code, 0, found.err)
+                if (JSON.parse(found.out).outcome.value.length > 0) matched.push(content)
+              }
+              const expected = capture === "strict"
+                ? ["public-field-label", "public-heading", "public-nearby"]
+                : [...contents, "public-field-label", "public-heading", "public-nearby"]
+              const queries = [...contents, "public-field-label", "public-heading", "public-nearby"]
+              const snapshotAnswers = yield* mcp(env, ["-s", capture, "mcp"], [
+                ...handshake,
+                {
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: { name: "snapshot", arguments: { page: "form" } }
+                }
+              ], 2)
+              const mcpSnapshot = snapshotAnswers.find((answer) => answer.id === 2)?.result
+              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswers))
+              const mcpShown = queries.filter((query) => JSON.stringify(mcpSnapshot).includes(query))
+              const mcpMatched: Array<string> = []
+              for (const query of queries) {
+                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
+                  ...handshake,
+                  {
+                    jsonrpc: "2.0",
+                    id: 2,
+                    method: "tools/call",
+                    params: { name: "find", arguments: { page: "form", query } }
+                  }
+                ], 2)
+                const result = answers.find((answer) => answer.id === 2)?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(answers))
+                if (result.structuredContent.outcome.length > 0) mcpMatched.push(query)
+              }
+              assert.deepStrictEqual(
+                { shown, matched, mcpShown, mcpMatched },
+                { shown: expected, matched: expected, mcpShown: expected, mcpMatched: expected },
+                snapshot.out
+              )
+            } finally {
+              const stopped = yield* run("stop")
+              assert.strictEqual(stopped.code, 0, stopped.err)
+            }
+          })).pipe(Effect.provide(NodeServices.layer)),
+        timeout
+      )
+    }
+  }
+
+  it.live("exits 0 when its MCP client closes standard input", () =>
+    Effect.callback<number | null>((resume) => {
+      const child = spawn(process.execPath, [bin, "-s", "nobody", "mcp"], {
+        env: { ...process.env, ...environment() },
+        stdio: ["pipe", "pipe", "pipe"]
+      })
+      const timer = setTimeout(() => child.kill(), 30_000)
+      child.on("close", (code) => {
+        clearTimeout(timer)
+        resume(Effect.succeed(code))
+      })
+      for (const message of handshake) child.stdin.write(`${JSON.stringify(message)}\n`)
+      child.stdin.end()
+    }).pipe(Effect.map((code) => assert.strictEqual(code, 0))), timeout)
+
+  for (const backend of ["Chromium", "stock WebKit"] as const) {
+    it.live(`attaches to ${backend} by an HTTP endpoint`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const served = yield* site
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+          const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+          const { endpoint } = backend === "Chromium"
+            ? yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+            : yield* startMiniBrowser(tab)
+          const before = yield* inspectorTargetIds(endpoint, backend)
+          assert.isNotEmpty(before, "the external browser has tabs before attachment")
+          try {
+            const started = yield* run("start", "--name", "remote", "--attach", endpoint)
+            assert.strictEqual(started.code, 0, started.err)
+            const sessions = yield* run("sessions")
+            assert.include(sessions.out, `attached ${backend === "Chromium" ? "chromium" : "webkit"}`)
+            const tabs = yield* run("-s", "remote", "tabs")
+            assert.strictEqual(tabs.code, 0, tabs.err)
+            assert.include(tabs.out, tab)
+          } finally {
+            yield* run("-s", "remote", "stop")
+            const response = yield* Effect.promise(() => fetch(new URL("/", endpoint)))
+            assert.strictEqual(response.status, 200, "attached browser survives stop")
+            assert.includeMembers(
+              yield* inspectorTargetIds(endpoint, backend),
+              before,
+              "the original tabs survive stop"
+            )
+          }
+        }).pipe(Effect.provide(NodeServices.layer))
+      ), timeout)
+  }
+
+  // An endpoint that is neither backend fails the start, with the reason
+  it.live("refuses an HTTP endpoint that is neither Chromium nor stock WebKit", () =>
+    Effect.gen(function*() {
+      const server = http.createServer((_, response) => {
+        response.writeHead(404)
+        response.end("<title>WebKitInspectorHTTPServer</title>")
+      })
+      yield* Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void)))
+      const { port } = server.address() as { readonly port: number }
+      const started = yield* strider(environment(), "start", "--name", "remote", "--attach", `http://127.0.0.1:${port}`)
+      server.close()
+      assert.notStrictEqual(started.code, 0)
+      assert.include(started.err, "Cannot detect attachment backend")
+      assert.include(started.err, "WebKitInspectorHTTPServer Server token")
+    }).pipe(Effect.provide(NodeServices.layer)), timeout)
+
+  // An inspector's tab, taken with control, stays listed and works until it is released
+  it.live("controls and releases a tab of an attached stock WebKit", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* startMiniBrowser(tab)
+        const before = yield* inspectorTargetIds(endpoint, "stock WebKit")
+        assert.isNotEmpty(before)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          const tabs = yield* run("-s", "remote", "tabs")
+          const id = tabs.out.split("\n")[0]!.split("  ")[0]!
+          const taken = yield* run("-s", "remote", "control", id, "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.include((yield* run("-s", "remote", "pages")).out, "own")
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+          assert.include((yield* run("-s", "remote", "tabs")).out, tab)
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "release keeps the original tab"
+          )
+        } finally {
+          yield* run("-s", "remote", "stop")
+          assert.includeMembers(
+            yield* inspectorTargetIds(endpoint, "stock WebKit"),
+            before,
+            "stop keeps the original tab"
+          )
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  // A tab closed outside the session leaves it, on a real browser's control grant
+  it.live("retires a controlled tab closed outside the session", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const closes = `${served.origin}/fixture?html=${encodeURIComponent("<title>closes</title>")}`
+        const stays = `${served.origin}/fixture?html=${encodeURIComponent("<title>stays</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(closes, stays)
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
+          const lines = (yield* run("-s", "remote", "tabs")).out.split("\n")
+          const idOf = (url: string) => lines.find((line) => line.includes(url))!.split("  ")[0]!
+          assert.strictEqual((yield* run("-s", "remote", "control", idOf(closes), "--name", "own")).code, 0)
+          const listed = (yield* run("-s", "remote", "pages")).out
+          assert.include(listed, "own")
+          assert.include(listed, closes)
+          assert.notInclude(listed, stays)
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          const targets = yield* Effect.promise(() =>
+            fetch(new URL("/json/list", endpoint)).then((response) =>
+              response.json() as Promise<ReadonlyArray<{ readonly id: string; readonly url: string }>>
+            )
+          )
+          const target = targets.find((each) => each.url === closes)!
+          const closing = yield* Effect.promise(() => fetch(new URL(`/json/close/${target.id}`, endpoint)))
+          assert.strictEqual(closing.status, 200)
+          let code = 0
+          for (let attempt = 0; attempt < 50 && code === 0; attempt++) {
+            yield* Effect.sleep("100 millis")
+            code = (yield* run("-s", "remote", "-p", "own", "snapshot")).code
+          }
+          assert.strictEqual(code, 16, "a closed tab has no name")
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
+          const taken = yield* run("-s", "remote", "control", idOf(stays), "--name", "own")
+          assert.strictEqual(taken.code, 0, taken.err)
+          assert.include((yield* run("-s", "remote", "pages")).out, "own")
+          assert.strictEqual((yield* run("-s", "remote", "-p", "own", "snapshot")).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "release", "-p", "own")).code, 0)
+          assert.include((yield* run("-s", "remote", "pages")).out, "no pages")
+          assert.include((yield* run("-s", "remote", "tabs")).out, stays)
+        } finally {
+          assert.strictEqual((yield* run("-s", "remote", "stop")).code, 0)
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  it.live("lists a held tab and saves only its state from the browser, widening when asked", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "remote", ...args)
+        const signingIn = (name: string) =>
+          `/fixture?html=${
+            encodeURIComponent(
+              `<title>${name}</title><script>document.cookie = "${name}=abc; path=/"; localStorage.setItem("${name}", "v")</script>`
+            )
+          }`
+        const app = `${served.origin}${signingIn("app")}`
+        const elsewhere = `${served.crossSite}${signingIn("elsewhere")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(app, elsewhere)
+        const state = path.join(env.XDG_RUNTIME_DIR, "held.state")
+        const saved = () => fs.readFileSync(state, "utf8")
+        try {
+          const started = yield* strider(env, "start", "--name", "remote", "--attach", endpoint)
+          assert.strictEqual(started.code, 0, started.err)
+          const empty = yield* run("state", "save", state)
+          assert.notStrictEqual(empty.code, 0, "an attached session holding nothing writes no empty file")
+          assert.include(empty.err, "strider control")
+          assert.isFalse(fs.existsSync(state))
+          const tabs = yield* run("tabs")
+          const tab = tabs.out.split("\n").find((line) => line.includes(app))!.split("  ")[0]!
+          assert.strictEqual((yield* run("control", tab, "--name", "app")).code, 0)
+          assert.include((yield* run("pages")).out, `app  ${app}`)
+          assert.include((yield* strider(env, "sessions")).out, "app")
+          // The held tab's state, not the browser's other tab's
+          const held = yield* run("state", "save", state)
+          assert.strictEqual(held.code, 0, held.err)
+          assert.include(held.out, "saved 1 cookie and 1 origin for 127.0.0.1 to ")
+          assert.include(saved(), `"app"`)
+          assert.notInclude(saved(), "elsewhere")
+          // The read's control ends with it: the tab is still the session's
+          assert.strictEqual((yield* run("-p", "app", "snapshot")).code, 0)
+          // Widening is asked for, and says what it found
+          const added = yield* run("state", "save", state, "--site", "localhost")
+          assert.strictEqual(added.code, 0, added.err)
+          assert.include(saved(), "elsewhere")
+          assert.include(added.out, "127.0.0.1, localhost")
+          const nothing = yield* run("state", "save", state, "--site", "okta.com")
+          assert.include(nothing.out, "nothing for okta.com")
+          assert.notInclude(saved(), "elsewhere")
+          const whole = yield* run("state", "save", state, "--all")
+          assert.strictEqual(whole.code, 0, whole.err)
+          assert.include(saved(), "elsewhere")
+          assert.notStrictEqual((yield* run("state", "save", state, "--all", "--site", "okta.com")).code, 0)
+          // A page of the session's own context is a second state to choose from, saved whole
+          assert.strictEqual((yield* run("page", "new", "--name", "own", `${served.origin}/fixture`)).code, 0)
+          const ambiguous = yield* run("state", "save", state)
+          assert.notStrictEqual(ambiguous.code, 0)
+          assert.include(ambiguous.err, "-p")
+          assert.strictEqual((yield* run("-p", "own", "state", "save", state)).code, 0)
+          assert.notInclude(saved(), `"app"`)
+          assert.notStrictEqual((yield* run("-p", "own", "state", "save", state, "--all")).code, 0)
+          assert.strictEqual((yield* run("-p", "app", "state", "save", state)).code, 0)
+          assert.include(saved(), `"app"`)
+        } finally {
+          assert.strictEqual((yield* run("stop")).code, 0)
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
+
+  // The browser WebSocket's id dies with that browser; the endpoint given outlives it
+  it.live("exports a Chromium HTTP attachment by the endpoint it was given", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const served = yield* site
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const tab = `${served.origin}/fixture?html=${encodeURIComponent("<title>remote</title>")}`
+        const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(tab, tab)
+        const file = path.join(env.XDG_STATE_HOME, "attached.test.ts")
+        try {
+          assert.strictEqual((yield* run("start", "--name", "remote", "--attach", endpoint)).code, 0)
+          assert.strictEqual((yield* run("-s", "remote", "export", "test", file)).code, 0)
+          assert.include(fs.readFileSync(file, "utf8"), `Chromium.layerConnect(${JSON.stringify(endpoint)})`)
+        } finally {
+          yield* run("-s", "remote", "stop")
+        }
+      }).pipe(Effect.provide(NodeServices.layer))
+    ), timeout)
 
   it.live("attaches to Firefox's remote agent by an endpoint with no path", () =>
     Effect.scoped(
@@ -495,6 +1753,30 @@ describe("strider", () => {
         }
       }).pipe(Effect.provide(NodeServices.layer))
     ), timeout)
+
+  it.live("shows what a daemon wrote to standard error when it dies before it serves", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      // A module the daemon, and only the daemon, fails to load, as one that fails at import time does
+      const preload = path.join(env.XDG_RUNTIME_DIR, "boom.mjs")
+      fs.writeFileSync(
+        preload,
+        `if (process.argv.includes("__daemon")) { console.error("boom at import"); process.exit(3) }\n`
+      )
+      const started = yield* strider(
+        { ...env, NODE_OPTIONS: `--import=${preload}` },
+        "start",
+        "--name",
+        "doomed",
+        "--chromium",
+        chromium.executable
+      )
+      assert.strictEqual(started.code, 3)
+      assert.include(started.err, "exited before it served (3)")
+      assert.include(started.err, "boom at import")
+      // Nothing is left beside the sessions
+      assert.deepStrictEqual(fs.readdirSync(env.XDG_RUNTIME_DIR).filter((name) => name.startsWith(".start-")), [])
+    }), timeout)
 
   it.live("fails at once on what a command can't mean, with exit codes of its own", () =>
     Effect.gen(function*() {

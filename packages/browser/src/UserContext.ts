@@ -31,6 +31,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
+import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Page from "./Page.ts"
 import type * as PageClock from "./PageClock.ts"
@@ -247,6 +248,12 @@ export interface UserContext extends ObservedUserContext {
    * Intercepts requests matching `pattern` from every page and worker of the context, at one phase, while the
    * registration lives. A page's own routes are asked first; otherwise it works as `Page.route` does.
    *
+   * **Details**
+   *
+   * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
+   * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
+   * also handle `"request"`; union phases require a handler compatible with every possible phase.
+   *
    * **Example** (Blocking analytics in every page)
    *
    * ```ts import.meta.vitest
@@ -256,14 +263,29 @@ export interface UserContext extends ObservedUserContext {
    * const blockAnalytics = Effect.fn("blockAnalytics")(function*(page: Page.Page) {
    *   yield* page.context.route(
    *     "https://analytics.example.com/**",
-   *     () => Effect.succeed(Route.abort())
+   *     () => Route.abort()
    *   )
    * })
    * ```
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, P>,
+    handler: Route.Handler<E, R, NoInfer<P>>,
+    options: Route.Options<P> & { readonly phase: P }
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>,
+    options?: Route.Options | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request">(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
+    options?: Route.Options<P> | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(
+    pattern: Url.Pattern | string,
+    handler: RoutePhaseDiagnostic.Handler<E, R, NoInfer<P> | "request", D>,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
@@ -440,7 +462,8 @@ export const UserContextErrorReason = Schema.Union([
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
-  Reason.BackendFailure
+  Reason.BackendFailure,
+  Reason.ViewportMismatch
 ])
 
 /**

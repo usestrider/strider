@@ -83,7 +83,7 @@ export const LogEntry = /*#__PURE__*/ Schema.suspend(() =>
     workerId: Schema.optional(Schema.String),
     args: Schema.optional(Schema.Array(Runtime.RemoteObject))
   }).annotate({ identifier: "Log.LogEntry" })
-) as any as Schema.Codec<LogEntry>
+) as any as Schema.Codec<LogEntry, unknown>
 
 /**
  * `LogEntry.category` values.
@@ -243,7 +243,7 @@ export const EntryAddedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     entry: LogEntry
   }).annotate({ identifier: "Log.EntryAddedParams" })
-) as any as Schema.Codec<EntryAddedParams>
+) as any as Schema.Codec<EntryAddedParams, unknown>
 
 /**
  * start violation reporting.

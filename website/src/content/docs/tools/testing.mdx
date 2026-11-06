@@ -13,7 +13,7 @@ the steps you wrote for scripts run in tests unchanged.
 Tests run under Vitest with Effect's `@effect/vitest`, and `@usestrider/vitest` connects the two:
 
 ```sh
-npm install --save-dev vitest @effect/vitest @usestrider/vitest
+pnpm add -D vitest @effect/vitest @usestrider/vitest
 ```
 
 A test opens its page as a script does, with `Browser.newPage()`. `VitestBrowser.layer` provides the backend you
@@ -66,6 +66,18 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
   expected, seen and nearest.
 - A step that takes a page, such as `addToCart`, runs the same in a test and a script. To sign in once per file,
   start each test's page from [saved storage state](/docs/pages/contexts#logging-in-once).
+
+Vitest's default `testTimeout` is five seconds for the whole test, shorter than Strider's thirty-second budget
+per operation, so a slow step can end with Vitest's generic timeout before Strider reports its failure.
+Raise `testTimeout` in your Vitest config to allow time for all the test's operations:
+
+```ts title="vitest.config.ts"
+import { defineConfig } from "vitest/config"
+
+export default defineConfig({
+  test: { testTimeout: 60_000 }
+})
+```
 
 ## Concurrent pages
 

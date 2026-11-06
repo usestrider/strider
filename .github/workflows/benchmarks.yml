@@ -1,0 +1,62 @@
+# Run on demand while establishing targets; performance failures are opt-in because
+# hosted runner load varies. Correctness failures always fail the job.
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Fail when any Strider median exceeds the Playwright ratio limit
+        type: boolean
+        default: false
+      max_ratio:
+        description: Maximum Strider / Playwright median ratio (1 means parity)
+        type: string
+        default: "1.10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+      - name: Allow user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install
+        run: nix develop --command pnpm install --frozen-lockfile
+      - name: Compare with Playwright
+        env:
+          CHECK: ${{ inputs.check }}
+          MAX_RATIO: ${{ inputs.max_ratio }}
+        run: |
+          args=(--max-ratio "$MAX_RATIO")
+          if [ "$CHECK" = "true" ]; then args+=(--check); fi
+          nix develop --command pnpm bench "${args[@]}" 2>&1 | tee benchmarks.log
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f .data/benchmarks/latest.md ]; then
+            cat .data/benchmarks/latest.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmarks-${{ github.sha }}
+          path: |
+            .data/benchmarks/latest.json
+            .data/benchmarks/latest.md
+            benchmarks.log
+          include-hidden-files: true
+          retention-days: 30

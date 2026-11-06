@@ -118,48 +118,64 @@ export const screenshot = (
         invalid(operation, id, "format", "a JPEG quality from 0 to 100", `${format.quality} isn't one`)
       )
     }
-    let clip = Option.none<Box>()
-    if (area._tag === "Clip") {
-      const { height, width, x, y } = area.rect
-      if (!(width > 0 && height > 0 && Number.isFinite(x) && Number.isFinite(y))) {
-        return yield* Effect.fail(
-          invalid(operation, id, "area", "a clip with a positive width and height", `${width}×${height} isn't one`)
+    const capture = Effect.gen(function*() {
+      let clip = Option.none<Box>()
+      if (area._tag === "Clip") {
+        const { height, width, x, y } = area.rect
+        if (!(width > 0 && height > 0 && Number.isFinite(x) && Number.isFinite(y))) {
+          return yield* Effect.fail(
+            invalid(operation, id, "area", "a clip with a positive width and height", `${width}×${height} isn't one`)
+          )
+        }
+        clip = Option.some({ x, y, width, height })
+      }
+      if (area._tag === "Element") {
+        const locator = area.locator
+        if (!(locator instanceof LocatorImpl.LocatorImpl) || locator.owner.page.id !== page.id) {
+          return yield* Effect.die(new Error("Page.screenshot: the element's locator belongs to another page"))
+        }
+        const box = yield* elementBox(runtime, page, locator, operation, id, budget.at).pipe(
+          Effect.mapError(failed(operation, record))
         )
+        if (Page.isPageError(box)) return yield* Effect.fail(box)
+        if (Option.isNone(box)) {
+          return yield* Effect.fail(
+            invalid(operation, id, "area", "an element in a frame that is there", "a frame on its way went")
+          )
+        }
+        clip = box
       }
-      clip = Option.some({ x, y, width, height })
-    }
-    if (area._tag === "Element") {
-      const locator = area.locator
-      if (!(locator instanceof LocatorImpl.LocatorImpl) || locator.owner.page.id !== page.id) {
-        return yield* Effect.die(new Error("Page.screenshot: the element's locator belongs to another page"))
+      const captureOptions: Adapter.ScreenshotOptions = {
+        format: format._tag === "Png" ? "png" : "jpeg",
+        quality: format._tag === "Jpeg" ? Option.some(format.quality) : Option.none(),
+        clip,
+        fullPage: area._tag === "FullPage",
+        scale: options?.scale ?? "device",
+        omitBackground: options?.omitBackground ?? false
       }
-      const box = yield* elementBox(runtime, page, locator, operation, id, budget.at).pipe(
-        Effect.mapError(failed(operation, record))
+      record.markSent()
+      return yield* runtime.model.adapter.screenshot(page.id, captureOptions).pipe(
+        Effect.mapError((error) =>
+          error._tag === "AdapterError" && error.reason._tag === "CaptureInvalidated"
+            ? pageError(operation, error.reason, id)
+            : failed(operation, record)(Runtime.fromAdapter(error, id, runtime.backend))
+        ),
+        (capturing) =>
+          record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
       )
-      if (Page.isPageError(box)) return yield* Effect.fail(box)
-      if (Option.isNone(box)) {
-        return yield* Effect.fail(
-          invalid(operation, id, "area", "an element in a frame that is there", "a frame on its way went")
-        )
-      }
-      clip = box
-    }
-    const captureOptions: Adapter.ScreenshotOptions = {
-      format: format._tag === "Png" ? "png" : "jpeg",
-      quality: format._tag === "Jpeg" ? Option.some(format.quality) : Option.none(),
-      clip,
-      fullPage: area._tag === "FullPage",
-      scale: options?.scale ?? "device",
-      omitBackground: options?.omitBackground ?? false
-    }
-    record.markSent()
-    return yield* runtime.model.adapter.screenshot(page.id, captureOptions).pipe(
-      Effect.mapError((error) => failed(operation, record)(Runtime.fromAdapter(error, id, runtime.backend))),
-      (capturing) =>
-        record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
-    )
+    })
+    const guard = runtime.model.adapter.captureGuard
+    return yield* (guard === undefined ? capture : guard.run(page.id, capture).pipe(
+      Effect.mapError((error) =>
+        error._tag === "AdapterError"
+          ? error.reason._tag === "CaptureInvalidated"
+            ? pageError(operation, error.reason, id)
+            : failed(operation, record)(Runtime.fromAdapter(error, id, runtime.backend))
+          : error
+      )
+    ))
   }).pipe(
-    Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
+    Effect.raceFirst(Runtime.pageEnded(page)),
     Operation.named(operation, {
       attributes: {
         "browser.page.id": page.id,
@@ -240,7 +256,7 @@ export const pdf = (
       (printing) => record.bound(printing, () => Option.some("The browser didn't finish printing before the deadline"))
     )
   }).pipe(
-    Effect.raceFirst(Runtime.pageEnded(page, Operation.operationId())),
+    Effect.raceFirst(Runtime.pageEnded(page)),
     Operation.named(operation, { attributes: { "browser.page.id": page.id } })
   )
 }
