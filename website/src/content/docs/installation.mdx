@@ -119,3 +119,11 @@ const FirefoxLive = Firefox.layerConfig({
   executablePath: Config.String("FIREFOX_PATH")
 }).pipe(Layer.provide([NodeServices.layer, NodeSocket.layerWebSocketConstructor]))
 ```
+
+## macOS integration coverage
+
+The macOS integration entry point targets Apple Silicon with Chrome for Testing 155.0.8059.79 and Firefox
+158.0, downloaded from versioned upstream URLs and checked against pinned SHA-256 hashes. It runs Chromium
+and Firefox adapter and public API slice tests. Its first CI run is pending; macOS support is not yet validated.
+Stock WebKitGTK is tested on Linux; Safari and Windows are outside this coverage. Linux retains its pinned Nix
+integration environment. On macOS, pass the executable inside the browser's `.app` bundle as `executablePath`.
