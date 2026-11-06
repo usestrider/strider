@@ -454,11 +454,11 @@ describe("Recordings", () => {
             Effect.flip
           )
           assert.strictEqual(caught, error)
-          yield* trace.stop
+          yield* trace.remove
           // The originating recording has stopped; classification follows the same error into a new one.
           const later = yield* Trace.record(page)
           const rethrown = yield* Effect.fail(caught).pipe(
-            PublicOperation.named("retry checkout", { attributes }),
+            PublicOperation.named(matcher === "toHaveURL" ? "Expect.toHaveValue" : "Expect.toHaveURL", { attributes }),
             Effect.flip
           )
           assert.strictEqual(rethrown, error)
