@@ -966,6 +966,7 @@ const sentHeaders = Effect.fnUntraced(
     const screenshotWork = yield* Queue.unbounded<Sent>()
     const stops = yield* Queue.unbounded<Sent>()
     const stopDeadlines: Array<Option.Option<number>> = []
+    const ackDeadlines: Array<Option.Option<number>> = []
     const stopWrites = yield* Queue.unbounded<void>()
     const stopWriteGate = yield* Deferred.make<void>()
     const startWrites = yield* Queue.unbounded<void>()
@@ -1039,6 +1040,9 @@ const sentHeaders = Effect.fnUntraced(
             yield* Queue.offer(startWrites, undefined)
             yield* Deferred.await(startWriteGate)
           }
+          if (JSON.parse(message).method === "Page.screencastFrameAck") {
+            ackDeadlines.push(yield* ProtocolClient.CommandDeadline)
+          }
           if (JSON.parse(message).method === "Page.stopScreencast") {
             stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
             yield* Queue.offer(stopWrites, undefined)
@@ -1103,6 +1107,7 @@ const sentHeaders = Effect.fnUntraced(
       captures,
       stops,
       stopDeadlines,
+      ackDeadlines,
       stopWrites,
       stopWriteGate,
       startWrites,
@@ -1623,6 +1628,11 @@ describe("Chromium video writer lifetime", () => {
       const recordedDeadline = yield* Deferred.await(deadline)
       yield* video.file
       assert.isTrue(Option.isNone(recordedDeadline), "recording and preparation outlive the acquisition deadline")
+      assert.strictEqual(h.ackDeadlines.length, 1)
+      assert.isTrue(
+        h.ackDeadlines.every(Option.isNone),
+        "releasing a pending frame must also clear the acquisition deadline"
+      )
     }).pipe(onTestClock))
 
   it.effect("paces idle images at 25fps and finishes after the recording scope closes", () =>
