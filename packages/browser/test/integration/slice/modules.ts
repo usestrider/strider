@@ -372,6 +372,44 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       // ── PageNavigation ──
 
+      it.effect("preserves the fragment in page.url after cross-document navigation", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const requested = `${origin}/json?token=url-test#details`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(requested)
+            const href = yield* page.evaluateInMainWorld(() => location.href)
+            assert.strictEqual(href, requested)
+            assert.strictEqual(yield* page.url, href)
+          }))
+        }), timeout)
+
+      it.effect("preserves page.url through same-document fragment changes and removal", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("navigation.sameDocument"))) return
+          const { origin } = yield* site
+          const base = `${origin}/json?token=url-test`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${base}#initial`)
+            for (const requested of [`${base}#changed`, base]) {
+              const next = yield* PageNavigation.next(page)
+              if (requested === base) {
+                yield* page.evaluateInMainWorld(() => history.pushState(null, "", location.pathname + location.search))
+              } else {
+                yield* page.evaluateInMainWorld(() => {
+                  location.hash = "changed"
+                })
+              }
+              assert.strictEqual((yield* next)._tag, "SameDocument")
+              const href = yield* page.evaluateInMainWorld(() => location.href)
+              assert.strictEqual(href, requested)
+              assert.strictEqual(yield* page.url, href)
+            }
+          }))
+        }), timeout)
+
       it.effect("runs call site 2: waits for the navigation a click causes", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => `<a href="/orders">Orders</a>`)

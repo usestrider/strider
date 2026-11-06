@@ -255,6 +255,38 @@ export const attaching = (
             }).pipe(Effect.provide(attached))
           }), timeout)
 
+        it.effect("preserves the fragment in page.url when attaching to an already loaded page", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const requested = `${fixtureUrl(origin, "<h1>Loaded</h1>")}#encoded%20fragment%23%2f`
+            const { layer: attached } = yield* start(requested, tabUrl(origin, "Other"))
+            // Finish loading before disconnecting, so the next client must read the frame-tree snapshot.
+            yield* Effect.gen(function*() {
+              const page = yield* byHeading(yield* Browser.Browser, "Loaded")
+              yield* Effect.scoped(Effect.gen(function*() {
+                const reader = yield* page.inspect
+                yield* reader.getByRole("heading").pipe(Expect.toHaveText("Loaded"))
+                assert.strictEqual(
+                  yield* reader.evaluate(() =>
+                    location.href
+                  ),
+                  requested
+                )
+              }))
+            }).pipe(Effect.provide(attached))
+            yield* Effect.gen(function*() {
+              const page = yield* byHeading(yield* Browser.Browser, "Loaded")
+              yield* Effect.scoped(Effect.gen(function*() {
+                const reader = yield* page.inspect
+                const href = yield* reader.evaluate(() =>
+                  location.href
+                )
+                assert.strictEqual(href, requested)
+                assert.strictEqual(yield* page.url, href)
+              }))
+            }).pipe(Effect.provide(attached))
+          }), timeout)
+
         if (name === "Firefox") {
           it.effect("refuses a second client while one holds Firefox's one session", () =>
             Effect.gen(function*() {
