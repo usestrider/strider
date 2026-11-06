@@ -1,6 +1,7 @@
 # Publishes to npm, on demand, the versions on main that npm doesn't have yet, in the Nix environment's default shell,
 # as the checks run. To release: run `pnpm changeset version` in a pull request and merge it, then run this workflow.
-# The npm-publish environment takes only main, and waits for the maintainer's approval.
+# The npm-publish environment takes only main, and waits for the maintainer's approval. Once it succeeds, docs.yml
+# deploys the site from the commit it released.
 name: Release
 
 on:
