@@ -534,6 +534,7 @@ export const start = Effect.fnUntraced(function*(
           finished: false,
           read: Option.none()
         })
+        pendingVideos.delete(page.id)
       }
     })
     const cast = (page: Model.PageEntry) =>
