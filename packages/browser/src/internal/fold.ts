@@ -195,7 +195,9 @@ export const make = Effect.fnUntraced(function*(options: {
   >(maxNavigations)
   const navigationHops = new Set<NetworkRequest.HopId>()
   const responses = NetworkIndex.bounded<NetworkRequest.HopId, NetworkResponse.NetworkResponse>(maxResponses)
-  const hops = NetworkIndex.hops<Model.HopEntry, Model.HopEnd>(maxHops, { _tag: "Forgotten" })
+  const hops = NetworkIndex.hops<Model.HopEntry, Model.HopEnd>(maxHops, { _tag: "Forgotten" }, (hop) => {
+    Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+  })
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
   const realmOwners = new Map<Target.RealmId, Model.Owner>()
   const workers = new Map<Target.RealmId, Model.WorkerEntry>()
@@ -285,6 +287,12 @@ export const make = Effect.fnUntraced(function*(options: {
         }
       }
     }
+    for (const hop of hops.values()) {
+      const initiator = hop.request.initiator
+      if (initiator._tag === "Document" && gone.has(initiator.navigable)) {
+        Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+      }
+    }
     for (const frame of gone) frames.delete(frame)
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
@@ -295,6 +303,12 @@ export const make = Effect.fnUntraced(function*(options: {
   const endWorker = Effect.fnUntraced(function*(worker: Model.WorkerEntry, reason: Target.CloseReason) {
     if (!workers.delete(worker.realm)) return
     realmOwners.delete(worker.realm)
+    for (const hop of hops.values()) {
+      const initiator = hop.request.initiator
+      if (initiator._tag === "Worker" && initiator.realm === worker.realm) {
+        Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+      }
+    }
     const without = <S extends { readonly workers: ReadonlyArray<Model.WorkerEntry> }>(state: S): S => ({
       ...state,
       workers: state.workers.filter((each) => each !== worker)
@@ -388,6 +402,9 @@ export const make = Effect.fnUntraced(function*(options: {
 
   const endContext = Effect.fnUntraced(function*(entry: Model.ContextEntry, reason: Target.CloseReason) {
     contexts.delete(entry.id)
+    for (const hop of hops.values()) {
+      if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
+    }
     const how = endOf(reason)
     for (const channel of Object.values(entry.events)) Events.end(channel as Events.Channel<unknown>, how)
     for (const worker of Array.from(workers.values())) {
@@ -935,6 +952,7 @@ export const make = Effect.fnUntraced(function*(options: {
       yield* Deferred.succeed(entry.outcome, { _tag: "Failed", error: "connection lost", errorDocument: Option.none() })
     }
     for (const hop of hops.values()) {
+      Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       Deferred.doneUnsafe(
         hop.end,
         Effect.succeed({ _tag: "Failed", error: "connection lost", canceled: false, at: Adapter.now() })

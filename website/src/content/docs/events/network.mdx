@@ -174,6 +174,16 @@ const sentCookies = Effect.fn("sentCookies")(function*(page: Page.Page) {
 })
 ```
 
+The operation's deadline bounds the wait. If the request ends, is evicted from the retained 1000 hops, or loses
+its frame, worker, context, page or browser connection, the wait returns already-attributed sent headers, or the
+immutable request event's headers when none were reported. A new lookup after eviction returns that snapshot too.
+These fallbacks can omit network additions such as `Cookie`.
+
+Inside a request-phase [route handler](/docs/events/routes), awaiting sent headers before continuing the request
+prevents it from being sent. Continue the route first and inspect sent headers outside the handler, as in the
+event subscription example above. On Chromium, the same trap applies while holding the response: attribution
+can need the response or redirect information. Read `request.headers` for an immediate snapshot inside a handler.
+
 Credential headers, such as cookies and authorization, are redacted in logs, errors and spans.
 
 ## Resending requests
