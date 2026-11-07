@@ -14,7 +14,12 @@ const docs = defineCollection({
   })
 })
 
+// Each published package's CHANGELOG.md, which `pnpm changeset version` writes and the release edits
+const changelogs = defineCollection({
+  loader: glob({ base: "../packages", pattern: "{browser,cli,vitest}/CHANGELOG.md" })
+})
+
 // The API reference, generated from the packages
 const reference = defineCollection({ loader: referenceLoader() })
 
-export const collections = { docs, reference }
+export const collections = { changelogs, docs, reference }
