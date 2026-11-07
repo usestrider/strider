@@ -1270,3 +1270,15 @@ condition descriptions remain user-authored text. User transformations, includin
 and reconstructed failures do not inherit source classification, because arbitrary transformations can change both
 type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
 and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.
+
+
+## Operation caller stacks
+
+Capture caller stacks in the operation constructor before calling the formatting helper,
+and defer formatting until a recording or failure rendering needs the frame. This keeps construction-time source
+links for prebuilt operations while reducing work on every unrecorded successful call. When capture is enabled but
+no user caller is available, retain the operation name without a location in failures, and omit unavailable source
+locations. The informational name is an accepted trade-off for avoiding eager formatting: Effect's frame contract
+cannot lazily omit a node. Reject eager caller resolution on every success and dependency changes to remove that
+rare location-free line. Capture remains independent of recording so failures outside recordings and operations
+built before recording retain their callers.

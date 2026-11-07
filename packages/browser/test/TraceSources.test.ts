@@ -320,11 +320,15 @@ it.effect("keeps preconstructed guarded getter and method callers", () =>
     const title = guarded.title
     const count = guarded.locator("#counter").count
     const fill = guarded.locator("#field").fill("value")
+    const screenshot = guarded.screenshot()
+    const evaluate = guarded.evaluate(() => 1)
     const { events } = yield* scenario(
       Effect.gen(function*() {
         yield* Effect.exit(title)
         yield* Effect.exit(count)
         yield* Effect.exit(fill)
+        yield* Effect.exit(screenshot)
+        yield* Effect.exit(evaluate)
       }),
       undefined,
       page.id
@@ -334,7 +338,9 @@ it.effect("keeps preconstructed guarded getter and method callers", () =>
       const [name, binding, member, offset] of [
         ["Page.title", "title", "title", 2],
         ["Locator.count", "count", "count", 1],
-        ["Locator.fill", "fill", "fill", 2]
+        ["Locator.fill", "fill", "fill", 2],
+        ["Page.screenshot", "screenshot", "screenshot", 2],
+        ["Page.evaluate", "evaluate", "evaluate", 2]
       ] as const
     ) {
       const line = lines.findIndex((line) => line.includes(`const ${binding} = guarded.`))
@@ -367,7 +373,7 @@ it("filters both source and distribution library frames before selecting the cal
   }
 })
 
-it("keeps caller locations when native frame omission is unavailable", () => {
+it("keeps caller locations without Error.captureStackTrace", () => {
   const capture = Object.getOwnPropertyDescriptor(Error, "captureStackTrace")!
   const limit = Error.stackTraceLimit
   try {

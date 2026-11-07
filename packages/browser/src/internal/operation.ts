@@ -533,19 +533,9 @@ const libraryPaths = /\/(?:src|dist)\/$/.test(libraryDirectory.pathname)
   ? ["../../src/", "../../dist/"].map((directory) => Recorders.filePath(new URL(directory, import.meta.url).href))
   : [Recorders.filePath(libraryDirectory.href)]
 
-/** Synchronous public wrappers and getters still have their caller when they construct an operation. */
-const namedCaller = (): (() => string | undefined) | undefined => {
-  const limit = Error.stackTraceLimit
-  if (limit === 0) return undefined
-  let error: Error | undefined
-  try {
-    Error.stackTraceLimit = 20
-    error = new Error()
-  } catch {
-    return undefined
-  } finally {
-    Error.stackTraceLimit = limit
-  }
+/** The first user location in a construction-time stack, formatted only when consumed. */
+const namedCaller = (error: Error | undefined): (() => string | undefined) | undefined => {
+  if (error === undefined) return undefined
   let call: string | undefined
   return () => {
     if (error === undefined) return call
@@ -575,7 +565,20 @@ const namedCaller = (): (() => string | undefined) | undefined => {
  * a step ran out with becomes the operation's, with the step's phase, history and hint.
  */
 const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
-  const call = namedCaller()
+  const limit = Error.stackTraceLimit
+  let error: Error | undefined
+  if (limit !== 0) {
+    try {
+      // Capture here so the formatting helper does not consume a caller frame.
+      Error.stackTraceLimit = 6
+      error = new Error()
+    } catch {
+      // Caller capture is optional when the runtime cannot supply a stack.
+    } finally {
+      Error.stackTraceLimit = limit
+    }
+  }
+  const call = namedCaller(error)
   return <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
       const record = yield* start(name)
