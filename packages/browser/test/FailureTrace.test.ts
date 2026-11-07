@@ -388,7 +388,7 @@ it("caps process slots, reports exhaustion and removes the transfer spool", asyn
   const records: Array<[string, unknown]> = []
   const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
   const directory = scope.open()
-  for (let slot = 0; slot < processSlots; slot++) fs.writeFileSync(path.join(directory, `${slot}.claim`), "")
+  for (let slot = 0; slot < processSlots; slot++) fs.unlinkSync(path.join(directory, `${slot}.claim`))
   execFileSync(process.execPath, [
     `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
     "-e",
@@ -396,7 +396,7 @@ it("caps process slots, reports exhaustion and removes the transfer spool", asyn
   ], {
     env: { ...process.env, [transferVariable]: directory }
   })
-  expect(fs.readdirSync(directory)).toHaveLength(processSlots + 1)
+  expect(fs.readdirSync(directory)).toHaveLength(processSlots * 2 + 1)
   scope.close()
   expect(records).toContainEqual(["overflow", "Child process slot budget exhausted"])
   expect(fs.existsSync(directory)).toBe(false)
@@ -429,19 +429,25 @@ it("retains recent early-slot daemon evidence independently of parent history an
   const trace = new TraceBuffer()
   trace.record("parent", "receive", "PARENT_FAILURE_EVIDENCE")
   trace.record("child-transfer", "receive", "RECENT_EARLY_DAEMON", {
-    pid: 1, connection: "daemon", sequence: 1, timestamp: "2026-11-07T12:00:00.000Z"
+    pid: 1,
+    connection: "daemon",
+    sequence: 1,
+    timestamp: "2026-11-07T12:00:00.000Z"
   })
   // Later slots replay old traffic after the daemon. Their combined volume exceeds the child budget.
   for (let pid = 2; pid <= 9; pid++) {
     for (let sequence = 1; sequence <= 40; sequence++) {
       trace.record("child-transfer", "node-stderr", "x".repeat(8000), {
-        pid, connection: `client:${pid}`, sequence, timestamp: "2026-11-07T11:00:00.000Z"
+        pid,
+        connection: `client:${pid}`,
+        sequence,
+        timestamp: "2026-11-07T11:00:00.000Z"
       })
     }
   }
-  expect(trace.entries().map(entry => entry.payload)).toContain("RECENT_EARLY_DAEMON")
-  expect(trace.entries().map(entry => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
-  expect(trace.entries().some(entry => entry.kind === "overflow")).toBe(true)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("RECENT_EARLY_DAEMON")
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+  expect(trace.entries().some((entry) => entry.kind === "overflow")).toBe(true)
   expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
 })
 
@@ -472,3 +478,69 @@ it("retires the writer-visible path before collecting and removing a live child'
     await once(child, "close")
   }
 }, 30_000)
+
+it("bounds parent and chronological child tails separately and clears both", () => {
+  const trace = new TraceBuffer()
+  for (let sequence = 1; sequence <= 300; sequence++) {
+    trace.record("parent", "receive", `${sequence}:` + "p".repeat(8000))
+    trace.record("child", "receive", `${sequence}:` + "c".repeat(8000), {
+      pid: 1,
+      connection: "daemon",
+      sequence,
+      timestamp: new Date(sequence).toISOString()
+    })
+  }
+  const entries = trace.entries().filter((entry) => entry.kind !== "overflow")
+  for (const child of [false, true]) {
+    const selected = entries.filter((entry) => (entry.origin !== undefined) === child)
+    const bytes = selected.reduce((sum, entry) => sum + JSON.stringify(entry).length * 2, 0)
+    expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(bytes).toBeGreaterThan(2 * 1024 * 1024 - 20 * 1024)
+    expect(selected.at(-1)?.payload).toMatch(/^300:/)
+    expect(selected.map((entry) => entry.sequence)).toEqual(
+      selected.map((entry) => entry.sequence).sort((a, b) => a - b)
+    )
+  }
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+  trace.clear()
+  expect(trace.bytes).toBe(0)
+  expect(trace.entries()).toEqual([])
+})
+
+it("records a byte-array stderr view as text while preserving the actual bytes written", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const { stderrText } = await import("./integration/traceStderr.ts")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const data = new TextEncoder().encode("beforeBYTE_STDERR_éafter")
+  const view = data.subarray(6, data.length - 5)
+  expect(stderrText(view)).toBe("BYTE_STDERR_é")
+  expect(stderrText(Buffer.from(view))).toBe("BYTE_STDERR_é")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  const child = spawnSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "const data = new TextEncoder().encode('beforeBYTE_STDERR_éafter'); process.stderr.write(data.subarray(6, data.length - 5))"
+  ], { env: { ...process.env, [transferVariable]: directory } })
+  scope.close()
+  expect(child.status).toBe(0)
+  expect(child.stderr).toEqual(Buffer.from(view))
+  expect(records).toContainEqual(["node-stderr", "BYTE_STDERR_é"])
+})
+
+it("keeps child transfer overflow markers out of the parent history budget", async () => {
+  const { TransferScope } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer(512)
+  trace.record("parent", "receive", "PARENT_NEAR_FULL")
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child-transfer", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  fs.writeFileSync(path.join(directory, "0-0"), JSON.stringify({
+    sequence: 2, timestamp: "2026-11-07T12:00:00.000Z", connection: "daemon", kind: "receive", payload: "tail", pid: 1
+  }) + "\n")
+  scope.close()
+  expect(trace.entries().map(entry => entry.payload)).toContain("PARENT_NEAR_FULL")
+  expect(trace.entries().some(entry => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
+})
