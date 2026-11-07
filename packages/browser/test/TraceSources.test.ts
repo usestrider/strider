@@ -233,7 +233,7 @@ for (const available of [true, false]) {
       }
       const constructed = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.lazy"))
       assert.strictEqual(formatted, 0)
-      const frame = Effect.runSync(constructed)
+      const frame = Effect.runSync(constructed.pipe(Effect.provideService(Tracing.TracerDisabledWhen, () => true)))
       assert.strictEqual(formatted, 0)
       assert.isDefined(frame)
       assert.strictEqual(frame!.stack(), available ? `at constructed (${file}:7:3)` : undefined)
@@ -253,9 +253,7 @@ it.effect("keeps the construction caller when recording starts later", () =>
     const { events } = yield* scenario(constructed)
     const frame = events.find((event) => event.title === "Page.preconstructed").stack[0]
     const lines = readFileSync(file, "utf8").split("\n")
-    const line = lines.findIndex((line) =>
-      line.includes("const constructed = Effect.void.pipe(Operation.named(\"Page.preconstructed\"")
-    )
+    const line = lines.findIndex((line) => line.includes("Operation.named(\"Page.preconstructed\", {"))
     assert.deepStrictEqual(frame, {
       file,
       line: line + 1,
