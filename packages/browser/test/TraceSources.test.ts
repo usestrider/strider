@@ -338,7 +338,9 @@ it.effect("keeps preconstructed guarded getter and method callers", () =>
       ] as const
     ) {
       const line = lines.findIndex((line) => line.includes(`const ${binding} = guarded.`))
-      const frame = events.find((event) => event.title === name).stack[0]
+      const stack = events.find((event) => event.title === name).stack
+      assert.isArray(stack, `${name} has a caller stack`)
+      const frame = stack[0]
       assert.deepStrictEqual(frame, {
         file,
         line: line + 1,
@@ -360,6 +362,45 @@ it("filters both source and distribution library frames before selecting the cal
     const operation = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.filtered"))
     const frame = Effect.runSync(operation.pipe(Effect.provideService(Tracing.TracerDisabledWhen, () => true)))
     assert.strictEqual(frame!.stack(), `at user (${file}:50:2)`)
+  } finally {
+    Error.prepareStackTrace = prepare
+  }
+})
+
+it("keeps caller locations when native frame omission is unavailable", () => {
+  const capture = Object.getOwnPropertyDescriptor(Error, "captureStackTrace")!
+  const limit = Error.stackTraceLimit
+  try {
+    Object.defineProperty(Error, "captureStackTrace", { ...capture, value: undefined })
+    const operation = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.fallback"))
+    const frame = Effect.runSync(operation.pipe(Effect.provideService(Tracing.TracerDisabledWhen, () => true)))
+    const lines = readFileSync(file, "utf8").split("\n")
+    const line = lines.findIndex((line) =>
+      line.includes(
+        "const operation = Effect.service(References.CurrentStackFrame).pipe(Operation.named(\"Page.fallback\""
+      )
+    )
+    assert.strictEqual(frame!.stack(), `at ${file}:${line + 1}:${lines[line]!.indexOf("Operation.named") + 11}`)
+    assert.strictEqual(Error.stackTraceLimit, limit)
+  } finally {
+    Object.defineProperty(Error, "captureStackTrace", capture)
+  }
+})
+
+it("preserves Error metadata supplied to a custom caller formatter", () => {
+  const prepare = Error.prepareStackTrace
+  let captured: Error | undefined
+  try {
+    Error.prepareStackTrace = (error) => {
+      captured = error
+      return `Error\n    at caller (${file}:50:2)`
+    }
+    const operation = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.formatter"))
+    const frame = Effect.runSync(operation.pipe(Effect.provideService(Tracing.TracerDisabledWhen, () => true)))
+    assert.strictEqual(frame!.stack(), `at caller (${file}:50:2)`)
+    assert.instanceOf(captured, Error)
+    assert.strictEqual(captured!.name, "Error")
+    assert.strictEqual(captured!.message, "")
   } finally {
     Error.prepareStackTrace = prepare
   }
