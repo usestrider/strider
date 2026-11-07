@@ -1299,3 +1299,7 @@ descendants and leaves unrelated owners alone. Owner loss does not imply a netwo
 deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
 may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
 redirect hops was rejected because attribution must remain correct.
+
+## Native passkey testing
+
+Virtual authenticators use native Chromium WebAuthn and belong to one page's scope, with one live acquisition per page so cleanup cannot disable another caller's environment. Credentials may be explicitly exported and imported into a second page or popup; those copies keep separate signature counters. Chromium's native environment follows a frame tree rather than a browser context, so context-wide sharing is not offered. Replacing `navigator.credentials.create/get` with a shared JavaScript implementation was rejected because it would test our emulation instead of the browser's WebAuthn. Firefox's classic WebDriver commands are outside Strider's BiDi transport, and stock WebKit's declared Automation credential commands are not implemented; these backends refuse acquisition rather than substituting behavior.

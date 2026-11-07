@@ -20,17 +20,26 @@ import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
+import type * as WebAuthn from "./WebAuthn.ts"
 
 const TypeId = "~@usestrider/browser/Capability"
 
 /**
  * A feature that only some backends have, whose handle has type `H`.
  *
+ * **Details**
+ *
+ * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface Capability<out H> {
+export interface Capability<out H, out Access extends "inspect" | "control" = "inspect"> {
+  /**
+   * The access needed to acquire this capability.
+   */
+  readonly access: Access
   readonly [TypeId]: () => H
   readonly name: string
 }
@@ -42,9 +51,10 @@ export interface Capability<out H> {
  * @category guards
  * @since 0.1.0
  */
-export const isCapability = (u: unknown): u is Capability<unknown> => Predicate.hasProperty(u, TypeId)
+export const isCapability = (u: unknown): u is Capability<unknown> | Capability<unknown, "control"> =>
+  Predicate.hasProperty(u, TypeId)
 
-const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name })
+const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name, access: "inspect" })
 
 /**
  * One node of the browser's own accessibility tree, unprocessed.
@@ -217,6 +227,42 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * @since 0.1.0
  */
 export const Video: Capability<VideoRecording> = make("Video")
+
+/**
+ * A native Chromium virtual authenticator on this page, removed when the caller's scope closes.
+ *
+ * **Details**
+ *
+ * Requires control access. Acquisition creates a CTAP2 authenticator with internal transport, resident keys
+ * and user verification supported, verification successful, automatic user presence enabled, and UI disabled.
+ * These are fixed defaults. Only one acquisition may live on a page; overlap fails with `CapabilityError`.
+ * Credentials survive navigation. Another page or popup needs an explicit copy; copies keep separate counters.
+ * Firefox and WebKit fail with `Unsupported`.
+ *
+ * **Example** (Enabling native passkey registration)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const registerPasskey = Effect.fn("registerPasskey")(function*(page: Page.Page) {
+ *   const authenticator = yield* page.capability(Capability.VirtualAuthenticator)
+ *   yield* page.getByRole("button", { name: "Create passkey" }).click()
+ *   yield* page.getByText("Passkey created").pipe(Expect.toBeVisible)
+ *   return yield* authenticator.credentials
+ * })
+ * ```
+ *
+ * @see WebAuthn.VirtualAuthenticator
+ * @stability unstable
+ * @category capabilities
+ * @since 0.1.0
+ */
+export const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "control"> = {
+  [TypeId]: () => undefined as unknown as WebAuthn.VirtualAuthenticator,
+  name: "VirtualAuthenticator",
+  access: "control"
+}
 
 /**
  * Schema for the reasons acquiring or using a capability can fail.

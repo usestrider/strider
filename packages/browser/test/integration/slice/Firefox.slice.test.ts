@@ -19,6 +19,7 @@ import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
+import { webauthn } from "./webauthn.ts"
 
 const backend = Firefox.layer({ executablePath: firefox.executable }).pipe(
   Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
@@ -35,3 +36,5 @@ recordings("Firefox", backend)
 toolkit("Firefox", backend)
 deadlines("Firefox", backend)
 attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))
+
+webauthn("Firefox", backend)
