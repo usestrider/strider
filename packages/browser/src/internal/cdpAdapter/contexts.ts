@@ -108,7 +108,13 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
-  const entry: ContextEntry = { id: state.ids.userContext(), browserContextId, isDefault: false, removing: false }
+  const entry: ContextEntry = {
+    id: state.ids.userContext(),
+    browserContextId,
+    isDefault: false,
+    removing: false,
+    proxy: Option.getOrUndefined(options.proxy)
+  }
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
   yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
@@ -137,6 +143,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
   // a budget of its own (`Model.remove`); they end with the connection at the latest
   state.buffer.start(Effect.gen(function*() {
     yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
+    context.proxy = undefined
     state.contexts.delete(id)
     state.contextsByCdp.delete(browserContextId)
     yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))

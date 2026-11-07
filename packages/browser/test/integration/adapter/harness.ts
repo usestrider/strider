@@ -126,6 +126,10 @@ const routes: Record<string, Route> = {
     response.writeHead(401, { "www-authenticate": `Basic realm="strider"`, "content-type": "text/html" })
     response.end(`<title>auth</title><p>who are you?</p>`)
   },
+  "/auth-with-proxy-header": (request, response, site) => {
+    response.setHeader("proxy-authenticate", "Basic realm=\"not-the-proxy\"")
+    routes["/auth"]!(request, response, site)
+  },
   "/fetching": (_request, response) =>
     html(
       response,

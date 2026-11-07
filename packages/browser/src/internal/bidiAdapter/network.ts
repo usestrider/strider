@@ -87,6 +87,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
     .on(Network.responseCompleted, (params, { state }) => {
+      if (params.response.status < 300 || params.response.status >= 400) {
+        ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
+          ?.proxyAttempts?.delete(params.request.request)
+      }
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
       state.buffer.emit({
@@ -102,6 +106,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
     .on(Network.fetchError, (params, { state }) => {
+      ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
+        ?.proxyAttempts?.delete(params.request.request)
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
       state.buffer.emit({

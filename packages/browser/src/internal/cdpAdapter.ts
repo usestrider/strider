@@ -64,6 +64,12 @@ export const capabilities = (
     entries: [
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
+      entry("userContexts.proxy", "supported", [
+        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.credentials", "supported", [
+        "proxy challenges only; one credential submission per request"
+      ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),
@@ -191,6 +197,10 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   lost: (session) => Effect.sync(() => Targets.lost(state, session)),
   ended: (session, reason) =>
     Effect.suspend(() => {
+      if (session.key === undefined) {
+        for (const context of state.contexts.values()) context.proxy = undefined
+        for (const target of state.targets.values()) target.proxyAuth?.clear()
+      }
       Targets.ended(state, session, reason)
       return state.buffer.flush
     })
@@ -226,6 +236,12 @@ export const connect: (
       }
     })
     root = client.root
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        for (const context of state.contexts.values()) context.proxy = undefined
+        for (const target of state.targets.values()) target.proxyAuth?.clear()
+      })
+    )
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
     const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect))

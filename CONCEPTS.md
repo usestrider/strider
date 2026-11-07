@@ -459,6 +459,26 @@ contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 6. Network
 
+A new context may carry a normalized HTTP proxy endpoint, a bypass host list (default empty), and optional
+credentials with a Redacted password. An omitted proxy leaves browser settings untouched. CDP and BiDi set the
+endpoint per user context; launched stock WebKit sets HTTP/HTTPS proxy environment variables on that context's
+process, overriding inherited proxy variables without changing the parent environment. Localhost, 127.0.0.1 and
+::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
+Unsupported endpoint schemes, WebKit credentials and settings for an existing WebKit process are explicit refusals.
+
+Automatic proxy authentication participates in native interception without replacing route declarations. CDP
+requires a Proxy source and matching endpoint origin; BiDi requires Proxy-Authenticate in the observed response.
+Configured credentials are submitted at most once per request, then canceled if challenged again. Website
+challenges continue through the ordinary obligations and auth routes; Firefox's missing challenge fields are read
+from WWW-Authenticate, never inferred from its potentially stale 407 status. Attempt state is removed when requests
+finish or their owner ends. Firefox's native proxy auth cache spans user contexts: a connection reserves each proxy
+endpoint's credentials (including none) before yielding. Each creation owns a share: a confirmed pre-creation
+rejection or confirmed unused rollback releases only its share. Another pending creation, prior successful context,
+observed navigable or uncertain remote outcome retains the binding. Conflicting configurations are refused. Configured
+credentials on an attached Firefox are refused because the pre-existing cache is unowned. Retained bindings survive
+later context cleanup; interceptor and request state do not.
+
+
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.
   Built: a hop also keeps the headers as the network sent and received them where the backend reports them apart (CDP's `ExtraInfo`, with `Cookie` and `Set-Cookie`), and the time its end was reported; recordings read them, and the request and response events keep the headers their own events gave (QUIRKS.md, Q158).
   A hop knows when its headers as sent are settled, with its first attributable report, its end (including failure or cancellation), eviction, or loss of its owning frame (including removal of an ancestor), worker, context, page or browser connection. `NetworkRequest.headersSent` waits within the operation's deadline for that settlement, then returns the available sent headers or the request event's headers when none were reported. Owner removal settles only the affected header waits without fabricating a network failure for detached requests. Eviction releases existing waiters; new lookups use the immutable snapshot.

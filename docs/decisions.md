@@ -1299,3 +1299,20 @@ descendants and leaves unrelated owners alone. Owner loss does not imply a netwo
 deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
 may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
 redirect hops was rejected because attribution must remain correct.
+
+
+## Context proxy routing and authentication
+
+Route a context through an HTTP proxy at its creation, leaving omitted proxy settings unchanged and keeping
+loopback destinations direct. Use native per-context proxy settings on CDP/BiDi and isolated process environment
+overrides for launched stock WebKit, whose command-line proxy setting does not apply in automation mode. Keep
+proxy credentials separate from endpoint URLs and Redacted through protocol encoding. Answer only positively
+identified proxy challenges, once per request, retaining website auth routes. Reject WebKit credentials and
+configured credentials on attached Firefox. Firefox reserves each endpoint's credential pair (including none)
+synchronously before creation and retains it for the connection lifetime after successful creation or an uncertain
+outcome, because its native proxy auth cache crosses context boundaries and survives removal. Each pending creation
+owns a share; confirmed pre-creation rejection or confirmed unused rollback releases only that share. Reject both
+permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
+preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
+shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
+unverified wildcard, CIDR, SOCKS or HTTPS-to-proxy configurations.

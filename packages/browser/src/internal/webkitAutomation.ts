@@ -36,11 +36,13 @@ import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
+import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Link from "./link.ts"
 import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Proxy from "./proxy.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
 import * as WebKitWire from "./webkitWire.ts"
@@ -80,6 +82,7 @@ export interface Settings {
 
 /** What a context's process is started with. */
 export interface ProcessOptions {
+  readonly proxy?: Adapter.ProxyOptions | undefined
   /** The time zone, which a WebKitGTK browser takes at launch (`--time-zone`). */
   readonly timeZone?: string | undefined
   /** Whether the session accepts certificates it can't verify, a capability of the session. */
@@ -296,6 +299,16 @@ const spawnProcess = Effect.fnUntraced(function*(
         coreDumps: settings.coreDumps,
         env: {
           WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
+          ...(options.proxy === undefined ? {} : {
+            http_proxy: `http://${options.proxy.server}`,
+            https_proxy: `http://${options.proxy.server}`,
+            HTTP_PROXY: `http://${options.proxy.server}`,
+            HTTPS_PROXY: `http://${options.proxy.server}`,
+            all_proxy: "",
+            ALL_PROXY: "",
+            no_proxy: [...Proxy.loopback, ...options.proxy.bypass].join(","),
+            NO_PROXY: [...Proxy.loopback, ...options.proxy.bypass].join(",")
+          }),
           XDG_DATA_HOME: `${directory}/data`,
           XDG_CACHE_HOME: `${directory}/cache`,
           XDG_CONFIG_HOME: `${directory}/config`
