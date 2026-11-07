@@ -169,6 +169,26 @@ describe("strider", () => {
         assert.strictEqual(fromFile.code, 0, fromFile.err)
         assert.deepStrictEqual(JSON.parse(fromFile.out).value, { type: "bigint", value: "7" })
         assert.strictEqual(JSON.parse((yield* evaluate("document.title")).out).value, "changed")
+        fs.writeFileSync(file, "() => typeof process")
+        const relative = yield* evaluate("--file", path.relative(process.cwd(), file))
+        assert.strictEqual(relative.code, 0, relative.err)
+        assert.strictEqual(JSON.parse(relative.out).value, "undefined")
+        for (
+          const [source, expected] of [
+            ["undefined", { type: "undefined" }],
+            ["NaN", { type: "number", value: "NaN" }],
+            ["[true, null, 'value']", [true, null, "value"]]
+          ] as const
+        ) {
+          const value = yield* evaluate(source)
+          assert.strictEqual(value.code, 0, value.err)
+          assert.deepStrictEqual(JSON.parse(value.out).value, expected)
+        }
+        for (const source of ["import x from 'node:fs'", "export default () => 1", "not valid javascript", "42"]) {
+          fs.writeFileSync(file, source)
+          assert.notStrictEqual((yield* evaluate("--file", file)).code, 0)
+        }
+        assert.notStrictEqual((yield* run("-p", "missing", "eval", "1")).code, 0)
         assert.notStrictEqual((yield* run("--json", "eval", "1")).code, 0)
         assert.notStrictEqual((yield* evaluate("(() => { throw Error('broken') })()")).code, 0)
         assert.strictEqual((yield* evaluate("--main-world", "globalThis.onlyMain = 9")).code, 0)
@@ -182,6 +202,51 @@ describe("strider", () => {
       }
     })), timeout)
 
+  for (const capture of ["local", "strict"]) {
+    it.live(`captures eval successes and failures with ${capture} capture`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = { ...environment(), EVAL_SECRET: "eval-private" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "eval-capture", ...args)
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "eval-capture",
+          "--chromium",
+          chromium.executable,
+          "--capture",
+          capture,
+          "--secret",
+          "token=EVAL_SECRET"
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          yield* run("page", "new", "--name", "main", "about:blank")
+          const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+          const value = yield* evaluate("'eval-private'")
+          assert.strictEqual(value.code, 0, value.err)
+          assert.strictEqual(JSON.parse(value.out).value, capture === "local" ? "%token%" : "•••")
+          const failure = yield* evaluate("(() => { document.title = 'acted'; throw Error('eval-private') })()")
+          assert.notStrictEqual(failure.code, 0)
+          assert.notInclude(failure.err, "eval-private")
+          const detail = JSON.parse(failure.err)
+          assert.strictEqual(detail.file, "eval")
+          assert.strictEqual(detail.phase, "execute")
+          if (capture === "strict") assert.include(detail.message, "masked")
+          const cycle = yield* evaluate("(() => { const x = {}; x.x = x; return x })()")
+          assert.notStrictEqual(cycle.code, 0)
+          assert.notInclude(cycle.err, "const x")
+          const exported = path.join(env.XDG_RUNTIME_DIR, "eval-export.ts")
+          yield* run("export", "test", exported)
+          const text = fs.readFileSync(exported, "utf8")
+          assert.strictEqual(text.split("TODO strider eval").length - 1, 3)
+          assert.notInclude(text, "eval-private")
+          assert.notInclude(text, "document.title")
+        } finally {
+          yield* run("stop")
+        }
+      })), timeout)
+  }
   for (const capture of ["local", "strict"]) {
     it.live(
       `prints segment values and validates typed arguments with ${capture} capture`,
@@ -617,6 +682,12 @@ describe("strider", () => {
           }`
           const opened = yield* session("page", "new", "--name", "home", url)
           assert.strictEqual(opened.code, 0, opened.err)
+          const isolated = yield* session("-p", "home", "--json", "eval", "1")
+          assert.notStrictEqual(isolated.code, 0)
+          assert.strictEqual(JSON.parse(isolated.err).reason, "Unsupported")
+          const evaluated = yield* session("-p", "home", "--json", "eval", "--main-world", "Promise.resolve(42)")
+          assert.strictEqual(evaluated.code, 0, evaluated.err)
+          assert.strictEqual(JSON.parse(evaluated.out).value, 42)
           const clicked = yield* session("-p", "home", "click", "role=button[name=\"Go\"]")
           assert.strictEqual(clicked.code, 0, clicked.err)
           const checked = yield* session("-p", "home", "expect", "css=button", "visible", "--text", "Done")

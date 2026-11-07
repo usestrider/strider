@@ -660,6 +660,68 @@ export const commands = (getDaemon: () => Daemon) => {
     {},
     () => Effect.flatMap(pageFlag, (page) => tool("release", { page }))
   )
+  const evaluate = Command.make("eval", {
+    expression: Argument.String("expression").pipe(Argument.optional),
+    file: Flag.String("file").pipe(
+      Flag.optional,
+      Flag.withDescription("UTF-8 browser function expression, relative to the caller working directory")
+    ),
+    mainWorld: Flag.Boolean("main-world").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Run among the page's own scripts instead of in an isolated world")
+    )
+  }, ({ expression, file, mainWorld }) =>
+    Effect.gen(function*() {
+      const daemon = getDaemon()
+      const { json } = yield* root
+      yield* presentResult(daemon, "eval", json, (status) =>
+        Effect.gen(function*() {
+          if (Option.isSome(expression) === Option.isSome(file)) {
+            return yield* new CommandFailed({
+              error: "InvalidInput",
+              message: "eval requires exactly one expression or --file"
+            })
+          }
+          const source = Option.isSome(file)
+            ? yield* Effect.flatMap(
+              resolvePath(file.value),
+              (path) => Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(path))
+            ).pipe(
+              Effect.mapError(() =>
+                new CommandFailed({ error: "InvalidInput", message: "Could not read eval function file" })
+              )
+            )
+            : Option.getOrThrow(expression)
+          const name = yield* pageFlag
+          const page = yield* daemon.session.page(name)
+          // The callable only supplies browser source. It is never compiled or invoked in the daemon.
+          const fn = Object.assign((): unknown => undefined, {
+            toString: () =>
+              Option.isSome(file) ?
+                `async () => await (
+${source}
+)()` :
+                `async () => (
+${source}
+)`
+          })
+          status.phase = "execute"
+          return yield* recording(daemon, "segment", (running) =>
+            Effect.gen(function*() {
+              // Keep even failed evaluations: a throw can follow side effects. Source never enters export metadata.
+              const before = new Set((yield* daemon.session.pages).map((each) => each.page.id))
+              const ran = yield* Effect.exit(mainWorld ? page.evaluateInMainWorld(fn) : page.evaluate(fn))
+              const pages = (yield* daemon.session.pages).filter((each) => !before.has(each.page.id))
+              daemon.recorder.record({ _tag: "Eval", pages: pages.map((each) => each.name) }, running)
+              for (const each of pages) daemon.recorder.declared(each.page.id)
+              return yield* ran
+            }))
+        }))
+    })).pipe(
+      Command.withDescription(
+        "Evaluate one browser JavaScript expression and await its value. Strict capture masks output, not side effects."
+      )
+    )
   const run = Command.make(
     "run",
     {
@@ -786,6 +848,7 @@ export const commands = (getDaemon: () => Daemon) => {
       tabs.pipe(Command.withDescription(Tools.tabs.description!)),
       control.pipe(Command.withDescription(Tools.control.description!)),
       release.pipe(Command.withDescription(Tools.release.description!)),
+      evaluate,
       run.pipe(Command.withDescription("Run a TypeScript segment in the session.")),
       state.pipe(Command.withDescription("Save the session’s storage state.")),
       exportCommand.pipe(Command.withDescription("Export the recorded session as a test.")),
@@ -929,14 +992,24 @@ const exportState = Effect.fnUntraced(function*(
 
 /** `strider run`: the file's default export, with `CurrentSession` and a scope of its own. */
 const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string, args: ReadonlyArray<string>, json: boolean) {
-  const started = performance.now()
   const resolved = yield* resolvePath(file)
+  return yield* presentResult(daemon, resolved, json, (status) =>
+    executeSegment(daemon, resolved, args, (next) => {
+      status.phase = next
+    }))
+})
+
+/** Shared serialization, capture and typed failure presentation for run and eval. */
+const presentResult = Effect.fnUntraced(function*<E, R>(
+  daemon: Daemon,
+  resolved: string,
+  json: boolean,
+  execute: (status: { phase: typeof SegmentResult.Failure.Type["phase"] }) => Effect.Effect<unknown, E, R>
+) {
+  const started = performance.now()
   const status: { phase: typeof SegmentResult.Failure.Type["phase"] } = { phase: "load" }
-  // Collect operation evidence without imposing a new deadline on the entire segment.
-  const operation = yield* OperationImpl.start("strider run")
-  const ran = yield* executeSegment(daemon, resolved, args, (next) => {
-    status.phase = next
-  }).pipe(
+  const operation = yield* OperationImpl.start(resolved === "eval" ? "strider eval" : "strider run")
+  const ran = yield* execute(status).pipe(
     Effect.provideService(Operation.Current, operation),
     Effect.flatMap((value) => {
       status.phase = "serialize"
@@ -971,7 +1044,9 @@ const segment = Effect.fnUntraced(function*(daemon: Daemon, file: string, args: 
       file: resolved,
       error: failure.error,
       ...("reason" in failure && typeof failure.reason === "string" ? { reason: failure.reason } : {}),
-      message: daemon.strictCapture ? "Segment failed; details masked by capture strict" : failure.message,
+      message: daemon.strictCapture
+        ? `${resolved === "eval" ? "Evaluation" : "Segment"} failed; details masked by capture strict`
+        : failure.message,
       ...(typeof hint === "string" ? { hint: daemon.strictCapture ? "•••" : hint } : {}),
       phase: status.phase,
       ...(step === undefined ? {} : { step }),
