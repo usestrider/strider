@@ -260,7 +260,11 @@ describe("Chromium video writer", () => {
           const trace = yield* Trace.record(page, { screencast: "native" })
           yield* page.goto("data:text/html,<h1>video trace</h1>")
           // Export stops the native recorder. Observe this recording's actual writer input before stopping it.
-          yield* Deferred.await(firstFrame).pipe(Effect.timeout("60 seconds"))
+          yield* Deferred.await(firstFrame).pipe(Effect.timeoutOrElse({
+            duration: "10 seconds",
+            orElse: () =>
+              Effect.fail(new Error("The native trace recorder delivered no frame to its writer within 10 seconds"))
+          }))
           const file = path.join(directory, "trace.zip")
           yield* trace.exportTrace(file)
           const files = new Map<string, Uint8Array>()
