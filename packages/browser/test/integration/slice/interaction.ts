@@ -1761,8 +1761,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   0,
                   "the asynchronous handler must run before it can block filling"
                 )
-                // Resolving means the target was never found; this target is waiting on focus preparation.
-                assert.strictEqual(error.phase, "waitingForCondition")
+                // A confirmed focus blocker was not sent. An unanswered apply call may have mutated the page,
+                // so its dispatch stays unconfirmed even when earlier rounds reported PreparingFocus.
+                assert.oneOf(JSON.stringify([error.phase, error.diagnostics.dispatch]), [
+                  JSON.stringify(["waitingForCondition", { _tag: "NotSent" }]),
+                  JSON.stringify(["dispatchedUnconfirmed", { _tag: "MayHaveBeenSent" }])
+                ])
                 // The target exists and passes every check. The focus blocker must not erase that evidence.
                 assert(
                   error.history.some((entry) => {
