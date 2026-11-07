@@ -1,5 +1,14 @@
 # @usestrider/vitest
 
+## 0.1.5
+
+### Patch Changes
+
+- **Failure traces for every test, configured once** (#147): `VitestBrowser.layer(backend, { trace: { directory } })` records each bound test, attaches its trace when it fails and discards it when it passes, with per-action screenshots, DOM snapshots and network by default.
+- **`VitestBrowser.withTest(context)`** (#139) ties a test's identity, retry and attachments to its own callback, so concurrent tests don't pick up each other's.
+- **`VitestBrowser.traceFileName(info)`** (#138) gives safe, deterministic trace filenames, distinct per test, retry and repeat.
+- Uses `@usestrider/browser` 0.5.0.
+
 ## 0.1.4
 
 ### Patch Changes
