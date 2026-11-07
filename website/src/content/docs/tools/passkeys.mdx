@@ -15,19 +15,27 @@ Firefox exposes virtual authenticators through classic WebDriver, outside Stride
 WebKit's Automation implementation refuses credential management.
 
 ```ts
-import { Capability, Page } from "@usestrider/browser"
+import { Capability, Expect, Page } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const registerAndSignIn = Effect.fn("registerAndSignIn")(function*(page: Page.Page) {
   const authenticator = yield* page.capability(Capability.VirtualAuthenticator)
   yield* page.goto("https://app.example.com/settings/security")
   yield* page.getByRole("button", { name: "Create passkey" }).click()
+  yield* page.getByText("Passkey created").pipe(Expect.toBeVisible)
   yield* page.getByRole("button", { name: "Sign out" }).click()
+  yield* page.getByRole("button", { name: "Sign in with passkey" }).pipe(
+    Expect.toBeVisible
+  )
   yield* page.goto("https://app.example.com/login")
   yield* page.getByRole("button", { name: "Sign in with passkey" }).click()
+  yield* page.getByRole("heading", { name: "Account" }).pipe(Expect.toBeVisible)
   return yield* authenticator.credentials
 })
 ```
+
+Wait for your app's success state before reading or copying credentials: a click alone does not wait for the
+registration ceremony to finish.
 
 The authenticator uses CTAP2 with internal transport, supports resident credentials and user verification, reports
 verification successful, supplies user presence automatically, and disables browser authenticator UI. These are
@@ -43,29 +51,42 @@ WebAuthn environment; do not manage that environment through another CDP client 
 
 ## Credential management
 
-The [`WebAuthn.Credential`](/docs/api/browser/WebAuthn#Credential) Schema describes exported credentials. Its binary
-fields are bytes; its private key is redacted PKCS#8 DER for ES256. Resident credentials require a user handle;
-adding malformed data fails with `WebAuthnError` with reason `InvalidInput`, without echoing the credential.
-Exported private keys can sign as the user: keep them secret, as you would session cookies.
+A reused authenticator retains credentials and verification settings from earlier steps. Reset it to a known set
+before a test:
 
 ```ts
 import { WebAuthn } from "@usestrider/browser"
 import { Effect } from "effect"
 
-const managePasskeys = Effect.fn("managePasskeys")(
-  function*(authenticator: WebAuthn.VirtualAuthenticator) {
-    const saved = yield* authenticator.credentials
-    for (const credential of saved) {
-      yield* authenticator.removeCredential(credential.credentialId)
-    }
-    for (const credential of saved) yield* authenticator.addCredential(credential)
-    yield* authenticator.setUserVerified(false)
-    yield* authenticator.setUserVerified(true)
-    yield* authenticator.setAutomaticPresenceSimulation(false)
-    yield* authenticator.setAutomaticPresenceSimulation(true)
-    yield* authenticator.clearCredentials
-  }
-)
+const resetPasskeys = Effect.fn("resetPasskeys")(function*(
+  authenticator: WebAuthn.VirtualAuthenticator,
+  saved: ReadonlyArray<WebAuthn.Credential>
+) {
+  yield* authenticator.clearCredentials
+  yield* authenticator.setUserVerified(true)
+  yield* authenticator.setAutomaticPresenceSimulation(true)
+  for (const credential of saved) yield* authenticator.addCredential(credential)
+})
+```
+
+The [`WebAuthn.Credential`](/docs/api/browser/WebAuthn#Credential) Schema describes exported credentials. Its binary
+fields are bytes; its private key is redacted PKCS#8 DER. Chromium validates which key algorithms it accepts.
+Resident credentials require a user handle. Adding malformed data fails with `WebAuthnError` with reason
+`InvalidInput`, without echoing the credential. Exported private keys can sign as the user: keep them secret, as
+you would session cookies.
+
+Remove a single credential by its ID:
+
+```ts
+import { WebAuthn } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const removePasskey = Effect.fn("removePasskey")(function*(
+  authenticator: WebAuthn.VirtualAuthenticator,
+  credentialId: Uint8Array
+) {
+  yield* authenticator.removeCredential(credentialId)
+})
 ```
 
 The verification control changes whether subsequent ceremonies pass user verification. Turning automatic presence
@@ -78,7 +99,7 @@ A second page has a separate authenticator. Export by listing the source's crede
 second page before asking it to sign in:
 
 ```ts
-import { Browser, Capability, WebAuthn } from "@usestrider/browser"
+import { Browser, Capability, Expect, WebAuthn } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const signInOnAnotherPage = Effect.fn("signInOnAnotherPage")(
@@ -89,6 +110,7 @@ const signInOnAnotherPage = Effect.fn("signInOnAnotherPage")(
     for (const credential of saved) yield* copy.addCredential(credential)
     yield* page.goto("https://app.example.com/login")
     yield* page.getByRole("button", { name: "Sign in with passkey" }).click()
+    yield* page.getByRole("heading", { name: "Account" }).pipe(Expect.toBeVisible)
     return page
   }
 )
@@ -104,7 +126,7 @@ A popup also needs its own authenticator. Subscribe before opening it, acquire i
 credential before triggering its sign-in ceremony:
 
 ```ts
-import { Capability, Page, Popup, WebAuthn } from "@usestrider/browser"
+import { Capability, Expect, Page, Popup, WebAuthn } from "@usestrider/browser"
 import { Effect } from "effect"
 
 const signInInPopup = Effect.fn("signInInPopup")(
@@ -116,6 +138,7 @@ const signInInPopup = Effect.fn("signInInPopup")(
     const copy = yield* popup.capability(Capability.VirtualAuthenticator)
     for (const credential of saved) yield* copy.addCredential(credential)
     yield* popup.getByRole("button", { name: "Sign in with passkey" }).click()
+    yield* popup.getByRole("heading", { name: "Account" }).pipe(Expect.toBeVisible)
     return popup
   }
 )

@@ -135,6 +135,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
+      entry("capability.virtualAuthenticator", "unsupported", [
+        "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
+      ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
       entry(

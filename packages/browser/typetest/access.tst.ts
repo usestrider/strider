@@ -3,6 +3,7 @@
  * `pnpm test-types`.
  */
 import {
+  Capability,
   Deadline,
   Download,
   JSHandle,
@@ -33,6 +34,19 @@ describe("access is typed", () => {
     expect((null! as Snapshot.Snapshot<Locator.ReadonlyLocator>).ref(ref).click()).type.toRaiseError(
       "Property 'click' does not exist"
     )
+  })
+
+  it("native authenticators require control while read capabilities retain inspect access", () => {
+    expect(reader.capability(Capability.VirtualAuthenticator)).type.toRaiseError()
+    expect(page.capability(Capability.VirtualAuthenticator)).type.not.toRaiseError()
+    expect(reader.capability(Capability.AxTree)).type.not.toRaiseError()
+  })
+
+  it("a capability guard preserves the access discriminator", () => {
+    const input: unknown = Capability.AxTree
+    if (Capability.isCapability(input) && input.access === "inspect") {
+      expect(reader.capability(input)).type.not.toRaiseError()
+    }
   })
 
   it("the main world needs control", () => {

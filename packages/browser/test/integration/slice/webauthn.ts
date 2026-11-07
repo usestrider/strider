@@ -8,7 +8,7 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
-import { createHash, createPublicKey, verify } from "node:crypto"
+import { createHash, createPublicKey, generateKeyPairSync, verify } from "node:crypto"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 
@@ -79,6 +79,7 @@ export const webauthn = (name: string, backend: Layer.Layer<Browser.Browser, unk
             if (!(yield* supports("capability.virtualAuthenticator"))) {
               const error = yield* page.capability(Capability.VirtualAuthenticator).pipe(Effect.flip)
               assert.strictEqual(error._tag, "CapabilityError")
+              if (error._tag !== "CapabilityError") return yield* Effect.die(error)
               assert.strictEqual(error.reason._tag, "Unsupported")
               return
             }
@@ -121,7 +122,7 @@ export const webauthn = (name: string, backend: Layer.Layer<Browser.Browser, unk
             if (!(yield* supports("capability.virtualAuthenticator"))) return
             const served = yield* site
             const page = yield* Browser.newPage()
-            const second = yield* Browser.newPage()
+            const second = yield* page.context.newPage
             yield* page.goto(`${served.crossSite}/child`)
             yield* page.activate
             const source = yield* page.capability(Capability.VirtualAuthenticator)
@@ -132,22 +133,34 @@ export const webauthn = (name: string, backend: Layer.Layer<Browser.Browser, unk
             assert.lengthOf(yield* copy.credentials, 0)
             yield* copy.addCredential(credential!)
             yield* second.activate
-            yield* signIn(second)
+            const secondAssertion = yield* signIn(second)
+            assert.deepEqual(secondAssertion.id, Array.from(credential!.credentialId))
             yield* signIn(second)
             assert.strictEqual((yield* source.credentials)[0]!.signCount, credential!.signCount)
             assert.strictEqual((yield* copy.credentials)[0]!.signCount, credential!.signCount + 2)
             const opened = yield* Popup.next(page)
             yield* page.evaluateInMainWorld(() => {
-              window.open("/child")
+              const button = document.createElement("button")
+              button.textContent = "Open sign-in"
+              button.onclick = () => {
+                window.open("/child")
+              }
+              document.body.append(button)
             })
+            yield* page.activate
+            yield* page.getByRole("button", { name: "Open sign-in" }).click()
             const popup = yield* opened
             const popupCopy = yield* popup.capability(Capability.VirtualAuthenticator)
             assert.lengthOf(yield* popupCopy.credentials, 0)
             yield* popupCopy.addCredential(credential!)
             yield* popup.activate
-            yield* signIn(popup)
+            const popupAssertion = yield* signIn(popup)
+            assert.deepEqual(popupAssertion.id, Array.from(credential!.credentialId))
             assert.strictEqual((yield* popupCopy.credentials)[0]!.signCount, credential!.signCount + 1)
             assert.strictEqual((yield* source.credentials)[0]!.signCount, credential!.signCount)
+            yield* page.close()
+            yield* signIn(popup)
+            assert.strictEqual((yield* popupCopy.credentials)[0]!.signCount, credential!.signCount + 2)
           })),
         timeout
       )
@@ -175,16 +188,63 @@ export const webauthn = (name: string, backend: Layer.Layer<Browser.Browser, unk
             ) {
               const error = yield* handle.addCredential(bad).pipe(Effect.flip)
               assert.strictEqual(error._tag, "WebAuthnError")
+              if (error._tag !== "WebAuthnError") return yield* Effect.die(error)
               assert.strictEqual(error.reason._tag, "InvalidInput")
               assert.notInclude(String(error), "1,2,3")
             }
+            const duplicate = yield* handle.addCredential(credential!).pipe(Effect.flip)
+            assert.strictEqual(duplicate._tag, "WebAuthnError")
+            const missing = yield* handle.removeCredential(new Uint8Array([255, 254])).pipe(Effect.flip)
+            assert.strictEqual(missing._tag, "WebAuthnError")
+            yield* handle.addCredential({
+              ...credential!,
+              credentialId: new Uint8Array([10, 11]),
+              isResidentCredential: false,
+              userHandle: undefined
+            })
+            assert.lengthOf(yield* handle.credentials, 2)
+            yield* handle.removeCredential(new Uint8Array([10, 11]))
             yield* handle.removeCredential(credential!.credentialId)
             assert.lengthOf(yield* handle.credentials, 0)
             yield* handle.addCredential(credential!)
             assert.lengthOf(yield* handle.credentials, 1)
             yield* handle.setUserVerified(false)
+            const unverified = yield* page.evaluateInMainWorld(async () => {
+              try {
+                await navigator.credentials.get({
+                  publicKey: {
+                    challenge: new Uint8Array([1]),
+                    rpId: "localhost",
+                    userVerification: "required",
+                    timeout: 1000
+                  },
+                  signal: AbortSignal.timeout(1500)
+                })
+                return "unexpected success"
+              } catch (error) {
+                return (error as Error).name
+              }
+            })
+            assert.strictEqual(unverified, "NotAllowedError")
             yield* handle.setUserVerified(true)
             yield* handle.setAutomaticPresenceSimulation(false)
+            const noPresence = yield* page.evaluateInMainWorld(async () => {
+              try {
+                await navigator.credentials.get({
+                  publicKey: {
+                    challenge: new Uint8Array([1]),
+                    rpId: "localhost",
+                    userVerification: "required",
+                    timeout: 1000
+                  },
+                  signal: AbortSignal.timeout(1500)
+                })
+                return "unexpected success"
+              } catch (error) {
+                return (error as Error).name
+              }
+            })
+            assert.include(["NotAllowedError", "TimeoutError"], noPresence)
             yield* handle.setAutomaticPresenceSimulation(true)
             yield* signIn(page)
             yield* handle.clearCredentials
@@ -194,30 +254,85 @@ export const webauthn = (name: string, backend: Layer.Layer<Browser.Browser, unk
       )
 
       it.effect(
+        "round-trips native RSA and Ed25519 private keys and verifies their assertions",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            if (!(yield* supports("capability.virtualAuthenticator"))) return
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.crossSite}/child`)
+            yield* page.activate
+            const handle = yield* page.capability(Capability.VirtualAuthenticator)
+            const pairs = [generateKeyPairSync("rsa", { modulusLength: 2048 }), generateKeyPairSync("ed25519")]
+            for (const [index, pair] of pairs.entries()) {
+              yield* handle.clearCredentials
+              yield* handle.addCredential({
+                credentialId: new Uint8Array([200, index]),
+                isResidentCredential: true,
+                rpId: "localhost",
+                privateKey: Redacted.make(new Uint8Array(pair.privateKey.export({ format: "der", type: "pkcs8" }))),
+                userHandle: new Uint8Array([index + 1]),
+                signCount: 7
+              })
+              const [exported] = yield* handle.credentials
+              yield* handle.clearCredentials
+              yield* handle.addCredential(exported!)
+              const assertion = yield* signIn(page)
+              checkClient(assertion.client, assertion.auth, served.crossSite, "webauthn.get")
+              assert.deepEqual(assertion.id, [200, index])
+              const signed = Buffer.concat([
+                Buffer.from(assertion.auth),
+                createHash("sha256").update(Buffer.from(assertion.client)).digest()
+              ])
+              assert.isTrue(
+                verify(
+                  pair.publicKey.asymmetricKeyType === "ed25519" ? null : "sha256",
+                  signed,
+                  pair.publicKey,
+                  Buffer.from(assertion.signature)
+                )
+              )
+              assert.strictEqual((yield* handle.credentials)[0]!.signCount, 8)
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
         "rejects overlapping acquisition and releases on scope end and interruption",
         () =>
           Effect.scoped(Effect.gen(function*() {
             if (!(yield* supports("capability.virtualAuthenticator"))) return
+            const served = yield* site
             const page = yield* Browser.newPage()
+            yield* page.goto(`${served.crossSite}/child`)
+            yield* page.activate
             const scope = yield* Scope.make()
             const handle = yield* page.capability(Capability.VirtualAuthenticator).pipe(Scope.provide(scope))
+            yield* register(page)
             const overlap = yield* Effect.scoped(page.capability(Capability.VirtualAuthenticator)).pipe(Effect.flip)
             assert.strictEqual(overlap._tag, "CapabilityError")
             assert.include(overlap.message, "already")
+            assert.lengthOf(yield* handle.credentials, 1)
             yield* Scope.close(scope, Exit.void)
             const stale = yield* handle.credentials.pipe(Effect.flip)
             assert.strictEqual(stale._tag, "TargetGone")
+            if (stale._tag !== "TargetGone") return yield* Effect.die(stale)
             assert.strictEqual(stale.reason._tag, "AccessReleased")
             const acquired = yield* Deferred.make<void>()
             const fiber = yield* Effect.scoped(Effect.gen(function*() {
-              yield* page.capability(Capability.VirtualAuthenticator)
+              const interrupted = yield* page.capability(Capability.VirtualAuthenticator)
+              assert.lengthOf(yield* interrupted.credentials, 0)
+              yield* register(page)
               yield* Deferred.succeed(acquired, undefined)
-              yield* Effect.never
+              return yield* Effect.never
             })).pipe(Effect.forkChild)
             yield* Deferred.await(acquired)
             yield* Fiber.interrupt(fiber)
             const fresh = yield* page.capability(Capability.VirtualAuthenticator)
             assert.lengthOf(yield* fresh.credentials, 0)
+            const staleWrite = yield* handle.clearCredentials.pipe(Effect.flip)
+            assert.strictEqual(staleWrite._tag, "TargetGone")
             yield* page.close()
           })),
         timeout

@@ -704,6 +704,15 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
  * @since 0.1.0
  */
 export interface Page extends ReadonlyPage {
+  /**
+   * Acquires a specialized feature for the caller's scope, including features that change native page behavior.
+   */
+  capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect<
+    H,
+    Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+
   getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator
   getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByLabel(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator

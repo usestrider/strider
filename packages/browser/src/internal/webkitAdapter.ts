@@ -191,6 +191,19 @@ export const connect: (
       accessibilityTree: refuse("capability.axTree", "WebKit reads accessibility one node at a time"),
       screencast: refuse("capability.screencast", "stock WebKit's inspector has no Screencast domain"),
       video: (id) => Capture.video(state, id, options.video, writer),
+      createAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      releaseAuthenticator: () => Effect.void,
+      authenticatorCredentials: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      updateAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
       cookies: (context) => Storage.cookiesAttached(state, context),
       setCookies: (context, list) => Storage.setCookiesAttached(state, context, list),
       clearCookies: (context) => Storage.clearCookiesAttached(state, context),
