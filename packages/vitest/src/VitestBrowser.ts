@@ -170,6 +170,6 @@ export const layer = <E, R>(
 export const traceFileName = (info: TestRun.TestInfo): string => {
   const identity = JSON.stringify([info.project, info.file, info.id, info.attempt])
   const digest = createHash("sha256").update(identity).digest("hex")
-  const prefix = info.id.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 48) || "test"
+  const prefix = info.id.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+/, "").slice(0, 48) || "test"
   return `${prefix}-retry-${String(info.attempt).replace(/[^a-zA-Z0-9_-]/g, "-")}-${digest}.zip`
 }
