@@ -132,7 +132,8 @@ names by hand. `TestRun`, which `VitestBrowser.layer` provides, attaches a file 
 artifact, kept with its result: `run.attach` takes the file's kind, `"Trace"`, `"Har"` or `"Screenshot"`, and its
 path, such as a [trace](/docs/tools/recordings#traces)'s. Bind the callback with
 `VitestBrowser.withTest(context)` to capture its identity, retry attempt and attachment owner, even with a shared
-browser layer. Call it again for each retry. Without this binding the adapter uses Vitest's global current-test
+browser layer, or with a per-effect browser layer in either composition order. Call it again for each retry.
+Complete attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without this binding the adapter uses Vitest's global current-test
 lookup, which supports sequential tests only and can select another callback during concurrent tests:
 
 ```ts title="cart.test.ts"

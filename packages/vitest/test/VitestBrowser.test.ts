@@ -142,7 +142,8 @@ for (const artifact of ["Screenshot", "Har"] as const) {
 const memoMap = Layer.makeMemoMapUnsafe()
 const memoScope = Scope.makeUnsafe()
 let memoBuilds = 0
-const reusedLayer = VitestBrowser.layer(Layer.syncContext(() => {
+const reusedLayer = VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>)
+const memoLayer = VitestBrowser.layer(Layer.syncContext(() => {
   memoBuilds++
   return Context.empty() as Context.Context<Browser.Browser>
 }))
@@ -174,9 +175,9 @@ for (const order of ["binding first", "layer first", "shared memo map"] as const
       } else {
         await Effect.runPromise(
           Effect.gen(function*() {
-            const services = yield* Layer.buildWithMemoMap(reusedLayer, memoMap, memoScope)
+            const services = yield* Layer.buildWithMemoMap(memoLayer, memoMap, memoScope)
             yield* check.pipe(Effect.provideContext(services))
-            context.expect.soft(memoBuilds).toBeGreaterThan(0)
+            context.expect.soft(memoBuilds).toBe(1)
           }).pipe(VitestBrowser.withTest(context))
         )
       }

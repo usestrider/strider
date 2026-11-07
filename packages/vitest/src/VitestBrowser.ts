@@ -8,8 +8,10 @@
  */
 import type * as Browser from "@usestrider/browser/Browser"
 import { TestRun } from "@usestrider/browser/test"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import { recordArtifact, type TestContext, TestRunner } from "vitest"
 
 declare module "vitest" {
@@ -90,7 +92,9 @@ const testRun = makeTestRun(() => TestRunner.getCurrentTest())
  * **Details**
  *
  * Call inside every test callback, including each retry. Captures identity and attempt immediately; attachments
- * use the captured task. Works with a browser layer shared by a block, without rebuilding the browser.
+ * use the captured task. Works with a browser layer shared by a block, without rebuilding the browser, and
+ * with a per-effect browser layer in either composition order. Complete attachments before the callback ends;
+ * Vitest does not guarantee that artifacts attached later reach reporters.
  *
  * **Example** (Binding a callback over a shared browser)
  *
@@ -140,6 +144,9 @@ export const withTest = (
  * sequential tests only: concurrent callbacks can read another test or attach to it. Bind each callback with
  * `withTest(context)` for concurrent tests or retained identity across retries.
  *
+ * When built inside a bound effect, the layer retains that TestRun service. Each build resolves its own
+ * binding while the backend keeps its usual layer memoization.
+ *
  * The browser starts where the layer is built: given to `@effect/vitest`'s `layer`, once for the block, whose tests
  * share it; provided to one effect, as below, once for that effect.
  *
@@ -181,4 +188,12 @@ export const withTest = (
  */
 export const layer = <E, R>(
   backend: Layer.Layer<Browser.Browser, E, R>
-): Layer.Layer<Browser.Browser | TestRun.TestRun, E, R> => Layer.merge(backend, Layer.succeed(TestRun.TestRun, testRun))
+): Layer.Layer<Browser.Browser | TestRun.TestRun, E, R> =>
+  // Resolve TestRun on every build: memoize the backend, never a callback's binding.
+  Layer.fromBuild((memoMap, scope) =>
+    Effect.gen(function*() {
+      const existing = yield* Effect.serviceOption(TestRun.TestRun)
+      const services = yield* Layer.buildWithMemoMap(backend, memoMap, scope)
+      return Context.add(services, TestRun.TestRun, Option.getOrElse(existing, () => testRun))
+    })
+  )

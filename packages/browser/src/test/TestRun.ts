@@ -70,7 +70,8 @@ export interface TestRun {
   readonly info: TestInfo
   /**
    * Attaches a file to the adapter’s test; an explicit callback binding uses its captured task. Outside a test, or in a runner that
-   * keeps no artifacts, nothing is attached and a warning is logged.
+   * keeps no artifacts, nothing is attached and a warning is logged. Complete bound attachments during their
+   * callback; Vitest does not guarantee that artifacts attached later reach reporters.
    *
    * **Example** (Attaching a trace of a checkout)
    *
