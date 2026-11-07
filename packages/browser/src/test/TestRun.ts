@@ -29,11 +29,12 @@ export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/T
   id: Schema.String,
   attempt: Schema.Int,
   /**
-   * Zero-based repetition within the test run, separate from its retry attempt.
+   * Zero-based repetition within the test run, separate from its retry attempt. Optional for older
+   * identity objects; construction and decoding supply zero when omitted.
    *
    * @default 0
    */
-  repeat: Schema.Int.pipe(
+  repeat: Schema.optionalKey(Schema.Int).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(0)),
     Schema.withConstructorDefault(Effect.succeed(0))
   ),
