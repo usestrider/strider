@@ -73,7 +73,7 @@ jobs:
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
       # Failure-only protocol and owned browser process traces accompany the log.
       - name: Keep the log
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-log
@@ -84,9 +84,9 @@ jobs:
           retention-days: 14
 
   integration-macos:
-    needs: [changed, integration]
-    # Keep macOS findings visible even when Linux fails; respect the nightly unchanged-main gate.
-    if: always() && needs.changed.outputs.run == 'true' && needs.integration.result != 'cancelled'
+    needs: changed
+    # Run independently of Linux; respect the changed-main gate and workflow cancellation.
+    if: ${{ !cancelled() && needs.changed.outputs.run == 'true' }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
@@ -106,10 +106,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
-      - name: macOS Chromium and Firefox integration tests
+      # The entry point verifies pinned browser, ffmpeg and ffprobe downloads before running real video tests.
+      - name: Install verified macOS browsers and video tools, then run integration tests
         run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
       - name: Keep the macOS log
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-macos-log
