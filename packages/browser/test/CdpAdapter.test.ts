@@ -1215,11 +1215,19 @@ describe("Chromium public sent-header waiting", () => {
       yield* browser.receive({
         method: "Network.loadingFailed",
         sessionId: "S1",
-        params: { requestId: captured[0]!.params.requestId, timestamp: 772297, type: "Fetch", errorText: "net::ERR_FAILED" }
+        params: {
+          requestId: captured[0]!.params.requestId,
+          timestamp: 772297,
+          type: "Fetch",
+          errorText: "net::ERR_FAILED"
+        }
       })
       yield* send(captured[1]!)
       yield* barrier
-      const headers = () => facts.filter((fact) => fact._tag === "HopHeaders" && fact.phase === "request")
+      const headers = () =>
+        facts.filter((fact): fact is Extract<Adapter.Fact, { _tag: "HopHeaders" }> =>
+          fact._tag === "HopHeaders" && fact.phase === "request"
+        )
       assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop])
       yield* send(captured[4]!)
       yield* barrier
