@@ -325,6 +325,28 @@ export class PageClosed extends Schema.Error<PageClosed>("@usestrider/browser/Ta
 }
 
 /**
+ * Reason for a prerender page that ended when its document became the active tab's document.
+ *
+ * **Details**
+ *
+ * The tab stays open. The transferred document and its surviving realms keep their identities.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class PrerenderActivated
+  extends Schema.Error<PrerenderActivated>("@usestrider/browser/Target/PrerenderActivated")({
+    _tag: Schema.tag("PrerenderActivated"),
+    hint: hinted("Use the activating tab; retained handles still address their surviving realm")
+  })
+{
+  override get message(): string {
+    return `The prerender page activated in its tab (${this.hint})`
+  }
+}
+
+/**
  * Reason for a dialog, file chooser or paused request that ended before it was decided, or was decided already.
  *
  * @stability unstable
@@ -401,7 +423,8 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
  *   of the browser's state).
  * - Context and access: `UserContextRemoved`, `AccessReleased`.
- * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
+ * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`;
+ *   `PrerenderActivated` ends the speculative page when its document moves into the surviving tab.
  * - Dialogs, file choosers, paused requests, downloads and request hops: `ObligationEnded` (a dialog, file chooser
  *   or paused request), `DownloadEnded`, `HopEnded`.
  * - No cause seen: `Vanished`, for a target Strider knows is gone but not why.
@@ -422,6 +445,7 @@ export const CloseReason = Schema.Union([
   UserContextRemoved,
   AccessReleased,
   PageClosed,
+  PrerenderActivated,
   ObligationEnded,
   DownloadEnded,
   HopEnded,

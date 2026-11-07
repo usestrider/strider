@@ -378,6 +378,14 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
   readonly [TypeId]: typeof TypeId
   readonly id: Target.NavigableId
   /**
+   * The page's fixed kind: a tab, a popup, or a speculative prerender page.
+   *
+   * **Details**
+   *
+   * A prerender page closes on activation; its tab keeps its original kind.
+   */
+  readonly pageKind: "tab" | "popup" | "prerender"
+  /**
    * One consistent view of the page's state; ends with `Closed`.
    *
    * **Example** (Checking for an open prompt)

@@ -28,6 +28,7 @@ export interface Registered {
 /** Where a target sits; omit the page to resolve a context's defaults for future pages. */
 export interface Placement {
   readonly page?: Target.NavigableId | undefined
+  readonly relatedPages?: ReadonlyArray<Target.NavigableId> | undefined
   readonly context: UserContext.Id
 }
 
@@ -42,7 +43,7 @@ export const covers = (scope: Adapter.DeclarationScope, placement: Placement): b
     case "UserContext":
       return scope.context === placement.context
     case "Page":
-      return scope.page === placement.page
+      return scope.page === placement.page || placement.relatedPages?.includes(scope.page) === true
   }
 }
 

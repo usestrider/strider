@@ -185,13 +185,32 @@ export const navigate = Effect.fnUntraced(function*(
 ) {
   const frame = yield* frameById(state, navigable)
   const id = Kit.expect(state.ids, frame.expected, url)
-  const reply = yield* Kit.protocol(
-    Page.navigate({
-      url,
-      frameId: frame.frameId as Page.FrameId,
-      ...(Option.isSome(options.referrer) ? { referrer: options.referrer.value } : {})
-    }).pipe(Protocol.on(frame.owner.session))
-  ).pipe(Effect.tapError(() => Effect.sync(() => Kit.unexpect(frame.expected, id))))
+  const target = frame.owner
+  const result = yield* Page.navigate({
+    url,
+    frameId: frame.frameId as Page.FrameId,
+    ...(Option.isSome(options.referrer) ? { referrer: options.referrer.value } : {})
+  }).pipe(
+    Protocol.on(target.session),
+    Effect.match({
+      onSuccess: (reply) => ({ _tag: "Reply" as const, reply }),
+      onFailure: (error) => ({ _tag: "Error" as const, error })
+    })
+  )
+  if (result._tag === "Error") {
+    if (
+      target.tab !== undefined && result.error.reason._tag === "SessionEnded" &&
+      ["detached", "swapped"].includes(result.error.reason.why)
+    ) {
+      const activated = yield* state.buffer.waitFor(() =>
+        frame.page.lastActivation === id ? true : frame.page.ended ? false : undefined
+      )
+      if (activated) return id
+    }
+    Kit.unexpect(frame.expected, id)
+    return yield* Effect.fail(Kit.protocolError(result.error))
+  }
+  const reply = result.reply
   if (reply.errorText !== undefined && reply.loaderId === undefined) {
     // A command that never started a navigation: its id ends at once, with the browser's reason
     yield* Kit.neverStarted(state.buffer, {

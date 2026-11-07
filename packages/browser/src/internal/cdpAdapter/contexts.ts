@@ -156,12 +156,9 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
         : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID })
     }).pipe(Protocol.on(state.root()))
   )
-  // The target attached before the reply; its attach is folded once this returns
+  // A tab child can attach after the root reply; its correlated page and Ready gate must both arrive
   yield* state.root().drainObserved
-  const page = state.targetsById.get(targetId)?.page
-  if (page === undefined) {
-    return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
-  }
+  const page = yield* state.buffer.waitFor(() => state.targetsById.get(targetId)?.page)
   yield* Deferred.await(page.ready)
   return page.id
 })

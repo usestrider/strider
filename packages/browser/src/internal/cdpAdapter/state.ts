@@ -16,6 +16,7 @@ import type * as Dialog from "../../Dialog.ts"
 import type * as Download from "../../Download.ts"
 import type * as NetworkConnection from "../../NetworkConnection.ts"
 import type * as NetworkRequest from "../../NetworkRequest.ts"
+import type * as PageNavigation from "../../PageNavigation.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
@@ -35,13 +36,17 @@ export interface ContextEntry {
   removing: boolean
 }
 
-export type TargetKind = "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
+export type TargetKind = "tab" | "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
 
 export interface TargetEntry {
   readonly kind: TargetKind
   readonly targetId: string
   readonly session: ProtocolClient.Session
-  readonly page: PageEntry | undefined
+  page: PageEntry | undefined
+  tab?: TargetEntry | undefined
+  tabPage?: PageEntry | undefined
+  prerender?: boolean | undefined
+  adopted?: boolean | undefined
   /** For an out-of-process frame: the frame its session owns. */
   readonly frame: FrameEntry | undefined
   readonly url: string
@@ -53,23 +58,26 @@ export interface TargetEntry {
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
+  initialized?: Deferred.Deferred<void> | undefined
   overrideLock?: Semaphore.Semaphore | undefined
   viewportLock?: Semaphore.Semaphore | undefined
 }
 
 export interface PageEntry {
   readonly id: L1Target.NavigableId
-  readonly targetId: string
+  targetId: string
   readonly context: ContextEntry
-  readonly target: TargetEntry
+  target: TargetEntry
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
+  lastActivation?: PageNavigation.Id | undefined
   closing: L1Target.CloseReason | undefined
   ended: boolean
 }
 
 export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
+  id: L1Target.NavigableId
   readonly frameId: string
-  readonly page: PageEntry
+  page: PageEntry
   /** The session that owns the frame now: its page's, or its own when out of process. */
   owner: TargetEntry
   document: DocumentEntry | undefined
@@ -87,7 +95,7 @@ export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
 
 export interface DocumentEntry {
   readonly id: L1Target.DocumentId
-  readonly frame: FrameEntry
+  frame: FrameEntry
   loaderId: string | undefined
   url: string
   generation: number
@@ -369,7 +377,11 @@ export const frameOf = (state: State, frameId: string | undefined) =>
   frameId === undefined ? undefined : state.frames.get(frameId)
 
 /** Where a page sits, for the declarations registry. */
-export const placement = (page: PageEntry): Declarations.Placement => ({ page: page.id, context: page.context.id })
+export const placement = (page: PageEntry): Declarations.Placement => ({
+  page: page.id,
+  context: page.context.id,
+  relatedPages: page.target.prerender && page.target.tab?.tabPage !== undefined ? [page.target.tab.tabPage.id] : []
+})
 
 /** Where a context's downloads go, if a declaration allows them to a directory. */
 export const downloadDirectory = (state: State, context: UserContext.Id) => {

@@ -52,7 +52,8 @@ export const capabilities = (
   info: Browser.Info,
   ownership: Adapter.ConnectOptions["ownership"],
   headless: boolean,
-  videoWriter = false
+  videoWriter = false,
+  prerender = ownership === "launched" && headless
 ) => {
   const evidence = `CDP adapter static profile, ${info.product}`
   const entry = (
@@ -62,6 +63,15 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry(
+        "prerender.activation",
+        ownership === "launched" && prerender ? "supported" : "unsupported",
+        ownership === "launched" && prerender
+          ? []
+          : [
+            "Activation transfer requires a headless launched Chromium with the speculative-prefetch workaround retained"
+          ]
+      ),
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
       entry("isolatedWorlds", "supported"),
@@ -254,7 +264,7 @@ export const connect: (
       waitForDebuggerOnStart: options.ownership === "launched",
       flatten: true,
       filter: [
-        { type: "page" },
+        { type: options.prerender === true && options.ownership === "launched" ? "tab" : "page" },
         { type: "service_worker" },
         { type: "shared_worker" },
         { exclude: true }
@@ -265,7 +275,13 @@ export const connect: (
     state.attachedAtConnect = false
     const writer = yield* Effect.serviceOption(VideoWriter.VideoWriter)
     const capabilitySet = yield* SubscriptionRef.make(
-      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"), Option.isSome(writer))
+      capabilities(
+        info,
+        options.ownership,
+        version.userAgent.includes("HeadlessChrome"),
+        Option.isSome(writer),
+        options.prerender === true
+      )
     )
 
     return {

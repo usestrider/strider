@@ -86,7 +86,12 @@ export const layer = (
   BrowserImpl.layer((sink) =>
     Effect.flatMap(
       ChromiumLauncher.launch(LaunchOptions.settings(options)),
-      ({ transport }) => CdpAdapter.connect(transport, { sink, ownership: "launched" })
+      ({ transport }) =>
+        CdpAdapter.connect(transport, {
+          sink,
+          ownership: "launched",
+          prerender: ChromiumLauncher.prerenderEnabled(LaunchOptions.settings(options))
+        })
     )
   )
 

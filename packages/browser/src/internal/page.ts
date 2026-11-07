@@ -112,6 +112,7 @@ const observeMembers = (owner: ObservedOwner) => {
   return {
     [PageTypeId]: PageTypeId as typeof PageTypeId,
     id: entry.id,
+    pageKind: entry.pageKind,
     status: Watchable.make({
       ref: entry.state,
       project: opened,
@@ -452,7 +453,7 @@ export const make = (owner: PageOwner): Page.Page => {
         fn,
         args,
         "handle",
-        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
+        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry), owner.grant)
       ),
     keyboard: Devices.keyboard({ runtime, page: entry }),
     mouse: Devices.mouse({ runtime, page: entry }),
