@@ -30,7 +30,7 @@ const chromiumAutomation: ReadonlyArray<string> = [
   "--disable-hang-monitor",
   "--disable-prompt-on-repost",
   "--disable-component-extensions-with-background-pages",
-  "--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication",
+  "--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,PrefetchPrerenderIntegration,Prerender2FallbackPrefetchSpecRules",
   "--enable-features=CDPScreenshotNewSurface",
   "--metrics-recording-only",
   "--password-store=basic",

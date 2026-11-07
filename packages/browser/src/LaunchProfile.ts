@@ -45,6 +45,11 @@ export const stock: LaunchProfile = new LaunchProfile({
  *
  * - Chromium enables CDPScreenshotNewSurface to request a repaint on a new surface for captures. Capturing can
  *   drive rendering and is not guaranteed to be unobservable to the page.
+ * - Chromium disables PrefetchPrerenderIntegration and Prerender2FallbackPrefetchSpecRules so speculative
+ *   document requests can pass through routes and configured headers. Prerender itself stays enabled.
+ *   A caller's `--disable-features` argument replaces the profile's entire disabled-feature list; include
+ *   these names in that list to retain this behavior. Stock profiles and attached browsers retain their own
+ *   settings, including this prefetch limitation.
  * - Firefox's JSON viewer is off, which a page can tell: a JSON response's document is the JSON as served, as in
  *   Chromium and WebKit, not the viewer's page.
  * - Firefox opens popups as windows, so the page that opened one keeps rendering behind it.

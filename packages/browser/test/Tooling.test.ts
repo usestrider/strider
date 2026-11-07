@@ -89,6 +89,13 @@ describe("LaunchProfile", () => {
       assert.include(disabled, "PrefetchPrerenderIntegration")
       assert.include(disabled, "Prerender2FallbackPrefetchSpecRules")
     }
+    assert.isTrue(Chromium.prerenderEnabled({}))
+    assert.isTrue(Chromium.prerenderEnabled({ profile: "concurrent" }))
+    assert.isFalse(Chromium.prerenderEnabled({ profile: "stock" }))
+    assert.isFalse(Chromium.prerenderEnabled({ headless: false }))
+    assert.isFalse(Chromium.prerenderEnabled({ args: ["--disable-features=Other"] }))
+    assert.isFalse(Chromium.prerenderEnabled({ args: ["--disable-features"] }))
+    assert.isFalse(Chromium.prerenderEnabled({ profileArgs: ["--custom"] }))
     assert.deepStrictEqual(LaunchProfile.stock.args, [])
     const overridden = Chromium.argsFor({ args: ["--disable-features=Other"] }, "/tmp/profile", "pipe")
     assert.strictEqual(overridden.findLast((arg) => arg.startsWith("--disable-features=")), "--disable-features=Other")
