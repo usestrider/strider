@@ -1065,12 +1065,12 @@ import { Chromium } from "@usestrider/browser/chromium"
 import { VitestBrowser } from "@usestrider/vitest"
 
 layer(VitestBrowser.layer(Chromium.layerConfig({ executablePath: Config.String("CHROMIUM_PATH") })))("checkout", (it) => {
-  it.effect("adds to cart", () =>
+  it.effect("adds to cart", (context) =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()      // a fresh context and page per test, closed after
       yield* page.goto("https://shop.example.com")
       // …
-    }))
+    }).pipe(VitestBrowser.withTest(context)))
 })
 ```
 
@@ -1086,14 +1086,17 @@ declare const TestRun: Context.Service<TestRun, TestRun>
 declare const layer: <E, R>(backend: Layer<Browser.Browser, E, R>) => Layer<Browser.Browser | TestRun.TestRun, E, R>   // the backend you pass, unchanged, plus TestRun from the current test
 declare const traceFileName: (info: TestInfo) => string    // safe deterministic ZIP basename; project, file, id and attempt
 
+declare const withTest: (context: Pick<TestContext, "task">) => <A, E, R>(effect: Effect<A, E, R>) => Effect<A, E, Exclude<R, TestRun.TestRun>>
+
 // Browser: the fake browser, for event and lifecycle tests
 declare const layerTest: (timeline: string) => Layer<Browser>   // the first page opened plays a marble timeline on Effect's clock
 ```
 
 - **A test is a program.** A test gets its page from `Browser.newPage()`, the same accessor a script uses, so there is no test-only way to open one (principle 22).
 - **Nothing changes because it's a test.** The layer launches exactly the backend you pass. Profile, focus, diagnostics and tracing are whatever the test chose, as anywhere else: a suite that runs many pages at once says `Chromium.layer({ profile: LaunchProfile.concurrent })` and `Browser.newPage({ focus: "emulated" })`, and a test that wants a trace calls `Trace.record` and attaches the export with `TestRun.attach` (under Vitest, `recordArtifact`).
-- **Trace identity.** `Trace.record` snapshots the optional `TestRun.info` when recording starts. A named test adds its ID as the context header's `title` and `{ project, file, id, attempt }` as `striderTest`; exports never read the current test again. Without a named test the header stays unchanged. Names and paths are exported as written. `VitestBrowser.traceFileName(info)` uses a bounded ASCII prefix and a full SHA-256 digest of those four fields, so slug collisions do not merge tests or retries. Capture `info` beside recording start; repeated exports of the same identity use the same basename, so separate runs or recordings need separate directories. Vitest's global current-test lookup is not isolated between concurrent tests: the shared adapter layer cannot reliably name their recordings.
+- **Trace identity.** `Trace.record` snapshots the optional `TestRun.info` when recording starts. A named test adds its ID as the context header's `title` and `{ project, file, id, attempt }` as `striderTest`; exports never read the current test again. Without a named test the header stays unchanged. Names and paths are exported as written. `VitestBrowser.traceFileName(info)` uses a bounded ASCII prefix and a full SHA-256 digest of those four fields, so slug collisions do not merge tests or retries. Capture `info` beside recording start; repeated exports of the same identity use the same basename, so separate runs or recordings need separate directories. Bind concurrent callbacks with `VitestBrowser.withTest(context)` so recording and filename capture use their own identity. Without binding, the adapter's global current-test lookup supports sequential tests only.
 - **Lifetimes.** One browser per layer block, which is about one per file under Vitest's default isolation, and a fresh context and page per test. Deadlines run on the clock the browser runs on: a real browser's live clock even under `TestClock`, and for `Browser.layerTest`, whose timeline runs on Effect's clock, that clock, so a test adjusts it past a deadline to see one pass.
+- **Test identity.** Call `VitestBrowser.withTest(context)` in each callback and retry. It captures identity and attempt immediately and attaches through that task, including over a shared browser layer. The unbound layer preserves sequential usage through Vitest’s global current-test lookup; concurrent callbacks can select another test. Retained bound services keep their original attempt. Per-effect layer provision and binding work in either composition order; the adapter resolves the existing TestRun on every build while preserving backend memoization. Bound attachments must complete during the callback: Vitest does not guarantee that later artifacts reach reporters.
 - **Parallelism.** Files run in parallel across Vitest workers, each with its own browser. Concurrent tests within a file are opt-in (`layer(…, { concurrent: true })`). One browser for a whole run waits for etest's run-wide shared layers.
 - **The fake browser is `Browser.layerTest(timeline)`,** named like Effect's `layerTest` and `layerNoop` layers. Its marble timeline scripts model events on Effect's clock, so under `TestClock` it moves only as the test adjusts it: `-` is 10 ms, `commit` commits a document at `https://example.test/`, `load` makes it complete, `resp(name)` answers a request for `https://example.test/name`, `dialog(kind)` opens a prompt, `popup` a popup, and `crash` and `|` end the page. Its facts are folded by the same model as a real backend's. It has no DOM: locator actions and reads fail with `Unsupported`, so it tests what happens around events and lifetimes. It is `@stability experimental` until the model tests have exercised it.
 - **Contexts don't isolate everything.** Launch flags, the downloads directory, browser-wide commands, extensions, and OS focus, clipboard and GPU are shared. The library always scopes commands to the context it owns.
@@ -1285,7 +1288,7 @@ const checkout = Operation.fn("checkout")(function*(page: Page.Page, card: strin
 
 ## Open questions
 
-1. **How the Vitest adapter finds the current test.** @effect/vitest passes Vitest's test context to `it.effect` as an argument, not as a service, so `VitestBrowser.layer` can't read it from the environment. Recommendation: propose that @effect/vitest provide it as a service in every `it.effect`. Until then, tests pass it explicitly. Since answered: Vitest 5's `TestRunner.getCurrentTest()` names the running test, and `TestRun.info` reads it each time.
+1. **How the Vitest adapter finds the current test.** @effect/vitest passes Vitest's test context to `it.effect` as an argument, not as a service, so `VitestBrowser.layer` can't read it from the environment. Recommendation: propose that @effect/vitest provide it as a service in every `it.effect`. Until then, tests pass it explicitly. Since answered: `VitestBrowser.withTest(context)` explicitly binds a callback’s task and snapshots its identity and attempt. The layer’s global lookup remains available for sequential tests, but cannot isolate concurrent callbacks.
 
 Decided:
 - **The fake browser is `Browser.layerTest(timeline)`,** public and `@stability experimental` (revision 5.25). It doesn't emulate a DOM: actions against fake pages fail with `Unsupported`. This replaces "internal first, a narrow `@usestrider/browser/testing` subpath later" (5.13).

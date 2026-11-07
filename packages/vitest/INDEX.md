@@ -15,3 +15,7 @@ The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the
 *constructors*
 
 - `const traceFileName: (info: TestRun.TestInfo) => string`
+
+*context*
+
+- `const withTest: (context: Pick<TestContext, "task">) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, TestRun.TestRun>>`

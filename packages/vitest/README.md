@@ -24,15 +24,20 @@ const ChromiumLive = Chromium.layerConfig({
 }).pipe(Layer.provide(NodeServices.layer))
 
 layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })("checkout", (it) => {
-  it.effect("adds a product to the cart", () =>
+  it.effect("adds a product to the cart", (context) =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()
       yield* page.goto("https://shop.example.com")
       yield* page.getByRole("button", { name: "Add to cart" }).click()
       yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-    }))
+    }).pipe(VitestBrowser.withTest(context)))
 })
 ```
+
+Call `VitestBrowser.withTest(context)` inside each callback and retry to capture its identity, attempt and attachment
+owner. It works over the shared browser layer and with a per-effect browser layer in either composition order.
+Complete bound attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without binding, the layer uses Vitest's global current-test lookup,
+which supports sequential tests only; concurrent callbacks can read another test's identity or attach to it.
 
 [Tests with Vitest](https://usestrider.dev/docs/tools/testing) covers concurrent pages, attaching files to a test, and a
 fake browser for events. The source is at https://github.com/usestrider/strider.

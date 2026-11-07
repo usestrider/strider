@@ -8,10 +8,12 @@
  */
 import type * as Browser from "@usestrider/browser/Browser"
 import { TestRun } from "@usestrider/browser/test"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import { createHash } from "node:crypto"
-import { recordArtifact, TestRunner } from "vitest"
+import { recordArtifact, type TestContext, TestRunner } from "vitest"
 
 declare module "vitest" {
   interface TestArtifactRegistry {
@@ -55,13 +57,13 @@ const contentType: Record<TestRun.TestArtifact["_tag"], string> = {
 }
 
 /** `TestRun` for Vitest: the current test, read each time, and its artifacts. */
-const testRun: TestRun.TestRun = {
+const makeTestRun = (current: () => RunnerTest | undefined, snapshot?: TestRun.TestInfo): TestRun.TestRun => ({
   get info() {
-    return infoOf(TestRunner.getCurrentTest())
+    return snapshot ?? infoOf(current())
   },
   attach: (artifact) =>
     Effect.suspend(() => {
-      const test = TestRunner.getCurrentTest()
+      const test = current()
       if (test === undefined) {
         return Effect.logWarning(`TestRun.attach: no test is running, so ${artifact.path} wasn't attached`)
       }
@@ -81,6 +83,57 @@ const testRun: TestRun.TestRun = {
         )
       )
     })
+})
+
+const testRun = makeTestRun(() => TestRunner.getCurrentTest())
+
+/**
+ * Binds an effect's test identity and attachments to this Vitest callback.
+ *
+ * **Details**
+ *
+ * Call inside every test callback, including each retry. Captures identity and attempt immediately; attachments
+ * use the captured task. Works with a browser layer shared by a block, without rebuilding the browser, and
+ * with a per-effect browser layer in either composition order. Complete attachments before the callback ends;
+ * Vitest does not guarantee that artifacts attached later reach reporters.
+ *
+ * **Example** (Binding a callback over a shared browser)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
+ * import { layer } from "@effect/vitest"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ * import { TestRun } from "@usestrider/browser/test"
+ * import { VitestBrowser } from "@usestrider/vitest"
+ * import { Effect, Layer } from "effect"
+ *
+ * layer(VitestBrowser.layer(
+ *   Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+ *     Layer.provide(NodeServices.layer)
+ *   )
+ * ))(
+ *   "browser",
+ *   (it) => {
+ *     it.effect("identity", (context) =>
+ *       Effect.gen(function*() {
+ *         const run = yield* TestRun.TestRun
+ *         yield* Effect.log(run.info.id)
+ *       }).pipe(VitestBrowser.withTest(context)))
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category context
+ * @since 0.1.0
+ */
+export const withTest = (
+  context: Pick<TestContext, "task">
+): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, TestRun.TestRun>> => {
+  const task = context.task
+  const run = makeTestRun(() => task, infoOf(task))
+  return <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, TestRun.TestRun>> =>
+    Effect.provideService(effect, TestRun.TestRun, run)
 }
 
 /**
@@ -88,12 +141,15 @@ const testRun: TestRun.TestRun = {
  *
  * **Details**
  *
+ * Without `withTest(context)`, identity and attachments use Vitest’s global current-test lookup. This supports
+ * sequential tests only: concurrent callbacks can read another test or attach to it. Bind each callback with
+ * `withTest(context)` for concurrent tests or retained identity across retries.
+ *
+ * When built inside a bound effect, the layer retains that TestRun service. Each build resolves its own
+ * binding while the backend keeps its usual layer memoization.
+ *
  * The browser starts where the layer is built: given to `@effect/vitest`'s `layer`, once for the block, whose tests
  * share it; provided to one effect, as below, once for that effect.
- *
- * Test identity uses Vitest's global current-test lookup, which is not isolated between concurrent tests.
- * Capture filenames and start recordings in sequential tests; a shared layer cannot reliably identify
- * which concurrent test is running.
  *
  * Vitest's default `testTimeout` is five seconds for the whole test, shorter than Strider's thirty-second budget
  * per operation, so a slow step can end with Vitest's generic timeout before Strider reports its failure.
@@ -133,7 +189,15 @@ const testRun: TestRun.TestRun = {
  */
 export const layer = <E, R>(
   backend: Layer.Layer<Browser.Browser, E, R>
-): Layer.Layer<Browser.Browser | TestRun.TestRun, E, R> => Layer.merge(backend, Layer.succeed(TestRun.TestRun, testRun))
+): Layer.Layer<Browser.Browser | TestRun.TestRun, E, R> =>
+  // Resolve TestRun on every build: memoize the backend, never a callback's binding.
+  Layer.fromBuild((memoMap, scope) =>
+    Effect.gen(function*() {
+      const existing = yield* Effect.serviceOption(TestRun.TestRun)
+      const services = yield* Layer.buildWithMemoMap(backend, memoMap, scope)
+      return Context.add(services, TestRun.TestRun, Option.getOrElse(existing, () => testRun))
+    })
+  )
 
 /**
  * Builds a deterministic trace ZIP filename from a captured test identity.
