@@ -786,6 +786,17 @@ export const engine = (backend: Backend) =>
             yield* check("button", { pressed: false, disabled: false, name: text("Toggle", true) }, 2)
           }), timeout)
 
+        for (const name of ["radio", "menuitemradio", "switch"]) {
+          it.effect(`treats mixed as false for the two-state ${name} role`, () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(backend, `<div role="${name}" aria-checked="mixed"></div>`)
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [{ ...role(name), checked: false }] })),
+                1
+              )
+            }), timeout)
+        }
+
         it.effect("distinguishes mixed, absent and malformed checked role states", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -812,10 +823,10 @@ export const engine = (backend: Backend) =>
                 expected
               )
             })
-            yield* check("checkbox", true, 0)
-            yield* check("checkbox", false, 4)
+            yield* check("checkbox", true, 1)
+            yield* check("checkbox", false, 3)
             yield* check("option", true, 0)
-            yield* check("option", false, 1)
+            yield* check("option", false, 0)
             yield* check("treeitem", false, 0)
             const read = yield* send({
               op: "read",

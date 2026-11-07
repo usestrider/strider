@@ -69,6 +69,31 @@ describe("Operation", () => {
         assert.deepStrictEqual(stopped.diagnostics.dispatch, { _tag: "NotSent" })
       }))
 
+    it.effect("retains PreparingFocus history when an apply call is unanswered or confirmed blocked", () =>
+      Effect.gen(function*() {
+        const preparingFocus = { _tag: "PreparingFocus", from: "input#other" }
+        const unanswered = yield* timeoutAfter((record) => {
+          record.markSent()
+          record.markNotSent()
+          record.observe(preparingFocus)
+          record.markSent()
+        })
+        assert.strictEqual(unanswered.phase, "dispatchedUnconfirmed")
+        assert.deepStrictEqual(unanswered.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+        assert.deepStrictEqual(unanswered.history.map((entry) => entry.value), [preparingFocus])
+        const blocked = yield* timeoutAfter((record) => {
+          record.markSent()
+          record.markNotSent()
+          record.observe(preparingFocus)
+          record.markSent()
+          record.markNotSent()
+          record.observe(preparingFocus)
+        })
+        assert.strictEqual(blocked.phase, "waitingForCondition")
+        assert.deepStrictEqual(blocked.diagnostics.dispatch, { _tag: "NotSent" })
+        assert.deepStrictEqual(blocked.history.map((entry) => entry.value), [preparingFocus])
+      }))
+
     it.effect("is postcondition once what was sent was confirmed", () =>
       Effect.gen(function*() {
         const timeout = yield* timeoutAfter((record) => {

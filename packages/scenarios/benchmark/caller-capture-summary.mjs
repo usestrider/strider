@@ -33,11 +33,14 @@ const interval = (values) => {
   return [estimates[249], estimates[9749]]
 }
 const summary = []
-for (const action of ["url", "fn-url", "title", "count"]) {
-  for (const [reference, control] of data.comparisons) {
+// Older current/control runs have neither explicit comparisons nor reference fields.
+const comparisons = data.comparisons ?? [["on", "named-off"], ["on", "off"]]
+for (const action of ["url", "fn-url", "title", "count", "click"]) {
+  for (const [reference, control] of comparisons) {
     const rows = data.raw.filter((row) =>
-      row.action === action && row.reference === reference && row.control === control
+      row.action === action && (row.reference ?? "on") === reference && row.control === control
     )
+    if (rows.length === 0) continue
     const on = rows.filter((row) => row.mode === reference)
     const off = rows.filter((row) => row.mode === control)
     const paired = on.map((row) => {

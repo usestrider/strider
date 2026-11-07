@@ -7,18 +7,27 @@ import { fileURLToPath } from "node:url"
 
 const sourceUrl = new URL("../../browser/src/internal/operation.ts", import.meta.url).href
 const original = readFileSync(new URL(sourceUrl), "utf8")
-// The baseline is retained outside the repository, alongside the raw evidence.
-const baseline = readFileSync(process.env.STRIDER_CAPTURE_BASELINE, "utf8")
-const lazy20 = readFileSync(process.env.STRIDER_CAPTURE_LAZY20, "utf8")
-const helper = (source, name) => {
-  const start = source.indexOf("const namedCaller =")
-  const end = source.indexOf("/**\n * Runs `self` as an operation", start)
-  if (start < 0 || end < 0) throw new Error("Cannot locate namedCaller")
-  return source.slice(start, end).replace("const namedCaller =", `const ${name} =`)
-}
-const eager = helper(baseline, "baselineNamedCaller")
-  .replace("return line.trim()", "const call = line.trim(); return () => call")
-const nativeCapture = `    if (Error.captureStackTrace === undefined) {
+// Supplying both retained sources reproduces the optimization-stage comparisons.
+const stages = process.env.STRIDER_CAPTURE_BASELINE !== undefined || process.env.STRIDER_CAPTURE_LAZY20 !== undefined
+let variants = {}
+let comparisons = [["on", "named-off"], ["on", "off"]]
+let switchable
+if (stages) {
+  if (process.env.STRIDER_CAPTURE_BASELINE === undefined || process.env.STRIDER_CAPTURE_LAZY20 === undefined) {
+    throw new Error("Supply both STRIDER_CAPTURE_BASELINE and STRIDER_CAPTURE_LAZY20")
+  }
+  // The baseline is retained outside the repository, alongside the raw evidence.
+  const baseline = readFileSync(process.env.STRIDER_CAPTURE_BASELINE, "utf8")
+  const lazy20 = readFileSync(process.env.STRIDER_CAPTURE_LAZY20, "utf8")
+  const helper = (source, name) => {
+    const start = source.indexOf("const namedCaller =")
+    const end = source.indexOf("/**\n * Runs `self` as an operation", start)
+    if (start < 0 || end < 0) throw new Error("Cannot locate namedCaller")
+    return source.slice(start, end).replace("const namedCaller =", `const ${name} =`)
+  }
+  const eager = helper(baseline, "baselineNamedCaller")
+    .replace("return line.trim()", "const call = line.trim(); return () => call")
+  const nativeCapture = `    if (Error.captureStackTrace === undefined) {
       // Include namedCaller and namedWith when the runtime cannot omit them during capture.
       Error.stackTraceLimit = 7
       error = new Error()
@@ -27,56 +36,59 @@ const nativeCapture = `    if (Error.captureStackTrace === undefined) {
       error = Object.create(Error.prototype) as Error
       Error.captureStackTrace(error, namedWith)
     }`
-const native5 = process.env.STRIDER_CAPTURE_NATIVE5 === undefined
-  ? lazy20.replace("    Error.stackTraceLimit = 20\n    error = new Error()", nativeCapture)
-  : readFileSync(process.env.STRIDER_CAPTURE_NATIVE5, "utf8")
-if (!native5.includes("Error.stackTraceLimit = 5") || !native5.includes("Error.captureStackTrace(error, namedWith)")) {
-  throw new Error("STRIDER_CAPTURE_NATIVE5 must name the native depth-5 comparison source")
-}
-const variants = {
-  inline6: original,
-  inline7: original.replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = 7"),
-  inline8: original.replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = 8"),
-  lazy20,
-  native5,
-  legacy7: lazy20.replace("Error.stackTraceLimit = 20", "Error.stackTraceLimit = 7"),
-  native6: native5.replace("Error.stackTraceLimit = 5", "Error.stackTraceLimit = 6")
-    .replace("Error.stackTraceLimit = 7", "Error.stackTraceLimit = 8"),
-  native8: native5.replace("Error.stackTraceLimit = 5", "Error.stackTraceLimit = 8")
-    .replace("Error.stackTraceLimit = 7", "Error.stackTraceLimit = 10")
-}
-const comparisons = [
-  ["on", "native5"],
-  ["lazy20", "native5"],
-  ["legacy7", "native5"],
-  ["native6", "native5"],
-  ["native8", "native5"],
-  ["native5", "named-off"],
-  ["native5", "off"],
-  ["lazy20", "named-off"],
-  ["on", "named-off"],
-  ["on", "legacy7"],
-  ["lazy20", "legacy7"],
-  ["legacy7", "named-off"],
-  ["legacy7", "off"],
-  ["on", "inline6"],
-  ["lazy20", "inline6"],
-  ["legacy7", "inline6"],
-  ["native5", "inline6"],
-  ["native6", "inline6"],
-  ["native8", "inline6"],
-  ["inline7", "inline6"],
-  ["inline8", "inline6"],
-  ["inline6", "named-off"],
-  ["inline6", "off"]
-]
-const captureStart = original.indexOf("  const limit = Error.stackTraceLimit", original.indexOf("const namedWith ="))
-const captureEnd = original.indexOf("  return <A, E, R>", captureStart)
-if (captureStart < 0 || captureEnd < 0) throw new Error("Cannot locate inline capture")
-const inline = original.slice(captureStart, captureEnd)
-  .replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = benchmarkDepth")
-  .replace("  const call = namedCaller(error)", "  call = namedCaller(error)")
-const switched = original.slice(0, captureStart) + `
+  const native5 = process.env.STRIDER_CAPTURE_NATIVE5 === undefined
+    ? lazy20.replace("    Error.stackTraceLimit = 20\n    error = new Error()", nativeCapture)
+    : readFileSync(process.env.STRIDER_CAPTURE_NATIVE5, "utf8")
+  if (
+    !native5.includes("Error.stackTraceLimit = 5") || !native5.includes("Error.captureStackTrace(error, namedWith)")
+  ) {
+    throw new Error("STRIDER_CAPTURE_NATIVE5 must name the native depth-5 comparison source")
+  }
+  variants = {
+    baseline,
+    inline6: original,
+    inline7: original.replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = 7"),
+    inline8: original.replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = 8"),
+    lazy20,
+    native5,
+    legacy7: lazy20.replace("Error.stackTraceLimit = 20", "Error.stackTraceLimit = 7"),
+    native6: native5.replace("Error.stackTraceLimit = 5", "Error.stackTraceLimit = 6")
+      .replace("Error.stackTraceLimit = 7", "Error.stackTraceLimit = 8"),
+    native8: native5.replace("Error.stackTraceLimit = 5", "Error.stackTraceLimit = 8")
+      .replace("Error.stackTraceLimit = 7", "Error.stackTraceLimit = 10")
+  }
+  comparisons = [
+    ["on", "native5"],
+    ["lazy20", "native5"],
+    ["legacy7", "native5"],
+    ["native6", "native5"],
+    ["native8", "native5"],
+    ["native5", "named-off"],
+    ["native5", "off"],
+    ["lazy20", "named-off"],
+    ["on", "named-off"],
+    ["on", "legacy7"],
+    ["lazy20", "legacy7"],
+    ["legacy7", "named-off"],
+    ["legacy7", "off"],
+    ["on", "inline6"],
+    ["lazy20", "inline6"],
+    ["legacy7", "inline6"],
+    ["native5", "inline6"],
+    ["native6", "inline6"],
+    ["native8", "inline6"],
+    ["inline7", "inline6"],
+    ["inline8", "inline6"],
+    ["inline6", "named-off"],
+    ["inline6", "off"]
+  ]
+  const captureStart = original.indexOf("  const limit = Error.stackTraceLimit", original.indexOf("const namedWith ="))
+  const captureEnd = original.indexOf("  return <A, E, R>", captureStart)
+  if (captureStart < 0 || captureEnd < 0) throw new Error("Cannot locate inline capture")
+  const inline = original.slice(captureStart, captureEnd)
+    .replace("Error.stackTraceLimit = 6", "Error.stackTraceLimit = benchmarkDepth")
+    .replace("  const call = namedCaller(error)", "  call = namedCaller(error)")
+  const switched = original.slice(0, captureStart) + `
   let call
   if (benchmarkInline) {
 ${inline}
@@ -84,8 +96,8 @@ ${inline}
     call = benchmarkModes[benchmarkMode]?.()
   }
 ` + original.slice(captureEnd)
-const helperVariants = Object.entries(variants).filter(([mode]) => !mode.startsWith("inline"))
-const switchable = `let benchmarkMode = "inline6"
+  const helperVariants = Object.entries(variants).filter(([mode]) => mode !== "baseline" && !mode.startsWith("inline"))
+  switchable = `let benchmarkMode = "inline6"
 let benchmarkInline = true
 let benchmarkDepth = 6
 ` + switched.replace("const trace =", "let trace =") + `
@@ -104,14 +116,44 @@ export const benchmarkSetCapture = (mode) => {
   trace = mode === "off" ? () => undefined : benchmarkTrace
 }
 `
+} else {
+  // Current-source controls skip capture itself, not just its lazy formatting helper.
+  const start = original.indexOf("  const limit = Error.stackTraceLimit", original.indexOf("const namedWith ="))
+  const end = original.indexOf("  return <A, E, R>", start)
+  if (start < 0 || end < 0) throw new Error("Cannot locate inline capture")
+  const capture = original.slice(start, end).replace("  const call = namedCaller(error)", "  call = namedCaller(error)")
+  const switched = original.slice(0, start) + `
+  let call
+  if (benchmarkMode === "on") {
+${capture}
+  }
+` + original.slice(end)
+  switchable = `let benchmarkMode = "on"\n` + switched.replace("const trace =", "let trace =") + `
+const benchmarkTrace = trace
+export const benchmarkSetCapture = (mode) => {
+  if (mode !== "on" && mode !== "named-off" && mode !== "off") throw new Error("Unknown benchmark mode: " + mode)
+  benchmarkMode = mode
+  trace = mode === "off" ? () => undefined : benchmarkTrace
+}
+`
+  variants = Object.fromEntries(["on", "named-off", "off"].map((mode) => [
+    mode,
+    switchable + `\nbenchmarkSetCapture(${JSON.stringify(mode)})\n`
+  ]))
+}
 if (process.argv[2] === "child") {
   const mode = process.argv[3]
   registerHooks({
     load(url, context, nextLoad) {
       const loaded = nextLoad(url, context)
       if (url === sourceUrl) process.env.STRIDER_CAPTURE_LOADED = mode
-      return url === sourceUrl && mode !== "on"
-        ? { ...loaded, source: switchable }
+      return url === sourceUrl
+        ? {
+          ...loaded,
+          source: mode === "switchable" ?
+            switchable :
+            switchable + `\nbenchmarkSetCapture(${JSON.stringify(mode)})\n`
+        }
         : loaded
     }
   })
@@ -121,11 +163,10 @@ if (process.argv[2] === "child") {
   const commit = process.argv[3] ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
   const output = resolve(process.argv[2] ?? ".data/benchmarks/caller-capture")
   mkdirSync(output, { recursive: true })
-  writeFileSync(`${output}/baseline.operation.ts`, baseline)
   writeFileSync(`${output}/module.operation.ts`, original)
   for (const [mode, source] of Object.entries(variants)) writeFileSync(`${output}/${mode}.operation.ts`, source)
-  const sameProcess = true
-  if (sameProcess) writeFileSync(`${output}/switchable.operation.ts`, switchable)
+  const sameProcess = stages || process.argv[4] === "same-process"
+  writeFileSync(`${output}/switchable.operation.ts`, switchable)
   const children = new Map()
   const request = (child, message) =>
     new Promise((resolve, reject) => {
@@ -172,12 +213,12 @@ if (process.argv[2] === "child") {
       if (result.error) throw new Error(result.error)
       process.stdout.write(`Prewarmed fn-url / ${mode}\n`)
     }
-    for (const action of ["url", "fn-url", "title", "count"]) {
+    for (const action of stages ? ["url", "fn-url", "title", "count"] : ["url", "fn-url", "title", "count", "click"]) {
       for (const [reference, controlMode] of comparisons) {
         for (let pair = -8; pair < 40; pair++) {
           const order = pair % 2 === 0 ? [reference, controlMode] : [controlMode, reference]
           for (const mode of order) {
-            const result = await request(children.get(mode), { action, mode, calls: 200 })
+            const result = await request(children.get(mode), { action, mode, calls: action === "click" ? 10 : 200 })
             if (result.error) throw new Error(result.error)
             if (pair >= 0) raw.push({ action, reference, control: controlMode, pair, order, mode, ...result })
           }

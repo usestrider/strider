@@ -1761,8 +1761,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   0,
                   "the asynchronous handler must run before it can block filling"
                 )
-                // Resolving means the target was never found; this target is waiting on focus preparation.
-                assert.strictEqual(error.phase, "waitingForCondition")
+                // A confirmed focus blocker was not sent. An unanswered apply call may have mutated the page,
+                // so its dispatch stays unconfirmed even when earlier rounds reported PreparingFocus.
+                assert.oneOf(JSON.stringify([error.phase, error.diagnostics.dispatch]), [
+                  JSON.stringify(["waitingForCondition", { _tag: "NotSent" }]),
+                  JSON.stringify(["dispatchedUnconfirmed", { _tag: "MayHaveBeenSent" }])
+                ])
                 // The target exists and passes every check. The focus blocker must not erase that evidence.
                 assert(
                   error.history.some((entry) => {
@@ -1871,9 +1875,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (
+        const role of [
+          "checkbox",
+          "radio",
+          "switch",
+          "menuitemcheckbox",
+          "menuitemradio",
+          "option",
+          "treeitem"
+        ] as const
+      ) {
+        it.effect(`interprets checked keywords consistently for ${role}`, () =>
+          Effect.gen(function*() {
+            const tokens = ["true", "TRUE", "True", "false", "FALSE", "False", "mixed", "MIXED", "Mixed"]
+            const { url } = yield* fixture(() =>
+              tokens.map((token, i) =>
+                `<div id="token${i}" role="${role}" aria-label="Token${i}" aria-checked="${token}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked').toLowerCase() === 'true' ? 'false' : 'true')">Token${i}</div>`
+              ).join("")
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              for (const [i, token] of tokens.entries()) {
+                const target = page.locator(`#token${i}`)
+                const checked = i < 3
+                const mixed = i >= 6 && ["checkbox", "menuitemcheckbox", "option", "treeitem"].includes(role)
+                assert.strictEqual(yield* target.isChecked, checked, token)
+                for (const value of [true, false]) {
+                  assert.strictEqual(
+                    yield* page.getByRole(role, { name: `Token${i}`, exact: true, checked: value }).count,
+                    !mixed && checked === value ? 1 : 0,
+                    token
+                  )
+                }
+                const node = [...snapshot.refs.values()].find((node) =>
+                  node.name._tag === "Accessible" && node.name.value === `Token${i}`
+                )!
+                assert.strictEqual(node.states.has("checked"), checked, token)
+                // Exercise actual clicks and their postconditions, including the boolean view of mixed.
+                if (checked) {
+                  yield* target.check()
+                  yield* target.uncheck()
+                  assert.isFalse(yield* target.isChecked)
+                } else {
+                  yield* target.uncheck()
+                  yield* target.check()
+                  assert.isTrue(yield* target.isChecked)
+                }
+              }
+            }))
+          }), timeout)
+      }
+
       // Optional checkability must be established before dispatching input.
       for (const kind of ["option", "treeitem", "native option"] as const) {
-        for (const state of ["absent", "undefined", "empty"] as const) {
+        for (
+          const state of [
+            "absent",
+            "undefined",
+            "empty",
+            "UNDEFINED",
+            "Undefined",
+            " ",
+            "\t\n",
+            " true ",
+            " false ",
+            " mixed ",
+            " undefined ",
+            "yes",
+            "bogus"
+          ] as const
+        ) {
           for (const operation of ["read", "check", "uncheck"] as const) {
             it.effect(
               `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
@@ -1883,7 +1957,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     ? ""
                     : state === "empty"
                     ? "aria-checked=\"\""
-                    : "aria-checked=\"undefined\""
+                    : `aria-checked="${state}"`
                   const { url } = yield* fixture(() =>
                     `${
                       kind === "native option"
@@ -1898,6 +1972,16 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const page = yield* Browser.newPage()
                     yield* page.goto(url)
                     const target = page.locator("#target")
+                    if (operation === "read") {
+                      for (const checked of [true, false]) {
+                        assert.strictEqual(
+                          yield* page.getByRole(kind === "native option" ? "option" : kind, { checked }).count,
+                          0
+                        )
+                      }
+                      const snapshot = yield* page.snapshot()
+                      assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")))
+                    }
                     const failure = yield* (operation === "read"
                       ? target.isChecked
                       : operation === "check"
@@ -1934,6 +2018,31 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const target = page.locator("#target")
               assert.isFalse(yield* target.isChecked)
               assert.isFalse(yield* page.locator("#undefined").isChecked)
+              for (
+                const token of [
+                  "",
+                  "undefined",
+                  "UNDEFINED",
+                  "Undefined",
+                  " ",
+                  "\t\n",
+                  " true ",
+                  " false ",
+                  " mixed ",
+                  " undefined ",
+                  "yes",
+                  "bogus"
+                ]
+              ) {
+                yield* page.evaluateInMainWorld(
+                  (token) => document.getElementById("undefined")!.setAttribute("aria-checked", token),
+                  token
+                )
+                assert.isFalse(yield* page.locator("#undefined").isChecked, token)
+                assert.strictEqual(yield* page.getByRole(role, { name: "Undefined", checked: false }).count, 1, token)
+                const snapshot = yield* page.snapshot()
+                assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")), token)
+              }
               yield* target.check()
               assert.isTrue(yield* target.isChecked)
               yield* target.uncheck()
