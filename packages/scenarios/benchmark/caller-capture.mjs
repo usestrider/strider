@@ -31,6 +31,7 @@ if (process.argv[2] === "child") {
   await import("./caller-capture-worker.ts")
 } else {
   if (process.env.STRIDER_ENVIRONMENT !== "nix-integration") throw new Error("Use the integration Nix shell")
+  const commit = process.argv[3] ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
   const output = resolve(process.argv[2] ?? ".data/benchmarks/caller-capture")
   mkdirSync(output, { recursive: true })
   for (const mode of ["named-off", "off"]) {
@@ -87,7 +88,7 @@ if (process.argv[2] === "child") {
           `${output}/raw.json`,
           JSON.stringify(
             {
-              commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+              commit,
               date: new Date().toISOString(),
               metadata,
               warmupPairs: 8,
