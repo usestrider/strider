@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
@@ -1279,5 +1280,64 @@ describe("CDP declaration cleanup lifetime", () => {
           assert.isTrue(completed, "the cleanup lifetime must survive the caller deadline")
         }))
     )
+  }
+})
+
+describe("CDP proxy and website challenge separation", () => {
+  for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
+    it.effect(`preserves website challenge coverage: ${coverage}`, () =>
+      Effect.gen(function*() {
+        const calls: Array<{ method: string; params: unknown }> = []
+        const wrote = yield* Deferred.make<void>()
+        const mock = {
+          ...session,
+          send: (command: { method: string; params: unknown }) =>
+            Effect.andThen(
+              Effect.sync(() => calls.push({ method: command.method, params: command.params })),
+              Deferred.succeed(wrote, undefined)
+            )
+        } as unknown as ProtocolClient.Session
+        const { state, page, target: original } = yield* withPage(mock)
+        const target = {
+          ...original,
+          page: {
+            ...page,
+            context: {
+              ...page.context,
+              proxy: {
+                server: "proxy.test:8080",
+                bypass: [],
+                credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+              }
+            }
+          }
+        }
+        if (coverage !== "none") {
+          state.registry.add(
+            { _tag: "Page", page: page.id },
+            coverage === "document policy"
+              ? { _tag: "Challenges" }
+              : { _tag: "Intercept", patterns: ["*"], phases: [coverage === "auth route" ? "auth" : "request"] },
+            state.ids.registration()
+          )
+        }
+        const handlers = Obligations.register(Kit.handlers<State.Event>())
+        handlers.apply("Fetch.authRequired", {
+          requestId: "F1",
+          frameId: "T1",
+          resourceType: coverage === "document policy" ? "Document" : "Fetch",
+          request: sent(`${origin}/auth`).request,
+          authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+        }, { state, target })
+        assert.strictEqual(state.obligations.size, coverage === "none" ? 0 : 1)
+        yield* state.buffer.flush
+        if (coverage === "none") {
+          yield* Deferred.await(wrote)
+          assert.deepStrictEqual(calls, [{
+            method: "Fetch.continueWithAuth",
+            params: { requestId: "F1", authChallengeResponse: { response: "Default" } }
+          }])
+        } else assert.deepStrictEqual(calls, [])
+      }))
   }
 })

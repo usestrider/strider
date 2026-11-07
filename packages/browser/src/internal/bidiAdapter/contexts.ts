@@ -6,8 +6,10 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
+import * as Network from "../../bidi-protocol/Network.ts"
 import type * as Download from "../../Download.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
@@ -91,6 +93,33 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
+  if (Option.isSome(options.proxy)) {
+    const { server, credentials } = options.proxy.value
+    if (credentials !== undefined && state.options.ownership !== "launched") {
+      return yield* Effect.fail(
+        Kit.unsupported(
+          "userContexts.proxy.credentials",
+          "Firefox proxy credentials require a freshly launched browser with an owned authentication cache"
+        )
+      )
+    }
+    const previous = state.proxyBindings.get(server)
+    if (
+      state.proxyBindings.has(server) && (previous?.username !== credentials?.username ||
+        (previous !== undefined && credentials !== undefined &&
+          Redacted.value(previous.password) !== Redacted.value(credentials.password)))
+    ) {
+      return yield* Effect.fail(
+        Kit.unsupported(
+          "userContexts.proxy.credentials.isolation",
+          "Firefox shares cached proxy credentials between contexts; use one credential pair per proxy endpoint for the browser's lifetime"
+        )
+      )
+    }
+    // Firefox's proxy auth cache outlives user contexts. Keep this binding for the connection's lifetime too.
+    // Reserve before yielding so concurrent context creations cannot admit conflicting credentials.
+    state.proxyBindings.set(server, credentials)
+  }
   return yield* Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       // Keep ownership of a successful create reply until setup has installed its rollback path.
@@ -107,7 +136,12 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           }
           : {})
       })))
-      const entry: ContextEntry = { id: state.ids.userContext(), bidi: userContext, removing: false }
+      const entry: ContextEntry = {
+        id: state.ids.userContext(),
+        bidi: userContext,
+        removing: false,
+        proxy: Option.getOrUndefined(options.proxy)
+      }
       state.contexts.set(entry.id, entry)
       state.contextsByBidi.set(userContext, entry)
       // Announce before setup: any pages observed during setup must have a known parent context.
@@ -115,7 +149,14 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })
       )
       // Seed only this context; every failure, including interruption, attempts rollback under a fresh budget.
-      yield* Kit.protocol(applyKind(state, "Viewport", { _tag: "UserContext", context: entry.id })).pipe(
+      yield* Effect.gen(function*() {
+        if (entry.proxy?.credentials !== undefined) {
+          const { intercept } = yield* Kit.protocol(state.send(Network.addIntercept({ phases: ["authRequired"] })))
+          entry.proxyIntercept = intercept
+          entry.proxyAttempts = new Set()
+        }
+        yield* Kit.protocol(applyKind(state, "Viewport", { _tag: "UserContext", context: entry.id }))
+      }).pipe(
         restore,
         Effect.onError(() =>
           Cleanup.report(
@@ -144,6 +185,15 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     // The command closes the context's navigables before it answers, and their `contextDestroyed` events come
     // before the reply on the one connection: once they are folded, its pages have ended, so the context ends now
     yield* state.root().drainObserved
+    context.proxyAttempts?.clear()
+    context.proxy = undefined
+    if (context.proxyIntercept !== undefined) {
+      yield* Cleanup.report(
+        Cleanup.bounded(Kit.protocol(state.send(Network.removeIntercept({ intercept: context.proxyIntercept })))),
+        "Proxy authentication interceptor removal could not be confirmed"
+      )
+      context.proxyIntercept = undefined
+    }
     yield* state.buffer.run(() => {
       // A successful removal confirms every page ended, even if no separate destruction event was observed.
       for (const page of Array.from(state.navigables.values())) {

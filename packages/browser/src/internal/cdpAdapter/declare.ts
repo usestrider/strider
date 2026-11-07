@@ -269,8 +269,9 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
 
 const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
   const intercepts = state.registry.intercepts(placement(page))
+  const proxyAuth = page.context.proxy?.credentials !== undefined
   const challenges = state.registry.challenges(placement(page))
-  const key = JSON.stringify({ intercepts, challenges })
+  const key = JSON.stringify({ intercepts, challenges, proxyAuth })
   if (key === target.intercepts) return
   const on = Protocol.on(target.session)
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
@@ -282,6 +283,7 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
       urlPattern,
       requestStage: "Request" as const
     })),
+    ...(proxyAuth ? [{ urlPattern: "*", requestStage: "Request" as const }] : []),
     ...(challenges
       ? [{ urlPattern: "*", resourceType: "Document" as const, requestStage: "Request" as const }]
       : []),
@@ -292,7 +294,10 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
   // past the route, about once in forty under load, apparently while the interceptor was installed again; with
   // the pattern kept, never in 160 (QUIRKS.md, Q46 and Q103). A request paused still has its decision to come.
   const effective = patterns.length > 0 ? patterns : [{ urlPattern: nothing, requestStage: "Request" as const }]
-  yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 || challenges }).pipe(on)
+  yield* Fetch.enable({
+    patterns: effective,
+    handleAuthRequests: intercepts.auth.length > 0 || challenges || proxyAuth
+  }).pipe(on)
   target.intercepts = key
 })
 

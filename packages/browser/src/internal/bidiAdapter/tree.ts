@@ -70,6 +70,9 @@ export const removeNavigable = (
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
     cancelRestoration(navigable)
+    for (const [key, request] of state.requests) {
+      if (request.navigable === navigable) navigable.context.proxyAttempts?.delete(key)
+    }
     navigable.traversalCommands.clear()
     navigable.navigationCommands.clear()
     navigable.commandNavigations.clear()

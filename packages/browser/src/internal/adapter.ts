@@ -714,10 +714,17 @@ export interface Cookie {
   readonly priority: Option.Option<"Low" | "Medium" | "High">
 }
 
+/** A normalized HTTP proxy endpoint; credentials stay redacted until protocol encoding. */
+export interface ProxyOptions {
+  readonly server: string
+  readonly bypass: ReadonlyArray<string>
+  readonly credentials?: { readonly username: string; readonly password: Redacted.Redacted<string> } | undefined
+}
+
 /** Settings for a new user context. */
 export interface UserContextOptions {
   readonly reclaimable?: boolean | undefined
-  readonly proxy: Option.Option<{ readonly server: string; readonly bypass: ReadonlyArray<string> }>
+  readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
 }
 

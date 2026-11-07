@@ -17,7 +17,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import * as Urls from "../urls.ts"
-import { bidiHeaders, bytesOf, headersOf, originOf, resourceType } from "./mapping.ts"
+import { bidiHeaders, bytesOf, bytesText, headersOf, originOf, resourceType } from "./mapping.ts"
 import {
   type Event,
   navigableOf,
@@ -110,6 +110,21 @@ export const pause = (
   })
 }
 
+/** The first challenge's scheme and realm, as BiDi normally reports them. */
+export const websiteChallenge = (header: string): Network.AuthChallenge | undefined => {
+  const first = /^[ \t]*([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:[ \t]+|$)/.exec(header)
+  if (first === null) return undefined
+  const parameter =
+    /[ \t]*([!#$%&'*+.^_`|~0-9A-Za-z-]+)[ \t]*=[ \t]*(?:"((?:[^"\\]|\\.)*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+))[ \t]*(?:,|$)/y
+  parameter.lastIndex = first[0].length
+  let realm = ""
+  let value: RegExpExecArray | null
+  while ((value = parameter.exec(header)) !== null) {
+    if (value[1]!.toLowerCase() === "realm") realm = value[2]?.replace(/\\(.)/g, "$1") ?? value[3] ?? ""
+  }
+  return { scheme: first[1]!, realm }
+}
+
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -117,7 +132,28 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.authRequired, (params, { state }) => {
       const request = state.requests.get(params.request.request)
       if (request === undefined || !params.isBlocked) return
-      const challenge = params.response.authChallenges?.[0]
+      const context = state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context
+      const proxyHeader = params.response.headers.find((header) => header.name.toLowerCase() === "proxy-authenticate")
+      if (proxyHeader !== undefined && context?.proxy?.credentials !== undefined) {
+        const attempted = context.proxyAttempts?.has(params.request.request) === true
+        context.proxyAttempts ??= new Set()
+        context.proxyAttempts.add(params.request.request)
+        state.buffer.later(state.send(Network.continueWithAuth({
+          request: params.request.request,
+          ...(attempted
+            ? { action: "cancel" as const }
+            : {
+              action: "provideCredentials" as const,
+              credentials: { type: "password" as const, ...context.proxy.credentials }
+            })
+        })))
+        return
+      }
+      // Firefox can retain a proxy's 407 and omit authChallenges when the origin then sends a 401.
+      // The current WWW-Authenticate header still supplies the website's challenge.
+      const website = params.response.headers.find((header) => header.name.toLowerCase() === "www-authenticate")
+      const challenge = params.response.authChallenges?.[0] ??
+        (website === undefined ? undefined : websiteChallenge(bytesText(website.value)))
       pause(state, params, "auth", requestSnapshot(params, request), Option.none(), challenge)
     })
     .on(BrowsingContext.userPromptOpened, (params, { state }) => {

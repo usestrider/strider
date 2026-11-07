@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import * as ChromiumLauncher from "../../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
@@ -284,11 +285,15 @@ describe("stock WebKit proxy feasibility", () => {
                 automation: group
               })
               const refused = yield* adapter.createUserContext({
-                proxy: Option.some({ server: local.address, bypass: [] }),
+                proxy: Option.some({
+                  server: local.address,
+                  bypass: [],
+                  credentials: { username: "proxy-user", password: Redacted.make("fixture-secret") }
+                }),
                 acceptInsecureCerts: false
               }).pipe(Effect.flip)
               assert(refused.reason._tag === "Unsupported")
-              assert.strictEqual(refused.reason.capability, "userContexts.proxy")
+              assert.strictEqual(refused.reason.capability, "userContexts.proxy.credentials")
               const context = mode === "environment"
                 ? yield* adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: true })
                 : adapter.defaultContext

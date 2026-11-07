@@ -245,12 +245,15 @@ export const resizeWindow = (
 
 export const createUserContextLaunched = Effect.fnUntraced(
   function*(state: State, options: Adapter.UserContextOptions) {
-    if (Option.isSome(options.proxy)) {
+    if (Option.isSome(options.proxy) && options.proxy.value.credentials !== undefined) {
       return yield* Effect.fail(
-        Kit.unsupported("userContexts.proxy", "stock WebKit's automation session takes no proxy")
+        Kit.unsupported("userContexts.proxy.credentials", "Stock WebKit does not support proxy credentials")
       )
     }
-    const process = yield* state.automation!.launch({ acceptInsecureCerts: options.acceptInsecureCerts }).pipe(
+    const process = yield* state.automation!.launch({
+      acceptInsecureCerts: options.acceptInsecureCerts,
+      proxy: Option.getOrUndefined(options.proxy)
+    }).pipe(
       Effect.mapError((error) =>
         new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability: "userContexts", hint: error.message } })
       )

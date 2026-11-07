@@ -9,6 +9,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
@@ -2614,4 +2615,47 @@ describe("BidiAdapter state", () => {
       }).pipe(Effect.flip)
       assert.strictEqual(error.reason._tag, "Protocol")
     }))
+})
+
+it.effect("removes a context's proxy auth interceptor and attempts, retaining only the browser-cache binding", () =>
+  Effect.gen(function*() {
+    const { state, commands } = yield* withPage({
+      "browser.createUserContext": { userContext: "proxy-context" },
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    const id = yield* Contexts.createUserContext(state, {
+      proxy: Option.some({
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "user", password: Redacted.make("fixture-password") }
+      }),
+      acceptInsecureCerts: false
+    })
+    const entry = state.contexts.get(id)!
+    entry.proxyAttempts!.add("request")
+    yield* Contexts.removeUserContext(state, id)
+    assert.strictEqual(entry.proxyAttempts?.size, 0)
+    assert.isUndefined(entry.proxyIntercept)
+    assert.isUndefined(entry.proxy)
+    assert.isTrue(
+      commands.some((command) =>
+        command.method === "network.removeIntercept" &&
+        (command.params as { intercept: string }).intercept === "proxy-intercept"
+      )
+    )
+    assert.isTrue(state.proxyBindings.has("proxy.test:8080"))
+    State.releaseProxy(state)
+    assert.strictEqual(state.proxyBindings.size, 0)
+  }))
+
+it("recovers only the first website challenge, including escaped realms", () => {
+  assert.deepStrictEqual(
+    Obligations.websiteChallenge("Basic realm=\"site\\\"realm\", charset=\"UTF-8\", Digest realm=\"other\""),
+    { scheme: "Basic", realm: "site\"realm" }
+  )
+  assert.deepStrictEqual(Obligations.websiteChallenge("Negotiate token==, Basic realm=\"other\""), {
+    scheme: "Negotiate",
+    realm: ""
+  })
+  assert.isUndefined(Obligations.websiteChallenge(""))
 })
