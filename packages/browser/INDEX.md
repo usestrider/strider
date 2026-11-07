@@ -1762,7 +1762,7 @@ What operations act on, how each one is identified, and how it ends.
 - `const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))`
 - `const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))`
 - `const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))`
-- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PrerenderActivated, PageClosed, ObligationEnded, DownloadEnded, HopEnded, PageCrashe…`
+- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PageClosed, ObligationEnded, DownloadEnded, HopEnded, PageCrashed, FrameDetached, Do…`
 - `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
 - `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
 
@@ -1782,7 +1782,6 @@ What operations act on, how each one is identified, and how it ends.
 - `class ModelUnavailable: Schema.Error { hint }`
 - `class UserContextRemoved: Schema.Error { hint }`
 - `class AccessReleased: Schema.Error { hint }`
-- `class PrerenderActivated: Schema.Error { hint }`
 - `class PageCrashed: Schema.Error { hint }`
 - `class FrameDetached: Schema.Error { hint }`
 - `class DocumentReplaced: Schema.Error { hint }`

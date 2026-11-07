@@ -300,6 +300,21 @@ export const declarations = (
 
       // ── Init scripts ──
 
+      for (const timing of [undefined, "beforeAuthorScript"] as const) {
+        it.effect(`runs launched context init scripts before author scripts with ${timing ?? "default"} timing`, () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.context.addInitScript({ source: "window.__launchedTiming = 'before'" }, { timing })
+              yield* page.goto(
+                fixtureUrl(origin, "<h1><script>document.write(window.__launchedTiming ?? 'missing')</script></h1>")
+              )
+              yield* page.getByRole("heading").pipe(Expect.toHaveText("before"))
+            }))
+          }), timeout)
+      }
+
       it.effect("runs call site 11: scripts in order, after their dependencies, in every frame", () =>
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site

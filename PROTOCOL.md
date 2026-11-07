@@ -314,7 +314,7 @@ interface AdapterConnection {
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:
-  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), and prerender activation, where the main frame is re-keyed.
+  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), while prerender activation and its document/realm transfer are not implemented.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
   - BiDi: route events to sessions client-side, because the wire carries no subscription id.
 - **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
@@ -389,7 +389,7 @@ Adapter responsibilities:
   - the on-demand realm strategy (no `Runtime.enable`);
   - merging `ExtraInfo` headers into request snapshots (`servedBy` is built since: Who served a response, below);
   - enrichment;
-  - a test of prerender activation, which headless Chromium 155 doesn't produce; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
+  - prerender activation and document/realm transfer, which current adapters do not implement; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
 **Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
 
@@ -454,7 +454,7 @@ Adapter responsibilities:
 
 - **CDP's `ExtraInfo` headers**, the ones the network stack adds, such as cookies. They change a request after it is reported, so they need a fact that updates it, a change to the fact contract not designed yet. (`servedBy` is on the response instead, and built: Who served a response, below.)
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
-- **A test of prerender activation**, which headless Chromium doesn't produce. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
+- **Prerender activation and document/realm transfer**, which current adapters do not implement. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
 - **The rest of the CLI.** `strider browsers` is built; the session commands of CLI.md aren't.
 - **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter. (Since built: Stock WebKit, attached, below, with the patched adapter's profile and a transport rather than a wire and an adapter of its own; WPE wasn't in the pinned nixpkgs after all.)
 
@@ -1044,7 +1044,7 @@ Before-author-script setup for *new* targets needs them paused at creation. Gran
 | BiDi | not needed: declarations are scoped natively by context or user context (built 2026-10-20) |
 | Stock WebKit | a page's targets after `Target.setPauseOnStart` start paused, the provisional targets of cross-site navigations among them, each resumed on its own (`Target.resume`); workers wait for `Worker.initialized`; new pages and popups aren't (built 2026-10-26) |
 
-The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A declaration that needs `beforeAuthorScript` on targets the available granularity can't isolate fails with `Unsupported`. Observe-only targets are never paused.
+The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. An init script requiring `beforeAuthorScript` fails with `DeclarationError{TimingUnsupported}` on attached Chromium when its scope covers new pages (browser or user context): popups are not paused at creation. `bestEffort` remains available, and page-scoped scripts retain before-author timing for later documents. Launched Chromium pauses browser targets and Firefox installs native preload scripts, so these scopes support required timing there. Observe-only targets are never paused.
 
 ## Backends and order
 
