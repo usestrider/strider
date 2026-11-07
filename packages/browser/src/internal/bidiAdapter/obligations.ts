@@ -134,7 +134,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (request === undefined || !params.isBlocked) return
       const context = state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context
       const proxyHeader = params.response.headers.find((header) => header.name.toLowerCase() === "proxy-authenticate")
-      if (proxyHeader !== undefined && context?.proxy?.credentials !== undefined) {
+      const website = params.response.headers.find((header) => header.name.toLowerCase() === "www-authenticate")
+      // An origin can add Proxy-Authenticate to its own response. Never answer its website challenge
+      // with the proxy's credentials, even when Firefox retains a stale 407 or proxy challenge metadata.
+      if (proxyHeader !== undefined && website === undefined && context?.proxy?.credentials !== undefined) {
         const attempted = context.proxyAttempts?.has(params.request.request) === true
         context.proxyAttempts ??= new Set()
         context.proxyAttempts.add(params.request.request)
@@ -151,9 +154,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       // Firefox can retain a proxy's 407 and omit authChallenges when the origin then sends a 401.
       // The current WWW-Authenticate header still supplies the website's challenge.
-      const website = params.response.headers.find((header) => header.name.toLowerCase() === "www-authenticate")
-      const challenge = params.response.authChallenges?.[0] ??
-        (website === undefined ? undefined : websiteChallenge(bytesText(website.value)))
+      const challenge = context?.proxy?.credentials !== undefined && website !== undefined
+        ? websiteChallenge(bytesText(website.value))
+        : params.response.authChallenges?.[0]
       pause(state, params, "auth", requestSnapshot(params, request), Option.none(), challenge)
     })
     .on(BrowsingContext.userPromptOpened, (params, { state }) => {
