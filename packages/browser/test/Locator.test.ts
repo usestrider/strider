@@ -1,10 +1,19 @@
 /** Runtime validation for JavaScript callers that bypass Locator's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Locator } from "@usestrider/browser"
+import { Browser, Deadline, Locator, Target } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import { TestClock } from "effect/testing"
+import type * as Adapter from "../src/internal/adapter.ts"
+import * as BrowserImpl from "../src/internal/browser.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Engine from "../src/internal/engine.ts"
+import * as Fake from "../src/internal/fake.ts"
 
 describe("Locator.fill", () => {
   for (
@@ -54,5 +63,113 @@ describe("Locator.pressSequentially", () => {
         assert.strictEqual(error.value.reason._tag, "InvalidInput")
         assert.notInclude(JSON.stringify(error.value), "private-caller-value")
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+})
+
+/** Real routing, engine installation cache and deadlines, with gated page execution. */
+describe("Locator.check refusal deadlines", () => {
+  for (const boundary of ["timely", "installation", "reply"] as const) {
+    it.effect(
+      boundary === "timely"
+        ? "returns timely WrongElement without input"
+        : boundary === "installation"
+        ? "times out during installation without a Checked read or input"
+        : "preserves Timeout after a late Checked refusal without input",
+      () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const installing = yield* Deferred.make<void>()
+          const installed = yield* Deferred.make<void>()
+          const reading = yield* Deferred.make<void>()
+          const reply = yield* Deferred.make<void>()
+          const replied = yield* Deferred.make<void>()
+          let reads = 0
+          let inputs = 0
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+              ...adapter,
+              realm: () => Effect.succeed("checked-realm" as Target.RealmId),
+              dispatchInput: () =>
+                Effect.sync(() => {
+                  inputs++
+                }),
+              evaluate: Effect.fnUntraced(function*(_realm, call) {
+                if (call.functionDeclaration === Engine.install) {
+                  yield* Deferred.succeed(installing, undefined)
+                  yield* Deferred.await(installed)
+                  return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+                }
+                const argument = call.arguments[0]
+                assert(argument?._tag === "Value" && argument.value.type === "string")
+                const request = JSON.parse(argument.value.value) as Engine.Request
+                assert(request.op === "read" && request.read._tag === "Checked")
+                reads++
+                yield* Deferred.succeed(reading, undefined)
+                // Model a browser response that still arrives after its caller's deadline.
+                return yield* Effect.gen(function*() {
+                  yield* Deferred.await(reply)
+                  yield* Deferred.succeed(replied, undefined)
+                  return {
+                    _tag: "Value",
+                    value: {
+                      type: "string",
+                      value: JSON.stringify({
+                        _tag: "Final",
+                        final: {
+                          _tag: "WrongElement",
+                          expected: "a checkbox, a radio or an ARIA checkable",
+                          element: "<option>"
+                        }
+                      })
+                    }
+                  } as const
+                }).pipe(Effect.forkDetach, Effect.flatMap(Fiber.join))
+              })
+            })))
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const pending = yield* page.locator("#target").check().pipe(
+              Deadline.within("1 second"),
+              Effect.flip,
+              Effect.forkChild
+            )
+            yield* Deferred.await(installing)
+            if (boundary !== "installation") {
+              yield* Deferred.succeed(installed, undefined)
+              yield* Deferred.await(reading)
+            }
+            if (boundary === "timely") {
+              yield* TestClock.adjust("500 millis")
+              yield* Deferred.succeed(reply, undefined)
+            } else {
+              yield* TestClock.adjust("1 second")
+            }
+            const error = yield* Fiber.join(pending)
+            if (boundary === "timely") {
+              assert(Locator.isLocatorError(error))
+              assert.strictEqual(error.reason._tag, "WrongElement")
+            } else {
+              assert(Deadline.isTimeout(error), String(error))
+              assert.strictEqual(error.operation, "Locator.check")
+              assert.strictEqual(error.phase, "resolving")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+              if (boundary === "installation") {
+                assert.strictEqual(reads, 0)
+                yield* Deferred.succeed(installed, undefined)
+              } else {
+                yield* Deferred.succeed(reply, undefined)
+                yield* Deferred.await(replied)
+                assert.strictEqual(yield* Fiber.join(pending), error)
+              }
+            }
+            assert.strictEqual(reads, boundary === "installation" ? 0 : 1)
+            assert.strictEqual(inputs, 0)
+          })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        })
+    )
   }
 })
