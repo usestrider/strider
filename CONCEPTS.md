@@ -324,6 +324,10 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
 - **Cleanup order.** Transport, ingestion and obligation resolvers stay alive while owned resources tear down. The order is: stop new work, drain obligations within the cleanup budget, release declarations and owned resources in dependency order, then disconnect or close the owned process. Finalizers are bounded.
 
+### Native virtual authenticators
+
+Native virtual WebAuthn authenticators are acquired by a controlled page's `capability(Capability.VirtualAuthenticator)` into the caller's scope. Chromium's virtual environment belongs to the page's frame tree, survives navigation and does not cover sibling pages or popups. L1 checks scope and access lifetime on every handle call; the adapter reserves one owner per page, releases a late creation, removes the authenticator and disables the environment before allowing reacquisition. An overlapping acquisition fails rather than allowing one scope's cleanup to remove another's authenticator. Credential listing exports redacted private-key bytes; importing provisions a separate native store with its own counter. Firefox's current BiDi transport and stock WebKit refuse acquisition.
+
 ### Experimental claims and handoff
 
 The experimental subpath gives session hosts opaque Schema claims for owned Chromium pages and non-default

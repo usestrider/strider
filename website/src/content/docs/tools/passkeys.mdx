@@ -1,0 +1,125 @@
+---
+title: Passkeys
+description: Native Chromium passkey tests, credential management, and explicit credential copies for a second page or popup.
+order: 4
+---
+
+A passkey sign-in needs an authenticator as well as the page's cookies. A scoped virtual authenticator lets
+Chromium run native registration and sign-in ceremonies without a physical device.
+
+## Registration and sign-in
+
+Acquire [`Capability.VirtualAuthenticator`](/docs/api/browser/Capability#VirtualAuthenticator) on a page you
+control, before starting a ceremony. Firefox and WebKit return `CapabilityError` with reason `Unsupported`:
+Firefox exposes virtual authenticators through classic WebDriver, outside Strider's BiDi transport, and stock
+WebKit's Automation implementation refuses credential management.
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const registerAndSignIn = Effect.fn("registerAndSignIn")(function*(page: Page.Page) {
+  const authenticator = yield* page.capability(Capability.VirtualAuthenticator)
+  yield* page.goto("https://app.example.com/settings/security")
+  yield* page.getByRole("button", { name: "Create passkey" }).click()
+  yield* page.getByRole("button", { name: "Sign out" }).click()
+  yield* page.goto("https://app.example.com/login")
+  yield* page.getByRole("button", { name: "Sign in with passkey" }).click()
+  return yield* authenticator.credentials
+})
+```
+
+The authenticator uses CTAP2 with internal transport, supports resident credentials and user verification, reports
+verification successful, supplies user presence automatically, and disables browser authenticator UI. These are
+the fixed acquisition defaults. It answers native browser WebAuthn calls; Strider does not replace the page's
+credential methods. The app still validates registration and assertion responses at its relying party.
+
+Credentials survive navigation on that page. Only one authenticator can live on a page at a time: overlapping
+acquisition fails with `CapabilityError`. When the acquiring scope closes, the authenticator and its credentials
+are removed and normal authenticator discovery resumes. A retained handle fails with `TargetGone` with reason
+`AccessReleased`. Closing the page before the scope ends is safe. If cleanup cannot confirm that the native virtual environment
+was disabled, acquisition remains refused until the page closes. The capability owns the page's virtual
+WebAuthn environment; do not manage that environment through another CDP client while the scope lives.
+
+## Credential management
+
+The [`WebAuthn.Credential`](/docs/api/browser/WebAuthn#Credential) Schema describes exported credentials. Its binary
+fields are bytes; its private key is redacted PKCS#8 DER for ES256. Resident credentials require a user handle;
+adding malformed data fails with `WebAuthnError` with reason `InvalidInput`, without echoing the credential.
+Exported private keys can sign as the user: keep them secret, as you would session cookies.
+
+```ts
+import { WebAuthn } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const managePasskeys = Effect.fn("managePasskeys")(
+  function*(authenticator: WebAuthn.VirtualAuthenticator) {
+    const saved = yield* authenticator.credentials
+    for (const credential of saved) {
+      yield* authenticator.removeCredential(credential.credentialId)
+    }
+    for (const credential of saved) yield* authenticator.addCredential(credential)
+    yield* authenticator.setUserVerified(false)
+    yield* authenticator.setUserVerified(true)
+    yield* authenticator.setAutomaticPresenceSimulation(false)
+    yield* authenticator.setAutomaticPresenceSimulation(true)
+    yield* authenticator.clearCredentials
+  }
+)
+```
+
+The verification control changes whether subsequent ceremonies pass user verification. Turning automatic presence
+off leaves ceremonies waiting until their own timeout or cancellation. Both controls start as `true`. An unknown
+credential ID on removal or a duplicate ID on import fails with `WebAuthnError`.
+
+## Copying to a second page
+
+A second page has a separate authenticator. Export by listing the source's credentials, then import them into the
+second page before asking it to sign in:
+
+```ts
+import { Browser, Capability, WebAuthn } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signInOnAnotherPage = Effect.fn("signInOnAnotherPage")(
+  function*(source: WebAuthn.VirtualAuthenticator) {
+    const saved = yield* source.credentials
+    const page = yield* Browser.newPage()
+    const copy = yield* page.capability(Capability.VirtualAuthenticator)
+    for (const credential of saved) yield* copy.addCredential(credential)
+    yield* page.goto("https://app.example.com/login")
+    yield* page.getByRole("button", { name: "Sign in with passkey" }).click()
+    return page
+  }
+)
+```
+
+The imported counter starts at the exported value. Copies keep separate signature counters: a sign-in on the
+second page does not update the original. Closing the source page does not remove the copy. Choose test accounts
+and relying-party counter policies accordingly; this is not a shared device or a context-wide credential store.
+
+## Copying to a popup
+
+A popup also needs its own authenticator. Subscribe before opening it, acquire its authenticator, and import the
+credential before triggering its sign-in ceremony:
+
+```ts
+import { Capability, Page, Popup, WebAuthn } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signInInPopup = Effect.fn("signInInPopup")(
+  function*(page: Page.Page, source: WebAuthn.VirtualAuthenticator) {
+    const saved = yield* source.credentials
+    const opened = yield* Popup.next(page)
+    yield* page.getByRole("button", { name: "Open sign-in" }).click()
+    const popup = yield* opened
+    const copy = yield* popup.capability(Capability.VirtualAuthenticator)
+    for (const credential of saved) yield* copy.addCredential(credential)
+    yield* popup.getByRole("button", { name: "Sign in with passkey" }).click()
+    return popup
+  }
+)
+```
+
+The popup's copy keeps its own signature counter too. Import does not restart a ceremony the popup already began;
+use a flow that lets the test provision the authenticator before starting the ceremony.
