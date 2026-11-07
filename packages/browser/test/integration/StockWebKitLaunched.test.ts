@@ -274,8 +274,9 @@ describe("Stock WebKit, launched in automation mode", () => {
             Effect.provide(socketConnector)
           )
           assert.strictEqual(children[0]?.port, occupiedPort)
-          assert.strictEqual(children.length, 1)
-          const child = children[0]!
+          assert.isAtLeast(children.length, 2, "the forced collision must replace the first child")
+          // Successful startup leaves the last spawned child owning the inspector listener.
+          const child = children[children.length - 1]!
           const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
           assert.strictEqual(child.executable, executable)
           assert.deepStrictEqual(child.args, args)
