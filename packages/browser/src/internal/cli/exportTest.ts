@@ -174,7 +174,7 @@ export const queryOf = (
               if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
                 ${
         name === undefined
-          ? "node.name._tag === \"None\" && /^f\\d+e/.test(ref)"
+          ? `node.name._tag === "None" && ref.startsWith(${quote(target.slice(0, target.indexOf("e")) + "e")})`
           : `node.name._tag !== "None" && node.name.value === ${quote(name)}`
       }) {
                 const current = snapshot.ref(ref)
@@ -186,7 +186,7 @@ export const queryOf = (
           })), Condition.make(${
         quote(
           name === undefined
-            ? "an unnamed password control inside a frame"
+            ? `an unnamed password control in recorded snapshot frame ${target.slice(0, target.indexOf("e"))}`
             : "a password control with the recorded accessible name"
         )
       }, (found) => found))
