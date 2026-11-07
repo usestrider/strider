@@ -7,8 +7,10 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, type Locator, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -323,6 +325,30 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           timeout
         )
       }
+
+      it.effect(
+        "refuses unnamed password exports spanning multiple frame documents",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const frame = "<iframe srcdoc='<input type=password>'></iframe>"
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(frame.repeat(2))}`)
+            for (const index of [0, 1]) {
+              yield* Expect.toHaveCount(page.frame(page.locator("iframe").nth(index)).locator("input"), 1)
+            }
+            const snapshot = yield* page.snapshot()
+            const nodes = [...snapshot.refs.values()].filter((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password") && each.name._tag === "None"
+            )
+            assert.lengthOf(nodes, 2)
+            const query = ExportTest.locatorOf("page", Option.getOrThrow(nodes[0]!.ref), snapshot)
+            const result = yield* Effect.exit(exportedLocator(query, page))
+            assert(Exit.isFailure(result), query)
+            assert.include(Cause.pretty(result.cause), "Locator.or: the other locator is in another frame")
+          })),
+        timeout
+      )
 
       it.effect(
         "exports a named password query that still finds a field appearing after it runs",
