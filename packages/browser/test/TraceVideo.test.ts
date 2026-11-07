@@ -116,12 +116,13 @@ for (const stage of ["pending-success", "pending-failure"] as const) {
 }
 
 describe("trace test identity", () => {
-  const info = (attempt: number) =>
+  const info = (attempt: number, repeat = 0) =>
     new TestRun.TestInfo({
       project: "chromium",
       file: "/tests/cart.test.ts",
       id: "cart > pays",
       attempt,
+      repeat,
       worker: "1",
       shard: ""
     })
@@ -146,7 +147,8 @@ describe("trace test identity", () => {
             project: "chromium",
             file: "/tests/cart.test.ts",
             id: "cart > pays",
-            attempt
+            attempt,
+            repeat: 0
           })
           assert.strictEqual(header.origin, "library")
           assert.strictEqual(header.version, 9)
@@ -154,6 +156,25 @@ describe("trace test identity", () => {
         }
       })))
   }
+  it.effect("snapshots the repeat before identity changes at export", () =>
+    Effect.scoped(Effect.gen(function*() {
+      let current = info(2, 3)
+      const { files } = yield* scenario(undefined, undefined, () => {
+        current = info(99, 99)
+      }).pipe(
+        Effect.provideService(TestRun.TestRun, {
+          get info() {
+            return current
+          },
+          attach: () => Effect.void
+        })
+      )
+      for (const file of files) {
+        const header = JSON.parse(new TextDecoder().decode(file.get("trace.trace")).split("\n")[0]!)
+        assert.strictEqual(header.striderTest.repeat, 3)
+        assert.strictEqual(header.striderTest.attempt, 2)
+      }
+    })))
   it.effect("keeps standalone headers free of test metadata", () =>
     Effect.scoped(Effect.gen(function*() {
       const { files } = yield* scenario()

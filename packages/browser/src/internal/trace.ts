@@ -360,7 +360,8 @@ export const start = Effect.fnUntraced(function*(
     project: info.project,
     file: info.file,
     id: info.id,
-    attempt: info.attempt
+    attempt: info.attempt,
+    repeat: info.repeat ?? 0
   }
   const own = yield* Scope.fork(scope)
   const clock = Recordings.anchor()
