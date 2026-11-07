@@ -23,6 +23,7 @@ import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Har from "../src/internal/har.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Readable from "../src/internal/readable.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
@@ -1455,6 +1456,59 @@ describe("Chromium capture document replacement", () => {
       yield* replyCapture(h.browser, yield* Queue.take(h.captures))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
+})
+
+describe("Chromium empty screenshot errors", () => {
+  for (
+    const variant of ["empty", "otherCode", "otherMessage", "metrics", "replacementBefore", "replacementAfter"] as const
+  ) {
+    it.effect(`preserves native cause and ordering for ${variant}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(variant === "metrics")
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const command = yield* Queue.take(variant === "metrics" ? h.preparation : h.captures)
+        const code = variant === "otherCode" ? -32001 : -32000
+        const description = variant === "otherMessage" ? "capture failed" : "Unable to capture screenshot"
+        if (variant === "replacementBefore") yield* h.browser.receive(replacementEvent())
+        yield* h.browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          error: { code, message: description }
+        })
+        if (variant === "replacementAfter") yield* h.browser.receive(replacementEvent())
+        const error = yield* Fiber.join(pending)
+        assert.strictEqual(error._tag, "PageError")
+        if (error._tag !== "PageError") return
+        if (variant === "replacementBefore") {
+          assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+          return
+        }
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+        if (error.reason._tag !== "BackendFailure") return
+        assert.strictEqual(error.operation, "Page.screenshot")
+        assert.strictEqual(error.reason.kind, "Rejected")
+        assert.strictEqual(error.reason.method, command.method)
+        const nativeMessage = `${command.method} rejected: Unrecognized (${description})`
+        const expected = variant === "empty" || variant === "replacementAfter"
+          ? "Chromium returned an empty image"
+          : nativeMessage
+        assert.strictEqual(error.reason.hint, expected)
+        assert.include(error.message, expected)
+        assert.instanceOf(error.reason.cause, Protocol.ProtocolError)
+        if (error.reason.cause instanceof Protocol.ProtocolError) {
+          assert.deepStrictEqual(
+            error.reason.cause.reason,
+            new Protocol.Rejected({
+              method: command.method,
+              reason: "Unrecognized",
+              code,
+              description
+            })
+          )
+        }
+      }).pipe(onTestClock))
+  }
 })
 
 describe("Chromium screenshot renderer readiness", () => {
