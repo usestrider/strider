@@ -114,6 +114,19 @@ Use the narrowest check that covers the change:
 | The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
 | Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
+Keep integration tests cheap: share setup only where cases do not need isolated contexts, keep a fresh scoped page
+and explicit cleanup, and add cases for distinct behavior rather than needless combinations. Preserve assertions,
+deadlines and normal failure tracing when measuring changes. The Linux reporter in
+`packages/browser/test/integration/timingReporter.ts` prints the slowest files and cases and writes
+`.data/integration-timings/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
+`integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
+if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
+Uncollected files have unknown case counts; pending cases and null durations are not passes or zero-cost tests.
+Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
+execution and the complete hosted job duration. **1500 seconds is the proposed full serial hosted job target,
+including heavy coverage, not an agreed budget or a hard threshold.** If CI splits across machines, reassess that
+target and report aggregate execution cost alongside elapsed job time.
+
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
 Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside

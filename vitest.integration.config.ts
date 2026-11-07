@@ -12,6 +12,7 @@ export default defineConfig({
   resolve,
   plugins: [failureTracePlugin()],
   test: {
+    reporters: ["default", ["./packages/browser/test/integration/timingReporter.ts", {}]],
     runner: path.join(import.meta.dirname, "packages/browser/test/integration/failureTraceRunner.ts"),
     projects: [{
       extends: true,

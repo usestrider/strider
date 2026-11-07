@@ -71,14 +71,15 @@ jobs:
           cat /proc/sys/kernel/core_pattern
       - name: Integration tests
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # Failure-only protocol and owned browser process traces accompany the log.
-      - name: Keep the log
-        if: failure()
+      # Retain timings on green runs too; failure-only traces still accompany failed runs.
+      - name: Keep the log and timings
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-log
           path: |
             integration.log
+            .data/integration-timings/
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14
