@@ -2648,6 +2648,36 @@ it.effect("removes a context's proxy auth interceptor and attempts, retaining on
     assert.strictEqual(state.proxyBindings.size, 0)
   }))
 
+it.effect("releases a Firefox proxy credential binding when its context is never created", () =>
+  Effect.gen(function*() {
+    // The browser refuses the first creation, so no context ever authenticated with these credentials
+    // and Firefox's proxy authentication cache holds nothing for the endpoint.
+    let refuse = true
+    const { state } = yield* withPage({
+      "browser.createUserContext": Effect.suspend(() =>
+        refuse
+          ? Effect.fail(
+            new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "browser.createUserContext" }) })
+          )
+          : Effect.succeed({ userContext: "proxy-context" })
+      ),
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    const create = (password: string) =>
+      Contexts.createUserContext(state, {
+        proxy: Option.some({
+          server: "proxy.test:8080",
+          bypass: [],
+          credentials: { username: "user", password: Redacted.make(password) }
+        }),
+        acceptInsecureCerts: false
+      })
+    yield* create("mistyped-password").pipe(Effect.flip)
+    refuse = false
+    // Correcting the password must not be refused as a conflict with a binding nothing used.
+    yield* create("corrected-password")
+  }))
+
 it("recovers only the first website challenge, including escaped realms", () => {
   assert.deepStrictEqual(
     Obligations.websiteChallenge("Basic realm=\"site\\\"realm\", charset=\"UTF-8\", Digest realm=\"other\""),
