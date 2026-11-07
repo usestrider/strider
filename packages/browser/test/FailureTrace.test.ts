@@ -343,3 +343,22 @@ describe("native video failure artifacts", () => {
     expect(content).not.toContain("user:pass")
   })
 })
+
+it("transfers bounded child and detached daemon records with process-local ordering", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", ["exec", "vitest", "--run", "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts", "child.fixture"],
+  { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  const paths = [...run.stderr.matchAll(/Integration failure trace: (.+child\.fixture.+-test\.ndjson)/g)]
+  expect(paths).toHaveLength(1)
+  const text = fs.readFileSync(paths[0]![1]!, "utf8")
+  expect(text).toContain("DAEMON_FAIL")
+  expect(text).toContain("DAEMON_ORDER_ONE")
+  expect(text).toContain("DAEMON_ORDER_TWO")
+  expect(text).toContain("FLOOD_TAIL")
+  expect(text).toContain("overflow")
+  expect(text).not.toContain("CHILD_PASS")
+  expect(Buffer.byteLength(text)).toBeLessThan(3 * 1024 * 1024)
+  for (const match of run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)) fs.unlinkSync(match[1]!)
+}, 30_000)
