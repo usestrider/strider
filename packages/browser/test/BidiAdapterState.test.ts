@@ -121,6 +121,41 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  for (const arrival of ["before", "after"] as const) {
+    it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
+      Effect.gen(function*() {
+        const url = "http://restored.example/"
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": {},
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        // Synthetic ordering, not captured Firefox traffic: no navigationStarted or commit is sent.
+        // The adapter already supports this unannounced restoration when the realm precedes the reply.
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const arrived = () =>
+          handlers.apply("script.realmCreated", {
+            realm: "R2",
+            context: page.bidi,
+            type: "window",
+            origin: "http://restored.example"
+          }, { state })
+        if (arrival === "before") arrived()
+        const navigation = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(navigation))
+        if (arrival === "after") arrived()
+        yield* state.buffer.flush
+        const started = facts.filter((fact) =>
+          fact._tag === "NavigationStarted" && fact.navigation === navigation.value
+        )
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        assert.lengthOf(started, 1, "the returned traversal must start")
+        assert.lengthOf(ended, 1, "the returned traversal must end")
+        assert.strictEqual(page.document!.url, url)
+        assert.lengthOf(page.pendingRealms, 0)
+      }))
+  }
+
   for (const ownsError of [true, false]) {
     it.effect(`preserves an immediately current error document and immutable provenance when the reply ${ownsError ? "owns" : "does not own"} it`, () =>
       Effect.gen(function*() {
