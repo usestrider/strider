@@ -9,8 +9,8 @@ import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { createServer } from "node:http"
-import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
 // The page prerenders and activates by itself, so no client needs to attach to drive it.

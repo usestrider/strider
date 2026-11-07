@@ -18,8 +18,8 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { createServer } from "node:http"
-import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
 const serve = Effect.acquireRelease(

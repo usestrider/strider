@@ -5,6 +5,11 @@ import * as FileSystem from "effect/FileSystem"
 import * as Schedule from "effect/Schedule"
 import * as BrowserClock from "./browserClock.ts"
 
+// Chromium 155.0.8059.79 (a49e2e3d4addfd84e765b52afe230bedb81096db),
+// content/browser/devtools/devtools_http_handler.cc:303-305,908-913, writes the port and a UUID browser path
+// without a final newline. Validate the whole UUID so a read torn inside its identifier keeps waiting.
+const browserPathPattern = /^\/devtools\/browser\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /** Both lines must be present before a connection can be attempted. */
 export const parse = (text: string): { readonly port: number; readonly browserPath: string } | undefined => {
   const lines = text.split("\n")
@@ -12,8 +17,7 @@ export const parse = (text: string): { readonly port: number; readonly browserPa
   if (
     port === undefined || !/^[0-9]+$/.test(port) ||
     Number(port) < 1 || Number(port) > 65535 ||
-    browserPath === undefined || !browserPath.startsWith("/devtools/browser/") ||
-    browserPath.length === "/devtools/browser/".length || /\s/.test(browserPath) ||
+    browserPath === undefined || !browserPathPattern.test(browserPath) ||
     lines.length > 3 || (lines.length === 3 && lines[2] !== "")
   ) return undefined
   return { port: Number(port), browserPath }

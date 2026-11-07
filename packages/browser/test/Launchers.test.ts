@@ -87,7 +87,9 @@ describe("DevToolsActivePort", () => {
     const id of [
       "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5g",
       "8d0f3c2e_5b7a-4c1d-9e6f-0a1b2c3d4e5f",
-      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5ff"
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5ff",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\r",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\u2028"
     ]
   ) {
     it.effect(`rejects malformed browser identifier ${id}`, () =>
