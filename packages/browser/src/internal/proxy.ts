@@ -45,7 +45,8 @@ export const normalize = (
   const bypass = options.bypass ?? []
   for (const host of bypass) {
     if (
-      typeof host !== "string" || host === "" || /[\s/*,?#@]/.test(host) || host.startsWith(".") || host.endsWith(".")
+      typeof host !== "string" || host === "" || /[\s/\\*,;?#@%]/.test(host) ||
+      host.startsWith(".") || host.endsWith(".") || (host.startsWith("[") && !host.endsWith("]"))
     ) return invalid()
     const parsed = URL.parse(`http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}`)
     if (parsed === null || parsed.port !== "" || parsed.pathname !== "/" || parsed.username !== "") return invalid()
