@@ -34,28 +34,36 @@ export type StriderNeeds =
   | FileSystem.FileSystem
   | ChildProcessSpawner.ChildProcessSpawner
 
-export interface Scenario {
-  readonly name: string
-  readonly title: string
-  /** What the Strider program shows, for its page on the documentation site. */
-  readonly description: string
-  /** The value both implementations must return. */
-  readonly expected: string
-  /** A public demo site, replayed from `.data/scenarios/<recording>.har` by the runner; none for the local site. */
-  readonly recording?: string
-  /** What writing it found, shown under its code. */
-  readonly note?: string
-  /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
-  readonly video?: string
-  /** The browser the Strider program runs on: Chromium unless it says Firefox */
-  readonly browser?: "firefox"
-  /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
-  readonly compare?: string
-  /** The Strider program: given the local site's address, and needing nothing of the runner's */
-  readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
-  /** Its twin, for the comparison; none for a scenario that only shows Strider */
-  readonly playwright?: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
-}
+export type Scenario =
+  & {
+    readonly name: string
+    readonly title: string
+    /** What the Strider program shows, for its page on the documentation site. */
+    readonly description: string
+    /** The value both implementations must return. */
+    readonly expected: string
+    /** What writing it found, shown under its code. */
+    readonly note?: string
+    /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
+    readonly video?: string
+    /** The browser the Strider program runs on: Chromium unless it says Firefox */
+    readonly browser?: "firefox"
+    /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
+    readonly compare?: string
+    /** The Strider program: given the local site's address, and needing nothing of the runner's */
+    readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
+    /** Its twin, for the comparison; none for a scenario that only shows Strider */
+    readonly playwright?: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
+  }
+  & (
+    | { readonly recording?: undefined; readonly requiredPages?: undefined }
+    | {
+      /** A public demo site, replayed from `.data/scenarios/<recording>.har`. */
+      readonly recording: keyof typeof recordings
+      /** Exact GET page URLs needed by this scenario, including navigation destinations. */
+      readonly requiredPages: ReadonlyArray<string>
+    }
+  )
 
 /** Where a Playwright twin may write a file, and where the recordings are; a Strider program names its own. */
 export interface Files {
@@ -515,6 +523,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
     description: "Logs in on The Internet's demo login page.",
     expected: "Secure Area",
     recording: "the-internet",
+    requiredPages: [`${theInternet}/login`, `${theInternet}/secure`],
     strider: theInternetStrider,
     playwright: theInternetPlaywright
   },
@@ -524,6 +533,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
     description: "Enables a text box that a script enables three seconds later, and fills it as soon as it can.",
     expected: "Strider",
     recording: "the-internet",
+    requiredPages: [controls],
     strider: controlsStrider,
     playwright: controlsPlaywright
   },
@@ -534,6 +544,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
       "Records a page to a WebM while it fills The Internet's dynamic controls: on Chromium from its screencast, with ffmpeg, and on Firefox with its own video.",
     expected: "Strider, recorded",
     recording: "the-internet",
+    requiredPages: [controls],
     video: "dynamic-controls.webm",
     compare: "video-firefox",
     strider: videoStrider
@@ -545,6 +556,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
       "Firefox records the video itself: no recorder and no ffmpeg, only the capability, for as long as its scope lives.",
     expected: "Strider, recorded",
     recording: "the-internet",
+    requiredPages: [controls],
     video: "dynamic-controls-firefox.webm",
     browser: "firefox",
     strider: videoFirefoxStrider

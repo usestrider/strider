@@ -27,7 +27,7 @@ import * as path from "node:path"
 import { chromium } from "playwright-core"
 import type * as Playwright from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
-import { replaying } from "./replay.ts"
+import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, report } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
@@ -90,12 +90,12 @@ if (argv.includes("--record")) {
 }
 
 const chosen = scenarios.filter((scenario) => only === undefined || scenario.name === only)
-const missing = chosen.flatMap((scenario) =>
-  scenario.recording !== undefined && !fs.existsSync(files.recording(scenario.recording)) ? [scenario.recording] : []
-)
-if (missing.length > 0) {
+const problems = recordingProblems(chosen, files.recording)
+if (problems.length > 0) {
   process.stderr.write(
-    `No recording of ${missing.join(" and ")}: run \`pnpm scenarios --record\` once, which visits them live.\n`
+    `${
+      problems.join("\n")
+    }\nPreserve and checksum the old recordings, then run \`pnpm scenarios --record\` to refresh them explicitly from the live sites (see packages/scenarios/README.md). Replay never falls back to the network.\n`
   )
   process.exit(1)
 }

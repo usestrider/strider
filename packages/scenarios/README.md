@@ -82,3 +82,30 @@ Playwright build is downloaded or run.
 
   The recording is kept in `.data/scenarios/`, which git ignores: it holds the site's own files, which the
   repository doesn't redistribute.
+
+## Refreshing recordings
+
+Before starting any replay browser, the runner checks that each selected scenario's required page URLs have GET
+requests in its HAR. A missing file, unreadable HAR or missing page stops the run with the file path and an explicit
+refresh command. This checks page coverage, not the completeness of assets, response bodies or interactions.
+Ordinary runs never fetch a missing request live. `--only controls` checks the dynamic-controls page without requiring
+the login pages used by other scenarios.
+
+`pnpm scenarios --record` visits the live sites and overwrites the ignored working recordings in `.data/scenarios/`.
+Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
+from the repository root (choose an absolute `evidence` path that does not already exist):
+
+```sh
+evidence=/absolute/path/to/recording-refresh
+mkdir -p "$evidence/before" "$evidence/after"
+cp -p .data/scenarios/*.har "$evidence/before/"
+sha256sum "$evidence"/before/*.har > "$evidence/before.sha256"
+pnpm scenarios --record > "$evidence/record.log" 2>&1
+cp -p .data/scenarios/*.har "$evidence/after/"
+sha256sum "$evidence"/after/*.har > "$evidence/after.sha256"
+sha256sum --check "$evidence/before.sha256"
+pnpm scenarios --only controls --runs 3 > "$evidence/controls.log" 2>&1
+```
+
+Keep previously retained evidence unchanged. Compare both checksum manifests and retain the refresh log even if the
+live recording fails. The filtered validation prints its report and leaves the full `RESULTS.md` intact.
