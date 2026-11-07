@@ -214,14 +214,57 @@ describe("strider", () => {
           assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
           const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
           const missing = yield* evaluate("--file", path.join(env.XDG_RUNTIME_DIR, "missing.js"))
-          assert.strictEqual(JSON.parse(missing.err).phase, "load")
+          assert.notStrictEqual(missing.code, 0)
+          const inputError = JSON.parse(missing.err)
+          assert.deepStrictEqual(Object.keys(inputError).sort(), ["durationMs", "error", "file", "message", "phase"])
+          assert.strictEqual(inputError.file, "eval")
+          assert.strictEqual(inputError.error, "InvalidInput")
+          assert.strictEqual(inputError.phase, "load")
+          assert.isString(inputError.message)
+          assert.isAtLeast(inputError.durationMs, 0)
           const neither = yield* evaluate()
+          assert.notStrictEqual(neither.code, 0)
+          assert.strictEqual(JSON.parse(neither.err).error, "InvalidInput")
           assert.strictEqual(JSON.parse(neither.err).phase, "load")
+          const both = yield* evaluate("1", "--file", "unused.js")
+          assert.strictEqual(JSON.parse(both.err).error, "InvalidInput")
+          assert.strictEqual(JSON.parse(both.err).phase, "load")
           const file = path.join(env.XDG_RUNTIME_DIR, "formatted.js")
           // A formatter ends a function expression statement with a semicolon.
           fs.writeFileSync(file, "async () => {\n  return document.title\n};\n")
           const formatted = yield* evaluate("--file", file)
           assert.strictEqual(formatted.code, 0, formatted.err)
+          const result = JSON.parse(formatted.out)
+          assert.deepStrictEqual(Object.keys(result).sort(), ["durationMs", "file", "handles", "value"])
+          assert.strictEqual(result.file, "eval")
+          assert.strictEqual(result.value, "")
+          assert.deepStrictEqual(result.handles, {})
+          assert.isAtLeast(result.durationMs, 0)
+          for (
+            const [source, expected] of [
+              ["Promise.resolve(42);  \n", 42],
+              ["'inside;string';", "inside;string"],
+              ["(() => { /* preserve; comment */ return 'value;' })();", "value;"],
+              ["(() => { // preserve; line comment\n return 'line;' })();", "line;"],
+              [
+                "(() => { /* preserve; comment */ return 'value;' }).toString();",
+                "() => { /* preserve; comment */ return 'value;' }"
+              ],
+              ["globalThis.evalCount = (globalThis.evalCount ?? 0) + 1;", 1],
+              ["globalThis.evalCount", 1]
+            ] as const
+          ) {
+            const evaluated = yield* evaluate(source)
+            assert.strictEqual(evaluated.code, 0, evaluated.err)
+            assert.strictEqual(JSON.parse(evaluated.out).value, expected)
+          }
+          fs.writeFileSync(file, "() => { /* preserve; comment */ return 'file;string' };\n")
+          const strings = yield* evaluate("--file", file)
+          assert.strictEqual(strings.code, 0, strings.err)
+          assert.strictEqual(JSON.parse(strings.out).value, "file;string")
+          assert.notStrictEqual((yield* evaluate("globalThis.evalCount = 99; 42;")).code, 0)
+          assert.strictEqual(JSON.parse((yield* evaluate("globalThis.evalCount")).out).value, 1)
+          assert.notStrictEqual((yield* evaluate("42;;")).code, 0)
         } finally {
           yield* run("stop")
         }
@@ -263,6 +306,10 @@ describe("strider", () => {
           const cycle = yield* evaluate("(() => { const x = {}; x.x = x; return x })()")
           assert.notStrictEqual(cycle.code, 0)
           assert.notInclude(cycle.err, "const x")
+          const cycleError = JSON.parse(cycle.err)
+          assert.strictEqual(cycleError.error, "PageError")
+          assert.strictEqual(cycleError.reason, "NotSerializable")
+          assert.strictEqual(cycleError.phase, "execute")
           const exported = path.join(env.XDG_RUNTIME_DIR, "eval-export.ts")
           yield* run("export", "test", exported)
           const text = fs.readFileSync(exported, "utf8")
