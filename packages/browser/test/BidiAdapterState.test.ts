@@ -336,6 +336,70 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  it.effect("keeps an invalidated unannounced restoration ambiguous until a document is observed", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state, sent } = yield* withPage({
+        "browsingContext.traverseHistory": {},
+        "script.evaluate": {
+          type: "success",
+          realm: "R2",
+          result: { type: "string", value: "http://ambiguous.example/" }
+        }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const first = yield* Navigation.traverse(state, page.id, -1)
+      const second = yield* Navigation.traverse(state, page.id, -1)
+      // Both replies are done. Issuing a third command does not identify a late realm from the earlier pair.
+      const third = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(first) && Option.isSome(second) && Option.isSome(third))
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://ambiguous.example"
+      }, { state })
+      yield* state.buffer.flush
+      handlers.apply("browsingContext.navigationStarted", {
+        context: page.bidi,
+        navigation: "observed",
+        url: "http://observed.example/",
+        timestamp: 1
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: page.bidi,
+        navigation: "observed",
+        url: "http://observed.example/",
+        timestamp: 2
+      }, { state })
+      yield* state.buffer.flush
+      const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+      assert.lengthOf(starts, 1)
+      assert(starts[0]!._tag === "NavigationStarted")
+      assert.strictEqual(starts[0]!.initiatedAs, "crossDocument")
+      for (const navigation of [first.value, second.value, third.value]) {
+        assert.notStrictEqual(starts[0]!.navigation, navigation)
+        assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation), 0)
+      }
+      assert.isFalse(sent.includes("script.evaluate"))
+      assert.lengthOf(page.expected.list, 0)
+      // The observed commit restores an unambiguous document boundary for the next traversal.
+      const next = yield* Navigation.traverse(state, page.id, -1)
+      handlers.apply("script.realmDestroyed", { realm: "R2" }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "R3",
+        context: page.bidi,
+        type: "window",
+        origin: "http://ambiguous.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert(Option.isSome(next))
+      yield* state.buffer.waitFor(() =>
+        facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === next.value) ? true : undefined
+      )
+      assert.strictEqual(page.document!.url, "http://ambiguous.example/")
+    }))
+
   for (const newer of ["command", "event", "page removal"] as const) {
     it.effect(`does not reinstall a traversal after a newer ${newer} and a late reply`, () =>
       Effect.gen(function*() {
