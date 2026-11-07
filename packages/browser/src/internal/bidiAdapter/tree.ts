@@ -17,6 +17,7 @@ import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, Real
 /** Releases only the reservation owned by the pending restoration. */
 export const cancelRestoration = (navigable: NavigableEntry) => {
   if (navigable.restoring === undefined) return
+  navigable.restorationAmbiguous = true
   Kit.unexpect(navigable.expected, navigable.restoring.navigation)
   navigable.restoring = undefined
 }
@@ -69,6 +70,7 @@ export const removeNavigable = (
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
     cancelRestoration(navigable)
+    navigable.traversalCommands.clear()
     navigable.navigationCommands.clear()
     navigable.commandNavigations.clear()
     navigable.pendingTerminals.length = 0
@@ -109,6 +111,7 @@ export const commit = (
   evidence: string
 ): DocumentEntry => {
   cancelRestoration(navigable)
+  navigable.restorationAmbiguous = false
   const old = navigable.document
   const document: DocumentEntry = {
     id: state.ids.document(),
@@ -260,6 +263,8 @@ export const addNavigable = (state: State, info: {
     document: undefined,
     pendingRealms: [],
     restoring: undefined,
+    restorationAmbiguous: false,
+    traversalCommands: new Set(),
     expected: Kit.makeExpectations(),
     navigationCommands: new Set(),
     commandNavigations: new Map(),

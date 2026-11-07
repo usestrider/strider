@@ -361,21 +361,14 @@ export const reload = Effect.fnUntraced(
 
 export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId, delta: number) {
   const navigable = yield* navigableById(state, id)
+  // An unannounced realm cannot distinguish overlapping traversals. Invalidated commands remain
+  // in traversalCommands until their replies, so a third command cannot silently regain ownership.
+  const ambiguous = navigable.restorationAmbiguous || navigable.restoring !== undefined ||
+    navigable.traversalCommands.size > 0
   cancelRestoration(navigable)
   const navigation = Kit.expect(state.ids, navigable.expected, "", "traversal")
-  const exit = yield* Effect.exit(
-    state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })).pipe(
-      Effect.onInterrupt(() =>
-        state.buffer.run(() => {
-          Kit.unexpect(navigable.expected, navigation)
-        })
-      )
-    )
-  )
-  if (exit._tag === "Failure") {
-    Kit.unexpect(navigable.expected, navigation)
-    return Option.none<PageNavigation.Id>()
-  }
+  if (ambiguous) Kit.unexpect(navigable.expected, navigation)
+  let replied = false
   // The reply comes once the traversal is done. One still in flight then, with a new main-world realm and
   // no commit, restored its document from the back/forward cache, which Firefox reports no other way. It may
   // not even have started one (Firefox 158, leaving its JSON viewer): then the realm says where it is.
@@ -406,7 +399,7 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
   const restoration = {
     navigation,
     arrived: (realm: RealmEntry) => {
-      state.buffer.later(complete(realm))
+      if (replied) state.buffer.later(complete(realm))
     }
   }
   const valid = (realm: RealmEntry) =>
@@ -446,25 +439,42 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
       restore(startNavigation(state, navigable, `restored:${navigation}`, href, "traversal", false, taken), realm)
     })
   })
-  let realm: RealmEntry | undefined
-  yield* state.buffer.run(() => {
-    const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
-    if (
-      navigable.removed || (entry === undefined
-        ? !navigable.expected.list.some((expected) => expected.id === navigation)
-        : entry.ended)
-    ) return
-    navigable.restoring = restoration
-    realm = pendingRealm()
-  })
-  if (realm !== undefined) {
-    yield* complete(realm).pipe(
-      Effect.onInterrupt(() =>
-        state.buffer.run(() => {
-          if (navigable.restoring === restoration) cancelRestoration(navigable)
-        })
+  // Install before sending: newer commands and events can invalidate this record while the reply
+  // is pending. A late reply may use its own surviving record, but can never install one again.
+  navigable.restoring = restoration
+  navigable.traversalCommands.add(navigation)
+  const release = () =>
+    state.buffer.run(() => {
+      Kit.unexpect(navigable.expected, navigation)
+      if (navigable.restoring === restoration) cancelRestoration(navigable)
+    })
+  return yield* Effect.gen(function*() {
+    const exit = yield* Effect.exit(state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })))
+      .pipe(
+        Effect.ensuring(Effect.sync(() => {
+          navigable.traversalCommands.delete(navigation)
+        }))
       )
-    )
-  }
-  return Option.some(navigation)
+    if (exit._tag === "Failure") {
+      yield* release()
+      return Option.none<PageNavigation.Id>()
+    }
+    let realm: RealmEntry | undefined
+    yield* state.buffer.run(() => {
+      if (navigable.restoring !== restoration) return
+      const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+      if (
+        ambiguous || navigable.removed || (entry === undefined
+          ? !navigable.expected.list.some((expected) => expected.id === navigation)
+          : entry.ended)
+      ) {
+        cancelRestoration(navigable)
+        return
+      }
+      replied = true
+      realm = pendingRealm()
+    })
+    if (realm !== undefined) yield* complete(realm)
+    return Option.some(navigation)
+  }).pipe(Effect.onInterrupt(release))
 })
