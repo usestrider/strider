@@ -94,25 +94,26 @@ and stock WebKit, and every member the API declares is built. One declared befor
 
 Use the narrowest check that covers the change:
 
-| Change                                | Run                                                                                                                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration    | `pnpm check`, `pnpm lint-fix`                                                                                                            |
-| A new, renamed or removed module      | `pnpm codegen`, then `pnpm check`                                                                                                        |
-| Protocol corrections or annotations   | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
-| Keyboard layouts                      | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
-| Runtime behavior                      | `pnpm test --run <file>`                                                                                                                 |
-| The protocol client or transports     | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
-| A backend adapter or launcher         | `pnpm test:integration`                                                                                                                  |
-| The model, engine, locators or pages  | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
-| The `strider` command                 | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
-| Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
-| JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                        | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
-| A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
-| The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
-| The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
-| The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
-| Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+| Change                                                                            | Run                                                                                                                                      |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration                                                | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module                                                  | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations                                               | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Keyboard layouts                                                                  | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
+| Runtime behavior                                                                  | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports                                                 | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher                                                     | `pnpm test:integration`                                                                                                                  |
+| The model, engine, locators or pages                                              | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
+| The `strider` command                                                             | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
+| Uploads or file transfer (including `setInputFiles` and the upload transfer path) | `pnpm test:integration:heavy`, in addition to the ordinary relevant checks                                                               |
+| Access rules or other type behavior                                               | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links                                                   | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                                                                    | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
+| A guide's code                                                                    | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
+| The website or the reference's tools                                              | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
+| The packages' exports, files or peers                                             | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| The root `README.md`                                                              | `pnpm readme`, which writes the README npm shows from it                                                                                 |
+| Before a commit that touches `src/`                                               | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
 Linux commands are serial: `pnpm test:integration` excludes the twelve large local-file upload cases;
 `pnpm test:integration:heavy` opts into all twelve (32/256/600 MiB on four backends), and
