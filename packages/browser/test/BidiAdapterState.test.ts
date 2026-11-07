@@ -264,7 +264,7 @@ describe("BidiAdapter state", () => {
   }
 
   for (const order of ["in order", "out of order"] as const) {
-    it.effect(`leaves no reservation behind when overlapping traversals reply ${order}`, () =>
+    it.effect(`does not attribute an unrelated navigation to overlapping traversals replying ${order}`, () =>
       Effect.gen(function*() {
         // Synthetic ordering, not captured Firefox traffic: two traversals overlap, neither is announced.
         const url = "http://restored.example/"
@@ -297,14 +297,131 @@ describe("BidiAdapter state", () => {
           origin: "http://restored.example"
         }, { state })
         yield* state.buffer.flush
-        yield* state.buffer.waitFor(() => facts.some((fact) => fact._tag === "NavigationEnded") ? true : undefined)
+        // A successful reply and a realm cannot identify either overlapping traversal.
+        // The next navigation must get its own facts, never a returned traversal id.
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "unrelated",
+          url: "http://unrelated.example/",
+          timestamp: 1
+        }, { state })
+        handlers.apply("browsingContext.navigationCommitted", {
+          context: page.bidi,
+          navigation: "unrelated",
+          url: "http://unrelated.example/",
+          timestamp: 2
+        }, { state })
         yield* state.buffer.flush
+        const unrelated = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(unrelated, 1, "ambiguous replies must not invent a navigation")
+        assert(unrelated[0]!._tag === "NavigationStarted")
+        assert.notStrictEqual(unrelated[0]!.navigation, one.value)
+        assert.notStrictEqual(unrelated[0]!.navigation, two.value)
+        assert.strictEqual(unrelated[0]!.initiatedAs, "crossDocument")
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1)
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.strictEqual(ended[0]!.navigation, unrelated[0]!.navigation)
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
         assert.strictEqual(page.restoring, undefined)
         assert.deepStrictEqual(
           page.expected.list.map((expected) => expected.id),
           [],
           "no traversal reservation may leak"
         )
+      }))
+  }
+
+  for (const newer of ["command", "event", "page removal"] as const) {
+    it.effect(`does not reinstall a traversal after a newer ${newer} and a late reply`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          ),
+          "browsingContext.navigate": { navigation: "newer", url: "http://newer.example/" },
+          "script.evaluate": {
+            type: "success",
+            realm: "R2",
+            result: { type: "string", value: "http://stale.example/" }
+          }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        let owned: PageNavigation.Id | undefined
+        if (newer === "command") {
+          owned = yield* Navigation.navigate(state, page.id, "http://newer.example/", { referrer: Option.none() })
+        } else if (newer === "event") {
+          // The traversal was positively announced before the subsequent navigation replaced it.
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "traversal",
+            url: "http://old.example/",
+            timestamp: 1
+          }, { state })
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 2
+          }, { state })
+        } else Tree.removeNavigable(state, page, new Target.Vanished({}), "test")
+        yield* Deferred.succeed(release, undefined)
+        const navigation = yield* Fiber.join(fiber)
+        assert(Option.isSome(navigation))
+        assert.strictEqual(page.restoring, undefined, "a stale reply must not reinstall restoration")
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://stale.example"
+        }, { state })
+        if (newer !== "page removal") {
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 3
+          }, { state })
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 4
+          }, { state })
+        }
+        yield* state.buffer.flush
+        assert.notStrictEqual(page.document?.url, "http://stale.example/")
+        const traversalEnds = facts.filter((fact) =>
+          fact._tag === "NavigationEnded" && fact.navigation === navigation.value
+        )
+        if (newer === "event") {
+          assert.lengthOf(traversalEnds, 1)
+          assert(traversalEnds[0]!._tag === "NavigationEnded")
+          assert.strictEqual(traversalEnds[0]!.outcome._tag, "Superseded")
+        } else assert.lengthOf(traversalEnds, 0, "command issuance and removal cannot invent an outcome")
+        if (owned !== undefined) {
+          const starts = facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === owned)
+          assert.lengthOf(starts, 1, "the newer command retains its own reply correlation")
+          const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === owned)
+          assert.lengthOf(ends, 1)
+          assert(ends[0]!._tag === "NavigationEnded")
+          assert.deepStrictEqual(ends[0]!.outcome, {
+            _tag: "Committed",
+            document: page.document!.id,
+            response: Option.none()
+          })
+        }
+        assert.lengthOf(page.expected.list, 0)
       }))
   }
 
