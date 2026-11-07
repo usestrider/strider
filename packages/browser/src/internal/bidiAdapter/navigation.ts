@@ -3,6 +3,7 @@
  * the commands that start them. A navigation command whose reply is an error may still have started a
  * navigation, whose outcome the events report; one that never started ends at once.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
@@ -443,10 +444,15 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
   // is pending. A late reply may use its own surviving record, but can never install one again.
   navigable.restoring = restoration
   navigable.traversalCommands.add(navigation)
-  const release = () =>
+  const release = (noHistory: boolean) =>
     state.buffer.run(() => {
       Kit.unexpect(navigable.expected, navigation)
-      if (navigable.restoring === restoration) cancelRestoration(navigable)
+      if (navigable.restoring !== restoration) return
+      // Only this rejection proves the command did not traverse. Do not clear ambiguity that
+      // already existed, or disregard a navigation the browser positively announced.
+      if (noHistory && ![...navigable.navigations.values()].some((entry) => entry.id === navigation)) {
+        navigable.restoring = undefined
+      } else cancelRestoration(navigable)
     })
   return yield* Effect.gen(function*() {
     const exit = yield* Effect.exit(state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })))
@@ -456,7 +462,13 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
         }))
       )
     if (exit._tag === "Failure") {
-      yield* release()
+      const noHistory = Option.exists(
+        Cause.findErrorOption(exit.cause),
+        (error) =>
+          error.reason._tag === "Rejected" && error.reason.method === "browsingContext.traverseHistory" &&
+          error.reason.code === "no such history entry"
+      )
+      yield* release(noHistory)
       return Option.none<PageNavigation.Id>()
     }
     let realm: RealmEntry | undefined
@@ -476,5 +488,5 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
     })
     if (realm !== undefined) yield* complete(realm)
     return Option.some(navigation)
-  }).pipe(Effect.onInterrupt(release))
+  }).pipe(Effect.onInterrupt(() => release(false)))
 })
