@@ -41,22 +41,24 @@ it("gives each failed repetition its own archive", { repeats: 1 }, async (contex
   if (destinations.length === 2) assert.notEqual(destinations[0], destinations[1])
 })
 
-
 const directory = mkdtempSync(join(tmpdir(), "strider-repeat-traces-"))
 let earlierPath: string
 let attachedPath: string
 afterAll(() => rmSync(directory, { recursive: true, force: true }))
 it("keeps an earlier archive when a later repeat recovers", { repeats: 1 }, async (context) => {
   const repeat = context.task.result?.repeatCount ?? 0
-  vi.mocked(Trace.record).mockImplementation(() => Effect.succeed({
-    remove: Effect.void,
-    exportTrace: (path: string) => Effect.promise(async () => {
-      await mkdir(dirname(path), { recursive: true })
-      await writeFile(path, `repeat-${repeat}`)
-      if (repeat === 0) earlierPath = path
-      return path as never
+  vi.mocked(Trace.record).mockImplementation(() =>
+    Effect.succeed({
+      remove: Effect.void,
+      exportTrace: (path: string) =>
+        Effect.promise(async () => {
+          await mkdir(dirname(path), { recursive: true })
+          await writeFile(path, `repeat-${repeat}`)
+          if (repeat === 0) earlierPath = path
+          return path as never
+        })
     })
-  }))
+  )
   const backend = Layer.succeed(Browser.Browser, { newContext: () => Effect.succeed({}) } as never)
   const body = Effect.scoped(Effect.andThen(Browser.newContext(), Effect.fail("failure")))
   await Effect.runPromiseExit((repeat === 0 ? body : body.pipe(Effect.catch(() => Effect.void))).pipe(
@@ -71,7 +73,7 @@ it("keeps an earlier archive when a later repeat recovers", { repeats: 1 }, asyn
   assert.equal(await readFile(attachedPath, "utf8"), "repeat-0")
 })
 
-it("retains the captured repeat when the runner mutates its task", (context) => {
+it("retains the captured repeat when the runner mutates its task", { repeats: 1 }, (context) => {
   const result = context.task.result!
   const before = result.repeatCount ?? 0
   const bind = VitestBrowser.withTest(context)

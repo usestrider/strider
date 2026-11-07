@@ -2438,7 +2438,7 @@ Test support that works with any test runner: the running test, and the files at
 
 *models*
 
-- `class TestInfo: Schema.Class { project, file, id, attempt, worker, shard }`
+- `class TestInfo: Schema.Class { project, file, id, attempt, repeat, worker, shard }`
 - `type TestArtifact = typeof TestArtifact.Type`
 
 *schemas*

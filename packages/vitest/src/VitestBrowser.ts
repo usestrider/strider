@@ -54,6 +54,7 @@ const infoOf = (test: RunnerTest | undefined): TestRun.TestInfo =>
     file: test?.file.filepath ?? "",
     id: test === undefined ? "" : pathOf(test),
     attempt: test?.result?.retryCount ?? 0,
+    repeat: test?.result?.repeatCount ?? 0,
     worker: env("VITEST_POOL_ID"),
     shard: env("VITEST_SHARD")
   })
@@ -151,8 +152,8 @@ const warn = (effect: Effect.Effect<unknown, unknown>): Effect.Effect<void> =>
  *
  * **Details**
  *
- * Call inside every test callback, including each retry. Captures identity and attempt immediately; attachments
- * use the captured task. Works with a browser layer shared by a block, without rebuilding the browser, and
+ * Call inside every test callback, including each retry and repeat. Captures identity, retry attempt and repeat
+ * immediately; attachments use the captured task. Works with a browser layer shared by a block, without rebuilding the browser, and
  * with a per-effect browser layer in either composition order. Complete attachments before the callback ends;
  * Vitest does not guarantee that artifacts attached later reach reporters.
  *
@@ -377,10 +378,11 @@ export const layer = <E, R>(
  * **Details**
  *
  * The basename contains only ASCII letters, digits, hyphens and underscores, followed by `.zip`. A readable
- * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID and attempt distinguishes
- * identities whose prefixes match. Workers and shards do not change the name. Repeated exports for the same
- * identity use the same name, so choose another directory to keep separate runs or recordings.
- * Capture `TestRun.info` beside `Trace.record`, before another test or retry starts. No file is written or attached.
+ * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID, attempt and repeat distinguishes
+ * identities whose prefixes match. Repeat zero keeps the original four-field digest and filename; later repeats
+ * add a repeat suffix and include the repeat in the digest. Workers and shards do not change the name. Exports
+ * for the same identity use the same name, so choose another directory to keep separate runs or recordings.
+ * Capture `TestRun.info` beside `Trace.record`, before another test, retry or repeat starts. No file is written or attached.
  *
  * **Example** (Exporting a trace named for its test)
  *
@@ -404,8 +406,12 @@ export const layer = <E, R>(
  * @since 0.1.0
  */
 export const traceFileName = (info: TestRun.TestInfo): string => {
-  const identity = JSON.stringify([info.project, info.file, info.id, info.attempt])
+  const repeat = info.repeat ?? 0
+  const fields: Array<string | number> = [info.project, info.file, info.id, info.attempt]
+  if (repeat !== 0) fields.push(repeat)
+  const identity = JSON.stringify(fields)
   const digest = createHash("sha256").update(identity).digest("hex")
   const prefix = info.id.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+/, "").slice(0, 48) || "test"
-  return `${prefix}-retry-${String(info.attempt).replace(/[^a-zA-Z0-9_-]/g, "-")}-${digest}.zip`
+  const repetition = repeat === 0 ? "" : `-repeat-${String(repeat).replace(/[^a-zA-Z0-9_-]/g, "-")}`
+  return `${prefix}${repetition}-retry-${String(info.attempt).replace(/[^a-zA-Z0-9_-]/g, "-")}-${digest}.zip`
 }

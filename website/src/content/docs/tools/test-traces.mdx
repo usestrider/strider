@@ -88,3 +88,8 @@ result. Hard process termination cannot complete export. Vitest timeouts must le
 Automatic tracing is off when `trace` is omitted, and creates no recordings without `withTest(context)`.
 It covers contexts created through the configured layer's ordinary `Browser.newContext` and `Browser.newPage`.
 Existing, default and reclaimed contexts need explicit [`Trace.record`](/docs/tools/recordings#traces).
+
+`TestRun.TestInfo.repeat` is the zero-based repetition, separate from the retry attempt. Constructors and
+decoding default it to zero when omitted. Bind every retry and repeat with `withTest(context)` to capture
+both counters. Repeat zero keeps the original trace filename; later repeats add `repeat-N` and include
+the repeat in the filename digest and trace metadata.

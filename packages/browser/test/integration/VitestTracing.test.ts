@@ -57,6 +57,7 @@ it("exports and attaches the real failed callback, keeping successful callbacks 
     )
     assert.include(lines[0].striderTest.id, "failed assertion")
     assert.equal(lines[0].striderTest.attempt, 0)
+    assert.equal(lines[0].striderTest.repeat, 0)
     assert.isTrue(lines.some((event) => event.type === "frame-snapshot"))
     assert.isTrue(lines.some((event) => event.type === "screenshot"))
     assert.isTrue(entries.has("trace.network"))
