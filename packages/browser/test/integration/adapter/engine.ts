@@ -823,10 +823,10 @@ export const engine = (backend: Backend) =>
                 expected
               )
             })
-            yield* check("checkbox", true, 0)
-            yield* check("checkbox", false, 4)
+            yield* check("checkbox", true, 1)
+            yield* check("checkbox", false, 3)
             yield* check("option", true, 0)
-            yield* check("option", false, 1)
+            yield* check("option", false, 0)
             yield* check("treeitem", false, 0)
             const read = yield* send({
               op: "read",
