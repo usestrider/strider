@@ -597,6 +597,42 @@ describe("BoundedAdapter", () => {
       }).pipe(Operation.named("creation then input"), Deadline.within("50 millis"))
     }))
 
+  it.effect("releases a virtual authenticator created after the acquisition deadline", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Adapter.Authenticator>()
+      const closed = yield* Deferred.make<Adapter.Authenticator>()
+      const ref = { page, id: "test-authenticator" }
+      const adapter = stub({
+        createAuthenticator: () => Deferred.await(made),
+        releaseAuthenticator: (ref) => Deferred.succeed(closed, ref).pipe(Effect.asVoid)
+      })
+      const timeout = yield* adapter.createAuthenticator(page).pipe(
+        Operation.named("Page.capability"),
+        Deadline.within("50 millis"),
+        Effect.flip
+      )
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      yield* Deferred.succeed(made, ref)
+      assert.strictEqual(yield* Deferred.await(closed), ref)
+    }))
+
+  it.effect("releases a virtual authenticator when acquisition is interrupted before its reply", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const made = yield* Deferred.make<Adapter.Authenticator>()
+      const closed = yield* Deferred.make<Adapter.Authenticator>()
+      const ref = { page, id: "test-authenticator" }
+      const adapter = stub({
+        createAuthenticator: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(made))),
+        releaseAuthenticator: (ref) => Deferred.succeed(closed, ref).pipe(Effect.asVoid)
+      })
+      const fiber = yield* adapter.createAuthenticator(page).pipe(Operation.named("Page.capability"), Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(fiber)
+      yield* Deferred.succeed(made, ref)
+      assert.strictEqual(yield* Deferred.await(closed), ref)
+    }))
+
   it.effect("never cuts a release short", () =>
     Effect.gen(function*() {
       const adapter = stub({ closePage: () => real(300) })

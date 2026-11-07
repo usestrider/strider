@@ -8,6 +8,7 @@
  * @since 0.1.0
  */
 import type * as Brand from "effect/Brand"
+import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Protocol from "../protocol/Protocol.ts"
 
@@ -96,7 +97,7 @@ export interface Credential {
   /**
    * The ECDSA P-256 private key in PKCS#8 format. (Encoded as a base64 string when passed over JSON)
    */
-  readonly privateKey: string
+  readonly privateKey: Redacted.Redacted<string>
   /**
    * An opaque byte sequence with a maximum size of 64 bytes mapping the
    * credential to a specific user. (Encoded as a base64 string when passed over JSON)
@@ -163,7 +164,7 @@ export const Credential = /*#__PURE__*/ Schema.suspend(() =>
     credentialId: Schema.String,
     isResidentCredential: Schema.Boolean,
     rpId: Schema.optional(Schema.String),
-    privateKey: Schema.String,
+    privateKey: Schema.RedactedFromValue(Schema.String),
     userHandle: Schema.optional(Schema.String),
     signCount: Schema.Number,
     largeBlob: Schema.optional(Schema.String),
@@ -175,7 +176,7 @@ export const Credential = /*#__PURE__*/ Schema.suspend(() =>
     activeCmtgKeyIndex: Schema.optional(Schema.Int),
     generateCmtgKeyOnNextOperation: Schema.optional(Schema.Boolean)
   }).annotate({ identifier: "WebAuthn.Credential" })
-) as any as Schema.Codec<Credential>
+) as any as Schema.Codec<Credential, unknown>
 
 /**
  * `Ctap2Version` values.
@@ -340,7 +341,7 @@ export const AddCredentialParams = /*#__PURE__*/ Schema.suspend(() =>
     authenticatorId: AuthenticatorId,
     credential: Credential
   }).annotate({ identifier: "WebAuthn.AddCredentialParams" })
-) as any as Schema.Codec<AddCredentialParams>
+) as any as Schema.Codec<AddCredentialParams, unknown>
 
 /**
  * Creates and adds a virtual authenticator.
@@ -438,7 +439,7 @@ export const CredentialAddedParams = /*#__PURE__*/ Schema.suspend(() =>
     authenticatorId: AuthenticatorId,
     credential: Credential
   }).annotate({ identifier: "WebAuthn.CredentialAddedParams" })
-) as any as Schema.Codec<CredentialAddedParams>
+) as any as Schema.Codec<CredentialAddedParams, unknown>
 
 /**
  * Triggered when a credential is used in a webauthn assertion.
@@ -464,7 +465,7 @@ export const CredentialAssertedParams = /*#__PURE__*/ Schema.suspend(() =>
     authenticatorId: AuthenticatorId,
     credential: Credential
   }).annotate({ identifier: "WebAuthn.CredentialAssertedParams" })
-) as any as Schema.Codec<CredentialAssertedParams>
+) as any as Schema.Codec<CredentialAssertedParams, unknown>
 
 /**
  * Triggered when a credential is deleted, e.g. through
@@ -518,7 +519,7 @@ export const CredentialUpdatedParams = /*#__PURE__*/ Schema.suspend(() =>
     authenticatorId: AuthenticatorId,
     credential: Credential
   }).annotate({ identifier: "WebAuthn.CredentialUpdatedParams" })
-) as any as Schema.Codec<CredentialUpdatedParams>
+) as any as Schema.Codec<CredentialUpdatedParams, unknown>
 
 /**
  * Enable the WebAuthn domain and start intercepting credential storage and
@@ -602,7 +603,7 @@ export const GetCredentialResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     credential: Credential
   }).annotate({ identifier: "WebAuthn.GetCredentialResult" })
-) as any as Schema.Codec<GetCredentialResult>
+) as any as Schema.Codec<GetCredentialResult, unknown>
 
 /**
  * Returns all the credentials stored in the given virtual authenticator.
@@ -650,7 +651,7 @@ export const GetCredentialsResult = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     credentials: Schema.Array(Credential)
   }).annotate({ identifier: "WebAuthn.GetCredentialsResult" })
-) as any as Schema.Codec<GetCredentialsResult>
+) as any as Schema.Codec<GetCredentialsResult, unknown>
 
 /**
  * Removes a credential from the authenticator.
@@ -871,7 +872,11 @@ export const addVirtualAuthenticator: Protocol.CommandDef<
   "WebAuthn.addVirtualAuthenticator",
   AddVirtualAuthenticatorParams,
   AddVirtualAuthenticatorResult,
-  { status: "stable" }
+  {
+    status: "stable",
+    createsResource: true,
+    release: [{ method: "WebAuthn.removeVirtualAuthenticator", param: "authenticatorId", from: "/authenticatorId" }]
+  }
 )
 
 /**

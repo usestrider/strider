@@ -16,13 +16,16 @@ import type * as FilePath from "../FilePath.ts"
 import * as Pixels from "../Pixels.ts"
 import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
+import type * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+import * as WebAuthn from "./webauthn.ts"
 
 /** Each capability: its support table entry, and the backends that have it. */
 const known: Readonly<Record<string, { readonly entry: string; readonly backends: string }>> = {
+  VirtualAuthenticator: { entry: "capability.virtualAuthenticator", backends: "Chromium native WebAuthn (CDP)" },
   AxTree: { entry: "capability.axTree", backends: "Chromium's (CDP)" },
   Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP)" },
   Video: { entry: "capability.video", backends: "Chromium with VideoWriter, or Firefox launched by the program" }
@@ -48,7 +51,8 @@ const gone = (page: Model.PageEntry, reason: Target.CloseReason, id: Diagnostics
 export const acquire = <H>(
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
-  capability: Capability.Capability<H>
+  capability: Capability.Capability<H, "inspect" | "control">,
+  grant: Option.Option<Access.Grant> = Option.none()
 ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope> =>
   Effect.gen(function*() {
     const { id } = yield* Operation.record
@@ -82,6 +86,8 @@ export const acquire = <H>(
     const adapter = runtime.model.adapter
     const attributes = { "browser.page.id": page.id, "browser.capability": capability.name }
     switch (capability.name) {
+      case "VirtualAuthenticator":
+        return (yield* WebAuthn.acquire(runtime, page, grant)) as H
       case "AxTree": {
         const reader: Capability.AxTreeReader = {
           read: Effect.flatMap(Operation.record, ({ id }) =>
