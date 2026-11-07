@@ -45,7 +45,20 @@ describe("proxy options", () => {
       }))
   }
 
-  for (const host of ["*.example.com", "example.com:8080", "192.0.2.0/24", "host,other", "http://host", " host"]) {
+  for (
+    const host of [
+      "*.example.com",
+      "example.com:8080",
+      "192.0.2.0/24",
+      "host,other",
+      "http://host",
+      " host",
+      "%65xample.com",
+      "foo;bar",
+      "foo\\",
+      "[::1]:80"
+    ]
+  ) {
     it.effect(`refuses unsupported bypass syntax ${host}`, () =>
       Effect.gen(function*() {
         const error = yield* Proxy.normalize({ server: "host:8080", bypass: [host] }, "test").pipe(Effect.flip)
