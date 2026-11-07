@@ -2662,7 +2662,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       (kind === "own" || kind === "own-ancestor")
                         ? `role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault();this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"`
                         : ""
-                    } style="display:inline-block;width:100px;height:30px">Toggle</${targetTag}>`
+                    } style="display:inline-block;position:relative;left:0.4px;top:0.4px;width:100px;height:30px">Toggle</${targetTag}>`
                   const wrapped = kind === "ancestor" || kind === "own-ancestor" ?
                     `<button>${target}</button>` :
                     kind === "link-ancestor" ?
