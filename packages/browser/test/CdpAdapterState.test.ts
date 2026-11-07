@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
@@ -1281,3 +1282,99 @@ describe("CDP declaration cleanup lifetime", () => {
     )
   }
 })
+
+describe("CDP proxy and website challenge separation", () => {
+  for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
+    it.effect(`preserves website challenge coverage: ${coverage}`, () =>
+      Effect.gen(function*() {
+        const calls: Array<{ method: string; params: unknown }> = []
+        const wrote = yield* Deferred.make<void>()
+        const mock = {
+          ...session,
+          send: (command: { method: string; params: unknown }) =>
+            Effect.andThen(
+              Effect.sync(() => calls.push({ method: command.method, params: command.params })),
+              Deferred.succeed(wrote, undefined)
+            )
+        } as unknown as ProtocolClient.Session
+        const { state, page, target: original } = yield* withPage(mock)
+        const target = {
+          ...original,
+          page: {
+            ...page,
+            context: {
+              ...page.context,
+              proxy: {
+                server: "proxy.test:8080",
+                bypass: [],
+                credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+              }
+            }
+          }
+        }
+        if (coverage !== "none") {
+          state.registry.add(
+            { _tag: "Page", page: page.id },
+            coverage === "document policy"
+              ? { _tag: "Challenges" }
+              : { _tag: "Intercept", patterns: ["*"], phases: [coverage === "auth route" ? "auth" : "request"] },
+            state.ids.registration()
+          )
+        }
+        const handlers = Obligations.register(Kit.handlers<State.Event>())
+        handlers.apply("Fetch.authRequired", {
+          requestId: "F1",
+          frameId: "T1",
+          resourceType: coverage === "document policy" ? "Document" : "Fetch",
+          request: sent(`${origin}/auth`).request,
+          authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+        }, { state, target })
+        assert.strictEqual(state.obligations.size, coverage === "none" ? 0 : 1)
+        yield* state.buffer.flush
+        if (coverage === "none") {
+          yield* Deferred.await(wrote)
+          assert.deepStrictEqual(calls, [{
+            method: "Fetch.continueWithAuth",
+            params: { requestId: "F1", authChallengeResponse: { response: "Default" } }
+          }])
+        } else assert.deepStrictEqual(calls, [])
+      }))
+  }
+})
+
+for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
+  it.effect(`cleans up a worker's proxy authentication attempt on ${terminal}`, () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      page.context.proxy = {
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+      }
+      const worker: State.TargetEntry = { ...target, kind: "worker", page: undefined }
+      state.workerContexts.set(worker, page.context)
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const request = sent(`${origin}/worker`).request
+      handlers.apply("Fetch.requestPaused", {
+        requestId: "F1",
+        networkId: "R1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request
+      }, { state, target: worker })
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request,
+        authChallenge: { source: "Proxy", origin: "http://proxy.test:8080", scheme: "basic", realm: "proxy" }
+      }, { state, target: worker })
+      assert.strictEqual(worker.proxyAuth?.size, 1)
+      handlers.apply(terminal, { requestId: "R1", encodedDataLength: 0, errorText: "canceled" }, {
+        state,
+        target: worker
+      })
+      assert.strictEqual(worker.proxyAuth?.size, 0)
+      yield* state.buffer.flush
+    }))
+}

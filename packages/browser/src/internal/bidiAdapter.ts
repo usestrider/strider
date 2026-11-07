@@ -60,6 +60,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("userContexts.proxy", "supported", [
+        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
+        "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+      ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
         "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new document itself"
@@ -224,6 +230,7 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
     }),
   ended: (_session, reason) =>
     Effect.suspend(() => {
+      if (reason.why === "connectionLost") State.releaseProxy(state)
       if (reason.why === "connectionLost" || reason.why === "modelUnavailable") {
         const why: L1Target.CloseReason = reason.why === "connectionLost"
           ? Kit.closed()
@@ -260,6 +267,7 @@ export const connect: (
       }
     })
     root = client.root
+    yield* Effect.addFinalizer(() => Effect.sync(() => State.releaseProxy(state)))
     const on = Protocol.on(root)
 
     const failConnect = (error: Protocol.ProtocolError) =>

@@ -243,6 +243,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      for (const [id, auth] of target.proxyAuth ?? []) {
+        if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
+      }
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
       const finished: Adapter.Fact = {
@@ -260,6 +263,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      for (const [id, auth] of target.proxyAuth ?? []) {
+        if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
+      }
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return

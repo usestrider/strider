@@ -304,6 +304,11 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
+  readonly proxy?: {
+    readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
+    readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
+    readonly credentials?: { readonly username: string; readonly password: Redacted<string> } | undefined // default none
+  } | undefined                                          // default existing browser proxy settings
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
@@ -335,6 +340,22 @@ interface Emulation {
 - **Stock WebKit viewport confirmation.** A launched window is resized, then its CSS dimensions are checked immediately and on resize events for up to five seconds by default, capped by the operation deadline. One final measurement at the confirmation limit can still succeed; otherwise `Reason.ViewportMismatch` carries numeric `requested` and `actual` sizes. This is an observed match within a limit, not permanent support or a guarantee against later user/window-manager changes. Page creation checks inherited defaults and closes failed pages. Failed overrides restore and confirm the prior size under a detached five-second cleanup budget; a failed-change rollback failure remains visible as a defect alongside the original error. Ordinary scope release is non-failing: a confirmed gone page needs no restoration, and other release failures are logged without claiming success. Callback disposal preserves the primary result, ignores confirmed vanished windows and logs other failures. Cleanup reserves its final second for measurement inside the shared five-second budget; genuine operation deadlines remain timeouts. Genuine operation deadlines, navigation and protocol failures retain their own errors. Popup defaults are attempted, but no creating operation exists to report their failure: explicitly emulate the popup for confirmation.
 - **One `emulate` call is one registration.** Removing it, or closing its scope, removes every field it set. Each field is a capability named for it: `emulation.viewport`, `emulation.viewport.mobile`, `emulation.userAgent`, `emulation.locale`, `emulation.timezone`, `emulation.geolocation`, `emulation.geolocation.unavailable`, `emulation.media`, `emulation.network.offline`, `emulation.network.throttling`, `emulation.cpuSlowdown`, `emulation.javaScript`, `emulation.touch` and `emulation.focus`. The call fails with `Unsupported` naming the first the backend can't apply, before anything is applied. Chromium applies every field. Firefox can't emulate media, touch, JavaScript, a mobile viewport, throttling, a CPU slowdown or an unavailable position. WebKit sets the locale and position per context, the locale only before the context's pages exist (which `UserContext.Options.emulation` is), and can't emulate touch, throttling, a CPU slowdown or an unavailable position. Most fields reach a loaded page at once; JavaScript, touch handlers and WebKit's `navigator.userAgent` wait for its next document.
 - **Grants are recomputed.** Removing one leaves the others in force: the browser can only reset a context's grants together, so the library resets them and grants what remains. A name the browser doesn't know fails with `InvalidInput` naming it, and every origin is `permissions.anyOrigin`, which Firefox lacks.
+- **A proxy belongs to a new context.** HTTP proxy endpoints carry HTTP requests and HTTPS CONNECT tunnels;
+  HTTPS-to-proxy and SOCKS endpoints fail `Unsupported{userContexts.proxy.scheme}`. URL userinfo, paths, queries,
+  fragments and non-host bypass entries fail `InvalidInput` without reflecting their text. Bypass entries are
+  hostnames or IP addresses, without URL, port, wildcard or CIDR syntax, interpreted by the browser's native host
+  rules (which may also exclude subdomains). Localhost, 127.0.0.1 and ::1 stay direct. Omitting the proxy leaves
+  launch/system settings unchanged. The context and its pages release proxy connections with their scope.
+- **Proxy credentials answer proxy challenges only, once per request.** A second challenge is canceled; website
+  auth routes retain their decisions. Passwords stay `Redacted` through protocol encoding and are absent from logs
+  and trace exports. Firefox uses Proxy-Authenticate to identify proxy challenges and WWW-Authenticate when its
+  origin challenge metadata is missing. Firefox credentials require a freshly launched browser: a proxy endpoint's
+  successful context binds its credential pair (including none) for the connection's life because Firefox shares
+  its auth cache across contexts. Pending creations also reserve their pair. Confirmed pre-creation rejection or
+  confirmed unused setup rollback releases only that creation's share; uncertain outcomes retain it. Conflicting settings fail `Unsupported{userContexts.proxy.credentials.isolation}`, including
+  after context removal; attached Firefox credentials fail `Unsupported{userContexts.proxy.credentials}`.
+  Launched WebKit routes through isolated child-process environment settings and refuses credentials with
+  `Unsupported{userContexts.proxy.credentials}`. An existing WebKit process cannot be reconfigured.
 - **Context failures are `UserContext.UserContextError`,** with reasons `StorageState.Incompatible{partitions}` (a saved state the new context can't apply in full: nothing is applied partly), `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`.
 
 ## Pages

@@ -70,6 +70,9 @@ export const removeNavigable = (
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
     cancelRestoration(navigable)
+    for (const [key, request] of state.requests) {
+      if (request.navigable === navigable) navigable.context.proxyAttempts?.delete(key)
+    }
     navigable.traversalCommands.clear()
     navigable.navigationCommands.clear()
     navigable.commandNavigations.clear()
@@ -249,6 +252,7 @@ export const addNavigable = (state: State, info: {
   const parent = info.parent === null || info.parent === undefined ? undefined : state.navigables.get(info.parent)
   if (info.parent !== null && info.parent !== undefined && parent === undefined) return undefined
   const context = contextFor(state, info.userContext)
+  context.proxyUsed = true
   const navigable: NavigableEntry = {
     bidi: info.context,
     id: state.ids.navigable(),

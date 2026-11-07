@@ -28,6 +28,7 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  proxy?: Adapter.ProxyOptions | undefined
   readonly id: UserContext.Id
   /** CDP's id; the default context's too, once a page in it reports it. */
   browserContextId: string | undefined
@@ -38,6 +39,7 @@ export interface ContextEntry {
 export type TargetKind = "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
 
 export interface TargetEntry {
+  proxyAuth?: Map<string, { readonly networkId: string | undefined; attempted: boolean }> | undefined
   readonly kind: TargetKind
   readonly targetId: string
   readonly session: ProtocolClient.Session
