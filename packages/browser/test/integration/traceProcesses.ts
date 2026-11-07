@@ -3,9 +3,10 @@ import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
 import { pipeObserver } from "./tracePipe.ts"
+import { prepareChild } from "./traceTransfer.ts"
+import type { SpawnOptions } from "./traceTransfer.ts"
 
 const patched = Symbol.for("strider.integration.processObserver")
-type SpawnOptions = { readonly file: string; readonly args?: ReadonlyArray<string> }
 // Node's spawn, execFile and fork all reach this method; it is absent from @types/node's public surface.
 const prototype = ChildProcess.prototype as ChildProcess & {
   [patched]?: boolean
@@ -16,6 +17,7 @@ if (!prototype[patched]) {
   const spawn = prototype.spawn
   prototype.spawn = function(this: ChildProcess, options: SpawnOptions) {
     const trace = connection(`process:${options.file}`)
+    prepareChild(options)
     const result = spawn.call(this, options)
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.

@@ -1,4 +1,4 @@
-/** Source instrumentation is confined to Vitest's integration module graph. No shipped source is changed. */
+/** Test-only source instrumentation shared by Vitest and the Node preload. No shipped source is changed. */
 import * as path from "node:path"
 import type { Plugin } from "vitest/config"
 

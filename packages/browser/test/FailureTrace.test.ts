@@ -346,9 +346,14 @@ describe("native video failure artifacts", () => {
 
 it("transfers bounded child and detached daemon records with process-local ordering", async () => {
   const { spawnSync } = await import("node:child_process")
-  const run = spawnSync("pnpm", ["exec", "vitest", "--run", "--config",
-    "packages/browser/test/fixtures/failureTrace/vitest.config.ts", "child.fixture"],
-  { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "child.fixture"
+  ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
   expect(run.status, run.stdout + run.stderr).toBe(1)
   const paths = [...run.stderr.matchAll(/Integration failure trace: (.+child\.fixture.+-test\.ndjson)/g)]
   expect(paths).toHaveLength(1)
@@ -356,9 +361,42 @@ it("transfers bounded child and detached daemon records with process-local order
   expect(text).toContain("DAEMON_FAIL")
   expect(text).toContain("DAEMON_ORDER_ONE")
   expect(text).toContain("DAEMON_ORDER_TWO")
+  expect(text).toContain("DAEMON_OWN_STDERR")
+  expect(text).toContain("node-stderr")
   expect(text).toContain("FLOOD_TAIL")
   expect(text).toContain("overflow")
   expect(text).not.toContain("CHILD_PASS")
+  expect(text).not.toContain("LATE_CHILD_PASS")
+  const entries = text.trimEnd().split("\n").map((line) => JSON.parse(line))
+  const children = entries.filter((entry) => entry.kind === "send" || entry.kind === "receive").map((entry) => ({
+    ...entry.origin,
+    payload: entry.payload
+  }))
+  const first = children.find((entry) => entry.payload === "DAEMON_ORDER_ONE")!
+  const second = children.find((entry) => entry.payload === "DAEMON_ORDER_TWO")!
+  expect(first.pid).toBe(second.pid)
+  expect(first.sequence).toBeLessThan(second.sequence)
+  expect(first.connection).toBe(second.connection)
   expect(Buffer.byteLength(text)).toBeLessThan(3 * 1024 * 1024)
   for (const match of run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)) fs.unlinkSync(match[1]!)
 }, 30_000)
+
+it("caps process slots, reports exhaustion and removes the transfer spool", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { processSlots, TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  for (let slot = 0; slot < processSlots; slot++) fs.writeFileSync(path.join(directory, `${slot}.claim`), "")
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    ""
+  ], {
+    env: { ...process.env, [transferVariable]: directory }
+  })
+  expect(fs.readdirSync(directory)).toHaveLength(processSlots + 1)
+  scope.close()
+  expect(records).toContainEqual(["overflow", "Child process slot budget exhausted"])
+  expect(fs.existsSync(directory)).toBe(false)
+})
