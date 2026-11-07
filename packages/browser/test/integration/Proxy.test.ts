@@ -337,3 +337,67 @@ describe("stock WebKit proxy feasibility", () => {
     }
   )
 })
+
+describe("Firefox interception scope feasibility", () => {
+  layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+    (it) => {
+      it.effect(
+        "ignores unsupported userContexts on addIntercept and still blocks another context",
+        () =>
+          Effect.gen(function*() {
+            const origin = yield* site
+            const { transport } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
+            let id = 0
+            const replies = new Map<number, Deferred.Deferred<any>>()
+            const challenges: Array<string> = []
+            const call = Effect.fnUntraced(function*(method: string, params: object) {
+              const next = ++id
+              const reply = yield* Deferred.make<any>()
+              replies.set(next, reply)
+              yield* transport.send(JSON.stringify({ id: next, method, params }))
+              const result = yield* Deferred.await(reply)
+              replies.delete(next)
+              return result
+            })
+            yield* transport.messages.pipe(
+              Stream.runForEach((text) =>
+                Effect.gen(function*() {
+                  const message = JSON.parse(text)
+                  if (message.id !== undefined) {
+                    const reply = replies.get(message.id)
+                    if (reply) yield* Deferred.succeed(reply, message)
+                  } else if (message.method === "network.authRequired") {
+                    challenges.push(message.params.userContext)
+                    yield* call("network.continueWithAuth", {
+                      request: message.params.request.request,
+                      action: "cancel"
+                    })
+                      .pipe(Effect.forkScoped)
+                  }
+                })
+              ),
+              Effect.forkScoped
+            )
+            const session = yield* call("session.new", { capabilities: {} })
+            assertPinned("Firefox", session.result.capabilities.browserVersion, firefox.version)
+            yield* call("session.subscribe", { events: ["network.authRequired"] })
+            const selected = (yield* call("browser.createUserContext", {})).result.userContext
+            const other = (yield* call("browser.createUserContext", {})).result.userContext
+            const interceptor = yield* call("network.addIntercept", {
+              phases: ["authRequired"],
+              userContexts: [selected]
+            })
+            assert.isUndefined(interceptor.error)
+            const page = (yield* call("browsingContext.create", { type: "tab", userContext: other })).result.context
+            yield* call("browsingContext.navigate", { context: page, url: `${origin.origin}/auth`, wait: "complete" })
+            assert.deepStrictEqual(
+              challenges,
+              [other],
+              "Firefox ignores the extra field rather than scoping interception"
+            )
+          }).pipe(Effect.timeout("20 seconds")),
+        30_000
+      )
+    }
+  )
+})

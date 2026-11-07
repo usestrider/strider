@@ -329,6 +329,37 @@ for (
         )
       }
 
+      if (name === "Firefox") {
+        it.effect(
+          "preserves website auth routes in an unrelated context while proxy auth is active",
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const local = yield* proxy({ username: "proxy-user", password: "proxy-secret" })
+              const proxied = yield* Browser.newPage(options(local.address, [], "proxy-secret"))
+              const unrelated = yield* Browser.newPage()
+              let directChallenges = 0
+              let proxyContextChallenges = 0
+              yield* unrelated.route("**/auth", () => {
+                directChallenges++
+                return Route.provideCredentials({ username: "strider", password: Redacted.make("secret") })
+              }, { phase: "auth" })
+              yield* proxied.route("**/auth", () => {
+                proxyContextChallenges++
+                return Route.provideCredentials({ username: "strider", password: Redacted.make("secret") })
+              }, { phase: "auth" })
+              yield* unrelated.goto(`${served.origin}/auth`)
+              assert.strictEqual(directChallenges, 1)
+              assert.strictEqual(proxyContextChallenges, 0)
+              assert.isFalse(local.requests.some((request) => request.url.endsWith("/auth")))
+              yield* proxied.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`)
+              assert.strictEqual(directChallenges, 1)
+              assert.strictEqual(proxyContextChallenges, 1)
+            }),
+          60_000
+        )
+      }
+
       if (name === "Chromium") {
         it.effect("does not reuse another context's cached proxy credentials", () =>
           Effect.gen(function*() {

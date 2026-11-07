@@ -2866,7 +2866,7 @@ describe("Firefox proxy reservation lifetime", () => {
       }))
   }
 
-  it.effect("scopes the automatic proxy auth interceptor to its own user context", () =>
+  it.effect("uses the supported global proxy auth intercept parameters", () =>
     Effect.gen(function*() {
       const { state, commands } = yield* withPage({
         "browser.createUserContext": { userContext: "proxy-context" },
@@ -2874,7 +2874,7 @@ describe("Firefox proxy reservation lifetime", () => {
       })
       yield* Contexts.createUserContext(state, options("secret"))
       const intercept = commands.find((command) => command.method === "network.addIntercept")
-      assert.deepStrictEqual(intercept?.params, { phases: ["authRequired"], userContexts: ["proxy-context"] })
+      assert.deepStrictEqual(intercept?.params, { phases: ["authRequired"] })
     }))
 })
 
