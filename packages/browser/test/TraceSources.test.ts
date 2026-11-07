@@ -221,3 +221,58 @@ for (const disabled of [false, true]) {
       })
     }))
 }
+
+for (const available of [true, false]) {
+  it(`defers and caches named caller formatting with caller available: ${available}`, () => {
+    const prepare = Error.prepareStackTrace
+    let formatted = 0
+    try {
+      Error.prepareStackTrace = () => {
+        formatted++
+        return available ? `Error\n    at constructed (${file}:7:3)` : "Error"
+      }
+      const constructed = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.lazy"))
+      assert.strictEqual(formatted, 0)
+      const frame = Effect.runSync(constructed)
+      assert.strictEqual(formatted, 0)
+      assert.isDefined(frame)
+      assert.strictEqual(frame!.stack(), available ? `at constructed (${file}:7:3)` : undefined)
+      assert.strictEqual(frame!.stack(), available ? `at constructed (${file}:7:3)` : undefined)
+      assert.strictEqual(formatted, 1)
+    } finally {
+      Error.prepareStackTrace = prepare
+    }
+  })
+}
+
+it.effect("keeps the construction caller when recording starts later", () =>
+  Effect.gen(function*() {
+    const constructed = Effect.void.pipe(
+      Operation.named("Page.preconstructed", { attributes: { "browser.page.id": id } })
+    )
+    const { events } = yield* scenario(constructed)
+    const frame = events.find((event) => event.title === "Page.preconstructed").stack[0]
+    const lines = readFileSync(file, "utf8").split("\n")
+    const line = lines.findIndex((line) =>
+      line.includes("const constructed = Effect.void.pipe(Operation.named(\"Page.preconstructed\"")
+    )
+    assert.deepStrictEqual(frame, {
+      file,
+      line: line + 1,
+      column: lines[line]!.indexOf("Operation.named") + 11,
+      function: "Page.preconstructed"
+    })
+  }))
+
+it.effect("renders a preconstructed named failure outside a recording", () =>
+  Effect.gen(function*() {
+    const constructed = Effect.fail("failed").pipe(Operation.named("Page.failed"))
+    const exit = yield* Effect.exit(constructed)
+    assert(Exit.isFailure(exit))
+    const lines = readFileSync(file, "utf8").split("\n")
+    const line = lines.findIndex((line) => line.includes("const constructed = Effect.fail(\"failed\")"))
+    assert.include(
+      Cause.pretty(exit.cause),
+      `at Page.failed (${file}:${line + 1}:${lines[line]!.indexOf("Operation.named") + 11})`
+    )
+  }))
