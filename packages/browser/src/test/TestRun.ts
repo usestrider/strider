@@ -63,12 +63,13 @@ export type TestArtifact = typeof TestArtifact.Type
  */
 export interface TestRun {
   /**
-   * The test running when this is read; in Vitest, `TestRunner.getCurrentTest()`. Outside a test, its fields
-   * are empty.
+   * The test identity supplied by the adapter. Explicit callback bindings retain the identity and attempt
+   * captured for that invocation. Vitest’s unbound layer uses a global lookup, which supports sequential tests
+   * only; without a current test its project, file and id are empty and its attempt is zero.
    */
   readonly info: TestInfo
   /**
-   * Attaches a file to the test running now; in Vitest, `recordArtifact`. Outside a test, or in a runner that
+   * Attaches a file to the adapter’s test; an explicit callback binding uses its captured task. Outside a test, or in a runner that
    * keeps no artifacts, nothing is attached and a warning is logged.
    *
    * **Example** (Attaching a trace of a checkout)

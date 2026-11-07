@@ -11,3 +11,7 @@ The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the
 *layers*
 
 - `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
+
+*context*
+
+- `const withTest: (context: Pick<TestContext, "task">) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, TestRun.TestRun>>`
