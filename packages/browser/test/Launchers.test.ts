@@ -764,8 +764,9 @@ describe("WebKit launcher", () => {
                 })
               )
             })))
-            const write = (bytes: Uint8Array) =>
+            const write = (bytes: string | Socket.CloseEvent | Uint8Array) =>
               Effect.sync(() => {
+                assert(bytes instanceof Uint8Array)
                 written.push(port)
                 Deferred.doneUnsafe(sent, Effect.void)
                 const nul = bytes.indexOf(0, 5)
@@ -779,7 +780,13 @@ describe("WebKit launcher", () => {
                   Deferred.doneUnsafe(commands[command++]!, Effect.succeed(message.id))
                 }
               })
-            return { pull, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
+            return {
+              pull,
+              upgrade: () => Effect.void,
+              write,
+              writeAll: (chunks) => Effect.forEach(chunks, write, { discard: true }),
+              close: Effect.void
+            }
           }
           const write = () =>
             Effect.andThen(
