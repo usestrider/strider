@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
@@ -10,6 +11,7 @@ import * as References from "effect/References"
 import * as Stream from "effect/Stream"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
+import * as Access from "../src/internal/access.ts"
 import * as Events from "../src/internal/events.ts"
 import type * as Model from "../src/internal/model.ts"
 import * as Operation from "../src/internal/operation.ts"
@@ -21,10 +23,10 @@ import * as Target from "../src/Target.ts"
 
 const file = new URL(import.meta.url).pathname
 const sourcePath = `src/${createHash("sha1").update(file).digest("hex")}.ts`
-const scenario = (run: Effect.Effect<void>, read?: "missing" | "interrupt") =>
+const scenario = (run: Effect.Effect<void>, read?: "missing" | "interrupt", pageId = "source-page") =>
   Effect.scoped(Effect.gen(function*() {
     const exports: Array<Uint8Array> = []
-    const id = "source-page" as Target.NavigableId
+    const id = pageId as Target.NavigableId
     const page = {
       id,
       events: {
@@ -277,12 +279,12 @@ it.effect("renders a preconstructed named failure outside a recording", () =>
 
 for (const enclosing of [false, true]) {
   for (const inside of [false, true]) {
-    it(`omits unavailable named failure frames with enclosing frame: ${enclosing}, rendered inside: ${inside}`, () => {
+    it(`names unavailable named failure frames without a location with enclosing frame: ${enclosing}, rendered inside: ${inside}`, () => {
       const prepare = Error.prepareStackTrace
       const parent = enclosing
         ? { name: "enclosing", stack: () => `at enclosing (${file}:50:2)`, parent: undefined }
         : undefined
-      const expected = "Error: failed" + (enclosing ? `\n    at enclosing (${file}:50:2)` : "")
+      const expected = "Error: failed\n    at Page.unavailable" + (enclosing ? `\n    at enclosing (${file}:50:2)` : "")
       try {
         Error.prepareStackTrace = () => "Error"
         const render = (exit: Exit.Exit<unknown, string>) => {
@@ -305,3 +307,60 @@ for (const enclosing of [false, true]) {
     })
   }
 }
+
+it.effect("keeps preconstructed guarded getter and method callers", () =>
+  Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const guarded = Access.guard(page, {
+      level: "control",
+      target: { _tag: "Page", id: page.id },
+      released: () => false,
+      onRelease: () => Effect.void
+    }, { observed: new Set(), declarations: new Set() })
+    const title = guarded.title
+    const count = guarded.locator("#counter").count
+    const fill = guarded.locator("#field").fill("value")
+    const { events } = yield* scenario(
+      Effect.gen(function*() {
+        yield* Effect.exit(title)
+        yield* Effect.exit(count)
+        yield* Effect.exit(fill)
+      }),
+      undefined,
+      page.id
+    )
+    const lines = readFileSync(file, "utf8").split("\n")
+    for (
+      const [name, binding, member, offset] of [
+        ["Page.title", "title", "title", 2],
+        ["Locator.count", "count", "count", 1],
+        ["Locator.fill", "fill", "fill", 2]
+      ] as const
+    ) {
+      const line = lines.findIndex((line) => line.includes(`const ${binding} = guarded.`))
+      const frame = events.find((event) => event.title === name).stack[0]
+      assert.deepStrictEqual(frame, {
+        file,
+        line: line + 1,
+        column: lines[line]!.lastIndexOf(`.${member}`) + offset,
+        function: name
+      })
+    }
+  })).pipe(Effect.provide(Browser.layerTest(""))))
+
+it("filters both source and distribution library frames before selecting the caller", () => {
+  const prepare = Error.prepareStackTrace
+  try {
+    const root = new URL("../", import.meta.url).pathname
+    Error.prepareStackTrace = () =>
+      `Error
+    at source (${root}src/internal/page.ts:1:1)
+    at distribution (${root}dist/internal/access.js:2:2)
+    at user (${file}:50:2)`
+    const operation = Effect.service(References.CurrentStackFrame).pipe(Operation.named("Page.filtered"))
+    const frame = Effect.runSync(operation.pipe(Effect.provideService(Tracing.TracerDisabledWhen, () => true)))
+    assert.strictEqual(frame!.stack(), `at user (${file}:50:2)`)
+  } finally {
+    Error.prepareStackTrace = prepare
+  }
+})
