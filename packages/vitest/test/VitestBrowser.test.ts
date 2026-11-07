@@ -71,3 +71,12 @@ it("never starts a trace filename with a hyphen, which shell commands read as an
     assert.notMatch(name, /^-/)
   }
 })
+
+it("uses the test prefix when sanitizing punctuation-only IDs leaves no name", () => {
+  for (const id of ["!!!", "---", "...", "🦆", " ".repeat(100), ""]) {
+    const name = VitestBrowser.traceFileName(
+      new TestRun.TestInfo({ project: "", file: "/a.test.ts", id, attempt: 0, worker: "1", shard: "" })
+    )
+    assert.match(name, /^test-retry-0-[a-f0-9]{64}\.zip$/)
+  }
+})
