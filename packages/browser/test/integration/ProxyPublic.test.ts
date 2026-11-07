@@ -201,8 +201,17 @@ for (
                   const navigate = page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/recorded`).pipe(
                     Deadline.within("10 seconds")
                   )
-                  if (supplied === password) yield* navigate
-                  else {
+                  if (supplied === password) {
+                    yield* navigate
+                    if (name === "Firefox") {
+                      const conflict = yield* Browser.newContext(options(local.address, [], wrong, username)).pipe(
+                        Effect.flip
+                      )
+                      assert.notEqual(conflict._tag, "Timeout")
+                      if (conflict._tag !== "Timeout") assert.strictEqual(conflict.reason._tag, "Unsupported")
+                      yield* Effect.logWarning(conflict)
+                    }
+                  } else {
                     const rejected = yield* navigate.pipe(Effect.flip)
                     assert.notEqual(rejected._tag, "Timeout")
                     yield* Effect.logWarning(rejected)
