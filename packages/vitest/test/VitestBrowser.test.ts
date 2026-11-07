@@ -7,8 +7,10 @@ import { TestRun } from "@usestrider/browser/test"
 import { VitestBrowser } from "@usestrider/vitest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
-import { TestRunner } from "vitest"
+import * as Scope from "effect/Scope"
+import { afterAll, TestRunner } from "vitest"
 
 describe("VitestBrowser", () => {
   it.effect("describes the test running, and attaches its files", () =>
@@ -134,4 +136,50 @@ for (const artifact of ["Screenshot", "Har"] as const) {
       )
     )
   })
+}
+
+// Reusing the adapter with one memo map must share the backend, never a callback's TestRun.
+const memoMap = Layer.makeMemoMapUnsafe()
+const memoScope = Scope.makeUnsafe()
+let memoBuilds = 0
+const reusedLayer = VitestBrowser.layer(Layer.syncContext(() => {
+  memoBuilds++
+  return Context.empty() as Context.Context<Browser.Browser>
+}))
+afterAll(() => Effect.runPromise(Scope.close(memoScope, Exit.void)))
+
+for (const order of ["binding first", "layer first", "shared memo map"] as const) {
+  const ready = barrier()
+  const done = barrier()
+  for (const artifact of ["Screenshot", "Har"] as const) {
+    it.concurrent(`keeps ${artifact} isolated with ${order}`, async (context) => {
+      const task = context.task
+      const check = Effect.gen(function*() {
+        const run = yield* TestRun.TestRun
+        const info = run.info
+        yield* Effect.promise(ready)
+        yield* Effect.yieldNow
+        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* Effect.promise(done)
+        context.expect.soft(run.info).toBe(info)
+        context.expect.soft(info.id).toContain(task.name)
+        context.expect.soft(
+          task.artifacts.filter((entry) => entry.type === "@usestrider/browser").map((entry) => entry.artifact)
+        ).toEqual([artifact])
+      })
+      if (order === "binding first") {
+        await Effect.runPromise(check.pipe(VitestBrowser.withTest(context), Effect.provide(reusedLayer)))
+      } else if (order === "layer first") {
+        await Effect.runPromise(check.pipe(Effect.provide(reusedLayer), VitestBrowser.withTest(context)))
+      } else {
+        await Effect.runPromise(
+          Effect.gen(function*() {
+            const services = yield* Layer.buildWithMemoMap(reusedLayer, memoMap, memoScope)
+            yield* check.pipe(Effect.provideContext(services))
+            context.expect.soft(memoBuilds).toBeGreaterThan(0)
+          }).pipe(VitestBrowser.withTest(context))
+        )
+      }
+    })
+  }
 }
