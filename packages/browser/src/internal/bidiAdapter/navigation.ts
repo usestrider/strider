@@ -22,7 +22,7 @@ import {
   type RealmEntry,
   type State
 } from "./state.ts"
-import { commit, endNavigation, startNavigation } from "./tree.ts"
+import { cancelRestoration, commit, endNavigation, startNavigation } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -327,6 +327,7 @@ export const navigate = Effect.fnUntraced(function*(
   if (Option.isSome(options.referrer)) {
     return yield* Effect.fail(Kit.unsupported("navigation.referrer", "WebDriver BiDi's navigate takes no referrer"))
   }
+  cancelRestoration(navigable)
   const navigation = Kit.expect(state.ids, navigable.expected, url)
   return yield* sendNavigation(
     state,
@@ -341,6 +342,7 @@ export const reload = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
     const navigable = yield* navigableById(state, id)
     const url = navigable.document?.url ?? ""
+    cancelRestoration(navigable)
     const navigation = Kit.expect(state.ids, navigable.expected, url, "reload")
     return yield* sendNavigation(
       state,
@@ -359,8 +361,17 @@ export const reload = Effect.fnUntraced(
 
 export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId, delta: number) {
   const navigable = yield* navigableById(state, id)
+  cancelRestoration(navigable)
   const navigation = Kit.expect(state.ids, navigable.expected, "", "traversal")
-  const exit = yield* Effect.exit(state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })))
+  const exit = yield* Effect.exit(
+    state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })).pipe(
+      Effect.onInterrupt(() =>
+        state.buffer.run(() => {
+          Kit.unexpect(navigable.expected, navigation)
+        })
+      )
+    )
+  )
   if (exit._tag === "Failure") {
     Kit.unexpect(navigable.expected, navigation)
     return Option.none<PageNavigation.Id>()
@@ -392,25 +403,23 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
     )
   }
   const pendingRealm = () => navigable.pendingRealms.find((pending) => !pending.ended && pending.world._tag === "Main")
-  let unannounced: RealmEntry | undefined
-  yield* state.buffer.run(() => {
+  const restoration = {
+    navigation,
+    arrived: (realm: RealmEntry) => {
+      state.buffer.later(complete(realm))
+    }
+  }
+  const valid = (realm: RealmEntry) =>
+    navigable.restoring === restoration && !navigable.removed && !realm.ended && pendingRealm() === realm
+  const complete = Effect.fnUntraced(function*(realm: RealmEntry) {
+    if (!valid(realm)) return
     const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
-    const realm = pendingRealm()
-    if (realm === undefined) {
-      // Its realm hasn't arrived yet: restore when it does, unless the traversal has ended by then
-      if (entry !== undefined && !entry.ended) {
-        navigable.restoring = (arrived) => {
-          navigable.restoring = undefined
-          if (!entry.ended) restore(entry, arrived)
-        }
-      }
+    if (entry !== undefined) {
+      yield* state.buffer.run(() => {
+        if (valid(realm) && !entry.ended) restore(entry, realm)
+      })
       return
     }
-    if (entry !== undefined && !entry.ended) restore(entry, realm)
-    else if (navigable.expected.list.some((expected) => expected.id === navigation)) unannounced = realm
-  })
-  if (unannounced !== undefined) {
-    const realm = unannounced
     const href = yield* state.send(Script.evaluate({
       expression: "location.href",
       target: { realm: realm.bidi },
@@ -422,12 +431,40 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
       Effect.orElseSucceed(() => undefined)
     )
     yield* state.buffer.run(() => {
-      if (href === undefined || pendingRealm() !== realm) return
+      if (!valid(realm)) return
+      if (href === undefined) {
+        cancelRestoration(navigable)
+        return
+      }
       const index = navigable.expected.list.findIndex((expected) => expected.id === navigation)
-      if (index < 0) return
+      if (index < 0) {
+        const announced = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+        if (announced !== undefined && !announced.ended) restore(announced, realm)
+        return
+      }
       const [taken] = navigable.expected.list.splice(index, 1)
       restore(startNavigation(state, navigable, `restored:${navigation}`, href, "traversal", false, taken), realm)
     })
+  })
+  let realm: RealmEntry | undefined
+  yield* state.buffer.run(() => {
+    const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+    if (
+      navigable.removed || (entry === undefined
+        ? !navigable.expected.list.some((expected) => expected.id === navigation)
+        : entry.ended)
+    ) return
+    navigable.restoring = restoration
+    realm = pendingRealm()
+  })
+  if (realm !== undefined) {
+    yield* complete(realm).pipe(
+      Effect.onInterrupt(() =>
+        state.buffer.run(() => {
+          if (navigable.restoring === restoration) cancelRestoration(navigable)
+        })
+      )
+    )
   }
   return Option.some(navigation)
 })

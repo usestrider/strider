@@ -44,11 +44,11 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   document: DocumentEntry | undefined
   /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
-  /**
-   * A traversal that replied before its restored document's realm arrived, waiting for it: under load, Firefox
-   * can reply first.
-   */
-  restoring: ((realm: RealmEntry) => void) | undefined
+  /** A successful traversal awaiting its replacement main realm, correlated to its reservation. */
+  restoring: {
+    readonly navigation: PageNavigation.Id
+    readonly arrived: (realm: RealmEntry) => void
+  } | undefined
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
   /** Commands awaiting replies; unknown error commits wait for their navigation identities. */

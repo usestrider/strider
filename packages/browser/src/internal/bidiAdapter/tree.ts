@@ -14,6 +14,13 @@ import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, Real
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
+/** Releases only the reservation owned by the pending restoration. */
+export const cancelRestoration = (navigable: NavigableEntry) => {
+  if (navigable.restoring === undefined) return
+  Kit.unexpect(navigable.expected, navigable.restoring.navigation)
+  navigable.restoring = undefined
+}
+
 /** Removes a realm; one still pending, created and destroyed before its document committed, is never reported. */
 export const removeRealm = (state: State, realm: RealmEntry, reason: L1Target.CloseReason) =>
   Kit.removeRealm(state.buffer, realm, reason, (realm) => {
@@ -22,7 +29,10 @@ export const removeRealm = (state: State, realm: RealmEntry, reason: L1Target.Cl
     state.workerPages.delete(realm)
     realm.navigable?.document?.realms.delete(realm)
     const pending = realm.navigable?.pendingRealms.indexOf(realm) ?? -1
-    if (pending >= 0) realm.navigable!.pendingRealms.splice(pending, 1)
+    if (pending >= 0) {
+      cancelRestoration(realm.navigable!)
+      realm.navigable!.pendingRealms.splice(pending, 1)
+    }
   })
 
 export const endNavigation = (
@@ -32,6 +42,7 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
+    if (navigation.navigable.restoring?.navigation === navigation.id) cancelRestoration(navigation.navigable)
     if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
       navigation.navigable.failedNavigation = {
         id: navigation.id,
@@ -57,6 +68,7 @@ export const removeNavigable = (
   evidence: string
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
+    cancelRestoration(navigable)
     navigable.navigationCommands.clear()
     navigable.commandNavigations.clear()
     navigable.pendingTerminals.length = 0
@@ -96,6 +108,7 @@ export const commit = (
   navigation: string | undefined,
   evidence: string
 ): DocumentEntry => {
+  cancelRestoration(navigable)
   const old = navigable.document
   const document: DocumentEntry = {
     id: state.ids.document(),
@@ -163,6 +176,7 @@ export const startNavigation = (
   const bound = navigable.commandNavigations.get(bidi)
   navigable.commandNavigations.delete(bidi)
   const expected = bound ?? (taken === undefined ? Kit.take(navigable.expected, url) : taken)
+  if (navigable.restoring?.navigation !== expected?.id) cancelRestoration(navigable)
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),
