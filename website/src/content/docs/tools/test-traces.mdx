@@ -1,0 +1,90 @@
+---
+title: Traces for failed tests
+description: Configure recording once and attach each failed Vitest attempt's browser trace.
+order: 1.5
+---
+
+A failed browser test needs a record of its actions and page state to explain what happened.
+Configure failure traces once on the Vitest browser layer, then bind each test callback so its traces carry its own identity and retry attempt.
+
+```ts title="checkout.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser, Expect } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = VitestBrowser.layer(
+  Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+    Layer.provide(NodeServices.layer)
+  ),
+  { trace: { directory: ".data/test-traces" } }
+)
+
+layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
+  it.effect("pays for the cart", (context) =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com/cart")
+      yield* page.getByRole("button", { name: "Pay" }).click()
+      yield* page.getByText("Thank you").pipe(Expect.toBeVisible)
+    }).pipe(VitestBrowser.withTest(context)))
+})
+```
+
+The browser is shared; recordings belong to each bound callback. Each new context gets one trace covering its
+pages and popups, including contexts created by `Browser.newPage`. Concurrent tests and retries keep separate
+identities, filenames and attachment owners. Every callback, including every retry, calls `withTest(context)`.
+Put the whole test effect inside the binding: failures thrown afterward are outside its lifetime.
+
+Screenshots default to `"perAction"`, DOM snapshots and network to `true`, and screencast to `"off"`.
+These are adapter defaults; calling [`Trace.record`](/docs/tools/recordings#traces) directly keeps its usual defaults.
+Explicit overrides can reduce capture. Disabling the network also requires disabling DOM snapshots:
+
+```ts
+import { VitestBrowser } from "@usestrider/vitest"
+
+const trace: VitestBrowser.TraceOptions = {
+  directory: ".data/test-traces",
+  screenshots: "off",
+  domSnapshots: false,
+  network: false
+}
+```
+
+A failed effect, thrown assertion, defect or interruption exports one ZIP per context and attaches it as a
+Vitest artifact before the binding returns. Archives go under `directory/context-N/`, using
+[`traceFileName`](/docs/tools/testing#attaching-files) for the basename. The directory is created when needed;
+use a different directory per run if earlier runs' archives must be kept.
+
+Successful callbacks retain no archives or attachments. If a nested scope fails, its trace is staged before its
+targets close; recovering that failure and passing the callback deletes the staged file. Deletion errors log a
+warning and can leave the file behind. Ordinary successful scopes write nothing.
+
+Keep the binding inside the scope that owns the pages when export must precede cleanup:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Effect } from "effect"
+import type { TestContext } from "vitest"
+
+declare const context: TestContext
+
+const test = Effect.scoped(
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    yield* page.goto("https://shop.example.com")
+  }).pipe(VitestBrowser.withTest(context))
+)
+```
+
+If a target's scope succeeds and closes before a later callback failure, the adapter exports that target's retained
+recording after cleanup. Recording, export and attachment failures log warnings and preserve the original test
+result. Hard process termination cannot complete export. Vitest timeouts must leave enough time for cleanup;
+[set the test timeout](/docs/tools/testing#writing-a-test) for the operations your test runs.
+
+Automatic tracing is off when `trace` is omitted, and creates no recordings without `withTest(context)`.
+It covers contexts created through the configured layer's ordinary `Browser.newContext` and `Browser.newPage`.
+Existing, default and reclaimed contexts need explicit [`Trace.record`](/docs/tools/recordings#traces).

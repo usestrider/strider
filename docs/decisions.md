@@ -1270,3 +1270,12 @@ condition descriptions remain user-authored text. User transformations, includin
 and reconstructed failures do not inherit source classification, because arbitrary transformations can change both
 type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
 and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.
+
+
+Vitest failure tracing is opt-in on the browser layer, with recording state owned by each bound callback and its
+captured test identity. The shared backend never owns a callback's recorder, so concurrent tests and retries keep
+their own metadata and attachments. Adapter recordings default to per-action screenshots, DOM snapshots and
+network capture, with screencast off; explicit settings can reduce capture, and disabling network requires
+disabling snapshots. These defaults make failed-test traces useful without changing direct `Trace.record` calls.
+Rejected: changing the general recording defaults, which adds capture cost outside tests, and owning recordings
+in the memoized browser layer, which shares one callback's identity with later callbacks.

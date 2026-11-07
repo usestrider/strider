@@ -125,6 +125,8 @@ layer(BrowserLive, { concurrent: true, excludeTestServices: true })(
 - `concurrent: true` runs the file's tests at once, on its one browser.
 - Pages can tell both apart from a normal browser, so neither is a default.
 
+For automatic recording and attachment on failure, see [Traces for failed tests](/docs/tools/test-traces).
+
 ## Attaching files
 
 A trace written to disk isn't tied to the test that made it, so finding a failed test's trace means matching file
@@ -192,8 +194,8 @@ const recordCheckout = Effect.fn("recordCheckout")(function*(page: Page.Page) {
 
 `traceFileName` returns a safe ZIP basename with a readable prefix and a SHA-256 digest of the project, file,
 test ID and attempt. Names that produce the same prefix still get distinct digests. The same identity always
-gets the same filename; use a separate directory to keep multiple runs or recordings. Recording, exporting
-and attaching remain explicit. The trace header stores test names and file paths as written.
+gets the same filename; use a separate directory to keep multiple runs or recordings. The manual form keeps recording, exporting
+and attaching explicit. The trace header stores test names and file paths as written.
 Bind each concurrent callback with `VitestBrowser.withTest(context)` as shown above, so recording and filename
 capture use that callback's identity. Without binding, the adapter's global lookup supports sequential tests only.
 Concurrent pages within one test keep that test's identity.
