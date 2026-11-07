@@ -177,7 +177,7 @@ for (
                 return span
               }
             })
-            const logger = Logger.make((entry) => observed.push(entry.message))
+            const logger = Logger.make((entry) => observed.push({ message: entry.message, cause: entry.cause }))
             const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-proxy-traces-"))
             yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
             yield* Effect.gen(function*() {
