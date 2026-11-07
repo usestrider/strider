@@ -2696,14 +2696,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const page = yield* Browser.newPage()
                     yield* page.goto(url)
                     const target = page.locator("#target")
-                    const expectedPoint = yield* page.evaluateInMainWorld(() => {
+                    // CDP accepts fractional viewport input; BiDi and WebKit require integer coordinates.
+                    const roundsInput = (yield* Browser.Browser).info.protocol !== "cdp"
+                    const expectedPoint = yield* page.evaluateInMainWorld((roundsInput) => {
                       const element = document.querySelector("#target")!
                       const rect = element.getBoundingClientRect()
                       const style = getComputedStyle(element)
-                      const x = Math.round(rect.left + parseFloat(style.borderLeftWidth) + 7) - rect.left
-                      const y = Math.round(rect.top + parseFloat(style.borderTopWidth) + 9) - rect.top
+                      const viewportX = rect.left + parseFloat(style.borderLeftWidth) + 7
+                      const viewportY = rect.top + parseFloat(style.borderTopWidth) + 9
+                      const x = (roundsInput ? Math.round(viewportX) : viewportX) - rect.left
+                      const y = (roundsInput ? Math.round(viewportY) : viewportY) - rect.top
                       return `target:${x}:${y}`
-                    })
+                    }, roundsInput)
                     const action = () =>
                       checked
                         ? target.check({ position: { x: 7, y: 9 } })
