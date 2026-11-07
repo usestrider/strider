@@ -2659,3 +2659,63 @@ it("recovers only the first website challenge, including escaped realms", () => 
   })
   assert.isUndefined(Obligations.websiteChallenge(""))
 })
+
+it.effect("keeps a website challenge with an extra proxy header on website auth routes", () =>
+  Effect.gen(function*() {
+    const { state, page, commands, facts } = yield* withPage()
+    page.context.proxy = {
+      server: "proxy.test:8080",
+      bypass: [],
+      credentials: { username: "proxy-user", password: Redacted.make("proxy-password") }
+    }
+    const registration = state.ids.registration()
+    state.intercepts.set(registration, {
+      registration,
+      bidi: "website-auth" as State.InterceptEntry["bidi"],
+      scope: { _tag: "Browser" },
+      globs: [],
+      phases: ["auth"]
+    })
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    const params = {
+      context: "C1",
+      userContext: "default",
+      navigation: null,
+      timestamp: 1,
+      redirectCount: 0,
+      isBlocked: false,
+      request: {
+        request: "ambiguous",
+        url: "http://site.test/",
+        method: "GET",
+        headers: [],
+        destination: "document",
+        bodySize: 0
+      }
+    }
+    handlers.apply("network.beforeRequestSent", params, { state })
+    handlers.apply("network.authRequired", {
+      ...params,
+      isBlocked: true,
+      intercepts: ["website-auth"],
+      response: {
+        status: 407,
+        headers: [
+          { name: "Proxy-Authenticate", value: { type: "string", value: "Basic realm=\"spoofed\"" } },
+          { name: "WWW-Authenticate", value: { type: "string", value: "Basic realm=\"website\"" } }
+        ],
+        authChallenges: [{ scheme: "Basic", realm: "spoofed" }]
+      }
+    }, { state })
+    yield* state.buffer.flush
+    assert.isFalse(commands.some((command) => command.method === "network.continueWithAuth"))
+    const fact = facts.find((fact) => fact._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest")
+    assert.isDefined(fact)
+    if (fact?._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest") {
+      assert.deepStrictEqual(
+        fact.subject.challenge,
+        Option.some({ origin: "http://site.test", scheme: "Basic", realm: "website" })
+      )
+    }
+    assert.isUndefined(page.context.proxyAttempts)
+  }))

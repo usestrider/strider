@@ -293,6 +293,33 @@ for (
         )
       }
 
+      if (name !== "WebKit") {
+        it.effect(
+          "never sends proxy credentials to a website challenge with an extra Proxy-Authenticate header",
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const local = yield* proxy({ username: "proxy-user", password: "proxy-secret" })
+              const page = yield* Browser.newPage(options(local.address, [], "proxy-secret"))
+              const url = served.origin.replace("127.0.0.1", "proxy.test")
+              yield* page.goto(`${url}/warm-proxy-cache`)
+              let websiteChallenges = 0
+              yield* page.route("**/auth-with-proxy-header", (paused) => {
+                websiteChallenges++
+                assert.strictEqual(paused.challenge.realm, "strider")
+                return Route.provideCredentials({ username: "strider", password: Redacted.make("secret") })
+              }, { phase: "auth" })
+              yield* page.goto(`${url}/auth-with-proxy-header`).pipe(Deadline.within("10 seconds"))
+              const leaked = served.served.some((request) =>
+                request.headers.authorization === `Basic ${Buffer.from("proxy-user:proxy-secret").toString("base64")}`
+              )
+              assert.isFalse(leaked, "proxy credentials must never be supplied to the website")
+              assert.strictEqual(websiteChallenges, 1)
+            }),
+          60_000
+        )
+      }
+
       if (name === "Chromium") {
         it.effect("does not reuse another context's cached proxy credentials", () =>
           Effect.gen(function*() {
