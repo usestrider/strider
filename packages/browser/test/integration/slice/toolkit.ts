@@ -7,10 +7,8 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, type Locator, Snapshot } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
 import type * as Toolkit from "effect/ai/Toolkit"
-import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -347,24 +345,25 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             // Replay where the recorded frame has no password and another frame does.
             yield* page.goto(frames("<p>first</p>", "<input data-frame=second type=password>"))
             yield* Expect.toHaveCount(page.frame(page.locator("iframe").nth(1)).locator("input"), 1)
-            const replayed = yield* exportedLocator(query, page).pipe(
+            const failure: unknown = yield* exportedLocator(query, page).pipe(
               Effect.flatMap((locator) => locator.readAttribute("data-frame")),
               Deadline.within("1 second"),
-              Effect.option
+              Effect.flip
             )
-            assert.notDeepEqual(replayed, Option.some(Option.some("second")), query)
+            assert(Expect.isExpectationFailed(failure), query)
+            assert.include(failure.condition, "unnamed password control")
           })),
         timeout
       )
 
       it.effect(
-        "refuses unnamed password exports spanning multiple frame documents",
+        "exports unnamed password queries scoped to each recorded frame",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
             const page = yield* Browser.newPage()
-            const frame = "<iframe srcdoc='<input type=password>'></iframe>"
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(frame.repeat(2))}`)
+            const frame = (index: number) => `<iframe srcdoc='<input data-frame=${index} type=password>'></iframe>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(frame(0) + frame(1))}`)
             for (const index of [0, 1]) {
               yield* Expect.toHaveCount(page.frame(page.locator("iframe").nth(index)).locator("input"), 1)
             }
@@ -373,10 +372,81 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               each.role._tag === "Inferred" && each.role.evidence.includes("password") && each.name._tag === "None"
             )
             assert.lengthOf(nodes, 2)
-            const query = ExportTest.locatorOf("page", Option.getOrThrow(nodes[0]!.ref), snapshot)
-            const result = yield* Effect.exit(exportedLocator(query, page))
-            assert(Exit.isFailure(result), query)
-            assert.include(Cause.pretty(result.cause), "Locator.or: the other locator is in another frame")
+            for (const [index, node] of nodes.entries()) {
+              const query = ExportTest.locatorOf("page", Option.getOrThrow(node.ref), snapshot)
+              const locator = yield* exportedLocator(query, page)
+              assert.strictEqual(yield* locator.count, 1, query)
+              assert.deepEqual(yield* locator.readAttribute("data-frame"), Option.some(String(index)), query)
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "exports an unnamed password query selecting a nested recorded frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const inner = "<input data-frame=nested type=password>"
+            const outer = `<input data-frame=outer type=password><iframe srcdoc="${inner}"></iframe>`
+            const html = `<iframe srcdoc='${outer}'></iframe>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            const nested = page.frame(page.locator("iframe")).frame(page.locator("iframe"))
+            yield* Expect.toHaveCount(nested.locator("input"), 1)
+            const snapshot = yield* page.snapshot()
+            const nodes = [...snapshot.refs.values()].filter((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password") && each.name._tag === "None"
+            )
+            assert.lengthOf(nodes, 2)
+            const ref = Option.getOrThrow(nodes[1]!.ref)
+            assert.match(ref, /^f2e/)
+            const query = ExportTest.locatorOf("page", ref, snapshot)
+            const locator = yield* exportedLocator(query, page)
+            assert.deepEqual(yield* locator.readAttribute("data-frame"), Option.some("nested"), query)
+          })),
+        timeout
+      )
+
+      it.effect(
+        "exports an unnamed framed password query that waits for delayed appearance",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const html = "<iframe srcdoc='<input type=password>'></iframe>"
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.toHaveCount(page.frame(page.locator("iframe")).locator("input"), 1)
+            const snapshot = yield* page.snapshot()
+            const node = [...snapshot.refs.values()].find((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password")
+            )!
+            const query = ExportTest.locatorOf("page", Option.getOrThrow(node.ref), snapshot)
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("iframe")!.contentDocument!.body.innerHTML = "<p>Waiting</p>"
+            )
+            let observedMissing = false
+            const replay = {
+              pipe: (resolve: (page: unknown) => unknown) =>
+                resolve({
+                  locator: page.locator.bind(page),
+                  snapshot: () =>
+                    page.snapshot().pipe(Effect.tap((current) => {
+                      if (observedMissing) return Effect.void
+                      observedMissing = true
+                      assert.isFalse([...current.refs.values()].some((each) =>
+                        each.role._tag === "Inferred" && each.role.evidence.includes("password")
+                      ))
+                      return page.evaluateInMainWorld(() => {
+                        document.querySelector("iframe")!.contentDocument!.body.innerHTML =
+                          "<input data-frame=late type=password>"
+                      })
+                    }))
+                })
+            }
+            const locator = yield* exportedLocator(query, replay)
+            assert.isTrue(observedMissing)
+            assert.deepEqual(yield* locator.readAttribute("data-frame"), Option.some("late"), query)
           })),
         timeout
       )
