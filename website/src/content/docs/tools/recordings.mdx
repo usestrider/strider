@@ -65,11 +65,19 @@ const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
 }, Effect.scoped)
 ```
 
-Each capture is opt-in:
+Available caller locations link steps to the viewer's Source tab. An operation constructed after its public call
+has returned uses the nearest available enclosing caller frame; runtime stacks and source maps determine how
+precise the location is. Disabled or unavailable stack capture can leave a step without a location.
+
+Exports include the local source files referenced by those locations, read when you export. Missing or unreadable
+files are omitted, and remote sources are not fetched. Source paths and contents are included unchanged under every
+diagnostics preset, so review the archive before sharing it; edits made before export appear in the archive.
+
+Page captures are opt-in:
 
 | Option                       | Adds                                                                  |
 | ---------------------------- | --------------------------------------------------------------------- |
-| none                         | operations, logs, errors and console output                           |
+| none                         | operations, available caller locations and sources, logs, errors and console output                           |
 | `screenshots: "perAction"`   | a screenshot after each action, navigation and page-associated expectation, on success or failure |
 | `screencast`                 | frames as the page renders: `"native"`, the browser's own: the page's [video](/docs/tools/video) where the browser can write one, Chromium's frames otherwise, and `Unsupported` on WebKit without video enabled and an attached Firefox; or `{ polled: "250 millis" }`, screenshots at an interval on any browser |
 | `network: true`              | the page's requests and responses                                     |

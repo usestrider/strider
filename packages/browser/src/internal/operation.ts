@@ -22,6 +22,7 @@ import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import { AdapterError, now } from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Recorders from "./recorders.ts"
 import * as Spans from "./spans.ts"
 
 let operations = 0
@@ -526,14 +527,44 @@ export const asStep = (record: Record) => <A, E, R>(self: Effect.Effect<A, E, R>
           })
       ))
 
+const libraryDirectory = new URL("../", import.meta.url)
+// Source maps can name src/ while this module runs from dist/. Keep both directory boundaries, not the package root.
+const libraryPaths = /\/(?:src|dist)\/$/.test(libraryDirectory.pathname)
+  ? ["../../src/", "../../dist/"].map((directory) => Recorders.filePath(new URL(directory, import.meta.url).href))
+  : [Recorders.filePath(libraryDirectory.href)]
+
+/** Synchronous public wrappers and getters still have their caller when they construct an operation. */
+const namedCaller = (): string | undefined => {
+  const limit = Error.stackTraceLimit
+  if (limit === 0) return undefined
+  let stack: string | undefined
+  try {
+    Error.stackTraceLimit = 20
+    stack = new Error().stack
+  } catch {
+    return undefined
+  } finally {
+    Error.stackTraceLimit = limit
+  }
+  for (const line of stack?.split("\n").slice(1) ?? []) {
+    const location = Recorders.location(line)
+    if (location === undefined) continue
+    if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
+    // Once execution has entered Effect, the immediate public call has already returned.
+    if (/\/effect\/(?:src|dist)\//.test(location.file)) return undefined
+    return line.trim()
+  }
+  return undefined
+}
+
 /**
  * Runs `self` as an operation: mints its id, reads its deadline once, gives everything inside that deadline and a
  * record, and opens its span. Inside another operation, it is a step of it. A `Timeout` that leaves it is its own: one
  * a step ran out with becomes the operation's, with the step's phase, history and hint.
  */
-export const named =
-  (name: string, options: Spans.Options = {}) =>
-  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
+const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
+  const call = namedCaller()
+  return <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
       const record = yield* start(name)
       return yield* under(Effect.provideService(self, Current, record), record.budget.at).pipe(
@@ -542,7 +573,20 @@ export const named =
         ),
         asStep(record)
       )
-    }).pipe(Spans.operation(name, options))
+    }).pipe(
+      Spans.operation(name, options),
+      Effect.updateService(
+        References.CurrentStackFrame,
+        (parent) =>
+          call === undefined || fromFn && Recorders.isFrame(parent) && parent?.name === name
+            ? parent
+            : Recorders.frame(name, () => call, parent)
+      )
+    )
+}
+
+/** Runs an operation constructed by a public wrapper or getter. */
+export const named = (name: string, options: Spans.Options = {}) => namedWith(name, options, false)
 
 /**
  * Runs `self` apart from the operation it is in, as an operation of its own named `name`, under a deadline of its
@@ -601,11 +645,12 @@ const framed = <A, E, R>(
   call: Error | undefined,
   definition: () => string | undefined
 ): Effect.Effect<A, E, R> =>
-  Effect.updateService(self, References.CurrentStackFrame, (parent) => ({
-    name,
-    stack: caller(call),
-    parent: { name: `${name} (definition)`, stack: definition, parent }
-  }))
+  Effect.updateService(self, References.CurrentStackFrame, (parent) =>
+    Recorders.frame(
+      name,
+      caller(call),
+      { name: `${name} (definition)`, stack: definition, parent }
+    ))
 
 /**
  * `Effect.fn` as an operation: each call runs its body, then `pipeables`, with the first of them `named`, so the
@@ -619,7 +664,7 @@ export const fnWith = (name: string, options: Spans.Options = {}) => {
     const definition = caller(trace())
     const untraced = Effect.fnUntraced(
       body as never,
-      (effect: Effect.Effect<unknown, unknown, unknown>) => named(name, options)(effect),
+      (effect: Effect.Effect<unknown, unknown, unknown>) => namedWith(name, options, true)(effect),
       ...pipeables as []
     ) as (...args: Array<any>) => Effect.Effect<any, any, any>
     return function(this: unknown, ...args: Array<any>) {
