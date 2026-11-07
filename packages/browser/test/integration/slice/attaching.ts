@@ -248,6 +248,40 @@ export const attaching = (
             })).pipe(Effect.provide(attached))
           }), timeout)
 
+        for (const timing of [undefined, "beforeAuthorScript", "bestEffort"] as const) {
+          it.effect(`checks attached context init-script timing ${timing ?? "default"} without leaking refusals`, () =>
+            Effect.gen(function*() {
+              const { origin } = yield* site
+              const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const page = yield* (yield* byHeading(browser, "First")).control
+                const context = yield* browser.defaultContext.control
+                const registration = yield* Effect.exit(context.addInitScript(
+                  { source: "window.__contextTiming = 'context'" },
+                  { timing }
+                ))
+                const refused = browser.info.protocol === "cdp" && timing !== "bestEffort"
+                if (refused) {
+                  const error = reasonOf(registration)
+                  assert.strictEqual(error?._tag, "DeclarationError")
+                  assert.strictEqual(error?.reason?._tag, "TimingUnsupported")
+                } else {
+                  assert.isTrue(Exit.isSuccess(registration))
+                }
+                // Page timing still runs before the first author script of the next document.
+                yield* page.addInitScript({ source: "window.__pageTiming = 'page'" })
+                yield* page.goto(
+                  fixtureUrl(
+                    origin,
+                    "<h1><script>document.write((window.__contextTiming ?? 'absent') + ':' + window.__pageTiming)</script></h1>"
+                  )
+                )
+                yield* page.getByRole("heading").pipe(Expect.toHaveText(`${refused ? "absent" : "context"}:page`))
+              })).pipe(Effect.provide(attached))
+            }), timeout)
+        }
+
         it.effect("attaches, inspects one tab, controls another, and leaves both open (call site 7)", () =>
           Effect.gen(function*() {
             const { origin } = yield* site
