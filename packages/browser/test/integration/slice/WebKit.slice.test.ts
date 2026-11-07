@@ -22,6 +22,7 @@ import { recordings } from "./recordings.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
+import { webauthn } from "./webauthn.ts"
 
 // The X server comes up before the browser, and goes after it
 const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))
@@ -46,3 +47,5 @@ recordings(name, backend)
 toolkit(name, backend)
 deadlines(name, backend)
 attaching(name, backend, Option.none())
+
+webauthn("WebKit", backend)
