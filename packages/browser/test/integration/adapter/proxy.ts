@@ -63,9 +63,13 @@ export const proxy = (credentials?: { readonly username: string; readonly passwo
           return
         }
         const url = new URL(`http://${request.url}`)
+        if (url.hostname !== "proxy.test") {
+          socket.end("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+          return
+        }
         const upstream = net.connect(
           Number(url.port),
-          url.hostname === "proxy.test" ? "127.0.0.1" : url.hostname,
+          "127.0.0.1",
           () => {
             socket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
             upstream.write(head)
