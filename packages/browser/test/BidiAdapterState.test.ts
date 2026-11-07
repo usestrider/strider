@@ -263,7 +263,38 @@ describe("BidiAdapter state", () => {
       }))
   }
 
-  for (const boundary of ["realm removed", "page removed", "new navigation", "unsuccessful lookup"] as const) {
+  it.effect("releases a traversal interrupted during its location lookup", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const { page, realm, state } = yield* withPage({
+        "browsingContext.traverseHistory": {},
+        "script.evaluate": Effect.andThen(Deferred.succeed(entered, undefined), Effect.never)
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://restored.example"
+      }, { state })
+      const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      assert.lengthOf(page.expected.list, 0)
+      assert.strictEqual(page.restoring, undefined)
+    }))
+
+  for (
+    const boundary of [
+      "realm removed",
+      "page removed",
+      "new navigation",
+      "unsuccessful lookup",
+      "exception lookup",
+      "failed lookup"
+    ] as const
+  ) {
     it.effect(`discards an unannounced traversal lookup after ${boundary}`, () =>
       Effect.gen(function*() {
         const entered = yield* Deferred.make<void>()
@@ -274,6 +305,19 @@ describe("BidiAdapter state", () => {
           "script.evaluate": Effect.gen(function*() {
             yield* Deferred.succeed(entered, undefined)
             yield* Deferred.await(release)
+            if (boundary === "failed lookup") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "script.evaluate",
+                    reason: "Unrecognized",
+                    code: "no such realm",
+                    description: "gone"
+                  })
+                })
+              )
+            }
+            if (boundary === "exception lookup") return { type: "exception", realm: "R2" }
             return boundary === "unsuccessful lookup"
               ? { type: "success", realm: "R2", result: { type: "undefined" } }
               : { type: "success", realm: "R2", result: { type: "string", value: "http://stale.example/" } }
