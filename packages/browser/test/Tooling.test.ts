@@ -83,6 +83,19 @@ describe("LaunchProfile", () => {
     assert.notInclude(LaunchProfile.stock.args, feature)
   })
 
+  it("disables prefetch ahead of prerender only in automation and concurrent", () => {
+    for (const profile of [LaunchProfile.automation, LaunchProfile.concurrent]) {
+      const disabled = profile.args.findLast((arg) => arg.startsWith("--disable-features="))!.split("=")[1]!.split(",")
+      assert.include(disabled, "PrefetchPrerenderIntegration")
+      assert.include(disabled, "Prerender2FallbackPrefetchSpecRules")
+    }
+    assert.deepStrictEqual(LaunchProfile.stock.args, [])
+    const overridden = Chromium.argsFor({ args: ["--disable-features=Other"] }, "/tmp/profile", "pipe")
+    assert.strictEqual(overridden.findLast((arg) => arg.startsWith("--disable-features=")), "--disable-features=Other")
+    const custom = Chromium.argsFor({ profileArgs: ["--custom"] }, "/tmp/profile", "pipe")
+    assert.isFalse(custom.some((arg) => arg.startsWith("--disable-features=")))
+  })
+
   it("keeps caller feature switches verbatim after the preset", () => {
     const caller = [
       "--enable-features=Other",
