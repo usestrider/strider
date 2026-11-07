@@ -59,7 +59,22 @@ describe("Request header lifetime", () => {
         })
         const sent = request(0, { _tag: "Worker", realm })
         yield* fold.sink({ _tag: "RequestSent", request: sent })
-        const other = request(1, { _tag: "Unattributed" })
+        const otherRealm = "other-worker" as Target.RealmId
+        const otherContext = terminal === "worker removal" ? context : "other-context" as UserContext.Id
+        yield* fold.context(otherContext, false)
+        yield* fold.sink({
+          _tag: "RealmAdded",
+          realm: otherRealm,
+          origin: "https://example.com",
+          kind: {
+            _tag: "Worker",
+            worker: { _tag: "Shared" },
+            url: "https://example.com/other.js" as Url.Url,
+            page: Option.none(),
+            context: Option.some(otherContext)
+          }
+        })
+        const other = request(1, { _tag: "Worker", realm: otherRealm })
         yield* fold.sink({ _tag: "RequestSent", request: other })
         const unrelated = Option.getOrThrow(fold.hop(other.hop))
         const hop = Option.getOrThrow(fold.hop(sent.hop))
