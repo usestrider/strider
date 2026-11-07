@@ -145,14 +145,176 @@ describe("BidiAdapter state", () => {
         assert(Option.isSome(navigation))
         if (arrival === "after") arrived()
         yield* state.buffer.flush
+        yield* state.buffer.waitFor(() =>
+          facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value) ?
+            true :
+            undefined
+        )
+        arrived()
+        yield* state.buffer.flush
         const started = facts.filter((fact) =>
           fact._tag === "NavigationStarted" && fact.navigation === navigation.value
         )
         const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
         assert.lengthOf(started, 1, "the returned traversal must start")
         assert.lengthOf(ended, 1, "the returned traversal must end")
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
         assert.strictEqual(page.document!.url, url)
         assert.lengthOf(page.pendingRealms, 0)
+      }))
+  }
+
+  for (const arrival of ["before", "after"] as const) {
+    it.effect(`ends an announced restoration exactly once with a realm ${arrival} the reply`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, realm, state, sent } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          )
+        })
+        const url = "http://past.example/"
+        const from = page.document!.id
+        page.past.set(url, from)
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "announced",
+          url,
+          timestamp: 1
+        }, { state })
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const arrived = () =>
+          handlers.apply("script.realmCreated", {
+            realm: "R2",
+            context: page.bidi,
+            type: "window",
+            origin: "http://past.example"
+          }, { state })
+        if (arrival === "before") arrived()
+        yield* Deferred.succeed(release, undefined)
+        const navigation = yield* Fiber.join(fiber)
+        assert(Option.isSome(navigation))
+        if (arrival === "after") arrived()
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() =>
+          facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value) ?
+            true :
+            undefined
+        )
+        arrived()
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        assert.lengthOf(ended, 1)
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.deepStrictEqual(ended[0]!.outcome, { _tag: "Restored", document: page.document!.id })
+        const committed = facts.filter((fact) =>
+          fact._tag === "DocumentCommitted" && fact.document === page.document!.id
+        )
+        assert.lengthOf(committed, 1)
+        assert(committed[0]!._tag === "DocumentCommitted")
+        assert.deepStrictEqual(committed[0]!.createdBy, { _tag: "Restored", navigation: navigation.value, from })
+        assert.lengthOf(
+          facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
+          1
+        )
+        assert.isFalse(sent.includes("script.evaluate"))
+      }))
+  }
+
+  for (const failure of ["failure", "interruption"] as const) {
+    it.effect(`releases a traversal reservation on command ${failure}`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const { page, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            failure === "failure" ?
+              Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    reason: "Unrecognized",
+                    code: "no such history entry",
+                    description: "no history"
+                  })
+                })
+              ) :
+              Effect.never
+          )
+        })
+        if (failure === "failure") assert(Option.isNone(yield* Navigation.traverse(state, page.id, -1)))
+        else {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(entered)
+          yield* Fiber.interrupt(fiber)
+        }
+        assert.lengthOf(page.expected.list, 0)
+        assert.strictEqual(page.restoring, undefined)
+      }))
+  }
+
+  for (const boundary of ["realm removed", "page removed", "new navigation", "unsuccessful lookup"] as const) {
+    it.effect(`discards an unannounced traversal lookup after ${boundary}`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const finished = yield* Deferred.make<void>()
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": {},
+          "script.evaluate": Effect.gen(function*() {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            return boundary === "unsuccessful lookup"
+              ? { type: "success", realm: "R2", result: { type: "undefined" } }
+              : { type: "success", realm: "R2", result: { type: "string", value: "http://stale.example/" } }
+          })
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const navigation = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(navigation))
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://stale.example"
+        }, { state })
+        // Queue a marker behind the lookup's state update, without waiting on wall-clock time.
+        const run = state.buffer.run
+        ;(state.buffer as { run: typeof run }).run = (facts) =>
+          run(() => {
+            facts()
+            state.buffer.later(Deferred.succeed(finished, undefined))
+          })
+        yield* state.buffer.flush
+        yield* Deferred.await(entered)
+        if (boundary === "realm removed") handlers.apply("script.realmDestroyed", { realm: "R2" }, { state })
+        if (boundary === "page removed") Tree.removeNavigable(state, page, new Target.Vanished({}), "test")
+        if (boundary === "new navigation") {
+          Tree.startNavigation(state, page, "new", "http://new.example/", "crossDocument", false, null)
+        }
+        yield* Deferred.succeed(release, undefined)
+        yield* Deferred.await(finished)
+        yield* state.buffer.flush
+        assert.lengthOf(
+          facts.filter((fact) =>
+            (fact._tag === "NavigationStarted" || fact._tag === "NavigationEnded") &&
+            fact.navigation === navigation.value
+          ),
+          0
+        )
+        assert.notStrictEqual(page.document?.url, "http://stale.example/")
+        assert.strictEqual(page.restoring, undefined)
       }))
   }
 
