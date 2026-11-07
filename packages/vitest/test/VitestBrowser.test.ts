@@ -109,3 +109,29 @@ it("keeps sequential identity and retry attempt across an asynchronous yield", {
   if (attempt === 0) throw new Error("Exercise Vitest's retry with a fresh test attempt")
   assert.deepStrictEqual(checkedAttempts, [0, 1])
 })
+
+const providedStarted = barrier()
+const providedAttached = barrier()
+
+// The per-effect form: the browser layer provided to the effect itself, then the callback bound. The binding must
+// still decide identity and the attachment owner, not the layer's global lookup.
+for (const artifact of ["Screenshot", "Har"] as const) {
+  it.concurrent(`keeps ${artifact} bound when the browser layer is provided to the effect`, async (context) => {
+    const task = context.task
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const run = yield* TestRun.TestRun
+        yield* Effect.promise(providedStarted)
+        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* Effect.promise(providedAttached)
+        context.expect.soft(run.info.id).toContain(task.name)
+        context.expect.soft(
+          task.artifacts.filter((entry) => entry.type === "@usestrider/browser").map((entry) => entry.artifact)
+        ).toEqual([artifact])
+      }).pipe(
+        Effect.provide(VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>)),
+        VitestBrowser.withTest(context)
+      )
+    )
+  })
+}
