@@ -1,4 +1,7 @@
-/** A local HTTP/CONNECT proxy. Credentials are checked but never kept in its request log. */
+/**
+ * A local HTTP/CONNECT proxy. Only proxy.test is forwarded, to loopback at the requested port; other hosts fail.
+ * This makes proxy-side DNS and bypass observable without external sites. Credentials never enter its request log.
+ */
 import * as Effect from "effect/Effect"
 import * as http from "node:http"
 import * as net from "node:net"
