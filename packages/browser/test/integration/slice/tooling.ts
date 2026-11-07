@@ -484,7 +484,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 descendantRssIncludesSharedPages: true
               })
             })).pipe(Deadline.withDefaultBudget("300 seconds"))
-          }), 400_000)
+          }), {
+          timeout: 400_000,
+          // Linux opts in through the heavy/full commands; macOS keeps its complete existing selection.
+          tags: process.platform === "linux" ? ["heavy"] : []
+        })
       }
 
       it.effect("cancels failed chooser preparation and allows the next chooser", () =>

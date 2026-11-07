@@ -62,6 +62,7 @@ const moduleFixture = (id: string, executionMs = 0) => {
         id: `${id}-${cases.length}`,
         module,
         fullName: `suite > ${name}`,
+        tags: [],
         result: () => ({ state: outcome }),
         diagnostic: () => durationMs === undefined ? undefined : { duration: durationMs, retryCount: 0, repeatCount: 0 }
       } as unknown as TestCase
@@ -122,6 +123,25 @@ describe("Linux integration timing reporter", () => {
     assert.strictEqual(report.counts.passed, 1)
     assert.strictEqual(report.summedFileExecutionMs, 123)
     assert.strictEqual(report.files[0].tests[0].retryCount, 0)
+  })
+
+  it("reports disjoint default and heavy case costs without assigning shared file overhead to either group", () => {
+    const f = fixture()
+    const m = moduleFixture("groups", 1000)
+    m.test("ordinary", "passed", 100)
+    const heavy = m.test("upload", "passed", 400)
+    Object.assign(heavy, { tags: ["heavy"] })
+    f.reporter.onTestRunStart([m.specification])
+    f.reporter.onTestModuleCollected(m.module)
+    f.reporter.onTestModuleEnd(m.module)
+    f.reporter.onTestRunEnd([m.module], [], "passed")
+    const r = f.read()
+    assert.strictEqual(r.groups.default.counts.passed, 1)
+    assert.strictEqual(r.groups.heavy.counts.passed, 1)
+    assert.strictEqual(r.groups.default.measuredCaseMs, 100)
+    assert.strictEqual(r.groups.heavy.measuredCaseMs, 400)
+    assert.strictEqual(r.summedFileExecutionMs, 1000)
+    assert.include(f.output.mock.calls.flat().join("\n"), "heavy cases:")
   })
 
   it("retains a collection failure with no cases and does not invent counts for an uncollected file", () => {

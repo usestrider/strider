@@ -23,7 +23,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
-    `test/integration/`: the browser integration tests. The full Linux suite runs in the Nix environment that fixes
+    `test/integration/`: the browser integration tests. The Linux suites run in the Nix environment that fixes
     the machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
@@ -41,7 +41,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
     capability table rather than its name (`slice/capabilities.ts`), checking the refusal where it can't. With
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
-    drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
+    drift test (`test/integration/record.ts`): `pnpm test:integration:full --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
   - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
@@ -114,11 +114,18 @@ Use the narrowest check that covers the change:
 | The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
 | Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
 
+Linux commands are serial: `pnpm test:integration` excludes the twelve large local-file upload cases;
+`pnpm test:integration:heavy` opts into all twelve (32/256/600 MiB on four backends), and
+`pnpm test:integration:full` runs the complete suite in one invocation. Nightly and dispatched Linux CI use the
+full command. macOS keeps its existing full selection. Default, heavy and full reports use separate directories;
+the full report also splits measured case time/counts by group, while shared hooks/startup remain in the complete
+run totals. Moving cases out of the default command does not reduce the full nightly cost.
+
 Keep integration tests cheap: share setup only where cases do not need isolated contexts, keep a fresh scoped page
 and explicit cleanup, and add cases for distinct behavior rather than needless combinations. Preserve assertions,
 deadlines and normal failure tracing when measuring changes. The Linux reporter in
 `packages/browser/test/integration/timingReporter.ts` prints the slowest files and cases and writes
-`.data/integration-timings/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
+`.data/integration-timings/<group>/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
 `integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
 if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
 Files that fail collection or are never collected have null case totals and execution durations; observed case

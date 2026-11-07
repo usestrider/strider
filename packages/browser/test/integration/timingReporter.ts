@@ -7,6 +7,7 @@ type Outcome = ReturnType<TestCase["result"]>["state"]
 interface CaseTiming {
   readonly id: string
   readonly name: string
+  readonly group: "default" | "heavy"
   readonly outcome: Outcome
   readonly durationMs: number | null
   readonly retryCount: number | null
@@ -35,6 +36,7 @@ const caseTiming = (test: TestCase): CaseTiming => {
   return {
     id: test.id,
     name: test.fullName,
+    group: test.tags.includes("heavy") ? "heavy" : "default",
     outcome: test.result().state,
     durationMs: diagnostic?.duration ?? null,
     retryCount: diagnostic?.retryCount ?? null,
@@ -61,7 +63,17 @@ export default class TimingReporter implements Reporter {
   private snapshot(reason: "running" | "passed" | "failed" | "interrupted", unhandledErrors = 0) {
     const files = Array.from(this.files.values())
     const counts = { passed: 0, failed: 0, skipped: 0, pending: 0 }
-    for (const file of files) for (const test of file.tests) counts[test.outcome]++
+    const groups = {
+      default: { counts: { ...counts }, measuredCaseMs: 0 },
+      heavy: { counts: { ...counts }, measuredCaseMs: 0 }
+    }
+    for (const file of files) {
+      for (const test of file.tests) {
+        counts[test.outcome]++
+        groups[test.group].counts[test.outcome]++
+        groups[test.group].measuredCaseMs += test.durationMs ?? 0
+      }
+    }
     const report = {
       schemaVersion: 1,
       startedAt: this.startedAt,
@@ -77,6 +89,7 @@ export default class TimingReporter implements Reporter {
       unknownCaseFiles: files.filter((file) => file.caseCount === null).length,
       knownCases: Object.values(counts).reduce((sum, count) => sum + count, 0),
       counts,
+      groups,
       unhandledErrors,
       files
     }
@@ -171,6 +184,13 @@ export default class TimingReporter implements Reporter {
         JSON.stringify(report.counts)
       }; files completed: ${report.completedFiles}/${report.plannedFiles}; failed files: ${report.failedFiles}; files with unknown case totals: ${report.unknownCaseFiles}; unhandled errors: ${errors.length}`
     )
+    for (const [group, timing] of Object.entries(report.groups)) {
+      console.log(
+        `${group} cases: ${JSON.stringify(timing.counts)}; ${
+          seconds(timing.measuredCaseMs)
+        } measured case time (excludes shared hooks/startup)`
+      )
+    }
     for (const file of report.files.filter((file) => file.outcome === "failed")) {
       console.log(`Failed file (${file.collectionStatus}): ${file.file}`)
       for (const message of file.errors) console.log(`  ${message}`)
