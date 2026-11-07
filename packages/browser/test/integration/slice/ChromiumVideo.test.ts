@@ -68,6 +68,7 @@ describe("Chromium video writer", () => {
           ], { encoding: "utf8" }))
           const video = probe.streams[0]
           assert.strictEqual(video.codec_name, "vp8")
+          assert.strictEqual(Number(probe.format.start_time), 0)
 
           assert.deepStrictEqual([video.width, video.height], [640, 480])
           assert.isAtMost(Number(video.nb_read_frames), 8)

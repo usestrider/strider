@@ -119,9 +119,18 @@ export const record = Effect.fnUntraced(function*(
     )
     return yield* Effect.scoped(Effect.gen(function*() {
       yield* finishing
+      let firstFrame = true
       return yield* writer.write(
-        Stream.fromEffectRepeat(
-          Queue.take(input).pipe(Effect.flatMap(({ frame, accept }) => Effect.as(accept, frame)))
+        Stream.fromEffectRepeat(Queue.take(input)).pipe(
+          Stream.flatMap(({ frame, accept }) => {
+            const initial = firstFrame
+            firstFrame = false
+            const original = Stream.fromEffect(Effect.as(accept, frame))
+            // A synthetic boundary picture does not take the original source delivery.
+            return initial && frame.at > 0
+              ? Stream.concat(Stream.make({ ...frame, at: 0 }), original)
+              : original
+          })
         ),
         { path, width: initial.width, height: initial.height }
       ).pipe(

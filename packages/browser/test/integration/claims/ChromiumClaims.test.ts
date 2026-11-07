@@ -584,9 +584,24 @@ describe("Chromium claims", () => {
             Protocol.on(browser.observer.browser)
           )
           const response = yield* Deferred.await(requested)
+          const destroyed = yield* browser.observer.browser.subscribe(Target.targetDestroyed)
+          yield* Target.setDiscoverTargets({ discover: true, filter: [{ exclude: false }] }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
           // Leave only the externally created target, so adoption needs no public-to-CDP ID mapping.
+          const remaining = new Set(initialPages.map((page) => page.targetId))
           for (const page of initialPages) {
             yield* Target.closeTarget({ targetId: page.targetId }).pipe(Protocol.on(browser.observer.browser))
+          }
+          // Close acknowledgements can precede removal; the subscription buffers even early destruction events.
+          if (remaining.size > 0) {
+            yield* destroyed.pipe(
+              Stream.takeUntil((event) => {
+                remaining.delete(event.targetId)
+                return remaining.size === 0
+              }),
+              Stream.runDrain
+            )
           }
           assert.deepStrictEqual(
             (yield* browser.targets).filter((info) => info.type === "page").map((info) => info.targetId),

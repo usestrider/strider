@@ -164,6 +164,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("pdf.preferCssPageSize", "unsupported", ["WebDriver BiDi prints at the size it is given"]),
       entry("cookies.partitioned", "unsupported", ["Firefox doesn't say which partition a cookie is in"]),
       entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"]),
+      entry("capability.virtualAuthenticator", "unsupported", [
+        "Firefox implements authenticators through classic WebDriver, not this BiDi transport"
+      ]),
       entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
       entry("capability.screencast", "unsupported", [
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
@@ -352,6 +355,19 @@ export const connect: (
           )
         ),
       video: (page) => Capture.video(state, page),
+      createAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      releaseAuthenticator: () => Effect.void,
+      authenticatorCredentials: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      updateAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),

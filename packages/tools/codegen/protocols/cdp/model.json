@@ -68401,7 +68401,8 @@
           "optional": false,
           "traits": {
             "status": "stable",
-            "description": "The ECDSA P-256 private key in PKCS#8 format. (Encoded as a base64 string when passed over JSON)"
+            "description": "The ECDSA P-256 private key in PKCS#8 format. (Encoded as a base64 string when passed over JSON)",
+            "sensitive": true
           }
         },
         "userHandle": {
@@ -68761,7 +68762,15 @@
       "result": "WebAuthn#addVirtualAuthenticator.Result",
       "traits": {
         "status": "stable",
-        "description": "Creates and adds a virtual authenticator."
+        "description": "Creates and adds a virtual authenticator.",
+        "createsResource": true,
+        "release": [
+          {
+            "method": "WebAuthn.removeVirtualAuthenticator",
+            "param": "authenticatorId",
+            "from": "/authenticatorId"
+          }
+        ]
       }
     },
     "WebAuthn#addVirtualAuthenticator.Params": {

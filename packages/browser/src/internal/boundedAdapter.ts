@@ -35,7 +35,7 @@ type Method = {
 }[keyof Connection]
 
 /** The methods that are cleanup. */
-type Release = "removeUserContext" | "closePage" | "releaseHandles" | "resetPermissions"
+type Release = "releaseAuthenticator" | "removeUserContext" | "closePage" | "releaseHandles" | "resetPermissions"
 
 /** What a call does to the browser, and what a `Timeout`'s hint calls it. */
 type Kind =
@@ -70,6 +70,10 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   accessibilityTree: read("the accessibility tree"),
   screencast: write("starting the screencast"),
   video: write("starting the video"),
+  createAuthenticator: { _tag: "Create", what: "creating the virtual authenticator" },
+  releaseAuthenticator: release,
+  authenticatorCredentials: read("the virtual authenticator credentials"),
+  updateAuthenticator: write("updating the virtual authenticator"),
   cookies: read("the cookie read"),
   setCookies: write("setting the cookies"),
   clearCookies: write("clearing the cookies"),
@@ -86,6 +90,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
 
 /** How what a creation made is closed, when the operation stopped waiting for it. */
 const closes = {
+  createAuthenticator: (adapter: Connection, ref: Adapter.Authenticator) => adapter.releaseAuthenticator(ref),
   createPage: (adapter: Connection, page: Target.NavigableId) => adapter.closePage(page, { runBeforeUnload: false }),
   createUserContext: (adapter: Connection, context: UserContext.Id) => adapter.removeUserContext(context)
 }
@@ -158,7 +163,9 @@ export const make = (adapter: Connection): Bounded => {
     const kind = methods[name]
     if (kind._tag === "Release") continue
     const method = adapter[name] as (...args: Array<unknown>) => Effect.Effect<unknown, unknown, unknown>
-    const close = name === "createPage" || name === "createUserContext" ? closes[name] : undefined
+    const close = name === "createPage" || name === "createUserContext" || name === "createAuthenticator"
+      ? closes[name]
+      : undefined
     bounded[name] = (...args: Array<unknown>) =>
       Effect.flatMap(Operation.current, (current) => {
         const call = Effect.suspend(() => method(...args))

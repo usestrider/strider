@@ -38,6 +38,7 @@ import * as Responses from "./cdpAdapter/responses.ts"
 import * as State from "./cdpAdapter/state.ts"
 import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
+import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
@@ -156,6 +157,9 @@ export const capabilities = (
       entry("cookies.partitioned", "supported"),
       entry("snapshot.clickListeners", "unsupported", [
         "Strider doesn't read them yet: it would take a command per element"
+      ]),
+      entry("capability.virtualAuthenticator", "supported", [
+        "Native Chromium WebAuthn, one scoped authenticator per page; credential copies keep separate counters"
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
@@ -318,6 +322,10 @@ export const connect: (
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
       video: (page) => Capture.video(state, page, writer),
+      createAuthenticator: (page) => WebAuthn.create(state, page),
+      releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
+      authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),
+      updateAuthenticator: (ref, update) => WebAuthn.update(state, ref, update),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),

@@ -313,3 +313,50 @@ None. Type-checking was settled by leaving it to the project's own `tsc`, and fa
 
 Candidates:
 - **Page-provided tools (WebMCP).** When a page registers tools for agents, one call can replace a sequence of clicks that a banner might block. Their names, schemas and results come from the page, so they are untrusted input. Designed (docs/decisions.md), and built once a browser ships the API.
+
+## Browser evaluation
+
+Use `eval` for a quick read or change in a named page without writing a segment.
+It awaits one JavaScript expression, including a promise.
+
+```sh
+strider -s shop -p main eval 'location.href'
+strider -s shop -p main eval 'Promise.resolve({ answer: 42 })' --json
+strider -s shop -p main eval --file fn.js
+strider -s shop -p main eval --main-world 'window.APP_VERSION'
+```
+
+Give exactly one expression or `--file`. Either input may end with one optional semicolon before trailing
+whitespace, such as `eval 'location.href;'` or a file ending in `() => document.title;`.
+It must still contain a single expression; a sequence of statements is invalid. The file is UTF-8, relative to your shell's working directory,
+and contains an ordinary or async function expression, invoked with no arguments in the browser:
+
+```js
+async () => {
+  return { title: document.title }
+}
+```
+
+Files are browser JavaScript, not Node modules: imports and default exports are invalid. Source is never
+executed in the daemon. Evaluation uses the isolated world by default, as `Page.evaluate` does.
+Backends without isolated worlds return the typed `Unsupported` reason. Choose `--main-world` explicitly
+to use `Page.evaluateInMainWorld`; the page's scripts can observe and tamper with that world.
+
+JSON success has exactly the same fields as a segment result, with the fixed label `"file": "eval"`:
+
+```json
+{"file":"eval","value":{"answer":42},"handles":{},"durationMs":12}
+```
+
+The shared value encoding preserves non-JSON values as type tags, including
+`{"type":"undefined"}` and `{"type":"bigint","value":"42"}`. Cycles and unsupported values fail.
+JSON failures go to stderr with `file`, `error`, optional `reason`, `message`, optional `hint`,
+`phase`, optional `step`, and `durationMs`. File/input errors have phase `load`, browser evaluation
+errors `execute`. Values the browser cannot return, including cycles, also fail during `execute`
+with reason `NotSerializable`. Only refusals by the later shared result encoder have phase `serialize`.
+
+Evaluation can change the page, start requests or open popups. A later failure does not undo those effects.
+Named secrets are concealed with local capture; strict capture masks arbitrary results and failure details.
+Strict capture masks output, not execution. Export records a marked placeholder for evaluation, including
+evaluation that throws after side effects; restore its code by hand. Source text and file paths are omitted
+from result and export metadata.

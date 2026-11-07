@@ -314,7 +314,7 @@ interface AdapterConnection {
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:
-  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), and prerender activation, where the main frame is re-keyed.
+  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), while prerender activation and its document/realm transfer are not implemented.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
   - BiDi: route events to sessions client-side, because the wire carries no subscription id.
 - **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
@@ -389,7 +389,7 @@ Adapter responsibilities:
   - the on-demand realm strategy (no `Runtime.enable`);
   - merging `ExtraInfo` headers into request snapshots (`servedBy` is built since: Who served a response, below);
   - enrichment;
-  - a test of prerender activation, which headless Chromium 155 doesn't produce; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
+  - prerender activation and document/realm transfer, which current adapters do not implement; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
 **Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
 
@@ -454,7 +454,7 @@ Adapter responsibilities:
 
 - **CDP's `ExtraInfo` headers**, the ones the network stack adds, such as cookies. They change a request after it is reported, so they need a fact that updates it, a change to the fact contract not designed yet. (`servedBy` is on the response instead, and built: Who served a response, below.)
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
-- **A test of prerender activation**, which headless Chromium doesn't produce. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
+- **Prerender activation and document/realm transfer**, which current adapters do not implement. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
 - **The rest of the CLI.** `strider browsers` is built; the session commands of CLI.md aren't.
 - **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter. (Since built: Stock WebKit, attached, below, with the patched adapter's profile and a transport rather than a wire and an adapter of its own; WPE wasn't in the pinned nixpkgs after all.)
 
@@ -1034,6 +1034,10 @@ Adapter responsibilities:
 - **Timing counts are successful/attempted repetitions.** Failed attempts are excluded from statistics; zero successful samples have no timing statistics. A failed initial attempt does not skip timed repetitions. If any scenario attempt fails, the command returns a nonzero status after publishing the report (writing `RESULTS.md`, or printing it for `--only`). This handling covers scenario attempts only: failures in the later waiting-expectation, interceptor or page probe measurements can still abort publication.
 - **The captured full run at `c732173` (2026-11-05) includes failures.** Both libraries failed The Internet's dynamic-controls navigation initially and in all ten timed repetitions because the preserved `the-internet.har` lacks `https://the-internet.herokuapp.com/dynamic_controls`, which replay therefore aborts. These are stale-recording failures, not established library or browser defects. The other nine scenarios passed their initial and ten timed attempts for both libraries. The local HAR recording/replay scenario's success in this run does not resolve its earlier intermittent failure. The dated 2026-10-27 findings above describe that earlier run.
 
+### Native WebAuthn resources
+
+CDP's `WebAuthn` domain is enabled on a page session, not the browser session. `addVirtualAuthenticator` creates a remote resource released by `removeVirtualAuthenticator`; its generated resource traits release late replies. The native environment is keyed by frame-tree node and inherited by descendant frames, not by the browser context or opener. The adapter retains a per-page reservation through failed-acquisition cleanup and scope release, and disables the environment after removing its authenticator. Disable commands run outside the originating operation's command deadline. The `Credential.privateKey` sensitivity annotation wraps decoded keys as `Redacted` and unwraps only when encoding a command for the wire. No virtual WebAuthn command is available on the BiDi transport. Stock WebKit Automation declares credential commands but its implementation refuses credential management, so it does not satisfy the capability.
+
 ### Pause-on-start granularity
 
 Before-author-script setup for *new* targets needs them paused at creation. Granularity differs by backend, and the access model depends on it.
@@ -1044,7 +1048,7 @@ Before-author-script setup for *new* targets needs them paused at creation. Gran
 | BiDi | not needed: declarations are scoped natively by context or user context (built 2026-10-20) |
 | Stock WebKit | a page's targets after `Target.setPauseOnStart` start paused, the provisional targets of cross-site navigations among them, each resumed on its own (`Target.resume`); workers wait for `Worker.initialized`; new pages and popups aren't (built 2026-10-26) |
 
-The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A declaration that needs `beforeAuthorScript` on targets the available granularity can't isolate fails with `Unsupported`. Observe-only targets are never paused.
+The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. An init script requiring `beforeAuthorScript` fails with `DeclarationError{TimingUnsupported}` on attached Chromium when its scope covers new pages (browser or user context): popups are not paused at creation. `bestEffort` remains available, and page-scoped scripts retain before-author timing for later documents. Launched Chromium pauses browser targets and Firefox installs native preload scripts, so these scopes support required timing there. Observe-only targets are never paused.
 
 ## Backends and order
 

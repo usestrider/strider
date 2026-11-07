@@ -159,6 +159,50 @@ describe("Shared video lifetime", () => {
       }))
   }
 
+  for (const times of [[127e6, 237e6], [127e6], [0], [-1e6]] as const) {
+    it.effect(`shows the first picture from zero and retains source times ${times}`, () =>
+      Effect.gen(function*() {
+        const written: Array<VideoWriter.Frame> = []
+        let acknowledgements = 0
+        const file = yield* Video.record(
+          Effect.succeed({
+            frames: Stream.fromIterable(times).pipe(Stream.map((at, index) => ({
+              frame: { ...frame, at: 10e9 + at, data: new Uint8Array([index + 1]) },
+              take: Effect.sync(() => {
+                acknowledgements++
+              })
+            }))),
+            ended: Effect.never
+          }),
+          {
+            write: (frames, destination) =>
+              frames.pipe(
+                Stream.runForEach((frame) =>
+                  Effect.sync(() => {
+                    written.push(frame)
+                  })
+                ),
+                Effect.as(destination.path)
+              )
+          },
+          "/tmp"
+        ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+          now: () => 10e9 as ReturnType<BrowserClock.BrowserClock["now"]>,
+          sleep: () => Effect.never
+        }))
+        yield* file
+        const normalized = times.map((at) => Math.max(0, at))
+        assert.deepStrictEqual(written.map((frame) => frame.at), [
+          ...(times[0] > 0 ? [0] : []),
+          ...normalized,
+          normalized.at(-1)
+        ])
+        assert.deepStrictEqual(written[0]!.data, new Uint8Array([1]))
+        assert.deepStrictEqual(written.at(-1)!.data, new Uint8Array([times.length]))
+        assert.strictEqual(acknowledgements, times.length, "synthetic pictures do not acknowledge the source")
+      }))
+  }
+
   it.effect("never gives the writer a frame earlier than the one before it", () =>
     Effect.gen(function*() {
       // The ffmpeg writer's Matroska input loses the timing of every later frame after a timestamp goes back:
@@ -315,6 +359,46 @@ describe("Shared video lifetime", () => {
       const error = yield* Effect.flip(file)
       assert.match(error.message, /did not finish within 5 seconds/)
       assert.isTrue(released)
+    }))
+
+  it.effect("backpressures the real first delivery after its zero-time copy and bounds termination", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const ended = yield* Deferred.make<void>()
+      const copied = yield* Deferred.make<void>()
+      let acknowledgements = 0
+      let produced = 0
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.fromEffectRepeat(Effect.sync(() => {
+            produced++
+            return {
+              frame: { ...frame, at: 127e6 },
+              take: Effect.sync(() => {
+                acknowledgements++
+              })
+            }
+          })),
+          ended: Deferred.await(ended)
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach(() => Deferred.succeed(copied, undefined).pipe(Effect.andThen(Effect.never))),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+      yield* Deferred.await(copied)
+      yield* TestClock.adjust("1 second")
+      const producedWhileBlocked = produced
+      const acknowledgedWhileBlocked = acknowledgements
+      yield* Deferred.succeed(ended, undefined)
+      yield* TestClock.adjust("5 seconds")
+      assert.match((yield* Effect.flip(file)).message, /did not finish within 5 seconds/)
+      assert.strictEqual(producedWhileBlocked, 1)
+      assert.strictEqual(acknowledgedWhileBlocked, 0, "taking the synthetic copy must not acknowledge the source")
     }))
 
   it.effect("propagates writer failure and releases the capture source", () =>

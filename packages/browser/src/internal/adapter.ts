@@ -41,6 +41,7 @@ import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as WebAuthn from "../WebAuthn.ts"
 import * as BrowserClock from "./browserClock.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -738,6 +739,20 @@ export interface AxNode {
   readonly children: ReadonlyArray<AxNode>
 }
 
+/** A remote authenticator; L1 never exposes its protocol ID. */
+export interface Authenticator {
+  readonly page: Target.NavigableId
+  readonly id: string
+}
+
+/** Credential mutations, all classified as writes by the bounded adapter. */
+export type AuthenticatorUpdate =
+  | { readonly _tag: "Add"; readonly credential: WebAuthn.Credential }
+  | { readonly _tag: "Remove"; readonly credentialId: Uint8Array }
+  | { readonly _tag: "Clear" }
+  | { readonly _tag: "Verified"; readonly verified: boolean }
+  | { readonly _tag: "Presence"; readonly enabled: boolean }
+
 /** One frame of a screencast, a JPEG, with its size in device pixels and when it arrived. */
 export interface ScreencastFrame {
   readonly at: MonotonicInstant.MonotonicInstant
@@ -979,6 +994,12 @@ export interface AdapterConnection {
   readonly video: (
     page: Target.NavigableId
   ) => Effect.Effect<Effect.Effect<string, AdapterError>, AdapterError, Scope.Scope>
+  readonly createAuthenticator: (page: Target.NavigableId) => Effect.Effect<Authenticator, AdapterError>
+  readonly releaseAuthenticator: (ref: Authenticator) => Effect.Effect<void, AdapterError>
+  readonly authenticatorCredentials: (
+    ref: Authenticator
+  ) => Effect.Effect<ReadonlyArray<WebAuthn.Credential>, AdapterError>
+  readonly updateAuthenticator: (ref: Authenticator, update: AuthenticatorUpdate) => Effect.Effect<void, AdapterError>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
   readonly clearCookies: (context: UserContext.Id) => Effect.Effect<void, AdapterError>

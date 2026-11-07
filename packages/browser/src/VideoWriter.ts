@@ -21,7 +21,9 @@ import * as Reason from "./Reason.ts"
 
 /**
  * An image at a timestamp in nanoseconds relative to the recording start. Each image is shown until the next
- * timestamp; the final image repeats the last picture at the recording end time. Timestamps never decrease:
+ * timestamp. Recordings supply a copy of the first picture at time zero when its capture time is later,
+ * keeping the original frame at its capture time; the final image repeats the last picture at recording end.
+ * Timestamps never decrease:
  * a source time before its predecessor is held at the preceding timestamp. Chromium maps browser
  * timestamps from a local receipt anchor and caps them at receipt time. Decreasing delivery latency
  * can shorten source intervals; backward clock jumps can flatten them until source time catches up.
@@ -40,7 +42,8 @@ export const Frame = Schema.Struct({
 
 /**
  * One image at nanoseconds relative to recording start, shown until the next timestamp.
- * Times never decrease, and the final image marks recording end.
+ * Recordings begin with the first picture at zero, retain its capture-time frame, and end with a copy
+ * of the last picture at recording end. Times never decrease.
  *
  * @stability unstable
  * @category models

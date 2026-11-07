@@ -125,6 +125,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("screenshot", "unsupported", ["nothing is painted"]),
   entry("pdf", "unsupported", ["nothing is painted"]),
   entry("workers.evaluate", "unsupported", ["the timeline has no workers"]),
+  entry("capability.virtualAuthenticator", "unsupported", ["The test backend does not implement native WebAuthn"]),
   entry("capability.axTree", "unsupported", [noDom]),
   entry("capability.screencast", "unsupported", ["nothing is painted"]),
   entry("capability.video", "unsupported", ["nothing is painted"])
@@ -387,6 +388,13 @@ export const connect = (
       accessibilityTree: () => unsupported("capability.axTree"),
       screencast: () => unsupported("capability.screencast", "nothing is painted"),
       video: () => unsupported("capability.video", "nothing is painted"),
+      createAuthenticator: () =>
+        unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP"),
+      releaseAuthenticator: () => Effect.void,
+      authenticatorCredentials: () =>
+        unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP"),
+      updateAuthenticator: () =>
+        unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP"),
       cookies: (context) => Effect.succeed(cookies.get(context) ?? []),
       setCookies: (context, added) =>
         Effect.sync(() => {

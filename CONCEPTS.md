@@ -68,7 +68,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 - **A step never waits.** No step waits on the browser or on a caller, so the stream never stalls: deciding an obligation, releasing a page and installing the engine happen apart, and what they write comes back as a command (a policy's `AutoResolution`, a dialog nothing will decide, a stay).
 - **Two exceptions, each with a single writer of its own.** A page's input state (§5) is written by the gesture that holds the page's input permit, at the rate of input events. Where the engine is installed (§8, Queries) is the runtime's `Cache` of its own work, which dedupes concurrent installs; it is no fact about the browser and no caller's setting.
 
-**Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (prerender activation moves both into the existing tab), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
+**Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (state can represent transfer between pages, which current adapters do not implement), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
 
 **Unions of valid models, not optional fields.** When fields only make sense together, the model is a tagged union of its valid shapes, so impossible combinations can't be built: a page with a parent, a worker realm attached to a tab, a left-open page with a cleanup scope. A value that is genuinely optional, such as an opener the backend didn't report, is an `Option`, never `?:`, `undefined` or `null`. Generated L0 wire types mirror the protocol's optional keys, and adapters convert them at the L0→L1 boundary.
 
@@ -132,7 +132,7 @@ interface NavigableState {
 interface PageModel {
   readonly _tag: "Page"
   readonly id: NavigableId
-  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: an activated prerender page ends (PrerenderActivated)
+  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: how the page was created
   readonly origin:                                      // fixed: how it came to exist
     | { _tag: "Created" }
     | { _tag: "Opened"; originalOpener: Option<NavigableId> }   // None: the backend didn't report it; kept even under noopener
@@ -159,7 +159,7 @@ interface DocumentModel {
     | { _tag: "Restored"; navigation: NavigationId; from: DocumentId }   // only with correlating evidence
     | { _tag: "Adopted" }                               // existed before we attached
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // changes only on prerender activation
+    navigable: NavigableId                              // fixed in current adapters
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: Url                                            // changes on same-document navigation
@@ -176,7 +176,7 @@ interface WindowRealmModel {
   readonly id: RealmId
   readonly world: { _tag: "Main" } | { _tag: "Isolated"; name: string }   // fixed: a realm never changes world
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // moves with its document on prerender activation
+    navigable: NavigableId                              // fixed in current adapters
     documents: NonEmptyReadonlyArray<DocumentId>        // usually one; two after initial-blank reuse
     lifecycle: RealmLifecycle
   }>
@@ -207,7 +207,7 @@ type NavigationOutcome =
   | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
-  | { _tag: "Activated"; document: DocumentId }       // prerender
+  | { _tag: "Activated"; document: DocumentId }       // prerender activation is not implemented
   | { _tag: "Download"; download: DownloadId }        // old document stays
   | { _tag: "NoContent"; status: 204 | 205; response: Option<ResponseRef> }   // old document stays
   | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }   // None: no error page correlated (yet)
@@ -264,7 +264,7 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
-  | UserContextRemoved | AccessReleased | PrerenderActivated
+  | UserContextRemoved | AccessReleased
   | PageClosed /* by: command | script | userContextRemoved */ | PageCrashed
   | ObligationEnded | DownloadEnded | HopEnded            // a dialog, file chooser or paused request; a download; a request hop
   | Vanished                                              // gone for a reason nothing reported
@@ -323,6 +323,10 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Remote facts and model loss.** A remote close invalidates local bindings without sending another close. Permanent loss of observation ends lifetimes with `ConnectionLost` or `ModelUnavailable` without asserting remote destruction. A temporary quarantine fails current operations without completing `closed`, and resumes only after a verified resynchronization.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
 - **Cleanup order.** Transport, ingestion and obligation resolvers stay alive while owned resources tear down. The order is: stop new work, drain obligations within the cleanup budget, release declarations and owned resources in dependency order, then disconnect or close the owned process. Finalizers are bounded.
+
+### Native virtual authenticators
+
+Native virtual WebAuthn authenticators are acquired by a controlled page's `capability(Capability.VirtualAuthenticator)` into the caller's scope. Chromium's virtual environment belongs to the page's frame tree, survives navigation and does not cover sibling pages or popups. L1 checks scope and access lifetime on every handle call; the adapter reserves one owner per page, releases a late creation, removes the authenticator and disables the environment before allowing reacquisition. An overlapping acquisition fails rather than allowing one scope's cleanup to remove another's authenticator. Credential listing exports redacted private-key bytes; importing provisions a separate native store with its own counter. Firefox's current BiDi transport and stock WebKit refuse acquisition.
 
 ### Experimental claims and handoff
 
@@ -386,7 +390,7 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
   - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one is `createdBy: Restored{from}`.
   - Node and handle continuity are proven separately from document continuity.
-  - On prerender activation the prerender page ends with `PrerenderActivated`. Its document and realms move into the activating tab, and their `navigable` changes in state.
+  - Current adapters do not implement prerender activation or document and realm transfer between pages.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.

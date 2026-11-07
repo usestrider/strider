@@ -27,6 +27,7 @@ import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
+import * as GVariant from "../src/internal/gvariant.ts"
 import * as Launch from "../src/internal/launch.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
@@ -566,6 +567,11 @@ describe("WebKit launcher", () => {
       behavior: (spawn: number) => {
         readonly held: boolean
         readonly silentSession?: boolean | undefined
+        readonly closeHandshake?:
+          | "before session reply"
+          | "before automation target"
+          | "before anchor announcement"
+          | undefined
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
@@ -712,6 +718,76 @@ describe("WebKit launcher", () => {
           connected.push(port)
           yield* Effect.addFinalizer(() => Effect.sync(() => closed.push(port)))
           yield* connect
+          const handshake = behavior(ports.indexOf(port)).closeHandshake
+          if (handshake !== undefined) {
+            const sent = yield* Deferred.make<void>()
+            const commands = [yield* Deferred.make<number>(), yield* Deferred.make<number>()]
+            let command = 0
+            let read = 0
+            const frame = (label: string, type: string, values: GVariant.Value) => {
+              const name = new TextEncoder().encode(`${label}\0`)
+              const parameters = GVariant.encode(type, values)
+              const bytes = new Uint8Array(5 + name.length + parameters.length)
+              new DataView(bytes.buffer).setUint32(0, name.length + parameters.length, false)
+              bytes[4] = 1
+              bytes.set(name, 5)
+              bytes.set(parameters, 5 + name.length)
+              return [bytes] as const
+            }
+            const pull = Deferred.await(sent).pipe(Effect.andThen(Effect.suspend(() => {
+              const step = read++
+              if (handshake !== "before session reply" && step === 0) {
+                return Effect.succeed(frame("DidStartAutomationSession", "(ss)", ["MiniBrowser", "2.54.1"]))
+              }
+              if (handshake === "before anchor announcement") {
+                if (step === 1) {
+                  return Effect.succeed(frame("SetTargetList", "(ta(tsssb))", [
+                    1n,
+                    [[1n, "Automation", "", "", false], [2n, "WebPage", "", "", false]]
+                  ]))
+                }
+                if (step === 2 || step === 3) {
+                  return Deferred.await(commands[step - 2]!).pipe(
+                    Effect.map((id) =>
+                      frame("SendMessageToFrontend", "(tts)", [
+                        1n,
+                        1n,
+                        JSON.stringify({ id, result: { handle: `window-${step}`, presentation: "Window" } })
+                      ])
+                    )
+                  )
+                }
+              }
+              return Effect.fail(
+                new Socket.SocketError({
+                  reason: new Socket.SocketReadError({ cause: "controlled handshake closure" })
+                })
+              )
+            })))
+            const write = (bytes: string | Socket.CloseEvent | Uint8Array) =>
+              Effect.sync(() => {
+                assert(bytes instanceof Uint8Array)
+                written.push(port)
+                Deferred.doneUnsafe(sent, Effect.void)
+                const nul = bytes.indexOf(0, 5)
+                const name = new TextDecoder().decode(bytes.subarray(5, nul))
+                if (name === "SendMessageToBackend") {
+                  const values = GVariant.decode("(tts)", bytes.subarray(nul + 1), true) as ReadonlyArray<
+                    GVariant.Value
+                  >
+                  const message = JSON.parse(values[2] as string)
+                  assert.strictEqual(message.method, "Automation.createBrowsingContext")
+                  Deferred.doneUnsafe(commands[command++]!, Effect.succeed(message.id))
+                }
+              })
+            return {
+              pull,
+              upgrade: () => Effect.void,
+              write,
+              writeAll: (chunks) => Effect.forEach(chunks, write, { discard: true }),
+              close: Effect.void
+            }
+          }
           const write = () =>
             Effect.andThen(
               Effect.sync(() => written.push(port)),
@@ -734,6 +810,27 @@ describe("WebKit launcher", () => {
       )
       return { exit, ports, stopped, connected, closed, written }
     })
+
+    for (const stage of ["before session reply", "before automation target", "before anchor announcement"] as const) {
+      it.effect(`reports socket loss ${stage} instead of waiting for the startup deadline`, () =>
+        Effect.gen(function*() {
+          // The live startup deadline is ten seconds; the independent one-second bound must win
+          // if loss is only reported at that deadline.
+          const result = yield* scriptedLaunch(
+            () => ({ held: true, closeHandshake: stage }),
+            Effect.void,
+            "10 seconds"
+          ).pipe(Effect.timeout("1 second"))
+          assert.strictEqual(result.ports.length, 1)
+          assert.strictEqual(result.written.length, stage === "before anchor announcement" ? 5 : 1)
+          assert.deepStrictEqual(result.closed, result.ports)
+          assert.deepStrictEqual(result.stopped, [0])
+          assert(result.exit._tag === "Failure")
+          const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+          assert(error.reason._tag === "ConnectionFailed")
+          assert.include(error.reason.hint, "An error occurred during Read")
+        }))
+    }
 
     it.effect("writes nothing to a silent foreign listener, and starts owned on the next port its collision picks", () =>
       Effect.gen(function*() {

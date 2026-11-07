@@ -205,6 +205,19 @@
       "traits": {
         "createsResource": true
       }
+    },
+    {
+      "target": "WebAuthn#addVirtualAuthenticator",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "WebAuthn.removeVirtualAuthenticator",
+            "param": "authenticatorId",
+            "from": "/authenticatorId"
+          }
+        ]
+      }
     }
   ]
 }
