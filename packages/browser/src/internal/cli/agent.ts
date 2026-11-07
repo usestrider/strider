@@ -166,7 +166,7 @@ ${example(examples.attach)}
 
 \`tabs\` lists browser tabs outside the session's control. \`control ID --name NAME\` (or \`control --url PATTERN --name NAME\`) takes one; \`release\` ends that access and its routes and handlers while leaving the tab open.
 
-\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
+\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. It returns success only after browser cleanup, directory cleanup and ledger removal finish; cleanup failure returns a nonzero exit code. \`stop --keep\` retains the directory. Concurrent stop callers share cleanup, with the first choosing directory retention; disconnecting a caller does not cancel shutdown. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
 
 ## Other operations and help
 

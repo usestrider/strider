@@ -48,6 +48,8 @@ export interface PageEntry {
   readonly pageProxyId: string
   readonly session: ProtocolClient.Session
   readonly context: ContextEntry
+  /** Document body reads still using this page’s resources, independent of the bounded request history. */
+  readonly retaining: Set<RequestEntry>
   readonly popup: boolean
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   /** The committed target, and the one a cross-site navigation is loading in. */
@@ -132,6 +134,8 @@ export interface RequestEntry {
   readonly session: ProtocolClient.Session
   /** WebKit's id, its target's own. */
   readonly requestId: string
+  /** The request event’s loader key, when reported. */
+  readonly loaderId: string | undefined
   redirects: number
   hop: NetworkRequest.HopId
   /** The last hop a response was reported for: WebKit can report one twice. */

@@ -1,6 +1,6 @@
 // The documentation site on Cloudflare, with Alchemy: the built site as a Worker's static assets at usestrider.dev.
 // `pnpm website:deploy` deploys it with the settings decrypted from deploy.sops.env, and `.github/workflows/docs.yml`
-// does from main.
+// does after each release.
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
 import * as Effect from "effect/Effect"
@@ -24,7 +24,10 @@ export default Alchemy.Stack(
       // www redirects to the bare domain (301, path kept), by a zone redirect rule ahead of the Worker
       domain: { name: "usestrider.dev", redirects: ["www.usestrider.dev"] },
       // No workers.dev URL: the domain is the only way in
-      workersDev: false
+      workersDev: false,
+      // The Worker's name, fixed: Alchemy otherwise derives it from a random instance ID kept in the state, so a lost
+      // state would make a second Worker rather than adopt this one (`alchemy deploy --adopt`)
+      name: "striderdocs-docs-prod-xhnnb6iygm53x7c5"
     })
     return { url: site.url }
   })

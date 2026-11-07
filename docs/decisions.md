@@ -9,8 +9,8 @@ CLI.md) state the contracts that follow from them.
 **Strider drives stock browsers and depends on nothing but Effect.** A script should run in the browser a site
 expects, not a build made for automation. A patched browser is also a dependency as much as a package is: its protocol
 changes whenever its vendor rolls it, and users can get it only through the vendor's installer. Rejected: Playwright's
-WebKit build as an option, and a patched WebKit of our own. Where a feature would need a dependency, it isn't built.
-Only Firefox records a video file, because turning Chromium's or WebKit's frames into one needs an encoder. A trace's
+WebKit build as an option, and a patched WebKit of our own. Optional services supply external tools when the caller explicitly provides them. Firefox writes video itself;
+Chromium writes it through an optional `VideoWriter`, whose ffmpeg layer takes an explicit executable path. A trace's
 DOM capture is our own code. Playwright's snapshotter is read to learn what the trace viewer expects, never copied or
 shipped, and there is no viewer of our own, since trace.playwright.dev already runs anywhere.
 
@@ -414,7 +414,7 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
-**Checked and selected are independent states.** All supported ARIA checkable roles read `aria-checked`. Option and treeitem require a nonempty value other than the literal `"undefined"`: absent, empty or undefined means unsupported checking, while `"false"` means checkable but unchecked, following [WAI-ARIA](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). WAI-ARIA [state processing](https://www.w3.org/TR/wai-aria-1.2/#state_property_processing) treats zero-length values as absent; this does not introduce whitespace trimming or general token normalization. Checked reads and check/uncheck reject unsupported checking with `WrongElement` before input. The other supported roles retain their existing false default. Native checkbox/radio inputs keep their checked property; native options keep their selected property. Reads, expectations, actions and snapshots agree. Rejected: defaulting optional checkability to unchecked for option/treeitem, which allows a click on an ordinary native option to change selection before failing with `StateUnchanged`; matching Playwright's missing-attribute behavior does not justify that effect. Also rejected: using `aria-selected` as checked for option/treeitem, which conflates two independent states and makes check/uncheck reject or skip valid controls; suppressing checked in snapshots of selectable roles, which hides a state the other operations observe.
+**Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions and snapshots. ARIA keywords `true`, `false`, `mixed` and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio and switch; on checkbox, menuitemcheckbox, option and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states. Snapshot representation remains a positive checked marker, not a mixed-state encoding.
 
 **Checking a label prefers its own checked state and clicks the label.** `check` and `uncheck` read the
 selected element's own checked state first, preserving ARIA checkable labels even when an associated control has
@@ -1154,8 +1154,7 @@ waiting for confirmation, runs interruptibly under a fresh one-second browser-cl
 acquisition's protocol deadline. A canceled caller waiting behind stop needs no start cleanup. Cleanup is best
 effort and does not retry a failed stop. A transport that ignores interruption can outlive the budget; bytes already
 accepted by a transport can still reach the browser. Missing confirmation does not prove native release.
-The built-in pipe and WebSocket transports preserve command order on their connection. Consumer frame
-subscriptions and acknowledgments remain independent.
+The built-in pipe and WebSocket transports preserve command order on their connection. Frame delivery and acknowledgements are coordinated across the session's consumers.
 
 Rejected: issuing another start for every confirmed-stream consumer, which Chromium rejects; independent finalizers or unconditional late-success stops, which stop another consumer's stream;
 counting abandoned acquisitions until their reply arrives, which can retain ownership forever; waiting a grace
@@ -1164,3 +1163,139 @@ start/reply exchanges, which blocks a newer acquisition behind an abandoned star
 consuming a reply, which needs a separate interruption-safe ownership transfer; and timing only stop's reply
 wait, which leaves a blocked write outside the cleanup budget. The acquisition's renderer readiness read and
 deadline remain in force, with no retries, activation lease or public options added.
+
+
+Video shares this session stream with user screencasts. A frame is acknowledged once after every current consumer
+has taken it, or released its scope; a fast consumer cannot acknowledge for a slower one. The session retains its
+latest image for a consumer joining an idle confirmed stream, without another acknowledgement. An acquired
+consumer that stops reading holds back new frames until its scope closes. This bounds native frame production
+without blocking the page's renderer. Rejected: acknowledging separately per consumer, which bypasses backpressure,
+and restarting the native stream for an idle join, which disrupts existing consumers.
+
+## Video files use an optional writer service
+
+`VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
+the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
+Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
+PATH. The video consumer keeps source timestamps relative to recording start and sends the last picture once more at stop time so a still ending lasts until stop. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
+the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
+scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
+that policy, timestamps, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
+inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
+or the explicitly named output directory on WebKit. Scope closure
+or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
+even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+retain their errors. A failed or unfinished writer fails
+`file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
+capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
+whole file-writing service `VideoEncoder`, which clashes with the DOM's WebCodecs name; and baking ffmpeg into
+the adapter, which would prevent later WebCodecs, key-frame and PNG/polled-source implementations from using
+the same boundary. In-browser preparation is rejected: even an isolated world shares the page's renderer main
+thread, so base64 transfers, decoding, canvas drawing and re-encoding at 25fps compete with the page under test;
+navigation destroys the realm and JPEG re-encoding loses quality. Core fitting in Node would require an additional
+codec dependency; no implicit external image tool is introduced.
+
+WebKit reads it only with an explicit polling interval and output directory on its layer; a writer alone
+leaves video unsupported. PNG polling has renderer cost and misses intermediate states, so it is never
+inferred from writer availability. The interval is finite and positive with no hidden default, and an absolute writable directory owned by the caller keeps video independent of unsupported WebKit downloads. The first PNG is
+immediate, subsequent serial captures wait the configured interval after completion and any backpressure, and
+navigation target replacement does not end the page proxy recording. Actual page, context or connection end is
+observed independently of writer reads. Rejected: enabling polling whenever a writer is supplied, claiming
+polled output is a native capture, and enabling downloads merely to supply a video destination.
+
+## Expectation observations
+
+Expectation history contains observed values and diagnostic error entries, and `last` is its final entry.
+For locator expectations, page values must reach Strider before the deadline; with neither a page value nor a
+diagnostic error recorded, history is empty and `last` is absent. Late replies do not update a returned failure.
+A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee a page value.
+`Expect.that` on an effect records `{ error: "a check was still running at the deadline" }` for an unfinished check,
+even if no check has returned a value. This diagnostic describes the unfinished check rather than a page value.
+Rejected: inventing a page value Strider never received, and waiting past the deadline for a reply, which breaks
+the caller’s budget. Changing how observations are collected is not required by this contract.
+
+
+
+## Diagnostic evidence at failure
+
+An error's diagnostics are a snapshot of what its operation and steps know when it is built. A write starts
+uncertain even after an earlier write was confirmed; a successful adapter reply or explicit browser rejection
+records acknowledgement of that call. Evaluations explicitly sent as writes use the same reply recording;
+read-only evaluations cannot confirm an earlier write. Engine actions record their applied answer, and a guard's proof that
+input did not reach the page remains `NotSent`. Adapter methods may send several protocol commands; their overall
+reply is not a delivery ledger for those commands.
+
+Cleanup reports evidence owned by the operation: completed or failed input recovery, and pending abandoned
+creation cleanup. It preserves existing resource owners and cleanup budgets. A summary gives known failure
+precedence over pending work, pending over completed, and completed over no cleanup; the first known failure
+supplies the cause. A step contributes its cleanup before the enclosing operation builds its error.
+
+Rejected: waiting past the deadline to obtain a final cleanup answer; transferring ownership to diagnostics;
+letting future scope finalizers rewrite earlier errors; treating any adapter failure as a browser rejection;
+and preserving an earlier acknowledgement across a later unanswered write. These would respectively change
+timing, lifetime, snapshot semantics or the evidence available to decide whether repeating an action is safe.
+
+Overlapping calls and steps retain uncertainty until each write has an acknowledgement. Ending a wait without a
+reply, including interruption, leaves that outcome uncertain when another overlapping call replies later. If all
+writes are acknowledged, any rejection takes precedence over successful replies. A later independent write starts
+with fresh evidence. A step that succeeds after handling a known missing reply cannot infer confirmation from its
+success; a manually marked send can still be confirmed by a successful step. Recovery releases are writes too, so
+acknowledgement alone does not prove that the requested gesture was dispatched.
+
+Rejected: counting only calls still running, which loses uncertainty when a wait ends before another reply;
+and allowing one reply or a successful error-handling step to confirm the other writes in its operation. Dispatch
+bookkeeping is acquired and released with interruption-safe finalizers; it adds no wait, deadline or resource owner.
+
+Dispatch overlap follows writes, not the lifetime of every enclosing step. A read-only step can remain active
+while several independent writes finish; it contributes no dispatch evidence and cannot retain a previous
+acknowledgement or overwrite a later guard result when it finishes. Actual call lifetimes propagate through
+enclosing operations as they start and end. Manual sends participate until their guard, confirmation or step
+completion settles them. A tracked call takes over its caller's preparatory manual send annotation; confirming
+or guarding a different manual send cannot erase a concurrent call's missing reply, even after that call's wait
+has ended. Rejected: using every active step as an overlap member, which lets unrelated read waits hide later
+evidence and keep already finished write groups alive.
+
+A guard cancels only its source record's tentative send. In that record, it restores `NotSent` for the guarded
+gesture. In enclosing records, an overlap consisting only of guarded child sends contributes no new delivery
+evidence, so the evidence from before that overlap survives. A completed or unanswered unrelated write in the
+overlap still takes precedence. Rejected: forwarding a child's cancellation as replacement of an enclosing
+operation's prior evidence, which could claim safe retry after an earlier write had reached the browser.
+
+
+Generic expectations classify observations from the exact library-produced `page.url` Watchable and `page.title`
+effect by source identity, including each fresh title getter and library access guards. Both watching and polling
+attach this metadata to the failure when it is created; it follows rethrows of that same object, and each trace
+export applies its chosen diagnostics preset. Dedicated matchers retain their expected-value redaction; generic
+condition descriptions remain user-authored text. User transformations, including `Watchable.map` and `Effect.map`,
+and reconstructed failures do not inherit source classification, because arbitrary transformations can change both
+type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
+and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.
+
+
+Vitest failure tracing is opt-in on the browser layer, with recording state owned by each bound callback and its
+captured test identity. The shared backend never owns a callback's recorder, so concurrent tests and retries keep
+their own metadata and attachments. Adapter recordings default to per-action screenshots, DOM snapshots and
+network capture, with screencast off; explicit settings can reduce capture, and disabling network requires
+disabling snapshots. These defaults make failed-test traces useful without changing direct `Trace.record` calls.
+Rejected: changing the general recording defaults, which adds capture cost outside tests, and owning recordings
+in the memoized browser layer, which shares one callback's identity with later callbacks.
+
+## Operation caller stacks
+
+Capture six caller frames in the operation constructor before calling the formatting helper,
+and defer formatting until a recording or failure rendering needs the frame. This keeps construction-time source
+links for prebuilt operations while reducing work on every unrecorded successful call. When capture is enabled but
+no user caller is available, retain the operation name without a location in failures, and omit unavailable source
+locations. The informational name is an accepted trade-off for avoiding eager formatting: Effect's frame contract
+cannot lazily omit a node. Reject eager caller resolution on every success and dependency changes to remove that
+rare location-free line. Capture remains independent of recording so failures outside recordings and operations
+built before recording retain their callers.
+
+## Sent-header waits end with their owner
+
+Sent-header waits end when a hop is evicted or loses its owning frame, worker, context, page or browser connection,
+returning already-attributed sent headers or the immutable request snapshot. Removing a frame includes its
+descendants and leaves unrelated owners alone. Owner loss does not imply a network failure. Waiting until the
+deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
+may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
+redirect hops was rejected because attribution must remain correct.

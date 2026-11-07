@@ -353,7 +353,8 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
  *   adds, such as `Cookie`. On Chromium this can wait for response or redirect information even after the extra
  *   headers arrive, so they cannot be confused with another redirect hop's headers. On WebKit it waits for the
  *   response. On Firefox it returns at once. The operation's deadline bounds the wait.
- * - If the request finishes, fails, is canceled or its page goes away before its sent headers are known, this
+ * - If the request finishes, fails, is canceled, is evicted from retention, or loses its frame, worker, context, page
+ *   or browser connection before its sent headers are known, this
  *   returns the available sent headers, or the request event's headers if none were reported. Those can omit
  *   network additions such as `Cookie`.
  * - `target` is the page or context the request was seen on.
@@ -361,8 +362,9 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
  *
  * **Gotchas**
  *
- * On Chromium, awaiting this before letting the same request's response proceed waits until the deadline. Let
- * the response proceed first, or read `request.headers` immediately if its possible omissions are acceptable.
+ * In a request-phase route handler, awaiting this before continuing the request prevents it from being sent.
+ * On Chromium, awaiting this before letting the same response proceed also waits until the deadline. Continue
+ * the route first, then inspect sent headers outside its handler, or read `request.headers` immediately if its possible omissions are acceptable.
  *
  * WebKit never reports `Cookie` among the headers sent (`network.headersSent` is partial there).
  *

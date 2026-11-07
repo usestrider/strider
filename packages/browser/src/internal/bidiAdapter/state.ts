@@ -44,11 +44,15 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   document: DocumentEntry | undefined
   /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
-  /**
-   * A traversal that replied before its restored document's realm arrived, waiting for it: under load, Firefox
-   * can reply first.
-   */
-  restoring: ((realm: RealmEntry) => void) | undefined
+  /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
+  restoring: {
+    readonly navigation: PageNavigation.Id
+    readonly arrived: (realm: RealmEntry) => void
+  } | undefined
+  /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
+  restorationAmbiguous: boolean
+  /** Traversal commands still awaiting replies, including ones whose restoration ownership was invalidated. */
+  readonly traversalCommands: Set<PageNavigation.Id>
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
   /** Commands awaiting replies; unknown error commits wait for their navigation identities. */

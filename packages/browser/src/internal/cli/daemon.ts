@@ -133,8 +133,8 @@ interface Daemon {
   readonly scope: Scope.Scope
   /** The steps `export test` writes, and how the session came to know the pages no command opened. */
   readonly recorder: Recorder.Recorder
-  /** Stops the session, keeping its directory or not, once the answer to `request` is written. */
-  readonly stop: (keep: boolean, request: Request) => void
+  /** Waits for session cleanup; the first stop chooses whether to retain the directory. */
+  readonly stop: (keep: boolean, request: Request) => Effect.Effect<boolean, CommandFailed>
   readonly lastActivity: () => number
   readonly idleTimeout: string
   readonly owner: number | undefined
@@ -711,7 +711,6 @@ export const commands = (getDaemon: () => Daemon) => {
         )
       }, ({ all, path, sites }) =>
         Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
           const { page } = yield* root
           const { summary, text } = yield* exportState(getDaemon(), {
             page: Option.getOrUndefined(page),
@@ -721,7 +720,7 @@ export const commands = (getDaemon: () => Daemon) => {
             Effect.mapError((failure) => new CommandFailed(failure))
           )
           const resolved = yield* resolvePath(path)
-          yield* fs.writeFileString(resolved, text, { mode: 0o600 }).pipe(Effect.mapError(failedWith))
+          yield* writeUserFile(resolved, text, { mode: 0o600 })
           yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
@@ -730,7 +729,6 @@ export const commands = (getDaemon: () => Daemon) => {
     Command.withSubcommands([
       Command.make("test", { path: Argument.String("path") }, ({ path }) =>
         Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
           const resolved = yield* resolvePath(path)
           const { placeholders, text } = ExportTest.render({
             name: getDaemon().name,
@@ -742,7 +740,7 @@ export const commands = (getDaemon: () => Daemon) => {
             userDataDir: getDaemon().userDataDir,
             steps: getDaemon().recorder.steps
           })
-          yield* fs.writeFileString(resolved, text).pipe(Effect.mapError(failedWith))
+          yield* writeUserFile(resolved, text)
           // The commands it repeats, not what the session saw of its pages
           const commands = getDaemon().recorder.steps.filter((step) => step._tag !== "Popup" && step._tag !== "Listed")
           yield* Console.log(`wrote ${commands.length} steps to ${resolved}`)
@@ -755,9 +753,9 @@ export const commands = (getDaemon: () => Daemon) => {
     { keep: Flag.Boolean("keep").pipe(Flag.withDefault(false)) },
     ({ keep }) =>
       Effect.gen(function*() {
-        getDaemon().stop(keep, yield* CurrentRequest)
+        const retained = yield* getDaemon().stop(keep, yield* CurrentRequest)
         yield* Console.log(
-          keep
+          retained
             ? `stopping ${getDaemon().name}; its directory stays at ${getDaemon().paths.dir}`
             : `stopping ${getDaemon().name}`
         )
@@ -807,6 +805,14 @@ const resolvePath = Effect.fnUntraced(function*(path: string) {
   const paths = yield* Path.Path
   const cwd = yield* WorkingDirectory
   return paths.resolve(cwd, path)
+})
+
+/** Writes a file the user named, creating the directories on the way to it. */
+const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, options?: { readonly mode?: number }) {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* Path.Path
+  yield* fs.makeDirectory(paths.dirname(path), { recursive: true }).pipe(Effect.mapError(failedWith))
+  yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
 
 /** A `--site`'s host, with or without a scheme, or nothing if it names none. */
@@ -1089,7 +1095,7 @@ const executeSegment = Effect.fnUntraced(function*(
 
 // ── Serving ──
 
-/** The call a command runs in, so `stop` ends the session once that call's answer is written. */
+/** The call whose response must stay connected while stop finishes cleanup. */
 class CurrentRequest extends Context.Service<CurrentRequest, Request>()("@usestrider/browser/cli/CurrentRequest") {}
 
 interface Request {
@@ -1203,19 +1209,29 @@ const handlers = (daemon: Daemon, tree: ReturnType<typeof commands>, version: st
   })
 
 /**
- * The socket's RPC protocol, which tells `written` of each answer it has written, so `stop` ends the session once
- * its own answer is written.
+ * Tracks stop responses and disconnected clients so shutdown can release the transport after cleanup.
  */
-const protocolTelling = (written: (request: Request) => void) =>
-  Layer.effect(RpcServer.Protocol)(Effect.map(RpcServer.makeProtocolSocketServer, (protocol) =>
-    RpcServer.Protocol.of({
+const protocolTelling = (written: (request: Request) => void, disconnected: (client: number) => void) =>
+  Layer.effect(RpcServer.Protocol)(Effect.gen(function*() {
+    const protocol = yield* RpcServer.makeProtocolSocketServer
+    const disconnects = yield* Queue.make<number>()
+    yield* Effect.gen(function*() {
+      while (true) {
+        const client = yield* Queue.take(protocol.disconnects)
+        disconnected(client)
+        yield* Queue.offer(disconnects, client)
+      }
+    }).pipe(Effect.forkScoped)
+    return RpcServer.Protocol.of({
       ...protocol,
+      disconnects,
       send: (client, response, transferables) =>
         Effect.tap(protocol.send(client, response, transferables), () =>
           Effect.sync(() => {
             if (response._tag === "Exit") written({ client, id: String(response.requestId) })
           }))
-    })))
+    })
+  }))
 
 // ── Starting ──
 
@@ -1451,8 +1467,9 @@ export const start = Command.make(
         : Option.none<StorageState.StorageState>()
       yield* fs.makeDirectory(paths.dir, { mode: 0o700 }).pipe(Effect.mapError(failedWith))
       let keep = false
+      let directoryReleased = false
       yield* Effect.addFinalizer(() =>
-        keep
+        directoryReleased ? Effect.void : keep
           // The socket may be gone with its server already, which leaves the lock to remove still
           ? Effect.forEach([paths.socket, paths.lock], (path) => fs.remove(path).pipe(Effect.ignore), { discard: true })
           : fs.remove(paths.dir, { recursive: true }).pipe(Effect.ignore)
@@ -1472,7 +1489,13 @@ export const start = Command.make(
         forkOf,
         secrets,
         version,
-        viewport
+        viewport,
+        released: () => {
+          directoryReleased = true
+        },
+        retain: (value) => {
+          keep = value
+        }
       }).pipe(
         Effect.provide(Logger.layer([log]))
       )
@@ -1481,6 +1504,8 @@ export const start = Command.make(
 
 /** What `start` found before the session's browser: where the session lives, its browser, and how it starts. */
 interface Prepared {
+  readonly released: () => void
+  readonly retain: (keep: boolean) => void
   readonly viewport: Viewport | undefined
   readonly browser: ExportTest.Browser
   /** The probed socket for this startup only; the spec and exports keep the supplied endpoint. */
@@ -1509,13 +1534,13 @@ const serve = Effect.fnUntraced(
     const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
     // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
     const os = yield* Effect.promise(() => Node.os())
-    const ledger = yield* Layer.build(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())))
-    const services = yield* Layer.build(layerOf(browser, userDataDir, connectionEndpoint)).pipe(
+    const scope = yield* Scope.fork(yield* Effect.scope)
+    const ledger = yield* Layer.buildWithScope(Ledger.layer(Session.ledgerRoot(process.env, os.homedir())), scope)
+    const services = yield* Layer.buildWithScope(layerOf(browser, userDataDir, connectionEndpoint), scope).pipe(
       Effect.provideContext(ledger),
       Effect.mapError(failedWith)
     )
     const instance = Context.get(services, Browser.Browser)
-    const scope = yield* Effect.scope
     // Every page of the session keeps rendering while another is in front, as a person's would: focus is
     // emulated where the backend can, and Firefox opens new pages as windows (QUIRKS.md, Q19 and Q71)
     const focus = ExportTest.focusFor(browser)
@@ -1539,7 +1564,7 @@ const serve = Effect.fnUntraced(
       ...(viewport === undefined ? {} : { emulation: { viewport } }),
       // The session's own directory, which strider stop --keep keeps
       downloads: reportsDownloads ? { directory: paths.downloads } : undefined
-    })).pipe(Effect.mapError(failedWith))
+    })).pipe(Scope.provide(scope), Effect.mapError(failedWith))
     const recorder = Recorder.make()
     const session = yield* ToolkitImpl.makeSession({
       context,
@@ -1554,10 +1579,14 @@ const serve = Effect.fnUntraced(
         seen._tag === "Listed"
           ? recorder.listed({ id: seen.page.id, name: seen.name, index: seen.index })
           : recorder.popup({ id: seen.page.id, name: seen.name, opener: seen.opener.id, openerName: seen.openerName })
-    })
+    }).pipe(Scope.provide(scope))
     const stopped = yield* Deferred.make<boolean>()
-    // The stop asked for, which ends the session once its answer is written
-    let stopping: (Request & { readonly keep: boolean }) | undefined
+    const cleaned = yield* Deferred.make<boolean, CommandFailed>()
+    const answered = yield* Queue.make<void>()
+    const pending = new Map<string, Request>()
+    const key = (request: Request) => `${request.client}:${request.id}`
+    // All stop callers share cleanup; the first caller chooses directory retention.
+    let stopping = false
     let last = performance.now()
     const daemon: Daemon = {
       name: flags.name,
@@ -1576,23 +1605,33 @@ const serve = Effect.fnUntraced(
       scope,
       recorder,
       shots: 0,
-      stop: (keepIt, request) => void (stopping = { ...request, keep: keepIt }),
+      stop: (keepIt, request) =>
+        Effect.suspend(() => {
+          pending.set(key(request), request)
+          if (!stopping) {
+            stopping = true
+            Deferred.doneUnsafe(stopped, Exit.succeed(keepIt))
+          }
+          return Deferred.await(cleaned)
+        }),
       lastActivity: () => last,
       idleTimeout: flags.idle.replace(/\s+/g, " "),
       owner: Option.getOrUndefined(flags.ownerPid)
     }
     const touch = () => void (last = performance.now())
     const written = (request: Request) => {
-      if (stopping !== undefined && stopping.client === request.client && stopping.id === request.id) {
-        Deferred.doneUnsafe(stopped, Exit.succeed(stopping.keep))
-      }
+      if (pending.delete(key(request))) Queue.offerUnsafe(answered, undefined)
     }
+    const disconnected = (client: number) => {
+      for (const request of pending.values()) if (request.client === client) written(request)
+    }
+    const listener = new AbortController()
     yield* Layer.build(
       RpcServer.layer(Protocol.Rpcs, { disableTracing: true }).pipe(
         Layer.provide(Protocol.Rpcs.toLayer(handlers(daemon, commands(() => daemon), version, touch))),
-        Layer.provide(protocolTelling(written)),
+        Layer.provide(protocolTelling(written, disconnected)),
         Layer.provide(RpcSerialization.layerNdjson),
-        Layer.provide(NodeSocketServer.layer({ path: paths.socket }))
+        Layer.provide(NodeSocketServer.layer({ path: paths.socket, signal: listener.signal }))
       )
     ).pipe(Effect.mapError(failedWith))
     yield* Effect.gen(function*() {
@@ -1617,7 +1656,34 @@ const serve = Effect.fnUntraced(
           : ""
       }${viewport === undefined ? "" : ` · requested viewport default ${viewport.width}x${viewport.height}`}`
     )
-    return yield* Deferred.await(stopped)
+    const keep = yield* Deferred.await(stopped)
+    prepared.retain(keep)
+    const cleanup = yield* Effect.gen(function*() {
+      yield* Scope.close(scope, Exit.void)
+      // Stop accepting before releasing the name. Closing the listener unlinks its own socket now;
+      // accepted RPC connections remain open for their responses, and a later close owns no path.
+      yield* Effect.sync(() => listener.abort())
+      if (keep) {
+        for (const file of [paths.socket, paths.lock]) {
+          yield* fs.remove(file, { force: true })
+        }
+      } else {
+        yield* fs.remove(paths.dir, { recursive: true, force: true })
+      }
+      prepared.released()
+      // Ledger intentionally tolerates I/O errors; stop must still detect an incomplete removal.
+      const owner = Session.self()
+      const record = `${Session.ledgerRoot(process.env, os.homedir())}/${owner.pid}-${owner.startedAt}.json`
+      if (yield* fs.exists(record)) {
+        return yield* Effect.fail(
+          new CommandFailed({ error: "SessionFailed", message: "The session's ledger record could not be removed" })
+        )
+      }
+    }).pipe(Effect.catchCause((cause) => Effect.fail(failedWith(Cause.pretty(cause)))), Effect.exit)
+    yield* Deferred.done(cleaned, Exit.map(cleanup, () => keep))
+    while (pending.size > 0) yield* Queue.take(answered)
+    yield* cleanup
+    return keep
   }
 )
 

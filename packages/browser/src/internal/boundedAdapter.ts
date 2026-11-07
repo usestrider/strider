@@ -15,6 +15,7 @@
  * Outside an operation, as in the model's own fibers and finalizers, a call is the adapter's, under
  * `CommandTimeout`.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -132,11 +133,20 @@ const creating = <A, E, R>(
   Effect.gen(function*() {
     record.markSent()
     const fiber = yield* Effect.forkDetach(call)
-    return yield* record.bound(Fiber.join(fiber), hint(kind)).pipe(
+    return yield* record.bound(Operation.answered(record, Fiber.join(fiber)), () => {
+      record.noteCleanup({ _tag: "Pending" })
+      return hint(kind)()
+    }).pipe(
       Effect.onExit((exit) =>
         Exit.isSuccess(exit)
           ? Effect.void
-          : Fiber.join(fiber).pipe(Effect.flatMap(close), Effect.ignore, Effect.forkDetach, Effect.asVoid)
+          : Effect.sync(() => {
+            if (Cause.hasInterrupts(exit.cause)) record.noteCleanup({ _tag: "Pending" })
+          }).pipe(
+            Effect.andThen(
+              Fiber.join(fiber).pipe(Effect.flatMap(close), Effect.ignore, Effect.forkDetach, Effect.asVoid)
+            )
+          )
       )
     )
   })
@@ -157,7 +167,11 @@ export const make = (adapter: Connection): Bounded => {
         // The operation's deadline is its commands'; one that passes it is the operation's Timeout
         const unbounded = call.pipe(
           Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
-          Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
+          Effect.mapError((error) => {
+            if (!noReply(error)) return error
+            if (kind._tag === "Create") record.noteCleanup({ _tag: "Pending" })
+            return record.timeout(hint(kind)())
+          })
         )
         switch (kind._tag) {
           case "Read":
@@ -165,7 +179,7 @@ export const make = (adapter: Connection): Bounded => {
           case "Write":
             return Effect.suspend(() => {
               record.markSent()
-              return record.bound(unbounded, hint(kind))
+              return record.bound(Operation.answered(record, unbounded), hint(kind))
             })
           case "Create":
             return creating(record, kind, unbounded, (made) => close!(adapter, made as never))
@@ -181,7 +195,7 @@ export const make = (adapter: Connection): Bounded => {
         const record = current.value
         if (kind._tag === "Write") record.markSent()
         return record.bound(
-          call.pipe(
+          (kind._tag === "Write" ? Operation.answered(record, call) : call).pipe(
             Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
             Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
           ),

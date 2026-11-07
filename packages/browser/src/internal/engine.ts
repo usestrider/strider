@@ -87,7 +87,7 @@ export interface Checks {
   readonly receivesPointer: boolean
 }
 
-/** Why an element isn't ready, as CONCEPTS.md §8 names it. */
+/** Why a target or its action preparation isn't ready. */
 export const NotReady = Schema.Union([
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("NotVisible", {}),
@@ -101,7 +101,9 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("Covered", { by: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
-  Schema.TaggedStruct("NoSuchOption", { option: Schema.String })
+  Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A different text control held focus before preparing the target for insertion. */
+  Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
 ])
 export type NotReady = typeof NotReady.Type
 
@@ -136,7 +138,7 @@ export type Read =
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean; readonly uncheck?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
@@ -235,7 +237,11 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
 
 /** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
 export const Final = Schema.Union([
-  Schema.TaggedStruct("WrongElement", { expected: Schema.String, element: Schema.String }),
+  Schema.TaggedStruct("WrongElement", {
+    expected: Schema.String,
+    element: Schema.String,
+    hint: Schema.optional(Schema.String)
+  }),
   Schema.TaggedStruct("NotEditable", { element: Schema.String }),
   Schema.TaggedStruct("Refused", { element: Schema.String, value: Schema.String })
 ])
@@ -1394,11 +1400,18 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const state = element.getAttribute("aria-checked")
-    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
-      return { state: null, checked: null }
+    const token = element.getAttribute("aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    if (token === "true") return { state: true, checked: true }
+    if (token === "false") return { state: false, checked: false }
+    if (token === "mixed") {
+      return {
+        state: role === "radio" || role === "menuitemradio" || role === "switch" ? false : "mixed",
+        checked: false
+      }
     }
-    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+    // Invalid optional state must not authorize check/uncheck input.
+    const fallback = role === "option" || role === "treeitem" ? null : false
+    return { state: fallback, checked: fallback }
   }
 
   const checkedOf = (element: Element): boolean | null => checkedState(element).checked
@@ -1492,9 +1505,9 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Association stays in the DOM; slots can add refusals without choosing another label. */
-  const checkedForAction = (element: Element): boolean | null => {
+  const checkableForAction = (element: Element): Element | null => {
     const own = checkedOf(element)
-    if (own !== null) return own
+    if (own !== null) return element
     let label: Element | null = element
     while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
     if (label === null || label.control === null) return null
@@ -1512,7 +1525,7 @@ export function engine(render: (root: SnapNode) => string) {
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
-    return checkedOf(label.control)
+    return checkedOf(label.control) === null ? null : label.control
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1854,28 +1867,46 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
-        let response = ready(element, action, request.apply, scrolled, point)
         if (
-          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-          checks.receivesPointer && request.clip !== undefined && points.length > 1
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         ) {
-          response = { ...response, candidates: points }
-        }
-        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-          const captured = {
-            token: `${generation}:${++stabilitySequence}`,
-            element,
-            rect: rects[rects.length - 1]!,
-            frames: checks.stable
+          const active = deepActive()
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            note({ _tag: "PreparingFocus", from: describe(active) })
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            rects = []
+            continue
           }
-          stability = captured
-          const token = captured.token
-          onFrame(() => {
-            if (stability?.token === token) stability = null
-          })
-          return { ...response, stability: captured.token }
         }
-        return response
+        let response = ready(element, action, request.apply, scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
+          }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: rects[rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
+        }
       }
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
@@ -1890,8 +1921,9 @@ export function engine(render: (root: SnapNode) => string) {
     action: Action,
     apply: boolean,
     scrolled: boolean,
-    point: { x: number; y: number } | null
-  ): Response => {
+    point: { x: number; y: number } | null,
+    checks: Checks
+  ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1932,6 +1964,8 @@ export function engine(render: (root: SnapNode) => string) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
+          if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
+          if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
             if (invalidNumberFill(element, action.value)) {
@@ -1950,6 +1984,12 @@ export function engine(render: (root: SnapNode) => string) {
           return { ...answer, fill: "set" }
         }
         selectContents(element as HTMLElement)
+        // Selection focuses the target; its handlers can remove actionability before native typing.
+        if (checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
+        }
+        if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
+        if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
         return { ...answer, fill: "type" }
       }
       case "Select": {
@@ -1992,7 +2032,21 @@ export function engine(render: (root: SnapNode) => string) {
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
+        const control = request.read.followLabel ? checkableForAction(element) : element
+        const checked = control === null ? null : checkedOf(control)
+        if (
+          request.read.uncheck && checked === true && control instanceof HTMLInputElement && control.type === "radio"
+        ) {
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox or a page-managed ARIA checkable to uncheck",
+              element: describe(control),
+              hint: "Check another radio in the group instead"
+            }
+          }
+        }
         return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }

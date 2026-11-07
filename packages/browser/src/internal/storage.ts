@@ -322,8 +322,8 @@ export const originStorage = (
           id,
           budget.at
         )
-        record.markSent()
         const value = yield* Evaluation.call(runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn,
           arguments: [area, ...args].map((arg) => ({ _tag: "Value", value: { type: "string", value: arg } })),

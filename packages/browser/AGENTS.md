@@ -103,7 +103,9 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
   `har.exportHar("run.har")`; `Trace.record(page, { screenshots: "perAction" })` and `exportTrace("trace.zip")`
   write a trace trace.playwright.dev opens; `domSnapshots: true` with `network: true` adds DOM snapshots before and
   after each action, which the viewer renders. Exports are redacted unless `include` names a class of secret;
-  requests' bodies are left out unless it names `"requestBodies"`. A request event's `headers` can lack `Cookie`:
+  requests' bodies are left out unless it names `"requestBodies"`. Trace exports also include available caller locations
+  and local source files, read at export time and copied unchanged under every diagnostics preset; unreadable files
+  are omitted. A request event's `headers` can lack `Cookie`:
   `NetworkRequest.headersSent(page, request)` gives the headers as sent.
 - **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then
   `strider -s s page new --name shop <url>`, `strider -s s -p shop snapshot`, `strider -s s -p shop click e9`; every

@@ -57,6 +57,9 @@ export const record = (
   fixture: string,
   options?: { readonly made?: ((method: string) => boolean) | undefined }
 ): Transport.Transport => {
+  if (process.env["STRIDER_ENVIRONMENT"] === "macos-integration" && process.env["STRIDER_RECORD"]) {
+    throw new Error("macOS traffic recording is disabled: drift fixtures belong to Linux")
+  }
   const directory = process.env["STRIDER_RECORD"]
   if (directory === undefined || directory === "") return transport
   const file = `${directory}/${fixture}.ndjson`

@@ -1,0 +1,79 @@
+---
+title: Video
+description: A WebM file of a page while a scope lives, what each browser needs to write one, where the file goes, and how it plays back.
+order: 3
+---
+
+Screenshots show the page at each step, not what happened between steps. A video records the page into a WebM file
+while a scope lives, the same way on every browser that can write one.
+
+## Recording
+
+Take [`Capability.Video`](/docs/api/browser/Capability#Video) for the scope you want on film. The recording runs
+until that scope closes, and `file` completes with the file's path once the browser or writer has finished it:
+
+```ts
+import { Browser, Capability } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const recordCheckout = Effect.fn("recordCheckout")(function*() {
+  const page = yield* Browser.newPage({ downloads: { directory: "/tmp/videos" } })
+  yield* page.goto("https://shop.example.com/cart")
+  const video = yield* Effect.scoped(Effect.gen(function*() {
+    const recording = yield* page.capability(Capability.Video)
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    return recording
+  }))
+  return yield* video.file
+}, Effect.scoped)
+```
+
+A [trace](/docs/tools/recordings#traces) with `screencast: "native"` records each page's video itself, wherever
+the browser can write one.
+
+## What each browser needs
+
+| Browser  | Needs                                                               | Frames                                          |
+| -------- | ------------------------------------------------------------------- | ----------------------------------------------- |
+| Chromium | a [`VideoWriter`](/docs/api/browser/VideoWriter) on its layer       | its screencast's, as the page paints        |
+| Firefox  | nothing, when the program launched it                               | Firefox's own, as the page paints               |
+| WebKit   | a writer and [polling enabled](/docs/browsers/webkit-video)         | screenshots at the interval you choose          |
+
+Firefox writes the file itself. Chromium only streams the frames it paints, so a writer turns them into a file.
+`VideoWriter.layerFfmpeg` runs the ffmpeg you name, by its absolute path, and writes VP8 with no audio:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { VideoWriter } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Layer } from "effect"
+
+const ChromiumLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+  Layer.provide(VideoWriter.layerFfmpeg({ path: "/usr/bin/ffmpeg" })),
+  Layer.provide(NodeServices.layer)
+)
+```
+
+Strider installs no ffmpeg and doesn't look for one on `PATH`. Without a writer, `Capability.Video` on Chromium
+fails with `Unsupported`, naming the missing `VideoWriter`, and a trace's `screencast: "native"` records frames
+instead. Firefox never reads a writer, and an attached Firefox can't record.
+
+## Where the file goes
+
+On Chromium and Firefox the file goes in the context's
+[`downloads`](/docs/pages/contexts#settings-for-a-contexts-life) directory. By default that's a temporary
+directory, removed when the context closes, so name one, as above, or read the file before the context ends. A
+context with `downloads: "deny"` can't record. WebKit has no downloads: its file goes in the directory its `video`
+option names.
+
+## Playback
+
+- **A still page stays on screen for as long as it was still.** Chromium sends a frame only when the page
+  repaints. The file is variable-rate: each frame keeps its time and stays on screen until the next, as on Firefox.
+  The last picture lasts until recording stops. WebKit keeps each polled sample until the next sample.
+- **A resize is fitted, not followed.** The recording carries on through a resize, but the file keeps the size
+  it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
+- **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last
+  one.
+- **The recording ends with its page.** Closing the scope, page or context ends it; a writer then has up to five
+  seconds on the browser's clock to finish, and a writer that fails fails `file`.

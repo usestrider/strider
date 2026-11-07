@@ -10,4 +10,16 @@ The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the
 
 *layers*
 
-- `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
+- `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>, options?: { readonly trace?: TraceOptions | undefined } | undefined) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
+
+*models*
+
+- `type TraceOptions = & { readonly screenshots?: Trace.CaptureOptions["screenshots"] readonly screencast?: Trace.CaptureOptions["screencast"] readonly directory: string } & (| { readonly domSnapshots?: true | undefined re…`
+
+*constructors*
+
+- `const traceFileName: (info: TestRun.TestInfo) => string`
+
+*context*
+
+- `const withTest: (context: Pick<TestContext, "task">) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, TestRun.TestRun>>`

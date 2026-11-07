@@ -318,11 +318,16 @@ const callEngine = (
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
-  request: string,
+  request: string | Effect.Effect<string>,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
   engineRealm(runtime, document).pipe(
-    Effect.flatMap((realm) => call(runtime, realm, functionDeclaration, [string(request)])),
+    Effect.flatMap((realm) =>
+      Effect.flatMap(
+        typeof request === "string" ? Effect.succeed(request) : request,
+        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)])
+      )
+    ),
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
@@ -572,13 +577,19 @@ export const sendRouted = (
           runtime,
           routed.document,
           Engine.run,
-          JSON.stringify(
-            retarget(
-              request.op === "act" && clip !== undefined ? { ...request, clip } : request,
-              last,
-              route._tag === "Missing"
+          Effect.gen(function*() {
+            // Recompute after every route and install, including a stale realm's replacement.
+            const current = request.op === "expect"
+              ? { ...request, cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at))) }
+              : request
+            return JSON.stringify(
+              retarget(
+                current.op === "act" && clip !== undefined ? { ...current, clip } : current,
+                last,
+                route._tag === "Missing"
+              )
             )
-          ),
+          }),
           id
         ).pipe(
           Effect.flatMap(Option.match({
@@ -638,7 +649,7 @@ export const sendToDocument = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "disarm" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>

@@ -20,6 +20,7 @@ import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as http from "node:http"
+import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
@@ -832,11 +833,11 @@ describe("strider", () => {
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
-        // State for a program, and a test of what ran
-        const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
+        // State for a program, and a test of what ran, into directories that don't exist yet
+        const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
         assert.strictEqual(fs.statSync(state).mode & 0o777, 0o600)
-        const test = path.join(env.XDG_RUNTIME_DIR, "shop.test.ts")
+        const test = path.join(env.XDG_RUNTIME_DIR, "tests", "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")
         // The test's context is made as the session's was, with every page rendering
@@ -909,6 +910,231 @@ describe("strider", () => {
       assert.strictEqual((yield* run("-s", "shop", "pages")).code, 20)
     })), timeout)
 
+  it.live("finishes stop cleanup while keeping the session directory", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      const started = yield* strider(env, "start", "--name", "kept", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "kept")
+      fs.writeFileSync(path.join(directory, "artifacts", "wanted.txt"), "kept")
+      const stopped = yield* strider(env, "-s", "kept", "stop", "--keep")
+      assert.strictEqual(stopped.code, 0, stopped.err)
+      assert.strictEqual(fs.readFileSync(path.join(directory, "artifacts", "wanted.txt"), "utf8"), "kept")
+      assert.isFalse(fs.existsSync(path.join(directory, "sock")))
+      assert.isFalse(fs.existsSync(path.join(directory, "lock")))
+      assert.deepStrictEqual(fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")), [])
+    }), timeout)
+
+  it.live(
+    "keeps a same-name replacement's socket when the stopped daemon closes its server",
+    () =>
+      Effect.promise(async () => {
+        const env = environment()
+        const barrier = path.join(env.XDG_RUNTIME_DIR, "close")
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "restart")
+        const socket = path.join(directory, "sock")
+        const lock = path.join(directory, "lock")
+        const appears = (file: string) =>
+          new Promise<void>((resolve, reject) => {
+            const signal = AbortSignal.timeout(30_000)
+            const watcher = fs.watch(env.XDG_RUNTIME_DIR, check)
+            function check() {
+              if (fs.existsSync(file)) {
+                watcher.close()
+                signal.removeEventListener("abort", expired)
+                resolve()
+              }
+            }
+            function expired() {
+              watcher.close()
+              reject(new Error(`${file} did not appear`))
+            }
+            signal.addEventListener("abort", expired, { once: true })
+            check()
+          })
+        const held = {
+          ...env,
+          STRIDER_CLOSE_BARRIER: barrier,
+          NODE_OPTIONS: `--import=${path.join(fixtures, "stop-close-barrier.mjs")}`
+        }
+        const run = (environment: Record<string, string>, ...args: ReadonlyArray<string>) =>
+          Effect.runPromise(strider(environment, ...args))
+        let original: number | undefined
+        let replacement: number | undefined
+        let stopped: ReturnType<typeof run> | undefined
+        try {
+          const started = await run(held, "start", "--name", "restart", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          original = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          stopped = run(held, "-s", "restart", "stop")
+          await appears(`${barrier}.closing`)
+          // The listener must give up its unlink action before the session name is released.
+          assert.isTrue(fs.existsSync(directory))
+          fs.writeFileSync(`${barrier}.release`, "")
+          const result = await stopped
+          assert.strictEqual(result.code, 0, result.err)
+          await appears(`${barrier}.closed`)
+          await appears(`${barrier}.finalizing`)
+          const restarted = await run(env, "start", "--name", "restart", "--chromium", chromium.executable)
+          if (fs.existsSync(lock)) replacement = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          assert.strictEqual(restarted.code, 0, restarted.err)
+          assert.isTrue(fs.existsSync(socket))
+          fs.writeFileSync(`${barrier}.finish`, "")
+          await appears(`${barrier}.finished`)
+          // The old server's eventual finalizer must leave the replacement reachable.
+          assert.isTrue(fs.existsSync(socket))
+          const pages = await run(env, "-s", "restart", "pages")
+          assert.strictEqual(pages.code, 0, pages.err)
+          assert.strictEqual((await run(env, "-s", "restart", "stop")).code, 0)
+        } finally {
+          // Release both synchronous holds even when an earlier assertion fails.
+          fs.writeFileSync(`${barrier}.release`, "")
+          fs.writeFileSync(`${barrier}.finish`, "")
+          if (stopped) await stopped.catch(() => {})
+          // A broken socket makes graceful stop impossible. Both daemons and their ledger resources
+          // still belong to this fixture, including when starting the replacement failed.
+          if (replacement === undefined && fs.existsSync(lock)) {
+            const owner = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+            if (owner !== original) replacement = owner
+          }
+          for (const pid of [original, replacement]) {
+            if (pid === undefined) continue
+            try {
+              process.kill(pid, "SIGKILL")
+            } catch {}
+          }
+          await run(env, "prune", "--yes")
+        }
+      }),
+    timeout
+  )
+
+  it.live("reports failed ledger cleanup instead of stop success", () =>
+    Effect.gen(function*() {
+      const env = {
+        ...environment(),
+        STRIDER_STOP_FAILURE: "1",
+        NODE_OPTIONS: `--import=${path.join(fixtures, "stop-cleanup-barrier.mjs")}`
+      }
+      const started = yield* strider(env, "start", "--name", "failure", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      const stopped = yield* strider(env, "-s", "failure", "stop")
+      assert.notStrictEqual(stopped.code, 0)
+      assert.include(stopped.err, "ledger record could not be removed")
+    }), timeout)
+
+  for (const concurrent of [false, true]) {
+    it.live(
+      `returns stop success only after the ledger finalizer finishes${
+        concurrent ? " with concurrent and disconnected callers" : ""
+      }`,
+      () =>
+        Effect.promise(async () => {
+          const env = environment()
+          const barrierPath = path.join(env.XDG_RUNTIME_DIR, "cleanup.sock")
+          const events = path.join(env.XDG_RUNTIME_DIR, "cleanup.ndjson")
+          const observed: Array<string> = []
+          const sockets = new Set<net.Socket>()
+          let another: Promise<{ code: number; err: string; out: string }> | undefined
+          let abandoned: net.Socket | undefined
+          let callers = 0
+          let released!: () => void
+          const removed = new Promise<void>((resolve, reject) => {
+            const signal = AbortSignal.timeout(30_000)
+            const expired = () => reject(new Error("Ledger finalizer did not finish"))
+            signal.addEventListener("abort", expired, { once: true })
+            released = () => {
+              signal.removeEventListener("abort", expired)
+              resolve()
+            }
+          })
+          void removed.catch(() => {})
+          const server = net.createServer((socket) => {
+            sockets.add(socket)
+            socket.once("close", () => sockets.delete(socket))
+            socket.once("end", released)
+            let pending = ""
+            socket.on("data", (chunk) => {
+              const lines = (pending + chunk.toString()).split("\n")
+              pending = lines.pop()!
+              for (const line of lines) {
+                observed.push(line)
+                // The finalizer cannot remove the ledger until the test explicitly releases it.
+                if (line === "entered") {
+                  if (!concurrent) socket.write("release\n")
+                  else {
+                    another = run("-s", "barrier", "stop", "--keep")
+                    abandoned = net.connect(path.join(env.XDG_RUNTIME_DIR, "strider", "barrier", "sock"))
+                    abandoned.on("error", () => {})
+                    abandoned.once("connect", () =>
+                      abandoned!.write(
+                        JSON.stringify({
+                          _tag: "Request",
+                          id: "999",
+                          tag: "Command",
+                          payload: { argv: ["stop"], cwd: process.cwd() },
+                          headers: []
+                        }) + "\n"
+                      ))
+                  }
+                }
+                if (line === "caller" && ++callers === 2) {
+                  abandoned!.destroy()
+                  socket.write("release\n")
+                }
+                if (line === "removed") socket.write("observed\n")
+              }
+            })
+          })
+          await new Promise<void>((resolve) => server.listen(barrierPath, resolve))
+          const run = (...args: ReadonlyArray<string>) =>
+            Effect.runPromise(strider({
+              ...env,
+              STRIDER_STOP_BARRIER: barrierPath,
+              STRIDER_STOP_EVENTS: events,
+              NODE_OPTIONS: `--import=${path.join(fixtures, "stop-cleanup-barrier.mjs")}`
+            }, ...args))
+          try {
+            const started = await run("start", "--name", "barrier", "--chromium", chromium.executable)
+            assert.strictEqual(started.code, 0, started.err)
+            const stopped = await run("-s", "barrier", "stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+            if (another) {
+              const result = await another
+              assert.strictEqual(result.code, 0, result.err)
+              assert.notInclude(result.out, "directory stays")
+            }
+            const pruned = await run("prune")
+            await removed
+            assert.deepStrictEqual(observed.filter((line) => line !== "caller"), ["entered", "removed"])
+            const order = fs.readFileSync(events, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+            assert.deepStrictEqual(
+              order.map((entry) => entry.event).filter((event, index, all) =>
+                event !== "stop-response" || all.indexOf(event) === index
+              ),
+              [
+                "ledger-finalizer-entered",
+                "ledger-removed",
+                "stop-response"
+              ]
+            )
+            assert.isTrue(order[0].exists)
+            assert.isFalse(order[1].exists)
+            assert.strictEqual(order[2].exit._tag, "Success")
+            assert.deepStrictEqual(fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")), [])
+            assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "barrier")))
+            assert.isFalse(order[2].sessionExists)
+            assert.strictEqual(pruned.code, 0, pruned.err)
+            assert.strictEqual(pruned.out.trim(), "Nothing is left behind by a program that ended")
+          } finally {
+            for (const socket of sockets) socket.destroy()
+            await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+          }
+        }),
+      timeout
+    )
+  }
+
   it.live(
     "forks a session's state, lists and prunes one a crash left behind",
     () =>
@@ -953,7 +1179,17 @@ describe("strider", () => {
               `// The session started from session first's state (start --fork), which no file holds: this test's context starts empty\n        const context = yield* Browser.newContext({ focus: "emulated" })\n`
             )
           } finally {
-            yield* run("-s", "second", "stop")
+            const stopped = yield* run("-s", "second", "stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+            const records = fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")).map((file) =>
+              JSON.parse(fs.readFileSync(path.join(env.XDG_STATE_HOME, "strider", "ledger", file), "utf8"))
+            )
+            const first = JSON.parse(fs.readFileSync(lock, "utf8"))
+            assert.deepStrictEqual(records.map((record) => record.owner.pid), [first.pid])
+            assert.strictEqual(
+              (yield* run("prune", "--yes")).out.trim(),
+              "Nothing is left behind by a program that ended"
+            )
           }
         } finally {
           // A daemon killed outright leaves its directory, listed until pruned
@@ -969,6 +1205,9 @@ describe("strider", () => {
         const listed = yield* run("prune")
         assert.include(listed.out, "which has ended:")
         assert.include(listed.out, firefox.executable)
+        assert.include(listed.out, path.join(env.XDG_RUNTIME_DIR, "strider", "first", "profile"))
+        assert.notInclude(listed.out, chromium.executable)
+        assert.notInclude(listed.out, path.join(env.XDG_RUNTIME_DIR, "strider", "second", "profile"))
         assert.include(listed.out, "strider prune --yes reclaims it")
         assert.include((yield* run("prune", "--yes")).out, "reclaimed what 1 ended program left")
         assert.include((yield* run("prune")).out, "Nothing is left behind by a program that ended")

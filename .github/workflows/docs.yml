@@ -1,11 +1,15 @@
-# The documentation site, deployed to Cloudflare from main (website/alchemy.run.ts): in the Nix environment's
-# default shell, as the checks run. Its settings, the Cloudflare token and account among them, are in
-# website/deploy.sops.env, which the SOPS_AGE_KEY secret, the deploy's own age key, decrypts (.sops.yaml). The secret
-# belongs to the docs-deploy environment, which only main can use, so no other branch's workflow can read it.
+# The documentation site, deployed to Cloudflare (website/alchemy.run.ts) once a release has published, from the
+# commit it released, so the guides and the reference describe what's on npm; or on demand, from main, for a fix to the
+# guides alone. In the Nix environment's default shell, as the checks run. Its settings, the Cloudflare token and
+# account among them, are in website/deploy.sops.env, which the SOPS_AGE_KEY secret, the deploy's own age key, decrypts
+# (.sops.yaml). The secret belongs to the docs-deploy environment, which only main can use, so no other branch's
+# workflow can read it.
 name: Docs
 
 on:
-  push:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -19,6 +23,8 @@ concurrency:
 
 jobs:
   deploy:
+    # A release that failed published nothing new, so there's nothing new to describe
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     environment: docs-deploy
     timeout-minutes: 20
@@ -27,6 +33,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The released commit, not main's tip, which may already describe what isn't released
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
       # Fails the run, before the install, if the settings don't decrypt or the token isn't in them
       - name: Check for the token

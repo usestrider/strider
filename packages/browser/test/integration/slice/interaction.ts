@@ -15,6 +15,7 @@ import {
   Mouse,
   Operation
 } from "@usestrider/browser"
+import { Protocol } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -22,8 +23,11 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Adapter from "../../../src/internal/adapter.ts"
+import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -1086,6 +1090,246 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      // Focus can remove editability after the initial actionability check.
+      for (const changesType of [false, true]) {
+        for (const property of ["readOnly", "disabled"] as const) {
+          for (const restores of changesType ? [false] : [false, true]) {
+            it.effect(
+              `focus-time ${property}: ${
+                restores ? "waits until editability returns" : "times out without writing or input/change events"
+              }${changesType ? " after switching to text" : ""}`,
+              () =>
+                Effect.gen(function*() {
+                  const { url } = yield* fixture(() =>
+                    `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; ${
+                      changesType ? "this.type = 'text';" : ""
+                    } this.${property} = true; events.textContent += 'focus;'; ${
+                      restores
+                        ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
+                        : ""
+                    }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
+                  )
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage()
+                    yield* page.goto(url)
+                    const result = yield* page.locator("#field").fill("2020-03-03").pipe(
+                      Deadline.within("1 second"),
+                      Effect.result
+                    )
+                    const events = yield* page.locator("#events").readText
+                    const value = yield* page.locator("#field").readValue
+                    // Stock WebKit can leave date inputs unfocused. This branch covers only that path.
+                    if (name === "WebKit" && !events.startsWith("focus;")) {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "input;change;"
+                      })
+                      return
+                    }
+                    assert.isTrue(events.startsWith("focus;"), "the focus handler ran")
+                    if (restores) {
+                      assert.deepStrictEqual({
+                        result: result._tag,
+                        value,
+                        events,
+                        before: yield* page.locator("#before").readText
+                      }, {
+                        result: "Success",
+                        value: "2020-03-03",
+                        events: "focus;editable;input;change;",
+                        before: "2020-03-02|focus;"
+                      })
+                    } else {
+                      assert.deepStrictEqual({ result: result._tag, value, events }, {
+                        result: "Failure",
+                        value: "2020-03-02",
+                        events: "focus;"
+                      })
+                      assert(result._tag === "Failure")
+                      assert(Deadline.isTimeout(result.failure), String(result.failure))
+                      assert(result.failure.history.some((entry) =>
+                        (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
+                      ))
+                    }
+                  }))
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      // Turning a check off skips it after focus too.
+      for (
+        const [property, attribute, check] of [["readOnly", "readonly", "editable"], [
+          "disabled",
+          "disabled",
+          "enabled"
+        ]] as const
+      ) {
+        it.effect(
+          `focus-time ${property}: ${check} check turned off writes the date input`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="date" tabindex="0" value="2020-03-02" ${attribute} onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill("2020-03-03", { checks: { [check]: false } }).pipe(
+                  Deadline.within("1 second"),
+                  Effect.result
+                )
+                assert.deepStrictEqual({
+                  result: result._tag,
+                  value: yield* page.locator("#field").readValue
+                }, { result: "Success", value: "2020-03-03" })
+              }))
+            }),
+          timeout
+        )
+      }
+
+      // A text input takes the typing path; a focus handler can make it read-only there too.
+      it.effect("focus-time readOnly: a text input times out with ReadOnly, unchanged", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="field" type="text" value="old" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("new").pipe(
+              Deadline.within("1 second"),
+              Effect.result
+            )
+            const state = {
+              result: result._tag,
+              timeout: result._tag === "Failure" && Deadline.isTimeout(result.failure) &&
+                result.failure.history.some((entry) => (entry.value as { _tag: string })._tag === "ReadOnly"),
+              value: yield* page.locator("#field").readValue,
+              events: yield* page.locator("#events").readText
+            }
+            // Stock WebKit leaves this input unfocused, so the read-only transition is unexercised.
+            if (name === "WebKit" && !state.events.startsWith("focus;")) {
+              assert.deepStrictEqual(state, {
+                result: "Success",
+                timeout: false,
+                value: "new",
+                events: "input;input;input;"
+              })
+              return
+            }
+            assert.deepStrictEqual(state, { result: "Failure", timeout: true, value: "old", events: "focus;" })
+          }))
+        }), timeout)
+
+      for (const property of ["readOnly", "disabled"] as const) {
+        for (const mode of ["blocked", "restored", "override"] as const) {
+          it.effect(`focus-time ${property}: text fill ${mode}`, () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field" type="text" value="old" onfocus="if (this.dataset.focused) return; this.dataset.focused = 'yes'; this.${property} = true; events.textContent += 'focus;'; ${
+                  mode === "restored"
+                    ? `setTimeout(() => { before.textContent = this.value + '|' + events.textContent; this.${property} = false; events.textContent += 'editable;'; }, 250);`
+                    : ""
+                }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const result = yield* page.locator("#field").fill("new", {
+                  checks: mode === "override" ? { [property === "readOnly" ? "editable" : "enabled"]: false } : {}
+                }).pipe(Deadline.within("1 second"), Effect.result)
+                const state = {
+                  result: result._tag,
+                  value: yield* page.locator("#field").readValue,
+                  events: yield* page.locator("#events").readText
+                }
+                // This asserts WebKit's unchanged typing path, not a post-focus transition.
+                if (name === "WebKit" && !state.events.startsWith("focus;")) {
+                  assert.deepStrictEqual(state, { result: "Success", value: "new", events: "input;input;input;" })
+                  return
+                }
+                if (mode === "blocked") {
+                  assert.deepStrictEqual(state, { result: "Failure", value: "old", events: "focus;" })
+                  assert(result._tag === "Failure")
+                  assert(Deadline.isTimeout(result.failure), String(result.failure))
+                  assert(result.failure.history.some((entry) =>
+                    (entry.value as { _tag: string })._tag === (property === "readOnly" ? "ReadOnly" : "Disabled")
+                  ))
+                } else if (mode === "restored") {
+                  assert.deepStrictEqual(state, {
+                    result: "Success",
+                    value: "new",
+                    events: name === "Chromium" ? "focus;editable;input;" : "focus;editable;input;input;input;"
+                  })
+                  assert.strictEqual(yield* page.locator("#before").readText, "old|focus;")
+                } else {
+                  // Skipping actionability does not bypass the browser's native typing restrictions.
+                  assert.deepStrictEqual(state, { result: "Success", value: "old", events: "focus;" })
+                }
+              }))
+            }), timeout)
+        }
+      }
+
+      // A focus handler can also make the typing target a kind that takes no text at all.
+      for (
+        const [kind, html] of [
+          [
+            "contenteditable off",
+            `<div id="field" contenteditable="true" onfocus="this.contentEditable = 'false'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'">old</div><p id="events"></p>`
+          ],
+          [
+            "type checkbox",
+            `<input id="field" type="text" value="old" onfocus="this.type = 'checkbox'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+          ]
+        ] as const
+      ) {
+        for (const editable of [true, false]) {
+          it.effect(
+            `focus-time ${kind}: text fill ${
+              editable ? "fails NotEditable, unchanged" : "skips NotEditable with editable check off"
+            }`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => html)
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator("#field").fill("new", { checks: { editable } }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.result
+                  )
+                  const field = page.locator("#field")
+                  const state = {
+                    notEditable: result._tag === "Failure" && Locator.isLocatorError(result.failure) &&
+                      result.failure.reason._tag === "NotEditable",
+                    value: kind === "type checkbox" ? yield* field.readValue : yield* field.readText,
+                    events: yield* page.locator("#events").readText
+                  }
+                  // Stock WebKit may leave the target unfocused; then the transition is unexercised.
+                  if (name === "WebKit" && !state.events.startsWith("focus;")) {
+                    assert.strictEqual(result._tag, "Success")
+                    assert.deepStrictEqual(state, { notEditable: false, value: "new", events: "input;input;input;" })
+                    return
+                  }
+                  assert.strictEqual(result._tag, editable ? "Failure" : "Success")
+                  assert.deepStrictEqual(
+                    state,
+                    { notEditable: editable, value: "old", events: "focus;" },
+                    String(result)
+                  )
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
       for (const type of ["range", "file", "checkbox"] as const) {
         it.effect(`rejects a date fill after a focus handler changes type to ${type}`, () =>
           Effect.gen(function*() {
@@ -1158,6 +1402,60 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url)
             yield* page.locator("#field").fill("2020-03-03")
             assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
+          }))
+        }), timeout)
+
+      for (
+        const [label, value] of [
+          ["number", 123],
+          ["null", null],
+          ["undefined", undefined],
+          ["boolean", true],
+          ["object", {}],
+          ["array", ["private-caller-value"]],
+          ["Redacted number", Redacted.make(123)],
+          ["Redacted null", Redacted.make(null)],
+          ["Redacted object", Redacted.make({ secret: "private-caller-value" })],
+          ["Redacted array", Redacted.make(["private-caller-value"])]
+        ] as const
+      ) {
+        it.effect(`pressSequentially rejects ${label} without mutation or events`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" value="old" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              const result = yield* Effect.suspend(() => field.pressSequentially(value as unknown as string)).pipe(
+                Effect.exit
+              )
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert.deepStrictEqual({
+                value: yield* field.readValue,
+                events: yield* page.locator("#events").readText,
+                reason: Option.isSome(error) && Locator.isLocatorError(error.value)
+                  ? error.value.reason._tag
+                  : result._tag
+              }, { value: "old", events: "", reason: "InvalidInput" })
+              assert.notInclude(JSON.stringify(result), "private-caller-value")
+            }))
+          }), timeout)
+      }
+
+      it.effect("pressSequentially preserves strings and Redacted strings", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            for (const value of ["123", Redacted.make("abc"), "", Redacted.make("")]) {
+              yield* field.clear()
+              yield* field.pressSequentially(value)
+              assert.strictEqual(yield* field.readValue, Redacted.isRedacted(value) ? Redacted.value(value) : value)
+            }
           }))
         }), timeout)
 
@@ -1278,6 +1576,211 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "fills an input then a paragraph in a top-level design-mode document",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#other").fill("other")
+              yield* page.locator("#target").fill("new")
+              assert.deepStrictEqual({
+                input: yield* page.locator("#other").readValue,
+                paragraph: yield* page.locator("#target").readText
+              }, { input: "other", paragraph: "new" })
+            }))
+          }),
+        timeout
+      )
+
+      for (
+        const change of [
+          "replace",
+          "detach",
+          "hide",
+          "inert",
+          "disable",
+          "disable with checks off",
+          "readonly",
+          "readonly with checks off",
+          "restore"
+        ] as const
+      ) {
+        it.effect(
+          `rechecks a top-level design-mode target when blur handlers ${change} it`,
+          (context) =>
+            Effect.gen(function*() {
+              if (!(yield* supports("input.topLevelDesignMode"))) {
+                context.skip(
+                  "Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY"
+                )
+              }
+              const mutation = change === "replace"
+                ? "target.outerHTML = \"<p id=target>replacement</p>\""
+                : change === "detach"
+                ? "target.remove()"
+                : change === "hide"
+                ? "target.style.display = \"none\""
+                : change === "inert"
+                ? "target.inert = true"
+                : change === "restore"
+                ? "target.style.display = \"none\"; setTimeout(() => target.style.display = \"\", 100)"
+                : change.startsWith("readonly")
+                ? "target.setAttribute(\"aria-readonly\", \"true\")"
+                : "target.setAttribute(\"aria-disabled\", \"true\")"
+              const { url } = yield* fixture(() =>
+                `<input id="other"><p id="target">old</p><script>
+              document.designMode = "on";
+              document.getElementById("other").onblur = () => {
+                document.body.dataset.blurred = "yes";
+                const target = document.getElementById("target");
+                ${mutation};
+              };
+              </script>`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                yield* page.activate
+                yield* page.locator("#other").click()
+                yield* page.locator("#other").fill("other")
+                if (
+                  change === "replace" || change === "restore" || change === "disable with checks off" ||
+                  change === "readonly with checks off"
+                ) {
+                  yield* page.locator("#target").fill("new", {
+                    checks: {
+                      enabled: change !== "disable with checks off",
+                      editable: change !== "readonly with checks off"
+                    }
+                  }).pipe(Deadline.within("3 seconds"))
+                  assert.strictEqual(yield* page.locator("#target").readText, "new")
+                } else {
+                  // WebKit makes inert content non-editable too; isolate the inert check on every backend.
+                  const error = yield* page.locator("#target").fill("new", {
+                    checks: { editable: change !== "inert" }
+                  }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.flip
+                  )
+                  assert(Deadline.isTimeout(error), String(error))
+                  const expected = {
+                    detach: "NoMatch",
+                    hide: "NotVisible",
+                    inert: "Inert",
+                    disable: "Disabled",
+                    readonly: "ReadOnly"
+                  }[change]
+                  assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === expected))
+                  if (change !== "detach") assert.strictEqual(yield* page.locator("#target").readText, "old")
+                }
+                assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.blurred), "yes")
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "fills a paragraph after an input in a shadow root of a top-level design-mode document",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              `<div id="host"></div><p id="target">old</p><script>
+              document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<input id=other>";
+              document.designMode = "on";
+              </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#other").fill("other")
+              yield* page.locator("#target").fill("new")
+              assert.deepStrictEqual({
+                input: yield* page.locator("#other").readValue,
+                paragraph: yield* page.locator("#target").readText
+              }, { input: "other", paragraph: "new" })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Firefox cannot focus inputs in top-level design-mode documents; native typing reaches BODY")
+            }
+            const { url } = yield* fixture(() =>
+              `<input id="other"><p id="target">old</p><script>
+              document.designMode = "on";
+              const other = document.getElementById("other");
+              other.onblur = () => {
+                document.body.dataset.blurs = String(Number(document.body.dataset.blurs ?? 0) + 1);
+                setTimeout(() => {
+                  other.focus();
+                  document.body.dataset.refocuses = String(Number(document.body.dataset.refocuses ?? 0) + 1);
+                });
+              };
+              </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.activate
+              yield* page.locator("#other").click()
+              yield* page.locator("#other").fill("other")
+              const error = yield* page.locator("#target").fill("new").pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onSuccess: () => undefined, onFailure: (error) => error })
+              )
+              assert.isAbove(
+                yield* page.evaluateInMainWorld(() => Number(document.body.dataset.blurs ?? 0)),
+                0,
+                "the native blur handler must execute"
+              )
+              assert.strictEqual(yield* page.locator("#other").readValue, "other")
+              // Scheduled refocus can race insertion. Successful completion is valid only on the intended target.
+              assert.strictEqual(yield* page.locator("#target").readText, error === undefined ? "new" : "old")
+              if (error !== undefined) {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.isAbove(
+                  yield* page.evaluateInMainWorld(() => Number(document.body.dataset.refocuses ?? 0)),
+                  0,
+                  "the asynchronous handler must run before it can block filling"
+                )
+                // A confirmed focus blocker was not sent. An unanswered apply call may have mutated the page,
+                // so its dispatch stays unconfirmed even when earlier rounds reported PreparingFocus.
+                assert.oneOf(JSON.stringify([error.phase, error.diagnostics.dispatch]), [
+                  JSON.stringify(["waitingForCondition", { _tag: "NotSent" }]),
+                  JSON.stringify(["dispatchedUnconfirmed", { _tag: "MayHaveBeenSent" }])
+                ])
+                // The target exists and passes every check. The focus blocker must not erase that evidence.
+                assert(
+                  error.history.some((entry) => {
+                    const value = entry.value as { _tag: string; from?: string }
+                    return value._tag === "PreparingFocus" && value.from?.includes("#other")
+                  }),
+                  JSON.stringify(error.history)
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("fills a paragraph of a design-mode frame after filling the parent", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture((origin) =>
@@ -1372,9 +1875,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (
+        const role of [
+          "checkbox",
+          "radio",
+          "switch",
+          "menuitemcheckbox",
+          "menuitemradio",
+          "option",
+          "treeitem"
+        ] as const
+      ) {
+        it.effect(`interprets checked keywords consistently for ${role}`, () =>
+          Effect.gen(function*() {
+            const tokens = ["true", "TRUE", "True", "false", "FALSE", "False", "mixed", "MIXED", "Mixed"]
+            const { url } = yield* fixture(() =>
+              tokens.map((token, i) =>
+                `<div id="token${i}" role="${role}" aria-label="Token${i}" aria-checked="${token}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked').toLowerCase() === 'true' ? 'false' : 'true')">Token${i}</div>`
+              ).join("")
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              for (const [i, token] of tokens.entries()) {
+                const target = page.locator(`#token${i}`)
+                const checked = i < 3
+                const mixed = i >= 6 && ["checkbox", "menuitemcheckbox", "option", "treeitem"].includes(role)
+                assert.strictEqual(yield* target.isChecked, checked, token)
+                for (const value of [true, false]) {
+                  assert.strictEqual(
+                    yield* page.getByRole(role, { name: `Token${i}`, exact: true, checked: value }).count,
+                    !mixed && checked === value ? 1 : 0,
+                    token
+                  )
+                }
+                const node = [...snapshot.refs.values()].find((node) =>
+                  node.name._tag === "Accessible" && node.name.value === `Token${i}`
+                )!
+                assert.strictEqual(node.states.has("checked"), checked, token)
+                // Exercise actual clicks and their postconditions, including the boolean view of mixed.
+                if (checked) {
+                  yield* target.check()
+                  yield* target.uncheck()
+                  assert.isFalse(yield* target.isChecked)
+                } else {
+                  yield* target.uncheck()
+                  yield* target.check()
+                  assert.isTrue(yield* target.isChecked)
+                }
+              }
+            }))
+          }), timeout)
+      }
+
       // Optional checkability must be established before dispatching input.
       for (const kind of ["option", "treeitem", "native option"] as const) {
-        for (const state of ["absent", "undefined", "empty"] as const) {
+        for (
+          const state of [
+            "absent",
+            "undefined",
+            "empty",
+            "UNDEFINED",
+            "Undefined",
+            " ",
+            "\t\n",
+            " true ",
+            " false ",
+            " mixed ",
+            " undefined ",
+            "yes",
+            "bogus"
+          ] as const
+        ) {
           for (const operation of ["read", "check", "uncheck"] as const) {
             it.effect(
               `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
@@ -1384,7 +1957,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     ? ""
                     : state === "empty"
                     ? "aria-checked=\"\""
-                    : "aria-checked=\"undefined\""
+                    : `aria-checked="${state}"`
                   const { url } = yield* fixture(() =>
                     `${
                       kind === "native option"
@@ -1399,6 +1972,16 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const page = yield* Browser.newPage()
                     yield* page.goto(url)
                     const target = page.locator("#target")
+                    if (operation === "read") {
+                      for (const checked of [true, false]) {
+                        assert.strictEqual(
+                          yield* page.getByRole(kind === "native option" ? "option" : kind, { checked }).count,
+                          0
+                        )
+                      }
+                      const snapshot = yield* page.snapshot()
+                      assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")))
+                    }
                     const failure = yield* (operation === "read"
                       ? target.isChecked
                       : operation === "check"
@@ -1435,6 +2018,31 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const target = page.locator("#target")
               assert.isFalse(yield* target.isChecked)
               assert.isFalse(yield* page.locator("#undefined").isChecked)
+              for (
+                const token of [
+                  "",
+                  "undefined",
+                  "UNDEFINED",
+                  "Undefined",
+                  " ",
+                  "\t\n",
+                  " true ",
+                  " false ",
+                  " mixed ",
+                  " undefined ",
+                  "yes",
+                  "bogus"
+                ]
+              ) {
+                yield* page.evaluateInMainWorld(
+                  (token) => document.getElementById("undefined")!.setAttribute("aria-checked", token),
+                  token
+                )
+                assert.isFalse(yield* page.locator("#undefined").isChecked, token)
+                assert.strictEqual(yield* page.getByRole(role, { name: "Undefined", checked: false }).count, 1, token)
+                const snapshot = yield* page.snapshot()
+                assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")), token)
+              }
               yield* target.check()
               assert.isTrue(yield* target.isChecked)
               yield* target.uncheck()
@@ -1715,8 +2323,110 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const box = page.locator("#box")
               const error = yield* box[action]().pipe(Effect.flip)
               assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
               assert.strictEqual(yield* box.isChecked, action === "uncheck")
               assert.strictEqual(yield* page.locator("#out").readText, "true")
+            }))
+          }), timeout)
+      }
+
+      it.effect("preserves browser rejection in a public locator failure", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<button id="button">Press</button>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const button = page.locator("#button")
+            assert(button instanceof LocatorImpl)
+            const adapter = button.owner.runtime.model.adapter
+            const original = adapter.dispatchInput
+            const rejected = new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Input.dispatchMouseEvent",
+                reason: "InvalidArgument",
+                code: -32602,
+                description: "refused"
+              })
+            })
+            const fake = BoundedAdapter.make({
+              dispatchInput: () =>
+                Effect.fail(
+                  new Adapter.AdapterError({
+                    reason: { _tag: "Protocol", error: rejected }
+                  })
+                )
+            } as unknown as Adapter.AdapterConnection)
+            yield* Effect.acquireRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput: fake.dispatchInput })),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            const error = yield* button.click().pipe(Effect.flip)
+            assert(Locator.isLocatorError(error) && error.reason._tag === "BackendFailure")
+            assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "rejected" })
+            assert.strictEqual(error.reason.cause, rejected)
+          }))
+        }), timeout)
+
+      for (const action of ["fill", "focus"] as const) {
+        it.effect(`records the engine's confirmed ${action} answer`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field">`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const field = page.locator("#field")
+              assert(field instanceof LocatorImpl)
+              const adapter = field.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              let reject = false
+              const rejected = new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.callFunctionOn",
+                  reason: "InvalidArgument",
+                  code: -32602,
+                  description: "refused"
+                })
+              })
+              let actionRecord: InternalOperation.Record | undefined
+              yield* Effect.acquireRelease(
+                Effect.sync(() =>
+                  Object.assign(adapter, {
+                    evaluate: (...args: Parameters<typeof original>) =>
+                      Effect.flatMap(InternalOperation.current, (record) => {
+                        if (Option.isSome(record)) actionRecord = record.value
+                        const call = args[1]
+                        const argument = call.arguments[0]
+                        if (
+                          reject && call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                          argument.value.type === "string"
+                        ) {
+                          const request = JSON.parse(argument.value.value) as Engine.Request
+                          if (request.op === "act" && request.apply) {
+                            return Effect.fail(
+                              new Adapter.AdapterError({
+                                reason: { _tag: "Protocol", error: rejected }
+                              })
+                            )
+                          }
+                        }
+                        return original(...args)
+                      })
+                  })
+                ),
+                () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+              )
+              const result = yield* Effect.gen(function*() {
+                yield* (action === "fill" ? field.fill("value") : field.focus())
+                assert.deepStrictEqual(actionRecord?.dispatch, { _tag: "Acknowledged", result: "ok" })
+                const record = yield* InternalOperation.record
+                return record.timeout(Option.none())
+              }).pipe(Operation.named("engine action"))
+              assert.deepStrictEqual(result.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+              reject = true
+              const error = yield* (action === "fill" ? field.fill("other") : field.focus()).pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === "BackendFailure")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "Acknowledged", result: "rejected" })
+              assert.strictEqual(error.reason.cause, rejected)
             }))
           }), timeout)
       }
@@ -1763,6 +2473,102 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert(Locator.isLocatorError(notFile) && notFile.reason._tag === "WrongElement", String(notFile))
           }))
         }), timeout)
+
+      for (const selector of ["#radio", "#label", "#descendant"]) {
+        for (const [checked, trial] of [[true, false], [false, false], [true, true], [false, true]] as const) {
+          it.effect(
+            `native radio uncheck ${selector} initially checked ${checked} trial ${trial} delivers no input`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() =>
+                  `<input id="radio" type="radio" ${
+                    checked ? "checked" : ""
+                  }><label id="label" for="radio"><span id="descendant">Choice</span></label><p id="clicks">0</p><script>["pointerdown", "mousedown", "mouseup", "click"].forEach(type => document.addEventListener(type, () => document.getElementById("clicks").textContent = String(Number(document.getElementById("clicks").textContent) + 1)))</script>`
+                )
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  yield* page.goto(url)
+                  const result = yield* page.locator(selector).uncheck({ trial }).pipe(Effect.exit)
+                  assert.strictEqual(yield* page.locator("#radio").isChecked, checked)
+                  assert.strictEqual(yield* page.locator("#clicks").readText, "0")
+                  if (checked) {
+                    assert.strictEqual(result._tag, "Failure")
+                    const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+                    assert(
+                      Option.isSome(error) && Locator.isLocatorError(error.value) &&
+                        error.value.reason._tag === "WrongElement"
+                    )
+                    if (
+                      Option.isSome(error) && Locator.isLocatorError(error.value) &&
+                      error.value.reason._tag === "WrongElement"
+                    ) {
+                      assert.include(error.value.reason.hint, "another radio in the group")
+                    }
+                  } else yield* result
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      for (const selector of ["#label", "#descendant"]) {
+        it.effect(`native radio uncheck control preserves ${selector}'s own ARIA state`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="radio" type="radio" checked><label id="label" for="radio" role="checkbox" aria-checked="false"><span id="descendant" role="checkbox" aria-checked="false">Choice</span></label>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator(selector).uncheck()
+              yield* page.locator(selector).uncheck({ trial: true })
+              assert.strictEqual(yield* page.locator(selector).isChecked, false)
+              assert.strictEqual(yield* page.locator("#radio").isChecked, true)
+            }))
+          }), timeout)
+      }
+
+      it.effect(
+        "native radio uncheck refusal is never reported as unsent after the click",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" checked onclick="this.type = 'radio'; this.checked = true; document.getElementById('clicks').textContent = '1'"><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const result = yield* page.locator("#box").uncheck().pipe(Effect.exit)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+              const error = result._tag === "Failure" ? Cause.findErrorOption(result.cause) : Option.none()
+              assert(Option.isSome(error) && Locator.isLocatorError(error.value))
+              if (Option.isSome(error) && Locator.isLocatorError(error.value)) {
+                assert.deepStrictEqual(error.value.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+                assert.strictEqual(error.value.reason._tag, "StateUnchanged")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "native radio uncheck control allows a page-managed ARIA radio to uncheck",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="radio" role="radio" aria-checked="true" onclick="this.setAttribute('aria-checked', 'false'); document.getElementById('clicks').textContent = '1'">Choice</div><p id="clicks">0</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              yield* page.locator("#radio").uncheck()
+              assert.isFalse(yield* page.locator("#radio").isChecked)
+              assert.strictEqual(yield* page.locator("#clicks").readText, "1")
+            }))
+          }),
+        timeout
+      )
 
       for (const checked of [true, false]) {
         for (const association of ["explicit", "wrapping"] as const) {
@@ -2651,7 +3457,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const error = yield* status.pipe(Expect.toHaveText("Never"), Deadline.within("300 millis"), Effect.flip)
             assert(Expect.isExpectationFailed(error), String(error))
             assert.strictEqual(error.condition, `to have the text "Never"`)
-            assert.deepStrictEqual(error.history.map((each) => each.value), ["Done for now"])
+            // A round may return after the deadline; every timely value must still be the settled text.
+            assert(error.history.length <= 1)
+            assert.deepStrictEqual(
+              error.history.map((each) => each.value),
+              error.history.length === 0 ? [] : ["Done for now"]
+            )
+            assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
           }))
         }), timeout)
 

@@ -165,7 +165,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (document === undefined || (realm.world._tag === "Main" && document.hadMainRealm)) {
           realm.pending = true
           navigable.pendingRealms.push(realm)
-          if (realm.world._tag === "Main") navigable.restoring?.(realm)
+          if (realm.world._tag === "Main") navigable.restoring?.arrived(realm)
         } else {
           addWindowRealm(state, realm, document)
         }

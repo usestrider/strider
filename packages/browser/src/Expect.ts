@@ -423,6 +423,10 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
  * **Details**
  *
  * A `Watchable` subject is checked again on each change. Any other effect is run again every `CheckInterval`.
+ * Direct `page.url` and `page.title` subjects classify failed observations as URLs and titles for trace export.
+ * The export preset applies through rethrows of the same failure. User transformations (including
+ * `Watchable.map` and `Effect.map`) and reconstructed failures do not retain that source classification.
+ * Condition descriptions are user-authored text exported as written; classification does not infer secrets.
  *
  * **Example** (Waiting for a download to complete)
  *
@@ -508,7 +512,12 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
  *
  * **Details**
  *
- * - `last` is the last value seen, and `history` every value seen, with repeats in a row dropped.
+ * - `history` contains observed values and diagnostic error entries, with repeats in a row dropped;
+ *   `last` is its final entry. For locator expectations, page values must reach Strider before the deadline.
+ *   If neither a page value nor a diagnostic error is recorded, `history` is empty and `last` is `Option.none()`.
+ *   Values evaluated in the page but received after the deadline do not update the failure.
+ * - For `Expect.that` on an effect, a check still running at the deadline records
+ *   `{ error: "a check was still running at the deadline" }`, even if no check has returned a value.
  * - `checks` says how many checks ran and what triggered them.
  * - `nearest`, when nothing matched, is an accessibility snapshot of what the locator's first steps found, up to
  *   the step that matched nothing.

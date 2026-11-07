@@ -198,7 +198,7 @@ strider -s login -p main fill 'label=Email' "ada@example.com"
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-mkdir -p auth && strider -s login state save ./auth/shop.state
+strider -s login state save ./auth/shop.state
 strider start --name later --chromium /usr/bin/chromium --state ./auth/shop.state
 strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
@@ -216,7 +216,7 @@ A session's browser runs until the session stops, so list what's running and sto
 | [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
 | `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
 | `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1 hour` |
-| `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
+| `strider -s s stop`                            | waits for browser, directory and ledger cleanup; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
 A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
@@ -256,6 +256,9 @@ into the new session. The old shared fallback is never reclaimed automatically.
 A client killed during startup can leave a private `.start-*` directory. Listings and named prune exclude it.
 After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
 directories; prune does not sweep startup entries.
+
+A successful `stop` means cleanup has finished, so you can run `prune` immediately or, unless you used `--keep`, start the same session name again. An attached browser stays running: stop disconnects from it. Cleanup failures return a nonzero exit code. Concurrent stop calls share cleanup; the first call chooses whether to keep the directory. Disconnecting a caller does not cancel shutdown.
+
 
 ## Attaching
 
