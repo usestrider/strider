@@ -239,3 +239,52 @@ it("releases a per-effect backend when the bound effect ends, and on a failed bu
   assert.isTrue(Exit.isFailure(exit))
   assert.deepStrictEqual(events, ["acquire", "use", "release", "acquire", "release"])
 })
+
+it("names traces deterministically without traversal or slug collisions", () => {
+  const info = new TestRun.TestInfo({
+    project: "chrome",
+    file: "../../a.test.ts",
+    id: "../a/b",
+    attempt: 0,
+    worker: "1",
+    shard: ""
+  })
+  const name = VitestBrowser.traceFileName(info)
+  assert.match(name, /^[a-zA-Z0-9_-]+\.zip$/)
+  assert.isBelow(name.length, 150)
+  assert.strictEqual(VitestBrowser.traceFileName(info), name)
+  for (
+    const changed of [
+      { id: "../a?b" },
+      { project: "firefox" },
+      { file: "../../b.test.ts" },
+      { attempt: 1 },
+      { id: "a".repeat(1000) },
+      { id: "🦆" },
+      { id: "" }
+    ]
+  ) {
+    const other = VitestBrowser.traceFileName(new TestRun.TestInfo({ ...info, ...changed }))
+    assert.notStrictEqual(other, name)
+    assert.match(other, /^[a-zA-Z0-9_-]+\.zip$/)
+    assert.isBelow(other.length, 150)
+  }
+})
+
+it("never starts a trace filename with a hyphen, which shell commands read as an option", () => {
+  for (const id of ["../a/b", "-rf", " > pays", "/tests/cart > pays"]) {
+    const name = VitestBrowser.traceFileName(
+      new TestRun.TestInfo({ project: "", file: "/a.test.ts", id, attempt: 0, worker: "1", shard: "" })
+    )
+    assert.notMatch(name, /^-/)
+  }
+})
+
+it("uses the test prefix when sanitizing punctuation-only IDs leaves no name", () => {
+  for (const id of ["!!!", "---", "...", "🦆", " ".repeat(100), ""]) {
+    const name = VitestBrowser.traceFileName(
+      new TestRun.TestInfo({ project: "", file: "/a.test.ts", id, attempt: 0, worker: "1", shard: "" })
+    )
+    assert.match(name, /^test-retry-0-[a-f0-9]{64}\.zip$/)
+  }
+})

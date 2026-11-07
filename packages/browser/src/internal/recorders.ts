@@ -7,6 +7,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
 import type * as Tracer from "effect/Tracer"
 import type * as Engine from "./engine.ts"
 
@@ -25,9 +26,81 @@ export const CurrentSubject: Context.Reference<Option.Option<Subject>> = Context
   { defaultValue: () => Option.none() }
 )
 
+/** A viewer location, with one-based line and column numbers. */
+export interface Location {
+  readonly file: string
+  readonly line: number
+  readonly column: number
+  readonly function: string
+}
+
+// Frame identity distinguishes an operation's own caller from an enclosing span with the same name.
+const operationFrames = new WeakSet<References.StackFrame>()
+
+/** Adds an operation's caller frame to Effect's chain. */
+export const frame = (
+  name: string,
+  stack: () => string | undefined,
+  parent: References.StackFrame | undefined
+): References.StackFrame => {
+  const frame = { name, stack, parent }
+  operationFrames.add(frame)
+  return frame
+}
+
+/** Whether the frame belongs to a library operation rather than a caller's span. */
+export const isFrame = (frame: References.StackFrame | undefined): boolean =>
+  frame !== undefined && operationFrames.has(frame)
+
+/** A stack's file URL or native path in the same form used for source reads and directory comparisons. */
+export const filePath = (file: string): string => {
+  if (file.startsWith("file://")) {
+    const url = new URL(file)
+    file = decodeURIComponent(url.pathname)
+    if (url.hostname !== "" && url.hostname !== "localhost") file = `//${url.hostname}${file}`
+  }
+  // A backslash is a separator in Windows paths, but a literal character in a POSIX filename.
+  return /^\/?[A-Za-z]:[\\/]/.test(file) || file.startsWith("\\\\")
+    ? file.replaceAll("\\", "/").replace(/^\/([A-Za-z]:)/, "$1")
+    : file
+}
+
+/** A local V8 stack location; unavailable and non-file frames have no source to include. */
+export const location = (stack: string): Omit<Location, "function"> | undefined => {
+  const match = stack.match(/(?:\(|at )((?:file:\/\/|\/|[A-Za-z]:[\\/]).*):(\d+):(\d+)\)?$/)
+  if (match === null) return undefined
+  try {
+    return { file: filePath(match[1]!), line: Number(match[2]), column: Number(match[3]) }
+  } catch {
+    return undefined
+  }
+}
+
+/** Available caller frames, without Effect.fn's definition frames. */
+const locations = (frame: References.StackFrame | undefined, name: string) => {
+  const result: Array<Location> = []
+  let own = false
+  for (; frame !== undefined; frame = frame.parent) {
+    if (frame.name.endsWith(" (definition)")) continue
+    // Stack capture is optional; a custom tracer may supply an unavailable or throwing lazy stack.
+    try {
+      const stack = frame.stack()
+      const parsed = stack === undefined ? undefined : location(stack)
+      if (parsed === undefined) continue
+      if (result.length === 0) own = isFrame(frame) && frame.name === name
+      result.push({ ...parsed, function: frame.name })
+    } catch {
+      // A missing call site must not prevent the operation from running.
+    }
+  }
+  return { stack: result, enclosingStack: own ? result.slice(1) : result }
+}
+
 /** One operation, as a recording sees it start. */
 export interface Started {
   readonly name: string
+  readonly stack: ReadonlyArray<Location>
+  readonly enclosingStack: ReadonlyArray<Location>
   readonly attributes: Readonly<Record<string, unknown>>
   /** The operation's own span, or, when its span is suppressed, the span it runs in. */
   readonly span: Option.Option<Tracer.AnySpan>
@@ -70,9 +143,10 @@ export const observe = <A, E, R>(
     return Effect.gen(function*() {
       const span = yield* Effect.option(Effect.currentParentSpan)
       const subject = yield* CurrentSubject
+      const locationsOf = locations(yield* References.CurrentStackFrame, name)
       const ends = yield* Effect.forEach(
         covering,
-        (recorder) => recorder.begin({ name, attributes, span, own, subject })
+        (recorder) => recorder.begin({ name, attributes, span, own, subject, ...locationsOf })
       )
       const exit = yield* Effect.exit(self)
       for (const end of ends) yield* end(exit)

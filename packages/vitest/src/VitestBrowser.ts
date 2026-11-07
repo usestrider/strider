@@ -12,6 +12,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { createHash } from "node:crypto"
 import { recordArtifact, type TestContext, TestRunner } from "vitest"
 
 declare module "vitest" {
@@ -197,3 +198,42 @@ export const layer = <E, R>(
       return Context.add(services, TestRun.TestRun, Option.getOrElse(existing, () => testRun))
     })
   )
+
+/**
+ * Builds a deterministic trace ZIP filename from a captured test identity.
+ *
+ * **Details**
+ *
+ * The basename contains only ASCII letters, digits, hyphens and underscores, followed by `.zip`. A readable
+ * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID and attempt distinguishes
+ * identities whose prefixes match. Workers and shards do not change the name. Repeated exports for the same
+ * identity use the same name, so choose another directory to keep separate runs or recordings.
+ * Capture `TestRun.info` beside `Trace.record`, before another test or retry starts. No file is written or attached.
+ *
+ * **Example** (Exporting a trace named for its test)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Trace } from "@usestrider/browser"
+ * import { TestRun } from "@usestrider/browser/test"
+ * import { VitestBrowser } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const record = Effect.fn("record")(function*(page: Page.Page) {
+ *   const { info } = yield* TestRun.TestRun
+ *   const name = VitestBrowser.traceFileName(info)
+ *   const trace = yield* Trace.record(page)
+ *   yield* page.getByRole("button", { name: "Pay" }).click()
+ *   yield* trace.exportTrace(`traces/${name}`)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const traceFileName = (info: TestRun.TestInfo): string => {
+  const identity = JSON.stringify([info.project, info.file, info.id, info.attempt])
+  const digest = createHash("sha256").update(identity).digest("hex")
+  const prefix = info.id.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+/, "").slice(0, 48) || "test"
+  return `${prefix}-retry-${String(info.attempt).replace(/[^a-zA-Z0-9_-]/g, "-")}-${digest}.zip`
+}

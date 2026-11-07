@@ -147,6 +147,10 @@ export interface Recording extends Declaration.Registration {
  * - Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration
  *   and its error. A span of yours that encloses steps, such as an `Effect.fn`'s, is a step too, so the trace
  *   nests as the program did.
+ * - Available caller file, line and column locations link steps to the viewer's Source tab, even when operation
+ *   spans are disabled. Enclosing caller spans retain their available locations too.
+ * - Export includes the local files referenced by those locations, read at export time. Source contents and file
+ *   paths are included unchanged under every diagnostics preset; review the archive before sharing it.
  * - Console messages and uncaught exceptions are always recorded.
  * - `screenshots: "perAction"` adds a screenshot after each action, navigation and page-associated expectation,
  *   whether it succeeds or fails. Value expectations without a page do not capture screenshots. The caller waits
@@ -164,6 +168,10 @@ export interface Recording extends Declaration.Registration {
  *
  * **Gotchas**
  *
+ * - Locations depend on runtime stacks and source maps. An operation constructed by a synchronous public method or
+ *   getter can retain that call site; one constructed later uses the nearest available enclosing caller frame.
+ *   Disabled or unavailable stack capture leaves no location. Unreadable source files are omitted; locations remain.
+ *   Sources are not fetched from remote URLs, and changes to a source file before export appear in the archive.
  * - `domSnapshots` needs `network: true`, since a snapshot's images, fonts and cross-origin styles come from the
  *   network recording. The types refuse one without the other; options that get past them, such as a cast, fail
  *   with `InvalidInput`.
@@ -186,6 +194,11 @@ export interface Recording extends Declaration.Registration {
  * - Export does not wait for native video acquisition. If acquisition is still pending when export begins,
  *   the Console tab explains the missing video as pending, without a browser error. Later exports show the
  *   actual outcome: the video once acquired, or its failure reason. They do not retain a stale pending message.
+ *
+ * When `TestRun` is available and names a running test, recording captures its identity at the start.
+ * The context header's `title` is its test ID; `striderTest` preserves `project`, `file`, `id` and `attempt`
+ * (zero for the first run). Later exports retain that identity, even after the running test changes. Without
+ * a named test, neither field is added. Test names and file paths are exported as written.
  *
  * **Example** (Exporting a trace when checkout fails)
  *

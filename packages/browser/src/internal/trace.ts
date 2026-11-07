@@ -35,6 +35,7 @@ import * as Expect from "../Expect.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
+import * as TestRun from "../test/TestRun.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -69,6 +70,7 @@ export type Recorded =
 type RecordedError = { readonly name: string; readonly message: string } | Expect.ExpectationFailed
 
 interface Step {
+  readonly stack: ReadonlyArray<Recorders.Location>
   readonly callId: string
   readonly parentId: Option.Option<string>
   readonly name: string
@@ -351,6 +353,15 @@ export const start = Effect.fnUntraced(function*(
   settings: Settings,
   scope: Scope.Scope
 ) {
+  const run = yield* Effect.serviceOption(TestRun.TestRun)
+  const info = Option.isSome(run) ? run.value.info : undefined
+  // Copy scalar fields now: export may run in another test or after its retry count changes.
+  const test = info === undefined || info.id === "" ? undefined : {
+    project: info.project,
+    file: info.file,
+    id: info.id,
+    attempt: info.attempt
+  }
   const own = yield* Scope.fork(scope)
   const clock = Recordings.anchor()
   const steps: Array<Step> = []
@@ -394,15 +405,19 @@ export const start = Effect.fnUntraced(function*(
   }
 
   // A span the step runs in: a recorded operation's, or one of the caller's, which becomes a step of its own
-  const stepOf = (span: Tracer.AnySpan): Option.Option<string> => {
+  const stepOf = (span: Tracer.AnySpan, stack: ReadonlyArray<Recorders.Location>): Option.Option<string> => {
     const known = bySpan.get(span.spanId)
     if (known !== undefined) return Option.some(known)
     if (span._tag === "ExternalSpan") return Option.none()
     const callId = `g${++calls}`
+    const frame = stack.findIndex((frame) => frame.function === span.name)
+    const ownStack = frame < 0 ? [] : stack.slice(frame)
+    const parentStack = frame < 0 ? stack : stack.slice(frame + 1)
     bySpan.set(span.spanId, callId)
     steps.push({
       callId,
-      parentId: Option.flatMap(span.parent, stepOf),
+      stack: ownStack,
+      parentId: Option.flatMap(span.parent, (parent) => stepOf(parent, parentStack)),
       name: span.name,
       params: Object.fromEntries(span.attributes),
       start: Adapter.now(),
@@ -446,13 +461,14 @@ export const start = Effect.fnUntraced(function*(
       if (started.own && Option.isSome(started.span)) {
         bySpan.set(started.span.value.spanId, callId)
         parentId = started.span.value._tag === "Span"
-          ? Option.flatMap(started.span.value.parent, stepOf)
+          ? Option.flatMap(started.span.value.parent, (parent) => stepOf(parent, started.enclosingStack))
           : Option.none()
       } else {
-        parentId = Option.flatMap(started.span, stepOf)
+        parentId = Option.flatMap(started.span, (span) => stepOf(span, started.enclosingStack))
       }
       const step: Step = {
         callId,
+        stack: started.stack,
         parentId,
         name: started.name,
         params: started.attributes,
@@ -658,6 +674,7 @@ export const start = Effect.fnUntraced(function*(
           class: step.group ? "Effect" : dot > 0 ? step.name.slice(0, dot) : "Strider",
           method: step.group ? "span" : dot > 0 ? step.name.slice(dot + 1) : step.name,
           params: params(step.params),
+          ...(step.stack.length > 0 ? { stack: step.stack } : {}),
           ...(Option.isSome(step.parentId) ? { parentId: step.parentId.value } : {})
         }
       })
@@ -678,6 +695,18 @@ export const start = Effect.fnUntraced(function*(
       })
     }
     const files: Array<{ path: string; content: string | Uint8Array }> = []
+    if (Option.isSome(runtime.fileSystem)) {
+      const fs = runtime.fileSystem.value
+      for (const file of new Set(steps.flatMap((step) => step.stack.map((frame) => frame.file)))) {
+        // Only typed file-system failures are optional. Defects and interruption still fail the export.
+        const content = yield* fs.readFile(file).pipe(Effect.option)
+        if (Option.isNone(content)) continue
+        const basename = file.slice(Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\")) + 1)
+        const dot = basename.lastIndexOf(".")
+        const extension = dot <= 0 ? "" : basename.slice(dot)
+        files.push({ path: `src/${yield* digest(file)}${extension}`, content: content.value })
+      }
+    }
     for (const shot of shots) {
       const file = `screenshots/${shot.callId}-after.png`
       files.push({ path: file, content: shot.png })
@@ -848,7 +877,8 @@ export const start = Effect.fnUntraced(function*(
         "unknown",
       wallTime: clock.wall,
       monotonicTime: Recordings.millis(clock.monotonic),
-      options: {}
+      options: {},
+      ...(test === undefined ? {} : { title: test.id, striderTest: test })
     }
     const lines = [header, ...events.map((each) => each.event)].map((line) => JSON.stringify(line)).join("\n")
     files.unshift({ path: "trace.trace", content: `${lines}\n` })
