@@ -202,6 +202,33 @@ describe("strider", () => {
       }
     })), timeout)
 
+  it.live(
+    "eval accepts function files ending in a semicolon, after load-phase input errors",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "eval-phases", ...args)
+        const started = yield* strider(env, "start", "--name", "eval-phases", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+          const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+          const missing = yield* evaluate("--file", path.join(env.XDG_RUNTIME_DIR, "missing.js"))
+          assert.strictEqual(JSON.parse(missing.err).phase, "load")
+          const neither = yield* evaluate()
+          assert.strictEqual(JSON.parse(neither.err).phase, "load")
+          const file = path.join(env.XDG_RUNTIME_DIR, "formatted.js")
+          // A formatter ends a function expression statement with a semicolon.
+          fs.writeFileSync(file, "async () => {\n  return document.title\n};\n")
+          const formatted = yield* evaluate("--file", file)
+          assert.strictEqual(formatted.code, 0, formatted.err)
+        } finally {
+          yield* run("stop")
+        }
+      })),
+    timeout
+  )
+
   for (const capture of ["local", "strict"]) {
     it.live(`captures eval successes and failures with ${capture} capture`, () =>
       Effect.scoped(Effect.gen(function*() {
