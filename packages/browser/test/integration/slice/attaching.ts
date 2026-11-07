@@ -6,7 +6,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Dialog, Expect, Locator, Page, Route, Target, UserContext } from "@usestrider/browser"
+import { Browser, Dialog, Expect, Locator, Page, Popup, Route, Target, UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
@@ -216,6 +216,37 @@ export const attaching = (
 
       if (Option.isSome(attachable)) {
         const start = attachable.value.start
+
+        it.effect("honors required init-script timing or refuses it for an attached context popup", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const page = yield* (yield* byHeading(browser, "First")).control
+              const context = yield* browser.defaultContext.control
+              const registration = yield* Effect.exit(
+                context.addInitScript({ source: "window.__initProbe = 'before'" }, { timing: "beforeAuthorScript" })
+              )
+              if (Exit.isFailure(registration)) {
+                const error = reasonOf(registration)
+                assert.strictEqual(error?._tag, "DeclarationError")
+                assert.strictEqual(error?.reason?._tag, "TimingUnsupported")
+                return
+              }
+              const url = fixtureUrl(
+                origin,
+                "<h1><script>document.write(window.__initProbe ?? 'missing')</script></h1>"
+              )
+              yield* page.goto(fixtureUrl(origin, `<a target="_blank" href="${url}">Open popup</a>`))
+              yield* page.activate
+              const opened = yield* Popup.next(page)
+              yield* page.getByRole("link", { name: "Open popup" }).click()
+              const popup = yield* (yield* opened).inspect
+              yield* popup.getByRole("heading").pipe(Expect.toHaveText(/^(before|missing)$/))
+              assert.strictEqual(yield* popup.getByRole("heading").readText, "before")
+            })).pipe(Effect.provide(attached))
+          }), timeout)
 
         it.effect("attaches, inspects one tab, controls another, and leaves both open (call site 7)", () =>
           Effect.gen(function*() {
