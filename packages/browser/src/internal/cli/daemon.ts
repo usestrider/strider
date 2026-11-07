@@ -692,6 +692,8 @@ export const commands = (getDaemon: () => Daemon) => {
               )
             )
             : Option.getOrThrow(expression)
+          // Accept one final statement terminator; keep all earlier source and trailing whitespace intact.
+          const expressionSource = source.replace(/;(\s*)$/, "$1")
           const name = yield* pageFlag
           const page = yield* daemon.session.page(name)
           // The callable only supplies browser source. It is never compiled or invoked in the daemon.
@@ -699,10 +701,10 @@ export const commands = (getDaemon: () => Daemon) => {
             toString: () =>
               Option.isSome(file) ?
                 `async () => await (
-${source}
+${expressionSource}
 )()` :
                 `async () => (
-${source}
+${expressionSource}
 )`
           })
           status.phase = "execute"

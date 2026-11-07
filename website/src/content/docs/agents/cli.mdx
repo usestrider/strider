@@ -440,7 +440,9 @@ strider -s shop -p main eval --file fn.js
 strider -s shop -p main eval --main-world 'window.APP_VERSION'
 ```
 
-Give exactly one expression or `--file`. The file is UTF-8, relative to your shell's working directory,
+Give exactly one expression or `--file`. Either input may end with one optional semicolon before trailing
+whitespace, such as `eval 'location.href;'` or a file ending in `() => document.title;`.
+It must still contain a single expression; a sequence of statements is invalid. The file is UTF-8, relative to your shell's working directory,
 and contains an ordinary or async function expression, invoked with no arguments in the browser:
 
 ```js
@@ -464,7 +466,8 @@ The shared value encoding preserves non-JSON values as type tags, including
 `{"type":"undefined"}` and `{"type":"bigint","value":"42"}`. Cycles and unsupported values fail.
 JSON failures go to stderr with `file`, `error`, optional `reason`, `message`, optional `hint`,
 `phase`, optional `step`, and `durationMs`. File/input errors have phase `load`, browser evaluation
-errors `execute`, and shared result encoding errors `serialize`.
+errors `execute`. Values the browser cannot return, including cycles, also fail during `execute`
+with reason `NotSerializable`. Only refusals by the later shared result encoder have phase `serialize`.
 
 Evaluation can change the page, start requests or open popups. A later failure does not undo those effects.
 Named secrets are concealed with local capture; strict capture masks arbitrary results and failure details.
