@@ -551,6 +551,67 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  for (const failure of ["rejected with no history", "interrupted"] as const) {
+    it.effect(`${failure === "interrupted" ? "keeps ownership ambiguous" : "restores a single traversal"} after an earlier traversal was ${failure}, with no commit between`, () =>
+      Effect.gen(function*() {
+        // Synthetic ordering, not captured Firefox traffic: the second traversal is the only one outstanding
+        // when its realm arrives.
+        const url = "http://restored.example/"
+        const entered = yield* Deferred.make<void>()
+        let calls = 0
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            if (calls++ > 0) return Effect.succeed({})
+            return failure === "interrupted" ?
+              Effect.andThen(Deferred.succeed(entered, undefined), Effect.never) :
+              Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    reason: "Unrecognized",
+                    code: "no such history entry",
+                    description: "no history"
+                  })
+                })
+              )
+          }),
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        if (failure === "interrupted") {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(entered)
+          yield* Fiber.interrupt(fiber)
+        } else assert(Option.isNone(yield* Navigation.traverse(state, page.id, 1)))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const navigation = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(navigation))
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://restored.example"
+        }, { state })
+        yield* state.buffer.flush
+        const started = facts.filter((fact) =>
+          fact._tag === "NavigationStarted" && fact.navigation === navigation.value
+        )
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        if (failure === "interrupted") {
+          // An interrupted command may still have reached the browser, so the realm could be its; nothing proves
+          // which traversal owns it, and neither is given facts.
+          assert.lengthOf(started, 0)
+          assert.lengthOf(ended, 0)
+          assert.lengthOf(page.expected.list, 0)
+          return
+        }
+        // A rejection is the browser's word that nothing navigated, so it leaves no ambiguity behind.
+        assert.lengthOf(started, 1, "the valid traversal must start")
+        assert.lengthOf(ended, 1, "the valid traversal must end")
+        assert.strictEqual(page.document!.url, url)
+      }))
+  }
+
   it.effect("releases a traversal interrupted during its location lookup", () =>
     Effect.gen(function*() {
       const entered = yield* Deferred.make<void>()
