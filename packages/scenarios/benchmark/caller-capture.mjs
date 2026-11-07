@@ -118,6 +118,8 @@ export const benchmarkSetCapture = (mode) => {
 `
 } else {
   // Current-source controls skip capture itself, not just its lazy formatting helper.
+  // Even in separate-process mode, the on baseline has a capture branch and mutable trace;
+  // future timings may include instrumentation and JIT effects.
   const start = original.indexOf("  const limit = Error.stackTraceLimit", original.indexOf("const namedWith ="))
   const end = original.indexOf("  return <A, E, R>", start)
   if (start < 0 || end < 0) throw new Error("Cannot locate inline capture")
