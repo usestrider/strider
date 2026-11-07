@@ -392,7 +392,8 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const outer = `<input data-frame=outer type=password><iframe srcdoc="${inner}"></iframe>`
             const html = `<iframe srcdoc='${outer}'></iframe>`
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
-            const nested = page.frame(page.locator("iframe")).frame(page.locator("iframe"))
+            const outerFrame = page.frame(page.locator("iframe"))
+            const nested = outerFrame.frame(outerFrame.locator("iframe"))
             yield* Expect.toHaveCount(nested.locator("input"), 1)
             const snapshot = yield* page.snapshot()
             const nodes = [...snapshot.refs.values()].filter((each) =>
