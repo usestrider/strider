@@ -753,6 +753,60 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(page.restoring, undefined)
     }))
 
+  it.effect("keeps ownership ambiguous after a no-history rejection of a traversal the browser announced", () =>
+    Effect.gen(function*() {
+      // Synthetic ordering, not captured Firefox traffic: the browser announces the first traversal, then
+      // rejects its command. The announced navigation may still own the next realm, so the second can't claim it.
+      const url = "http://restored.example/"
+      const entered = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, realm, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.suspend(() =>
+          calls++ > 0 ? Effect.succeed({}) : Effect.andThen(
+            Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(gate)),
+            Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "browsingContext.traverseHistory",
+                  reason: "Unrecognized",
+                  code: "no such history entry",
+                  description: "no history"
+                })
+              })
+            )
+          )
+        ),
+        "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered)
+      handlers.apply("browsingContext.navigationStarted", {
+        context: page.bidi,
+        navigation: "announced",
+        url,
+        timestamp: 1
+      }, { state })
+      yield* Deferred.succeed(gate, undefined)
+      assert(Option.isNone(yield* Fiber.join(first)))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const navigation = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(navigation))
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://restored.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert.lengthOf(
+        facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
+        0,
+        "the second traversal must not claim a realm the announced one may own"
+      )
+    }))
+
   it.effect("releases a traversal interrupted during its location lookup", () =>
     Effect.gen(function*() {
       const entered = yield* Deferred.make<void>()
