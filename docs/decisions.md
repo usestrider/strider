@@ -1281,3 +1281,11 @@ locations. The informational name is an accepted trade-off for avoiding eager fo
 cannot lazily omit a node. Reject eager caller resolution on every success and dependency changes to remove that
 rare location-free line. Capture remains independent of recording so failures outside recordings and operations
 built before recording retain their callers.
+
+
+Sent-header waits end when a hop is evicted or loses its owning frame, worker, context, page or browser connection,
+returning already-attributed sent headers or the immutable request snapshot. Removing a frame includes its
+descendants and leaves unrelated owners alone. Owner loss does not imply a network failure. Waiting until the
+deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
+may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
+redirect hops was rejected because attribution must remain correct.
