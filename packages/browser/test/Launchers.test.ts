@@ -98,6 +98,64 @@ describe("Chromium launcher", () => {
         )
       }))
 
+    it.effect("waits for the complete DevToolsActivePort endpoint before connecting", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const contents = ["", "9222", "9222\n", "9222\n/devtools/browser/test-browser"]
+        const events: Array<unknown> = []
+        let reads = 0
+        const partialWrites: FileSystem.FileSystem = {
+          ...fs,
+          exists: (path) => path === "/fake/chromium" ? Effect.succeed(true) : fs.exists(path),
+          readFileString: (path, options) =>
+            path === "/fake/profile/DevToolsActivePort"
+              ? Effect.sync(() => {
+                const text = contents[Math.min(reads++, contents.length - 1)]!
+                events.push({ read: text })
+                return text
+              })
+              : fs.readFileString(path, options)
+        }
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000001),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.never,
+            all: Stream.never,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const result = yield* ChromiumLauncher.launchWithPort({
+          executablePath: "/fake/chromium",
+          userDataDir: "/fake/profile",
+          timeout: "5 seconds"
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, partialWrites),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Socket.WebSocketConstructor, (url) => {
+            events.push({ connect: url })
+            // Stop at the connection attempt; no browser or real socket is involved.
+            throw new Error("scripted socket refusal")
+          }),
+          Effect.scoped,
+          Effect.exit
+        )
+        assert.deepStrictEqual(events, [
+          ...contents.map((read) => ({ read })),
+          { connect: "ws://127.0.0.1:9222/devtools/browser/test-browser" }
+        ])
+        assert(result._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result))
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "scripted socket refusal")
+      }))
+
     it.effect("reports a browser that exits before it is ready, with its exit code and stderr", () =>
       Effect.gen(function*() {
         const failing = "/bin/sh"
