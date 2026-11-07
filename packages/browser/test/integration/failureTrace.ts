@@ -33,7 +33,10 @@
  * Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
  * WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
  * receive observations may be ignored by the link. Apart from native trace video failures, failures above the
- * inspector socket are not instrumented;
+ * inspector socket are not generally instrumented. Test-local request-body recording stages and integration-only
+ * HAR collector wait markers record bounded active-phase snapshots and exit flags, without body/header/path/error
+ * values. Abort snapshots cover test stages separately from recorder-local snapshots; there is no global registry.
+ * A completed HAR finalizer does not prove later scope cleanup completed; page/context release is not instrumented;
  * interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
  * pids and process arguments, rather than an explicit connection-to-process identifier. Launch and page-creation
  * preludes can be evicted from bounded histories; no protected head is kept. Shared-artifact links identify context

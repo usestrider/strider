@@ -343,3 +343,115 @@ describe("native video failure artifacts", () => {
     expect(content).not.toContain("user:pass")
   })
 })
+
+describe("wait observations", () => {
+  it("preserves values, Causes, interruption and original cleanup order despite observer errors", async () => {
+    const Effect = await import("effect/Effect")
+    const Exit = await import("effect/Exit")
+    const { waitTrace } = await import("./integration/waitTrace.ts")
+    const order: Array<string> = []
+    const trace = waitTrace("fixture", (kind) => {
+      order.push(kind)
+      throw new Error("observer")
+    })
+    const value = {}
+    expect(await Effect.runPromise(trace.observe("value", Effect.succeed(value)))).toBe(value)
+    for (const effect of [Effect.fail(value), Effect.die(value), Effect.interrupt]) {
+      const original = await Effect.runPromiseExit(effect)
+      const observed = await Effect.runPromiseExit(trace.observe("exit", effect))
+      expect(Exit.isFailure(observed)).toBe(true)
+      // Interrupt fiber IDs differ between runs; other Causes retain their original value.
+      if (effect !== Effect.interrupt) expect(observed).toEqual(original)
+    }
+    order.length = 0
+    await Effect.runPromise(trace.observe(
+      "cleanup",
+      Effect.void.pipe(Effect.ensuring(Effect.sync(() => {
+        order.push("original-cleanup")
+      })))
+    ))
+    expect(order).toEqual(["stage-enter", "original-cleanup", "stage-exit"])
+  })
+  it("bounds active snapshots and observes abort before controlled cleanup, then removes its listener", async () => {
+    const Effect = await import("effect/Effect")
+    const Deferred = await import("effect/Deferred")
+    const Fiber = await import("effect/Fiber")
+    const { waitTrace } = await import("./integration/waitTrace.ts")
+    const controller = new AbortController()
+    const events: Array<{ kind: string; payload: unknown }> = []
+    const trace = waitTrace("fixture", (kind, payload) => events.push({ kind, payload }))
+    await Effect.runPromise(Effect.gen(function*() {
+      const gate = yield* Deferred.make<void>()
+      const entered = yield* Deferred.make<void>()
+      const effects = Array.from(
+        { length: 40 },
+        () => trace.observe("waiting", Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(gate))))
+      )
+      const fiber = yield* Effect.forkChild(Effect.all(effects, { concurrency: "unbounded" }))
+      yield* Deferred.await(entered)
+      // The controlled gate holds every entered phase; no timer or browser load.
+      yield* Effect.yieldNow
+      expect(trace.snapshot().active.length).toBeLessThanOrEqual(16)
+      expect(trace.snapshot().omitted).toBeGreaterThan(0)
+      yield* trace.test(controller.signal, Effect.sync(() => controller.abort()))
+      expect(events.some((e) => e.kind === "test-abort-observed")).toBe(true)
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(fiber)
+    }))
+    expect(trace.snapshot()).toEqual({ active: [], omitted: 0 })
+  })
+  it("rejects changed HAR anchors and preserves transformed line numbers", () => {
+    const file = new URL("../src/internal/har.ts", import.meta.url)
+    const source = fs.readFileSync(file, "utf8")
+    expect(instrument(source, file.pathname)!.code.split("\n").length).toBe(source.split("\n").length)
+    expect(() => instrument(source.replace("Deferred.await(hop.end)", "Effect.void"), file.pathname)).toThrow(
+      "no longer matches"
+    )
+  })
+  it("executes the transformed HAR collector with controlled body gates", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "harWait.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8"
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(0)
+  }, 30_000)
+})
+
+it("retains abort and gated cleanup plus late events on the originating failed test", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "waitOwner.fixture"
+  ], {
+    cwd: new URL("../../../", import.meta.url),
+    encoding: "utf8"
+  })
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  const files = fixtureFiles(run.stderr)
+  const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+  const test = files.find((name) => name.includes("-test"))!
+  const entries = fs.readFileSync(new URL(test, directory), "utf8").trim().split("\n").map((line) => JSON.parse(line))
+  const abort = entries.findIndex((e) => e.kind === "test-abort-observed")
+  const cleanup = entries.findIndex((e) =>
+    e.kind === "stage-exit" && JSON.parse(e.payload).phase === "controlled-cleanup"
+  )
+  expect(abort).toBeGreaterThan(0)
+  expect(cleanup).toBeGreaterThan(abort)
+  expect(entries.some((e) => e.kind === "late-owned-event")).toBe(true)
+  expect(entries.some((e) => e.kind === "late-owned-cleanup")).toBe(true)
+  const shared = files.find((name) => name.includes("-shared"))!
+  expect(fs.readFileSync(new URL(shared, directory), "utf8")).not.toContain("late-owned")
+  for (const name of files) fs.unlinkSync(new URL(name, directory))
+}, 30_000)
