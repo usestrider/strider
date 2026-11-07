@@ -246,29 +246,41 @@ describe("Chromium video writer", () => {
       Effect.gen(function*() {
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-trace-"))
         yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-        const page = yield* Browser.newPage()
-        const trace = yield* Trace.record(page, { screencast: "native" })
-        yield* page.goto("data:text/html,<h1>video trace</h1>")
-        yield* Effect.sleep("400 millis")
-        const file = path.join(directory, "trace.zip")
-        yield* trace.exportTrace(file)
-        const files = new Map<string, Uint8Array>()
-        yield* Stream.make(new Uint8Array(fs.readFileSync(file))).pipe(
-          Stream.pipeThroughChannel(Zip.decode()),
-          Stream.runForEach((entry) =>
-            Stream.runCollect(entry.body).pipe(Effect.map((chunks) => {
-              files.set(entry.header.path, Buffer.concat(chunks))
-            }))
+        const firstFrame = yield* Deferred.make<void>()
+        const writer = Layer.effect(VideoWriter.VideoWriter)(Effect.gen(function*() {
+          const encoder = yield* VideoWriter.VideoWriter
+          return {
+            write: (frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) =>
+              encoder.write(frames.pipe(Stream.tap(() => Deferred.succeed(firstFrame, undefined))), destination)
+          }
+        })).pipe(Layer.provide(VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! })))
+        const browser = Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(writer))
+        yield* Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const trace = yield* Trace.record(page, { screencast: "native" })
+          yield* page.goto("data:text/html,<h1>video trace</h1>")
+          // Export stops the native recorder. Observe this recording's actual writer input before stopping it.
+          yield* Deferred.await(firstFrame).pipe(Effect.timeout("60 seconds"))
+          const file = path.join(directory, "trace.zip")
+          yield* trace.exportTrace(file)
+          const files = new Map<string, Uint8Array>()
+          yield* Stream.make(new Uint8Array(fs.readFileSync(file))).pipe(
+            Stream.pipeThroughChannel(Zip.decode()),
+            Stream.runForEach((entry) =>
+              Stream.runCollect(entry.body).pipe(Effect.map((chunks) => {
+                files.set(entry.header.path, Buffer.concat(chunks))
+              }))
+            )
           )
-        )
-        const events = new TextDecoder().decode(files.get("trace.trace")).trim().split("\n").map((line) =>
-          JSON.parse(line)
-        )
-        const videos = events.filter((event) => event.type === "video")
-        assert.strictEqual(videos.length, 1)
-        assert.isAbove(videos[0].width, 0)
-        assert.isAbove(videos[0].height, 0)
-        assert.deepStrictEqual(Array.from(files.get(videos[0].file)!.subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
+          const events = new TextDecoder().decode(files.get("trace.trace")).trim().split("\n").map((line) =>
+            JSON.parse(line)
+          )
+          const videos = events.filter((event) => event.type === "video")
+          assert.strictEqual(videos.length, 1)
+          assert.isAbove(videos[0].width, 0)
+          assert.isAbove(videos[0].height, 0)
+          assert.deepStrictEqual(Array.from(files.get(videos[0].file)!.subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
+        }).pipe(Effect.provide(browser))
       }), 60_000)
   })
 })
