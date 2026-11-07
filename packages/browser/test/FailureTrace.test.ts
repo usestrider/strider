@@ -400,3 +400,26 @@ it("caps process slots, reports exhaustion and removes the transfer spool", asyn
   expect(records).toContainEqual(["overflow", "Child process slot budget exhausted"])
   expect(fs.existsSync(directory)).toBe(false)
 })
+
+it("keeps the test's own records when replayed child records exceed the artifact buffer", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TraceBuffer } = await import("./integration/failureTrace.ts")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer()
+  trace.record("client", "receive", "PARENT_FAILURE_EVIDENCE")
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child-transfer", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  // Eight ordinary children, each within its own 256 KiB spool bound, still add more than the 2 MiB buffer.
+  for (let child = 0; child < 8; child++) {
+    execFileSync(process.execPath, [
+      `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+      "-e",
+      "for (let i = 0; i < 40; i++) process.stderr.write('x'.repeat(8000))"
+    ], { env: { ...process.env, [transferVariable]: directory }, stdio: "ignore" })
+  }
+  scope.close()
+  expect(trace.entries().some((entry) => entry.kind === "node-stderr")).toBe(true)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+}, 30_000)
