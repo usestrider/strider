@@ -95,6 +95,83 @@ export const writerConformance = (
     )
 
     it.effect(
+      `${name} starts core recordings at zero without shifting delayed capture times`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-zero-start-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          let now = 0
+          const file = yield* Video.record(
+            Effect.succeed({
+              frames: Stream.fromIterable([127, 237, 391, 412]).pipe(Stream.map((at) => ({
+                frame: {
+                  at: at * 1e6,
+                  format: "png" as const,
+                  width: 2,
+                  height: 2,
+                  data: png(2, 2, at < 391 ? [255, 0, 0] : [0, 0, 255])
+                },
+                take: Effect.sync(() => {
+                  now = at * 1e6
+                })
+              }))),
+              ended: Effect.never
+            }),
+            encoder,
+            directory
+          ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+            now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+            sleep: () => Effect.never
+          }))
+          const output = yield* file
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            output
+          ], { encoding: "utf8" }))
+          // Check seeking first so the pre-fix failure demonstrates the reported empty output.
+          const final = lastVideoFrame(output, probe.frames.length)
+          for (const distance of ["-0.1", "-0.01"]) {
+            const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+              "-v",
+              "error",
+              "-sseof",
+              distance,
+              "-i",
+              output,
+              "-frames:v",
+              "1",
+              "-fps_mode",
+              "passthrough",
+              "-f",
+              "rawvideo",
+              "-pix_fmt",
+              "rgb24",
+              "pipe:1"
+            ])
+            assert.strictEqual(pixels.length, 12, `end seek ${distance} returns a picture`)
+            assert.deepStrictEqual(pixels, final, "controlled final blue picture includes the stop marker")
+          }
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.127, 0.237, 0.391, 0.412, 0.412]
+          )
+          assert.strictEqual(Number(probe.format.start_time), 0)
+          assert.strictEqual(Number(probe.format.duration), 0.413)
+          assert.isAbove(final[2]!, 200, "final picture is blue")
+          assert.isBelow(final[0]!, 20, "final picture is not red")
+        }),
+      60_000
+    )
+
+    it.effect(
       `${name} preserves the later four-second frame after normalizing a backward source time`,
       () =>
         Effect.gen(function*() {
