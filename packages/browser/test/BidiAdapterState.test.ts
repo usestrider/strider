@@ -2753,3 +2753,167 @@ for (const configured of [true, false]) {
       assert.isUndefined(page.context.proxyAttempts)
     }))
 }
+
+describe("Firefox proxy reservation lifetime", () => {
+  const options = (password: string): Adapter.UserContextOptions => ({
+    proxy: Option.some({
+      server: "proxy.test:8080",
+      bypass: [],
+      credentials: { username: "user", password: Redacted.make(password) }
+    }),
+    acceptInsecureCerts: false
+  })
+  const refused = () =>
+    new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "browser.createUserContext" }) })
+  const uncertain = () =>
+    new Protocol.ProtocolError({
+      reason: new Protocol.NoReply({ method: "browser.createUserContext", timeout: Duration.seconds(1) })
+    })
+
+  for (const otherSucceeds of [true, false]) {
+    it.effect(`releases only its own concurrent reservation when the other creation ${otherSucceeds ? "succeeds" : "fails"}`, () =>
+      Effect.gen(function*() {
+        const first = yield* Deferred.make<void>()
+        const second = yield* Deferred.make<void>()
+        const entered = yield* Deferred.make<void>()
+        let calls = 0
+        const { state } = yield* withPage({
+          "browser.createUserContext": Effect.suspend(() => {
+            const call = ++calls
+            if (call === 1) return Deferred.await(first).pipe(Effect.andThen(Effect.fail(refused())))
+            if (call === 2) {
+              return Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(second)),
+                Effect.andThen(otherSucceeds ? Effect.succeed({ userContext: "second" }) : Effect.fail(refused()))
+              )
+            }
+            return Effect.succeed({ userContext: "corrected" })
+          }),
+          "network.addIntercept": { intercept: "auth" }
+        })
+        const a = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
+        const b = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
+        yield* Deferred.await(entered)
+        yield* Deferred.succeed(first, undefined)
+        yield* Fiber.join(a)
+        const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+        assert.strictEqual(calls, 2)
+        yield* Deferred.succeed(second, undefined)
+        yield* Fiber.join(b)
+        if (otherSucceeds) {
+          const retained = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+          assert.strictEqual(retained.reason._tag, "Unsupported")
+        } else yield* Contexts.createUserContext(state, options("different"))
+      }))
+  }
+
+  it.effect("retains an earlier successful binding after another creation is rejected", () =>
+    Effect.gen(function*() {
+      let reject = false
+      const { state } = yield* withPage({
+        "browser.createUserContext": Effect.suspend(() =>
+          reject ? Effect.fail(refused()) : Effect.succeed({ userContext: "created" })
+        ),
+        "network.addIntercept": { intercept: "auth" }
+      })
+      yield* Contexts.createUserContext(state, options("same"))
+      reject = true
+      yield* Contexts.createUserContext(state, options("same")).pipe(Effect.flip)
+      const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+      assert.strictEqual(conflict.reason._tag, "Unsupported")
+    }))
+
+  for (const outcome of ["confirmed unused", "uncertain removal", "used"] as const) {
+    it.effect(`handles setup rollback with ${outcome} outcome`, () =>
+      Effect.gen(function*() {
+        let failSetup = true
+        const { state } = yield* withPage({
+          "browser.createUserContext": { userContext: "created" },
+          "network.addIntercept": Effect.suspend(() => {
+            if (!failSetup) return Effect.succeed({ intercept: "auth" })
+            if (outcome === "used") {
+              Tree.addNavigable(state, {
+                context: "during-setup" as BrowsingContext.BrowsingContext,
+                userContext: "created",
+                originalOpener: null,
+                url: "http://proxy.test/"
+              }, false)
+            }
+            return Effect.fail(refused())
+          }),
+          "browser.removeUserContext": outcome === "uncertain removal" ? Effect.fail(uncertain()) : {}
+        })
+        yield* Contexts.createUserContext(state, options("mistyped")).pipe(Effect.flip)
+        failSetup = false
+        if (outcome === "confirmed unused") yield* Contexts.createUserContext(state, options("corrected"))
+        else {
+          const conflict = yield* Contexts.createUserContext(state, options("corrected")).pipe(Effect.flip)
+          assert.strictEqual(conflict.reason._tag, "Unsupported")
+        }
+      }))
+  }
+
+  for (const interrupted of [true, false]) {
+    it.effect(`retains a binding when creation ${interrupted ? "is interrupted" : "has no reply"}`, () =>
+      Effect.gen(function*() {
+        const { state } = yield* withPage({
+          "browser.createUserContext": interrupted ? Effect.interrupt : Effect.fail(uncertain())
+        })
+        yield* Contexts.createUserContext(state, options("original")).pipe(Effect.exit)
+        const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+      }))
+  }
+
+  it.effect("scopes the automatic proxy auth interceptor to its own user context", () =>
+    Effect.gen(function*() {
+      const { state, commands } = yield* withPage({
+        "browser.createUserContext": { userContext: "proxy-context" },
+        "network.addIntercept": { intercept: "auth" }
+      })
+      yield* Contexts.createUserContext(state, options("secret"))
+      const intercept = commands.find((command) => command.method === "network.addIntercept")
+      assert.deepStrictEqual(intercept?.params, { phases: ["authRequired"], userContexts: ["proxy-context"] })
+    }))
+})
+
+for (const kind of ["InvalidArgument", "Encode", "Decode", "Unrecognized"] as const) {
+  it.effect(`handles a proxy creation ${kind} without mistaking uncertainty for rejection`, () =>
+    Effect.gen(function*() {
+      let failing = true
+      const method = "browser.createUserContext"
+      const reason = kind === "Encode" ?
+        new Protocol.Encode({ method, issue: "fixture" })
+        : kind === "Decode" ?
+        new Protocol.Decode({ method, issue: "fixture" })
+        : new Protocol.Rejected({
+          method,
+          reason: kind,
+          code: kind === "InvalidArgument" ? "invalid argument" : "unknown error",
+          description: "fixture"
+        })
+      const { state } = yield* withPage({
+        [method]: Effect.suspend(() =>
+          failing ? Effect.fail(new Protocol.ProtocolError({ reason })) : Effect.succeed({ userContext: "created" })
+        ),
+        "network.addIntercept": { intercept: "auth" }
+      })
+      const create = (password: string) =>
+        Contexts.createUserContext(state, {
+          proxy: Option.some({
+            server: "proxy.test:8080",
+            bypass: [],
+            credentials: { username: "user", password: Redacted.make(password) }
+          }),
+          acceptInsecureCerts: false
+        })
+      yield* create("original").pipe(Effect.flip)
+      failing = false
+      if (kind === "Encode" || kind === "InvalidArgument") yield* create("corrected")
+      else {
+        const conflict = yield* create("corrected").pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+      }
+    }))
+}
