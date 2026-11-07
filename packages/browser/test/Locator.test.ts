@@ -1,6 +1,7 @@
 /** Runtime validation for JavaScript callers that bypass Locator's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Deadline, Locator, Target } from "@usestrider/browser"
+import * as Cache from "effect/Cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
@@ -8,12 +9,14 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
+import * as Handles from "../src/internal/handles.ts"
 
 describe("Locator.fill", () => {
   for (
@@ -82,7 +85,10 @@ describe("Locator.check refusal deadlines", () => {
           const installed = yield* Deferred.make<void>()
           const reading = yield* Deferred.make<void>()
           const reply = yield* Deferred.make<void>()
-          const replied = yield* Deferred.make<void>()
+          const installationFinished = yield* Deferred.make<void>()
+          const responseFiber = yield* Deferred.make<Fiber.Fiber<Adapter.RemoteResult>>()
+          const scope = yield* Scope.Scope
+          let installsFinished = 0
           let reads = 0
           let inputs = 0
           const layer = BrowserImpl.layer((sink) =>
@@ -100,6 +106,8 @@ describe("Locator.check refusal deadlines", () => {
                 if (call.functionDeclaration === Engine.install) {
                   yield* Deferred.succeed(installing, undefined)
                   yield* Deferred.await(installed)
+                  installsFinished++
+                  yield* Deferred.succeed(installationFinished, undefined)
                   return { _tag: "Value", value: { type: "string", value: "installed" } } as const
                 }
                 const argument = call.arguments[0]
@@ -109,9 +117,8 @@ describe("Locator.check refusal deadlines", () => {
                 reads++
                 yield* Deferred.succeed(reading, undefined)
                 // Model a browser response that still arrives after its caller's deadline.
-                return yield* Effect.gen(function*() {
+                const fiber = yield* Effect.gen(function*() {
                   yield* Deferred.await(reply)
-                  yield* Deferred.succeed(replied, undefined)
                   return {
                     _tag: "Value",
                     value: {
@@ -126,7 +133,10 @@ describe("Locator.check refusal deadlines", () => {
                       })
                     }
                   } as const
-                }).pipe(Effect.forkDetach, Effect.flatMap(Fiber.join))
+                }).pipe(Effect.forkDetach)
+                yield* Scope.addFinalizer(scope, Fiber.interrupt(fiber))
+                yield* Deferred.succeed(responseFiber, fiber)
+                return yield* Fiber.join(fiber)
               })
             })))
           )
@@ -138,6 +148,12 @@ describe("Locator.check refusal deadlines", () => {
               Effect.forkChild
             )
             yield* Deferred.await(installing)
+            // Keep a cache observer waiting independently of the action's deadline.
+            // Cache cancels a pending installation when its last waiter leaves.
+            const { entry, runtime } = Handles.page(page)
+            const document = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+            const installation = yield* Cache.get(runtime.engineRealms, document).pipe(Effect.forkChild)
+            yield* Effect.yieldNow
             if (boundary !== "installation") {
               yield* Deferred.succeed(installed, undefined)
               yield* Deferred.await(reading)
@@ -160,16 +176,23 @@ describe("Locator.check refusal deadlines", () => {
               if (boundary === "installation") {
                 assert.strictEqual(reads, 0)
                 yield* Deferred.succeed(installed, undefined)
+                yield* Deferred.await(installationFinished)
+                // Await the shared cache lookup, including the installation's continuation.
+                assert.strictEqual(yield* Fiber.join(installation), "checked-realm")
+                assert.strictEqual(installsFinished, 1)
               } else {
                 yield* Deferred.succeed(reply, undefined)
-                yield* Deferred.await(replied)
+                yield* Fiber.join(yield* Deferred.await(responseFiber))
                 assert.strictEqual(yield* Fiber.join(pending), error)
               }
+            }
+            if (boundary === "timely") {
+              yield* Fiber.join(yield* Deferred.await(responseFiber))
             }
             assert.strictEqual(reads, boundary === "installation" ? 0 : 1)
             assert.strictEqual(inputs, 0)
           })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
-        })
+        }).pipe(Effect.scoped)
     )
   }
 })
