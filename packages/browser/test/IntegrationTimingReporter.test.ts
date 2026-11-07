@@ -1,7 +1,9 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
+import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import { vi } from "vitest"
 import type { TestCase, TestModule, TestSpecification } from "vitest/node"
 import TimingReporter from "./integration/timingReporter.ts"
@@ -46,7 +48,8 @@ const moduleFixture = (id: string, executionMs = 0) => {
     project: specification.project,
     state: () => state,
     diagnostic: () => ({ duration: executionMs }),
-    children: { allTests: () => cases.values() }
+    errors: () => [],
+    children: { allTests: () => cases.values(), allSuites: () => [].values() }
   } as unknown as TestModule
   return {
     module,
@@ -126,15 +129,21 @@ describe("Linux integration timing reporter", () => {
     const broken = moduleFixture("broken", 0)
     const unknown = moduleFixture("unknown")
     broken.state("failed")
+    Object.assign(broken.module, { errors: () => [{ message: "collection failed" }] })
     f.reporter.onTestRunStart([broken.specification, unknown.specification])
+    f.reporter.onTestModuleCollected(broken.module)
     f.reporter.onTestModuleEnd(broken.module)
     f.reporter.onTestRunEnd([broken.module], [], "failed")
     const report = f.read()
     assert.strictEqual(report.plannedFiles, 2)
-    assert.strictEqual(report.collectedFiles, 1)
+    assert.strictEqual(report.collectedFiles, 0)
     assert.strictEqual(report.completedFiles, 1)
     assert.strictEqual(report.knownCases, 0)
     assert.strictEqual(report.files[0].outcome, "failed")
+    assert.strictEqual(report.files[0].collectionStatus, "failed")
+    assert.strictEqual(report.files[0].caseCount, null)
+    assert.strictEqual(report.files[0].executionMs, null)
+    assert.strictEqual(report.unknownCaseFiles, 2)
     assert.strictEqual(report.files[1].outcome, "not-collected")
     assert.strictEqual(report.files[1].executionMs, null)
   })
@@ -151,20 +160,75 @@ describe("Linux integration timing reporter", () => {
     const withErrors = (module: TestModule, message: string) =>
       Object.assign(module, { errors: () => [{ name: "Error", message }] })
     withErrors(broken.module, "boom at collection")
-    withErrors(fixtureFailed.module, "browser did not launch")
     fixtureFailed.test("one", "skipped")
     f.reporter.onTestRunStart([broken.specification, fixtureFailed.specification])
+    f.reporter.onTestModuleCollected(broken.module)
+    f.reporter.onTestModuleCollected(fixtureFailed.module)
+    withErrors(fixtureFailed.module, "browser did not launch")
     f.reporter.onTestModuleEnd(broken.module)
     f.reporter.onTestModuleEnd(fixtureFailed.module)
     f.reporter.onTestRunEnd([broken.module, fixtureFailed.module], [], "failed")
     const report = f.read()
     assert.strictEqual(report.counts.failed, 0)
     assert.strictEqual(report.failedFiles, 2)
+    assert.strictEqual(report.files[1].collected, true)
+    assert.strictEqual(report.files[1].caseCount, 1)
+    assert.strictEqual(report.counts.skipped, 1)
+    const printed = f.output.mock.calls.flat().join("\n")
+    assert.include(printed, "failed files: 2")
+    assert.include(printed, "boom at collection")
+    assert.include(printed, "browser did not launch")
     assert.deepStrictEqual(report.files.map((file: { errors?: Array<string> }) => file.errors), [
       ["boom at collection"],
       ["browser did not launch"]
     ])
   })
+
+  it("reports real Vitest collection and nested shared-layer failures without changing skipped case outcomes", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-timing-probe-"))
+    directories.push(directory)
+    const root = fileURLToPath(new URL("../../../", import.meta.url))
+    const config = path.join(directory, "vitest.config.mjs")
+    fs.writeFileSync(
+      config,
+      `export default {
+      root: ${JSON.stringify(root)},
+      test: {
+        include: ["packages/browser/test/fixtures/timings/*.fixture.ts"],
+        fileParallelism: false,
+        reporters: ["default", [${
+        JSON.stringify(fileURLToPath(new URL("./integration/timingReporter.ts", import.meta.url)))
+      },
+          { directory: ${JSON.stringify(directory)} }]]
+      }
+    }`
+    )
+    const cli = fileURLToPath(new URL("./vitest.mjs", import.meta.resolve("vitest/package.json")))
+    const result = spawnSync(process.execPath, [cli, "--run", "--config", config], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 20_000
+    })
+    assert.strictEqual(result.status, 1, result.stderr + result.stdout)
+    const report = JSON.parse(fs.readFileSync(path.join(directory, "timings.json"), "utf8"))
+    assert.strictEqual(report.failedFiles, 2)
+    assert.strictEqual(report.collectedFiles, 1)
+    assert.strictEqual(report.unknownCaseFiles, 1)
+    assert.deepStrictEqual(report.counts, { passed: 0, failed: 0, skipped: 1, pending: 0 })
+    const collection = report.files.find((file: { file: string }) => file.file.endsWith("collection.fixture.ts"))
+    const shared = report.files.find((file: { file: string }) => file.file.endsWith("shared.fixture.ts"))
+    assert.strictEqual(collection.collected, false)
+    assert.strictEqual(collection.collectionStatus, "failed")
+    assert.strictEqual(collection.caseCount, null)
+    assert.strictEqual(collection.executionMs, null)
+    assert.include(collection.errors.join("\n"), "timing probe collection failed")
+    assert.strictEqual(shared.collected, true)
+    assert.strictEqual(shared.caseCount, 1)
+    assert.include(shared.errors.join("\n"), "timing probe shared fixture failed")
+    assert.include(result.stdout, "failed files: 2")
+    assert.include(result.stdout, "timing probe collection failed")
+    assert.include(result.stdout, "timing probe shared fixture failed")
+  }, 30_000)
 
   it("keeps a gracefully interrupted file incomplete and preserves received case timings", () => {
     const f = fixture()

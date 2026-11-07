@@ -121,7 +121,10 @@ deadlines and normal failure tracing when measuring changes. The Linux reporter 
 `.data/integration-timings/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
 `integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
 if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
-Uncollected files have unknown case counts; pending cases and null durations are not passes or zero-cost tests.
+Files that fail collection or are never collected have null case totals and execution durations; observed case
+counts may be incomplete. File errors and failed-file counts stay visible even when a failed shared fixture makes
+Vitest mark its cases skipped. Case outcomes are preserved; pending cases and null durations are not passes or
+zero-cost tests.
 Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
 execution and the complete hosted job duration. **1500 seconds is the proposed full serial hosted job target,
 including heavy coverage, not an agreed budget or a hard threshold.** If CI splits across machines, reassess that

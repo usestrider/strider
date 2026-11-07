@@ -19,8 +19,17 @@ interface FileTiming {
   readonly outcome: string
   readonly executionMs: number | null
   readonly collected: boolean
+  readonly collectionStatus: "not-collected" | "failed" | "collected"
+  readonly caseCount: number | null
+  readonly errors: ReadonlyArray<string>
   readonly tests: ReadonlyArray<CaseTiming>
 }
+// Hook errors may belong to a nested suite rather than the module itself.
+const fileErrors = (module: TestModule) =>
+  [module, ...module.children.allSuites()].flatMap((suite) =>
+    suite.errors().map((error) => error.message ?? String(error))
+  )
+
 const caseTiming = (test: TestCase): CaseTiming => {
   const diagnostic = test.diagnostic()
   return {
@@ -35,6 +44,7 @@ const caseTiming = (test: TestCase): CaseTiming => {
 
 export default class TimingReporter implements Reporter {
   private readonly files = new Map<string, FileTiming>()
+  private readonly collections = new Map<string, FileTiming["collectionStatus"]>()
   private readonly completed = new Set<string>()
   private started = 0
   private startedAt = ""
@@ -62,7 +72,9 @@ export default class TimingReporter implements Reporter {
       summedFileExecutionMs: files.reduce((sum, file) => sum + (file.executionMs ?? 0), 0),
       plannedFiles: files.length,
       collectedFiles: files.filter((file) => file.collected).length,
-      completedFiles: files.filter((file) => file.executionMs !== null).length,
+      completedFiles: files.filter((file) => this.completed.has(file.id)).length,
+      failedFiles: files.filter((file) => file.outcome === "failed").length,
+      unknownCaseFiles: files.filter((file) => file.caseCount === null).length,
       knownCases: Object.values(counts).reduce((sum, count) => sum + count, 0),
       counts,
       unhandledErrors,
@@ -79,6 +91,7 @@ export default class TimingReporter implements Reporter {
     this.startedAt = new Date().toISOString()
     this.files.clear()
     this.completed.clear()
+    this.collections.clear()
     fs.mkdirSync(this.directory, { recursive: true })
     fs.writeFileSync(path.join(this.directory, "events.ndjson"), "")
     for (const specification of specifications) {
@@ -89,6 +102,9 @@ export default class TimingReporter implements Reporter {
         outcome: "not-collected",
         executionMs: null,
         collected: false,
+        collectionStatus: "not-collected",
+        caseCount: null,
+        errors: [],
         tests: []
       })
     }
@@ -96,18 +112,25 @@ export default class TimingReporter implements Reporter {
   }
 
   private fileTiming(module: TestModule, ended: boolean): FileTiming {
+    const collectionStatus = this.collections.get(module.id) ?? "not-collected"
+    const collected = collectionStatus === "collected"
+    const tests = Array.from(module.children.allTests(), caseTiming)
     return {
       id: module.id,
       file: path.relative(process.cwd(), module.moduleId),
       project: module.project.name,
       outcome: module.state(),
-      executionMs: ended ? module.diagnostic().duration : null,
-      collected: true,
-      tests: Array.from(module.children.allTests(), caseTiming)
+      executionMs: ended && collected ? module.diagnostic().duration : null,
+      collected,
+      collectionStatus,
+      caseCount: collected ? tests.length : null,
+      errors: fileErrors(module),
+      tests
     }
   }
 
   onTestModuleCollected(module: TestModule) {
+    this.collections.set(module.id, fileErrors(module).length === 0 ? "collected" : "failed")
     const file = this.fileTiming(module, false)
     this.files.set(module.id, file)
     this.event({ event: "collected", file })
@@ -146,8 +169,12 @@ export default class TimingReporter implements Reporter {
     console.log(
       `Cases known: ${report.knownCases}; ${
         JSON.stringify(report.counts)
-      }; files completed: ${report.completedFiles}/${report.plannedFiles}; unhandled errors: ${errors.length}`
+      }; files completed: ${report.completedFiles}/${report.plannedFiles}; failed files: ${report.failedFiles}; files with unknown case totals: ${report.unknownCaseFiles}; unhandled errors: ${errors.length}`
     )
+    for (const file of report.files.filter((file) => file.outcome === "failed")) {
+      console.log(`Failed file (${file.collectionStatus}): ${file.file}`)
+      for (const message of file.errors) console.log(`  ${message}`)
+    }
     console.log("Slowest files (execution includes tests and hooks):")
     for (
       const file of report.files.filter((file) => file.executionMs !== null)
