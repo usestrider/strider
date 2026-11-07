@@ -184,3 +184,58 @@ for (const order of ["binding first", "layer first", "shared memo map"] as const
     })
   }
 }
+
+// Two bound callbacks building the adapter through one memo map build its backend exactly once.
+const onceMemoMap = Layer.makeMemoMapUnsafe()
+const onceScope = Scope.makeUnsafe()
+let onceBuilds = 0
+const onceLayer = VitestBrowser.layer(Layer.syncContext(() => {
+  onceBuilds++
+  return Context.empty() as Context.Context<Browser.Browser>
+}))
+const onceBuilt = barrier()
+afterAll(() => Effect.runPromise(Scope.close(onceScope, Exit.void)))
+
+for (const artifact of ["Screenshot", "Har"] as const) {
+  it.concurrent(`builds the backend once for ${artifact} through a shared memo map`, async (context) => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const services = yield* Layer.buildWithMemoMap(onceLayer, onceMemoMap, onceScope)
+        const run = Context.get(services, TestRun.TestRun)
+        yield* Effect.promise(onceBuilt)
+        context.expect.soft(onceBuilds).toBe(1)
+        context.expect.soft(run.info.id).toContain(context.task.name)
+      }).pipe(VitestBrowser.withTest(context))
+    )
+  })
+}
+
+it("releases a per-effect backend when the bound effect ends, and on a failed build", async (context) => {
+  const events: Array<string> = []
+  const backend = Layer.effectContext(
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        events.push("acquire")
+        return Context.empty() as Context.Context<Browser.Browser>
+      }),
+      () => Effect.sync(() => events.push("release"))
+    )
+  )
+  await Effect.runPromise(
+    Effect.sync(() => events.push("use")).pipe(
+      Effect.provide(VitestBrowser.layer(backend)),
+      VitestBrowser.withTest(context)
+    )
+  )
+  assert.deepStrictEqual(events, ["acquire", "use", "release"])
+
+  const failing = Layer.mergeAll(backend, Layer.effectDiscard(Effect.fail("boom"))) as unknown as Layer.Layer<
+    Browser.Browser,
+    string
+  >
+  const exit = await Effect.runPromiseExit(
+    Effect.void.pipe(Effect.provide(VitestBrowser.layer(failing)), VitestBrowser.withTest(context))
+  )
+  assert.isTrue(Exit.isFailure(exit))
+  assert.deepStrictEqual(events, ["acquire", "use", "release", "acquire", "release"])
+})
