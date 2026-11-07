@@ -40,10 +40,13 @@ describe("DevToolsActivePort", () => {
     it.effect(`accepts port ${port} with or without a final newline`, () =>
       Effect.sync(() => {
         for (const ending of ["", "\n"]) {
-          assert.deepStrictEqual(DevToolsActivePort.parse(`${port}\n/devtools/browser/test${ending}`), {
-            port,
-            browserPath: "/devtools/browser/test"
-          })
+          assert.deepStrictEqual(
+            DevToolsActivePort.parse(`${port}\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f${ending}`),
+            {
+              port,
+              browserPath: "/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+            }
+          )
         }
       }))
   }
@@ -52,23 +55,44 @@ describe("DevToolsActivePort", () => {
       "",
       "9222",
       "9222\n",
-      "0\n/devtools/browser/test",
-      "65536\n/devtools/browser/test",
-      "-1\n/devtools/browser/test",
-      "+1\n/devtools/browser/test",
-      "1.5\n/devtools/browser/test",
-      "1e3\n/devtools/browser/test",
-      " 9222\n/devtools/browser/test",
-      "9222 \n/devtools/browser/test",
+      "0\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "65536\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "-1\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "+1\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "1.5\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "1e3\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      " 9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "9222 \n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
       "9222\n/devtools/page/test",
       "9222\n/devtools/browser/",
-      "9222\n/devtools/browser/test path",
-      "9222\n/devtools/browser/test\nextra"
+      "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f path",
+      "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\nextra"
     ]
   ) {
     it.effect(`rejects ${JSON.stringify(text)}`, () =>
       Effect.sync(() => {
         assert.isUndefined(DevToolsActivePort.parse(text))
+      }))
+  }
+  it.effect("accepts complete UUIDs without restricting their version or hex case", () =>
+    Effect.sync(() => {
+      for (const id of ["8d0f3c2e-5b7a-7c1d-9e6f-0a1b2c3d4e5f", "8D0F3C2E-5B7A-4C1D-9E6F-0A1B2C3D4E5F"]) {
+        assert.deepStrictEqual(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`), {
+          port: 9222,
+          browserPath: `/devtools/browser/${id}`
+        })
+      }
+    }))
+  for (
+    const id of [
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5g",
+      "8d0f3c2e_5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5ff"
+    ]
+  ) {
+    it.effect(`rejects malformed browser identifier ${id}`, () =>
+      Effect.sync(() => {
+        assert.isUndefined(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`))
       }))
   }
   // Chromium writes `port\n/devtools/browser/<lowercase v4 UUID>` with no final newline, so a read torn inside the
@@ -85,7 +109,7 @@ describe("DevToolsActivePort", () => {
       }
     }))
   layer(NodeServices.layer)("readiness", (it) => {
-    for (const content of ["9222\n", "65536\n/devtools/browser/test", undefined]) {
+    for (const content of ["9222\n", "65536\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f", undefined]) {
       it.effect(`bounds waiting for ${JSON.stringify(content)} on the live clock`, () =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
@@ -194,7 +218,13 @@ describe("Chromium launcher", () => {
     it.effect("waits for the complete DevToolsActivePort endpoint before connecting", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
-        const contents = ["", "9222", "9222\n", "9222\n/devtools/browser/test-browser"]
+        const contents = [
+          "",
+          "9222",
+          "9222\n",
+          "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5",
+          "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+        ]
         const events: Array<unknown> = []
         let reads = 0
         const partialWrites: FileSystem.FileSystem = {
@@ -241,7 +271,7 @@ describe("Chromium launcher", () => {
         )
         assert.deepStrictEqual(events, [
           ...contents.map((read) => ({ read })),
-          { connect: "ws://127.0.0.1:9222/devtools/browser/test-browser" }
+          { connect: "ws://127.0.0.1:9222/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f" }
         ])
         assert(result._tag === "Failure")
         const error = Option.getOrThrow(Exit.findErrorOption(result))
