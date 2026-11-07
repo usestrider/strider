@@ -147,6 +147,41 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  it.live("evaluates browser expressions and function files", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const env = environment()
+      const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "evaluation", ...args)
+      const started = yield* strider(env, "start", "--name", "evaluation", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      try {
+        assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+        const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+        const result = yield* evaluate("Promise.resolve({answer: 42})")
+        assert.strictEqual(result.code, 0, result.err)
+        assert.deepStrictEqual(JSON.parse(result.out).value, { answer: 42 })
+        assert.notInclude(result.out, "Promise.resolve")
+        for (const args of [[], ["--file", "/missing-eval.js"], ["1", "--file", "/missing-eval.js"]]) {
+          assert.notStrictEqual((yield* evaluate(...args)).code, 0)
+        }
+        const file = path.join(env.XDG_RUNTIME_DIR, "fn.js")
+        fs.writeFileSync(file, "async () => { document.title = 'changed'; return 7n }")
+        const fromFile = yield* evaluate("--file", file)
+        assert.strictEqual(fromFile.code, 0, fromFile.err)
+        assert.deepStrictEqual(JSON.parse(fromFile.out).value, { type: "bigint", value: "7" })
+        assert.strictEqual(JSON.parse((yield* evaluate("document.title")).out).value, "changed")
+        assert.notStrictEqual((yield* run("--json", "eval", "1")).code, 0)
+        assert.notStrictEqual((yield* evaluate("(() => { throw Error('broken') })()")).code, 0)
+        assert.strictEqual((yield* evaluate("--main-world", "globalThis.onlyMain = 9")).code, 0)
+        assert.deepStrictEqual(JSON.parse((yield* evaluate("typeof globalThis.onlyMain")).out).value, "undefined")
+        const exported = path.join(env.XDG_RUNTIME_DIR, "export.ts")
+        assert.strictEqual((yield* run("export", "test", exported)).code, 0)
+        assert.include(fs.readFileSync(exported, "utf8"), "TODO strider eval")
+        assert.notInclude(fs.readFileSync(exported, "utf8"), "onlyMain")
+      } finally {
+        yield* run("stop")
+      }
+    })), timeout)
+
   for (const capture of ["local", "strict"]) {
     it.live(
       `prints segment values and validates typed arguments with ${capture} capture`,
