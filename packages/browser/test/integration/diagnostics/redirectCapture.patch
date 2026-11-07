@@ -1,0 +1,128 @@
+diff --git a/packages/browser/src/chromium/Chromium.ts b/packages/browser/src/chromium/Chromium.ts
+index 0984d895..f3705593 100644
+--- a/packages/browser/src/chromium/Chromium.ts
++++ b/packages/browser/src/chromium/Chromium.ts
+@@ -23,6 +23,7 @@ import * as ChromiumIdentity from "../internal/chromiumIdentity.ts"
+ import * as ChromiumLauncher from "../internal/chromiumLauncher.ts"
+ import * as Connect from "../internal/connect.ts"
+ import * as LaunchOptions from "../internal/launchOptions.ts"
++import { wrap } from "../internal/redirectCapture.ts"
+ import * as CdpConnection from "../protocol/CdpConnection.ts"
+ import * as Protocol from "../protocol/Protocol.ts"
+ import type * as Url from "../Url.ts"
+@@ -86,7 +87,10 @@ export const layer = (
+   BrowserImpl.layer((sink) =>
+     Effect.flatMap(
+       ChromiumLauncher.launch(LaunchOptions.settings(options)),
+-      ({ transport }) => CdpAdapter.connect(transport, { sink, ownership: "launched" })
++      ({ transport }) => {
++        const diagnostic = wrap(transport, sink)
++        return CdpAdapter.connect(diagnostic.transport, { sink: diagnostic.sink, ownership: "launched" })
++      }
+     )
+   )
+ 
+diff --git a/packages/browser/src/internal/cdpAdapter/network.ts b/packages/browser/src/internal/cdpAdapter/network.ts
+index 087fce39..f736c95c 100644
+--- a/packages/browser/src/internal/cdpAdapter/network.ts
++++ b/packages/browser/src/internal/cdpAdapter/network.ts
+@@ -12,6 +12,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
+ import * as Protocol from "../../protocol/Protocol.ts"
+ import * as Adapter from "../adapter.ts"
+ import * as Kit from "../adapterKit.ts"
++import { capture } from "../redirectCapture.ts"
+ import * as Urls from "../urls.ts"
+ import { postData, resourceTypes } from "./mapping.ts"
+ import { emitResponse, release, servedBy } from "./responses.ts"
+@@ -50,6 +51,15 @@ const sentBody = (state: State, target: TargetEntry, request: Network.Request) =
+ 
+ /** Reports headers the network sent or received for a hop; the current hop's received ones go with its response. */
+ const deliver = (state: State, request: RequestEntry, hop: NetworkRequest.HopId, { headers, phase }: ExtraInfo) => {
++  capture("attribution", {
++    hop,
++    phase,
++    headers,
++    currentHop: request.hop,
++    requestId: request.requestId,
++    ahead: request.ahead,
++    owed: request.owed
++  })
+   state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
+   if (hop !== request.hop) return
+   if (phase === "response") {
+diff --git a/packages/browser/src/internal/har.ts b/packages/browser/src/internal/har.ts
+index c36b4a1a..a6e59f85 100644
+--- a/packages/browser/src/internal/har.ts
++++ b/packages/browser/src/internal/har.ts
+@@ -39,6 +39,7 @@ import type * as HarLog from "./harLog.ts"
+ import type * as Model from "./model.ts"
+ import * as Operation from "./operation.ts"
+ import * as Recordings from "./recordings.ts"
++import { capture } from "./redirectCapture.ts"
+ import type * as Runtime from "./runtime.ts"
+ 
+ /** One hop, as recorded: its request, the model's hop, and what the recording read as it ended. */
+@@ -392,6 +393,15 @@ export const entryOf = (
+   const sent = Option.flatMap(received_, (state) => state.sent)
+   const received = Option.flatMap(received_, (state) => state.received)
+   const requestHeaders = Option.getOrElse(sent, () => request.headers) as Readonly<Record<string, string>>
++  capture("har-input", {
++    request,
++    end,
++    sent,
++    requestHeaders,
++    received: received_,
++    requestBody: Option.map(recorded.requestBody, (bytes) => Array.from(bytes)),
++    writing: { ...writing, include: Array.from(writing.include) }
++  })
+   const responseHeaders: Readonly<Record<string, string | undefined>> = Option.match(response, {
+     onNone: () => ({}),
+     onSome: (response) => Option.getOrElse(received, () => response.headers) as Readonly<Record<string, string>>
+diff --git a/packages/browser/src/internal/redirectCapture.ts b/packages/browser/src/internal/redirectCapture.ts
+new file mode 100644
+index 00000000..4ade4c5a
+--- /dev/null
++++ b/packages/browser/src/internal/redirectCapture.ts
+@@ -0,0 +1,42 @@
++/** Temporary redirect diagnostics; apply redirectCapture.patch to connect the hooks. */
++import * as Effect from "effect/Effect"
++import * as Stream from "effect/Stream"
++import * as fs from "node:fs"
++import type * as Transport from "../protocol/Transport.ts"
++import type * as Adapter from "./adapter.ts"
++
++let sequence = 0
++let connection = 0
++export const capture = (kind: string, value: unknown) => {
++  const directory = process.env["STRIDER_RECORD"]
++  if (!directory) return
++  fs.mkdirSync(directory, { recursive: true })
++  fs.appendFileSync(
++    `${directory}/redirect-${process.pid}.ndjson`,
++    JSON.stringify({
++      sequence: ++sequence,
++      at: Date.now(),
++      kind,
++      value
++    }) + "\n"
++  )
++}
++
++export const wrap = (transport: Transport.Transport, sink: Adapter.Sink) => {
++  const id = ++connection
++  capture("connection", { id })
++  return {
++    transport: {
++      send: (message: string) =>
++        Effect.andThen(
++          Effect.sync(() => capture("send", { id, message: JSON.parse(message) })),
++          transport.send(message)
++        ),
++      messages: transport.messages.pipe(
++        Stream.tap((message) => Effect.sync(() => capture("receive", { id, message: JSON.parse(message) })))
++      ),
++      closed: transport.closed
++    },
++    sink: (fact: Adapter.Fact) => Effect.andThen(Effect.sync(() => capture("fact", { id, fact })), sink(fact))
++  }
++}
