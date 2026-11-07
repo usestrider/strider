@@ -26,6 +26,7 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../src/internal/devToolsActivePort.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as GVariant from "../src/internal/gvariant.ts"
 import * as Launch from "../src/internal/launch.ts"
@@ -33,6 +34,85 @@ import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 import type * as UserContext from "../src/UserContext.ts"
+
+describe("DevToolsActivePort", () => {
+  for (const port of [1, 9222, 65535]) {
+    it.effect(`accepts port ${port} with or without a final newline`, () =>
+      Effect.sync(() => {
+        for (const ending of ["", "\n"]) {
+          assert.deepStrictEqual(DevToolsActivePort.parse(`${port}\n/devtools/browser/test${ending}`), {
+            port,
+            browserPath: "/devtools/browser/test"
+          })
+        }
+      }))
+  }
+  for (
+    const text of [
+      "",
+      "9222",
+      "9222\n",
+      "0\n/devtools/browser/test",
+      "65536\n/devtools/browser/test",
+      "-1\n/devtools/browser/test",
+      "+1\n/devtools/browser/test",
+      "1.5\n/devtools/browser/test",
+      "1e3\n/devtools/browser/test",
+      " 9222\n/devtools/browser/test",
+      "9222 \n/devtools/browser/test",
+      "9222\n/devtools/page/test",
+      "9222\n/devtools/browser/",
+      "9222\n/devtools/browser/test path",
+      "9222\n/devtools/browser/test\nextra"
+    ]
+  ) {
+    it.effect(`rejects ${JSON.stringify(text)}`, () =>
+      Effect.sync(() => {
+        assert.isUndefined(DevToolsActivePort.parse(text))
+      }))
+  }
+  layer(NodeServices.layer)("readiness", (it) => {
+    for (const content of ["9222\n", "65536\n/devtools/browser/test", undefined]) {
+      it.effect(`bounds waiting for ${JSON.stringify(content)} on the live clock`, () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          let reads = 0
+          const readFileString: FileSystem.FileSystem["readFileString"] = () =>
+            Effect.suspend(() => {
+              reads++
+              return content === undefined ? fs.readFileString("/missing-strider-active-port") : Effect.succeed(content)
+            })
+          const exit = yield* DevToolsActivePort.read("/profile", { timeout: "120 millis" }).pipe(
+            Effect.provideService(FileSystem.FileSystem, { ...fs, readFileString }),
+            Effect.exit
+          )
+          assert.isTrue(Exit.isFailure(exit))
+          assert.isAtLeast(reads, 2)
+        }))
+    }
+    it.effect("stops retrying when the process exits", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        let reads = 0
+        const exit = yield* DevToolsActivePort.read("/profile", {
+          timeout: "1 second",
+          until: () => Effect.succeed(true)
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            readFileString: () =>
+              Effect.sync(() => {
+                reads++
+                return "9222\n"
+              })
+          }),
+          Effect.exit
+        )
+        assert.isTrue(Exit.isFailure(exit))
+        assert.strictEqual(reads, 1)
+      }))
+  })
+})
 
 /** A scoped process-platform stub for fake launchers; no production override or public bypass. */
 const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>

@@ -9,11 +9,10 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
-import * as BrowserClock from "./browserClock.ts"
+import * as DevToolsActivePort from "./devToolsActivePort.ts"
 import * as Launch from "./launch.ts"
 import * as Profiles from "./profiles.ts"
 
@@ -79,31 +78,23 @@ export const launch: (
 export const launchWithPort = Effect.fnUntraced(function*(
   options: Options & { readonly timeout?: Duration.Input | undefined }
 ) {
-  const fs = yield* FileSystem.FileSystem
   const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {
     coreDumps: options.coreDumps
   })
   const timeout = options.timeout ?? "30 seconds"
-  const active = yield* fs.readFileString(`${userDataDir}/DevToolsActivePort`).pipe(
-    Effect.filterOrFail((text) => text.includes("\n")),
-    Effect.retry({
-      schedule: Schedule.spaced("50 millis"),
-      until: () => launched.handle.isRunning.pipe(Effect.map((running) => !running), Effect.orElseSucceed(() => true))
-    }),
-    Effect.timeoutOption(timeout),
-    Effect.catch(() => Effect.succeedNone),
-    // The browser starts in real time, whatever clock the program's fiber has (QUIRKS.md, Q235)
-    BrowserClock.onLive
-  )
+  const active = yield* DevToolsActivePort.read(userDataDir, {
+    timeout,
+    until: () => launched.handle.isRunning.pipe(Effect.map((running) => !running), Effect.orElseSucceed(() => true))
+  }).pipe(Effect.asSome, Effect.catch(() => Effect.succeedNone))
   if (active._tag === "None") {
     return yield* Launch.notReady(
       launched,
       `It didn't write DevToolsActivePort within ${Duration.format(Duration.fromInputUnsafe(timeout))}`
     )
   }
-  const [port, browserPath] = active.value.split("\n")
+  const { port, browserPath } = active.value
   const transport = yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`).pipe(
     Effect.catch((error) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "refused", hint: error.message }), "connect")
