@@ -1282,6 +1282,7 @@ cannot lazily omit a node. Reject eager caller resolution on every success and d
 rare location-free line. Capture remains independent of recording so failures outside recordings and operations
 built before recording retain their callers.
 
+## Sent-header waits end with their owner
 
 Sent-header waits end when a hop is evicted or loses its owning frame, worker, context, page or browser connection,
 returning already-attributed sent headers or the immutable request snapshot. Removing a frame includes its
