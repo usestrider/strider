@@ -134,9 +134,10 @@ counts may be incomplete. File errors and failed-file counts stay visible even w
 Vitest mark its cases skipped. Case outcomes are preserved; pending cases and null durations are not passes or
 zero-cost tests.
 Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
-execution and the complete hosted job duration. **1500 seconds is the proposed full serial hosted job target,
-including heavy coverage, not an agreed budget or a hard threshold.** If CI splits across machines, reassess that
-target and report aggregate execution cost alongside elapsed job time.
+execution and the complete hosted job duration. **1500 seconds is the agreed goal for the complete serial Linux
+hosted run, including heavy coverage, with all coverage retained.** There is no hard CI threshold until measured
+against this goal. If the workflow splits across machines, reassess the goal using elapsed-job and total-execution
+figures separately.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
