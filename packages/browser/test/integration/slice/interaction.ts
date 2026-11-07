@@ -1987,7 +1987,6 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       : operation === "check"
                       ? target.check()
                       : target.uncheck()).pipe(
-                        Deadline.within("1 second"),
                         Effect.match({
                           onFailure: (error) => error,
                           onSuccess: () => undefined
