@@ -61,6 +61,7 @@ export type Step =
     /** The pages it gave the session, by the names they had after it: opened, returned, kept or popups. */
     readonly pages?: ReadonlyArray<string> | undefined
   }
+  | { readonly _tag: "Eval"; readonly pages?: ReadonlyArray<string> | undefined }
   | ToolStep
   /** A popup that opened while a popup wait the session had started on its opener was pending: the wait gives it. */
   | { readonly _tag: "Popup"; readonly page: string; readonly wait: string }
@@ -432,6 +433,15 @@ export const render = (options: {
       const previous = viewports.get(page)
       if (previous !== undefined) body.push(`yield* ${previous}.remove`)
       viewports.set(page, registration)
+      continue
+    }
+    if (step._tag === "Eval") {
+      const pages = (step.pages ?? []).filter((page) => named.has(page) && !variables.has(page)).map(declare)
+      const declaring = pages.length === 0 ? "" : `, declaring ${listed(pages)}`
+      placeholders.push(`strider eval: restore browser evaluation and its side effects${declaring}`)
+      body.push(
+        `// TODO strider eval: restore browser evaluation and its side effects; source omitted for capture${declaring}`
+      )
       continue
     }
     if (step._tag === "Segment") {
