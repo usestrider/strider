@@ -29,6 +29,14 @@ download. Firefox's calculated SHA-512 also matches Mozilla's
 The entry point checks archive integrity on every run; adapter and slice setup separately require exact browser
 versions. Updating either macOS pin requires downloading and hashing the new archive and running this suite.
 
+The entry point also installs the Apple Silicon FFmpeg and FFprobe 9.0 static builds pinned in
+`scripts/ffmpeg.macos.json`, verifies both archives before extraction, and supplies their absolute paths as
+`STRIDER_FFMPEG` and `STRIDER_FFPROBE`. They share the browsers' temporary directory and cleanup. Real recording,
+writer conformance, probing and decoding remain enabled; the missing-writer refusal runs separately.
+Both downloaded archives' calculated SHA-256 matched the publisher's `.zip.sha256` files at
+[the versioned build page](https://ffmpeg.martin-riedl.de/info/detail/macos/arm64/1785863997_9.0).
+Updating these pins requires downloading and hashing both archives and validating the macOS recording tests.
+
 ## Scope and platform boundaries
 
 - Every Chromium and Firefox test file in `adapter/` and `slice/` is included, including backend-specific,
