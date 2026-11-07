@@ -139,6 +139,33 @@ describe("Linux integration timing reporter", () => {
     assert.strictEqual(report.files[1].executionMs, null)
   })
 
+  it("records why a file failed when it has no failed case, as when collection or a shared fixture fails", () => {
+    // Vitest reports a file that throws while collecting as failed with no cases, and the cases under a
+    // failed beforeAll (where a shared browser fixture is acquired) as skipped: the file's errors are the
+    // only record of the failure.
+    const f = fixture()
+    const broken = moduleFixture("broken", 0)
+    const fixtureFailed = moduleFixture("fixture", 40)
+    broken.state("failed")
+    fixtureFailed.state("failed")
+    const withErrors = (module: TestModule, message: string) =>
+      Object.assign(module, { errors: () => [{ name: "Error", message }] })
+    withErrors(broken.module, "boom at collection")
+    withErrors(fixtureFailed.module, "browser did not launch")
+    fixtureFailed.test("one", "skipped")
+    f.reporter.onTestRunStart([broken.specification, fixtureFailed.specification])
+    f.reporter.onTestModuleEnd(broken.module)
+    f.reporter.onTestModuleEnd(fixtureFailed.module)
+    f.reporter.onTestRunEnd([broken.module, fixtureFailed.module], [], "failed")
+    const report = f.read()
+    assert.strictEqual(report.counts.failed, 0)
+    assert.strictEqual(report.failedFiles, 2)
+    assert.deepStrictEqual(report.files.map((file: { errors?: Array<string> }) => file.errors), [
+      ["boom at collection"],
+      ["browser did not launch"]
+    ])
+  })
+
   it("keeps a gracefully interrupted file incomplete and preserves received case timings", () => {
     const f = fixture()
     const m = moduleFixture("partial", 9999)
