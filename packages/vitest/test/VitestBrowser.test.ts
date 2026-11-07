@@ -1,5 +1,5 @@
 /**
- * The Vitest adapter: `TestRun` for the test running, read each time, and its attachments.
+ * The Vitest adapter: `TestRun` for the test running, and its attachments, including concurrent callbacks.
  */
 import { assert, describe, it } from "@effect/vitest"
 import type { Browser } from "@usestrider/browser"
@@ -30,4 +30,69 @@ describe("VitestBrowser", () => {
     )
     assert.include(info.id, "reads the current test each time")
   })
+})
+
+// Both callbacks must reach each phase before either can finish and clear Vitest's current test.
+const barrier = () => {
+  let arrived = 0
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return () => {
+    if (++arrived === 2) release()
+    return gate
+  }
+}
+
+const started = barrier()
+const attached = barrier()
+
+for (const artifact of ["Screenshot", "Har"] as const) {
+  it.concurrent(`keeps ${artifact} identity and attachments in its concurrent callback`, async (context) => {
+    const task = context.task
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const run = yield* TestRun.TestRun
+        yield* Effect.promise(started)
+        const before = run.info
+        yield* Effect.yieldNow
+        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* Effect.promise(attached)
+        // The callback's own context remains stable across both asynchronous boundaries.
+        context.expect.soft(context.task).toBe(task)
+        context.expect.soft(before.id).toContain(task.name)
+        context.expect.soft(run.info.id).toContain(task.name)
+        context.expect.soft(run.info.file).toBe(task.file.filepath)
+        context.expect.soft(run.info.attempt).toBe(task.result?.retryCount ?? 0)
+        context.expect.soft(
+          task.artifacts.filter((entry) => entry.type === "@usestrider/browser").map((entry) => entry.artifact)
+        ).toEqual([artifact])
+      }).pipe(Effect.provide(VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>)))
+    )
+  })
+}
+
+const checkedAttempts: Array<number> = []
+
+it("keeps sequential identity and retry attempt across an asynchronous yield", { retry: 1 }, async (context) => {
+  const task = context.task
+  const attempt = task.result?.retryCount ?? 0
+  await Effect.runPromise(
+    Effect.gen(function*() {
+      const run = yield* TestRun.TestRun
+      const before = run.info
+      yield* Effect.yieldNow
+      assert.strictEqual(context.task, task)
+      assert.include(before.id, task.name)
+      assert.include(run.info.id, task.name)
+      assert.strictEqual(before.attempt, attempt)
+      assert.strictEqual(run.info.attempt, attempt)
+      yield* run.attach({ _tag: "Screenshot", path: "test/VitestBrowser.test.ts" as never })
+      assert.isTrue(task.artifacts.some((entry) => entry.type === "@usestrider/browser"))
+    }).pipe(Effect.provide(VitestBrowser.layer(Layer.empty as unknown as Layer.Layer<Browser.Browser>)))
+  )
+  checkedAttempts.push(attempt)
+  if (attempt === 0) throw new Error("Exercise Vitest's retry with a fresh test attempt")
+  assert.deepStrictEqual(checkedAttempts, [0, 1])
 })
