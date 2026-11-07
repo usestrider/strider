@@ -533,28 +533,30 @@ const libraryPaths = /\/(?:src|dist)\/$/.test(libraryDirectory.pathname)
   ? ["../../src/", "../../dist/"].map((directory) => Recorders.filePath(new URL(directory, import.meta.url).href))
   : [Recorders.filePath(libraryDirectory.href)]
 
-/** Synchronous public wrappers and getters still have their caller when they construct an operation. */
-const namedCaller = (): string | undefined => {
-  const limit = Error.stackTraceLimit
-  if (limit === 0) return undefined
-  let stack: string | undefined
-  try {
-    Error.stackTraceLimit = 20
-    stack = new Error().stack
-  } catch {
-    return undefined
-  } finally {
-    Error.stackTraceLimit = limit
+/** The first user location in a construction-time stack, formatted only when consumed. */
+const namedCaller = (error: Error | undefined): (() => string | undefined) | undefined => {
+  if (error === undefined) return undefined
+  let call: string | undefined
+  return () => {
+    if (error === undefined) return call
+    const captured = error
+    // Release V8's structured call sites after the first read, including when no caller is available.
+    error = undefined
+    try {
+      for (const line of captured.stack?.split("\n").slice(1) ?? []) {
+        const location = Recorders.location(line)
+        if (location === undefined) continue
+        if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
+        // Once execution has entered Effect, the immediate public call has already returned.
+        if (/\/effect\/(?:src|dist)\//.test(location.file)) break
+        call = line.trim()
+        break
+      }
+    } catch {
+      // A custom stack formatter may fail; caller capture remains optional.
+    }
+    return call
   }
-  for (const line of stack?.split("\n").slice(1) ?? []) {
-    const location = Recorders.location(line)
-    if (location === undefined) continue
-    if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
-    // Once execution has entered Effect, the immediate public call has already returned.
-    if (/\/effect\/(?:src|dist)\//.test(location.file)) return undefined
-    return line.trim()
-  }
-  return undefined
 }
 
 /**
@@ -563,7 +565,22 @@ const namedCaller = (): string | undefined => {
  * a step ran out with becomes the operation's, with the step's phase, history and hint.
  */
 const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
-  const call = namedCaller()
+  const limit = Error.stackTraceLimit
+  let error: Error | undefined
+  if (limit !== 0) {
+    try {
+      // Six frames: namedWith, named, up to three library wrappers, then the caller.
+      // Locator.fill needs all six; TraceSources tests its preconstructed guarded caller.
+      // Capture here so the formatting helper does not consume a caller frame.
+      Error.stackTraceLimit = 6
+      error = new Error()
+    } catch {
+      // Caller capture is optional when the runtime cannot supply a stack.
+    } finally {
+      Error.stackTraceLimit = limit
+    }
+  }
+  const call = namedCaller(error)
   return <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Operation.Current>> =>
     Effect.gen(function*() {
       const record = yield* start(name)
@@ -580,7 +597,7 @@ const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
         (parent) =>
           call === undefined || fromFn && Recorders.isFrame(parent) && parent?.name === name
             ? parent
-            : Recorders.frame(name, () => call, parent)
+            : Recorders.frame(name, call, parent)
       )
     )
 }

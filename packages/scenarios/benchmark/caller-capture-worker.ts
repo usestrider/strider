@@ -58,7 +58,8 @@ try {
             cpu: os.cpus()[0]?.model,
             platform: `${os.platform()} ${os.release()} ${os.arch()}`,
             loadedMode: process.env["STRIDER_CAPTURE_LOADED"],
-            stackTraceLimit: Error.stackTraceLimit
+            stackTraceLimit: Error.stackTraceLimit,
+            nativeCaptureStackTrace: typeof Error.captureStackTrace === "function"
           })
         }
         ready = true

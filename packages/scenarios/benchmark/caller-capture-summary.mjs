@@ -33,10 +33,15 @@ const interval = (values) => {
   return [estimates[249], estimates[9749]]
 }
 const summary = []
+// Older current/control runs have neither explicit comparisons nor reference fields.
+const comparisons = data.comparisons ?? [["on", "named-off"], ["on", "off"]]
 for (const action of ["url", "fn-url", "title", "count", "click"]) {
-  for (const control of ["named-off", "off"]) {
-    const rows = data.raw.filter((row) => row.action === action && row.control === control)
-    const on = rows.filter((row) => row.mode === "on")
+  for (const [reference, control] of comparisons) {
+    const rows = data.raw.filter((row) =>
+      row.action === action && (row.reference ?? "on") === reference && row.control === control
+    )
+    if (rows.length === 0) continue
+    const on = rows.filter((row) => row.mode === reference)
     const off = rows.filter((row) => row.mode === control)
     const paired = on.map((row) => {
       const other = off.find((candidate) => candidate.pair === row.pair)
@@ -46,6 +51,7 @@ for (const action of ["url", "fn-url", "title", "count", "click"]) {
     })
     summary.push({
       action,
+      reference,
       control,
       onMs: stats(on.flatMap((row) => row.timings)),
       controlMs: stats(off.flatMap((row) => row.timings)),
@@ -65,10 +71,10 @@ for (const action of ["url", "fn-url", "title", "count", "click"]) {
 writeFileSync(`${directory}/summary.json`, JSON.stringify(summary, null, 2) + "\n")
 for (const row of summary) {
   console.log(
-    `${row.action} ${row.control}: on median/p95 ${row.onMs.median.toFixed(6)}/${row.onMs.p95.toFixed(6)} ms; control ${
-      row.controlMs.median.toFixed(6)
-    }/${row.controlMs.p95.toFixed(6)} ms; paired median ${row.pairedMs.median.toFixed(6)} ms (${
-      row.pairedPercent.median.toFixed(2)
-    }%), SD ${row.pairedMs.sd.toFixed(6)} ms`
+    `${row.action} ${row.reference}/${row.control}: on median/p95 ${row.onMs.median.toFixed(6)}/${
+      row.onMs.p95.toFixed(6)
+    } ms; control ${row.controlMs.median.toFixed(6)}/${row.controlMs.p95.toFixed(6)} ms; paired median ${
+      row.pairedMs.median.toFixed(6)
+    } ms (${row.pairedPercent.median.toFixed(2)}%), SD ${row.pairedMs.sd.toFixed(6)} ms`
   )
 }
