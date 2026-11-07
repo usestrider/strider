@@ -34,7 +34,7 @@ const interval = (values) => {
 }
 const summary = []
 for (const action of ["url", "fn-url", "title", "count"]) {
-  for (const [reference, control] of [["on", "lazy"], ["on", "named-off"], ["lazy", "named-off"], ["lazy", "off"]]) {
+  for (const [reference, control] of data.comparisons) {
     const rows = data.raw.filter((row) =>
       row.action === action && row.reference === reference && row.control === control
     )
