@@ -5,6 +5,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it, layer } from "@effect/vitest"
+import { Deadline } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -20,12 +21,17 @@ import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
+import { inspect } from "node:util"
+import * as Adapter from "../src/internal/adapter.ts"
+import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as Launch from "../src/internal/launch.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
+import type * as UserContext from "../src/UserContext.ts"
 
 /** A scoped process-platform stub for fake launchers; no production override or public bypass. */
 const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -393,6 +399,34 @@ describe("WebKit launcher", () => {
       }
     )
 
+    for (
+      const [mode, stages] of [
+        ["unreadable", ["spawned"]],
+        ["unreadable-after", ["spawned", "listener verified", "connected"]],
+        ["owned", ["spawned", "listener verified", "connected", "inspector established"]]
+      ] as const
+    ) {
+      it.effect(`reports completed startup stages and times for ${mode} without changing cleanup`, () =>
+        Effect.gen(function*() {
+          const result = yield* ownershipAttempt(mode)
+          const message = result.error.message
+          assert.include(message, "WebKit startup (port ")
+          const reached = Array.from(
+            message.matchAll(/(spawned|listener verified|connected|inspector established) at ([0-9.]+)ms/g)
+          )
+          assert.deepStrictEqual(reached.map((match) => match[1]), [...stages])
+          const times = reached.map((match) => Number(match[2]))
+          assert(times.every((time, index) => time >= 0 && (index === 0 || time >= times[index - 1]!)))
+          assert.strictEqual(result.stopped, 1)
+          assert.strictEqual(result.closed, result.connected)
+          assert(result.error.reason._tag === "ConnectionFailed")
+          assert.include(
+            result.error.reason.hint,
+            mode === "owned" ? "The connection was lost" : "Cannot read Linux procfs"
+          )
+        }))
+    }
+
     it.effect("writes only after the same spawned PID holds the listener across connecting", () =>
       Effect.gen(function*() {
         const result = yield* ownershipAttempt("owned")
@@ -531,6 +565,7 @@ describe("WebKit launcher", () => {
     const scriptedLaunch = Effect.fnUntraced(function*(
       behavior: (spawn: number) => {
         readonly held: boolean
+        readonly silentSession?: boolean | undefined
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
@@ -680,7 +715,7 @@ describe("WebKit launcher", () => {
           const write = () =>
             Effect.andThen(
               Effect.sync(() => written.push(port)),
-              Effect.fail(
+              behavior(ports.indexOf(port)).silentSession === true ? Effect.void : Effect.fail(
                 new Socket.SocketError({
                   reason: new Socket.SocketWriteError({ cause: "stop after the first write" })
                 })
@@ -712,6 +747,21 @@ describe("WebKit launcher", () => {
         assert.include(result.stopped, 0)
       }).pipe(Random.withSeed("port-in-use")))
 
+    it.effect("reports only the last port attempt after a collision", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch((spawn) =>
+          spawn === 0 ? { held: false, foreign: true, collides: true } : { held: false }
+        )
+        assert.strictEqual(result.ports.length, 2)
+        assert(result.exit._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+        assert.include(error.message, `WebKit startup (port ${result.ports[1]}, PID 9100001;`)
+        assert.strictEqual(Array.from(error.message.matchAll(/spawned at/g)).length, 1)
+        assert.notInclude(error.message, "listener verified at")
+        assert.deepStrictEqual(result.connected, [])
+        assert.deepStrictEqual(result.stopped, [0, 1])
+      }).pipe(Random.withSeed("port-in-use")))
+
     it.effect("closes the connection and stops the child when the deadline interrupts a connection in progress", () =>
       Effect.gen(function*() {
         const result = yield* scriptedLaunch(() => ({ held: true }), Effect.never, "50 millis")
@@ -720,6 +770,160 @@ describe("WebKit launcher", () => {
         assert.deepStrictEqual(result.stopped, [0])
         assert.strictEqual(result.written.length, 0)
       }))
+
+    // The historical failure: the page's operation deadline, not the launcher's, interrupted a startup whose listener
+    // never appeared. Its Timeout is the only error the caller sees, so it has to name the stage startup reached.
+    it.effect("names the reached startup stage when the calling operation's deadline interrupts startup", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: false }),
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const inner = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(inner._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(inner))
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        assert.deepStrictEqual(result.stopped, [0])
+        assert.match(JSON.stringify({ hint: timeout.hint, last: timeout.last, history: timeout.history }), /spawned/)
+      }))
+
+    // A failed test's log shows its error as Node inspects it, at the default depth; the failure traces hold
+    // protocol and process records, not the error. A stage only that inspection collapses names nothing.
+    it.effect("names the reached startup stage, PID and port in the timeout as a failed test's log prints it", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          () => ({ held: false }),
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const inner = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(inner._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(inner))
+        assert(Deadline.isTimeout(timeout), String(timeout))
+        const printed = inspect(timeout)
+        assert.include(printed, "spawned")
+        assert.include(printed, "9100000")
+        assert.include(printed, String(result.ports[0]))
+      }))
+
+    const startupObservation = (value: unknown) => {
+      assert(typeof value === "string")
+      const match =
+        /^WebKit startup (spawned|listener verified|connected|inspector established): attempt (\d+), port (\d+), PID (\d+), (\d+\.\d{3})ms$/
+          .exec(value)
+      assert(match !== null, value)
+      return {
+        stage: match[1],
+        attempt: Number(match[2]),
+        port: Number(match[3]),
+        pid: Number(match[4]),
+        elapsedMillis: Number(match[5])
+      }
+    }
+
+    for (
+      const [held, pendingConnect, stages] of [
+        [false, false, ["spawned"]],
+        [true, true, ["spawned", "listener verified"]],
+        [true, false, ["spawned", "listener verified", "connected", "inspector established"]]
+      ] as const
+    ) {
+      it.effect(`carries ${stages.at(-1)} through detached bounded creation into the calling timeout`, () =>
+        Effect.gen(function*() {
+          const result = yield* scriptedLaunch(
+            () => ({ held, silentSession: true }),
+            pendingConnect ? Effect.never : Effect.void,
+            "300 millis",
+            (start) =>
+              Effect.gen(function*() {
+                const finished = yield* Deferred.make<void>()
+                let caller: Operation.Record | undefined
+                let detached: Operation.Record | undefined
+                const adapter = BoundedAdapter.make({
+                  createUserContext: Effect.fnUntraced(function*() {
+                    detached = Option.getOrUndefined(yield* Operation.current)
+                    return yield* start.pipe(Effect.scoped, Effect.as("created" as UserContext.Id))
+                  }, Effect.ensuring(Deferred.succeed(finished, undefined))),
+                  removeUserContext: () => Effect.die("A failed creation must not release a context that doesn't exist")
+                } as unknown as Adapter.AdapterConnection)
+                const exit = yield* Effect.gen(function*() {
+                  caller = yield* Operation.record
+                  return yield* adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false })
+                }).pipe(Operation.named("Browser.newPage"), Deadline.within("100 millis"), Effect.exit)
+                // The detached creation keeps its original launch deadline and owns cleanup after the caller leaves.
+                const endedWithCaller = yield* Deferred.isDone(finished)
+                yield* Deferred.await(finished)
+                assert.isFalse(endedWithCaller)
+                assert.strictEqual(detached, caller)
+                assert(exit._tag === "Failure")
+                const timeout = Option.getOrThrow(Exit.findErrorOption(exit))
+                assert(Deadline.isTimeout(timeout))
+                assert.strictEqual(timeout.phase, "dispatchedUnconfirmed")
+                assert.strictEqual(timeout.diagnostics.operationId, caller!.id)
+                assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+                const observations = timeout.history.map(({ value }) => startupObservation(value))
+                assert.deepStrictEqual(observations.map((value) => value.stage), [...stages])
+                for (const [index, value] of observations.entries()) {
+                  assert.strictEqual(value.pid, 9100000)
+                  assert.strictEqual(value.attempt, 1)
+                  assert.isTrue(value.port >= 49152 && value.port <= 65535)
+                  assert.isTrue(value.elapsedMillis >= 0)
+                  if (index > 0) assert.isTrue(value.elapsedMillis >= observations[index - 1]!.elapsedMillis)
+                }
+                assert.deepStrictEqual(Option.getOrThrow(timeout.last), timeout.history.at(-1))
+                return timeout
+              })
+          )
+          yield* result.exit
+          assert.deepStrictEqual(result.stopped, [0])
+          assert.deepStrictEqual(result.closed, result.connected)
+        }))
+    }
+
+    it.effect("keeps startup observations attributed to their own port attempt after a collision", () =>
+      Effect.gen(function*() {
+        const result = yield* scriptedLaunch(
+          (spawn) => spawn === 0 ? { held: false, foreign: true, collides: true } : { held: false },
+          Effect.void,
+          "10 seconds",
+          (start) =>
+            Effect.flatMap(Operation.record, (record) => record.bound(start)).pipe(
+              Operation.named("Browser.newPage"),
+              Deadline.within("100 millis"),
+              Effect.exit
+            )
+        )
+        assert(result.exit._tag === "Success")
+        const exit = result.exit.value as Exit.Exit<unknown, unknown>
+        assert(exit._tag === "Failure")
+        const timeout = Option.getOrThrow(Exit.findErrorOption(exit))
+        assert(Deadline.isTimeout(timeout))
+        assert.strictEqual(result.ports.length, 2)
+        assert.deepStrictEqual(
+          timeout.history.map(({ value }) => {
+            const stage = startupObservation(value)
+            return { stage: stage.stage, port: stage.port, pid: stage.pid, attempt: stage.attempt }
+          }),
+          result.ports.map((port, index) => ({ stage: "spawned", port, pid: 9100000 + index, attempt: index + 1 }))
+        )
+        assert.deepStrictEqual(Option.getOrThrow(timeout.last), timeout.history.at(-1))
+        assert.deepStrictEqual(result.stopped, [0, 1])
+      }).pipe(Random.withSeed("port-in-use")))
 
     it.effect("reports a child that exits while being polled as its exit, not as unreadable procfs", () =>
       Effect.gen(function*() {
@@ -730,6 +934,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.include(error.reason.hint, "exec MiniBrowser")
         assert.include(error.reason.hint, "WebKit.layerAttach")
         assert.deepStrictEqual(result.connected, [])
@@ -744,6 +949,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.include(error.reason.hint, "exec MiniBrowser")
         assert.include(error.reason.hint, "WebKit.layerAttach")
         assert.strictEqual(result.connected.length, 1)
@@ -762,6 +968,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("keeps a child's exit when procfs loses it before Node reports the exit", () =>
@@ -773,6 +980,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("keeps the exit and closes the connection when procfs disappears before the post-connect exit event", () =>
@@ -783,6 +991,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
         assert.strictEqual(result.connected.length, 1)
         assert.deepStrictEqual(result.closed, result.connected)
         assert.deepStrictEqual(result.written, [])
@@ -798,6 +1007,7 @@ describe("WebKit launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(1))
         assert.strictEqual(error.reason.stderrTail, "MiniBrowser startup failed\n")
+        assert.include(error.message, "spawned at")
       }))
 
     it.effect("closes a connection in progress when the child's exit wins the race", () =>
@@ -1011,6 +1221,33 @@ describe("WebKit launcher", () => {
 })
 
 describe("Core dumps", () => {
+  // Procfs can be empty during exec; require the waiting executable's complete argv[0].
+  const hasExeced = (line: string) => line.startsWith(`${process.execPath}\0`)
+
+  it("does not accept an empty command line during exec as readiness to inspect core limits", () => {
+    // Observed on a live spawned PID with its inherited unlimited core limit, before the shell lowered it.
+    assert.isFalse(hasExeced(""))
+  })
+
+  it("distinguishes the shell from the waiting executable when their command lines are populated", () => {
+    assert.isFalse(hasExeced("/bin/sh\0-c\0ulimit -c 0; exec \"$@\"\0"))
+    assert.isTrue(hasExeced(`${process.execPath}\0-e\0setTimeout(() => {}, 60000)\0`))
+  })
+
+  it("rejects unrelated executables and misleading command-line prefixes", () => {
+    for (
+      const line of [
+        "/usr/bin/sleep\0--help\0",
+        `/bin/sh\0-c\0exec ${process.execPath}\0`,
+        `${process.execPath}-other\0-e\0setTimeout(() => {}, 60000)\0`,
+        `${process.execPath}/other\0`,
+        process.execPath
+      ]
+    ) {
+      assert.isFalse(hasExeced(line), JSON.stringify(line))
+    }
+  })
+
   it("starts a browser through sh, with the executable and its arguments as parameters, unless dumps are on", () => {
     assert.deepStrictEqual(Launch.command("/opt/b rowser", ["--a", "$(x)"], true), ["/opt/b rowser", ["--a", "$(x)"]])
     assert.deepStrictEqual(Launch.command("/opt/browser", ["--a", "; rm -rf /"], false, "linux"), [
@@ -1035,9 +1272,9 @@ describe("Core dumps", () => {
         coreDumps
       })
       const pid = String(launched.handle.pid)
-      // Until the shell has exec'd, the process is the shell: its command line says so
+      // Wait for the target's argv[0] before inspecting limits, including across empty reads during exec.
       yield* Effect.promise(() => readFile(`/proc/${pid}/cmdline`, "utf8")).pipe(
-        Effect.filterOrFail((line) => !line.startsWith("/bin/sh")),
+        Effect.filterOrFail(hasExeced),
         Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 500 })
       )
       return { launched, pid }

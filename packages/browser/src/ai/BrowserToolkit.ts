@@ -1,8 +1,9 @@
 /**
  * The agent toolkit: browser tools for a model, defined once, and served in your program, over MCP and by the CLI.
  *
- * Every page tool names its page; there is no current tab. No tool waits after it acts: each result has the call's
- * outcome, then a digest of what happened since the previous call. Tools are `effect/ai` tools whose failures are
+ * Every page tool names its page; there is no current tab. Action tools await browser/protocol completion, which
+ * can include navigation or a busy page responding, without adding a wait for later page events. Each result has
+ * the call's outcome, then a digest of what happened since the previous call. Tools are `effect/ai` tools whose failures are
  * returned to the model, so a `LocatorError`, a `Timeout` or a stale ref reaches the model as data, hint included.
  * Parameters are Schemas: a model's `"e12"` is decoded to a `Snapshot.RefId` and checked against that page's latest
  * snapshot.
@@ -123,7 +124,8 @@ export interface MakeOptions {
  * - Pages are named when they're created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is.
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
- * - Each result is the call's outcome and `sinceLast`: navigations, popups, dialogs and who decided them,
+ * - Each result is the call's outcome and `sinceLast`: what happened since the previous call, including
+ *   navigations, popups, dialogs and who decided them,
  *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. The capture
  *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
  *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.

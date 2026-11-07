@@ -13,7 +13,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
-import { initiatedAs, isSameDocument } from "./mapping.ts"
+import { frameUrl, initiatedAs, isSameDocument } from "./mapping.ts"
 import { type Event, frameById, frameOf, pageOf, type State } from "./state.ts"
 import { addFrame, commit, endNavigation, removeFrame, startNavigation } from "./tree.ts"
 
@@ -55,6 +55,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Page.frameNavigated, (params, { state, target }) => {
       if (target === undefined) return
       const f = params.frame
+      const url = frameUrl(f)
       let frame = state.frames.get(f.id)
       if (frame === undefined) {
         const parent = frameOf(state, f.parentId)
@@ -70,7 +71,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         commit(
           state,
           frame,
-          { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+          { loaderId: f.loaderId, url, origin: f.securityOrigin },
           () => ({ _tag: "ErrorPage", navigation: failed.id }),
           failed,
           "cdp:Page.frameNavigated"
@@ -81,12 +82,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       // A restore commits under the restored document's loader id, not the traversal's
       const navigation = state.navigations.get(f.loaderId) ??
         (restored ? [...frame.navigations.values()].find((pending) => pending.traversal) : undefined) ??
-        startNavigation(state, frame, f.loaderId, f.url, "crossDocument", false)
+        startNavigation(state, frame, f.loaderId, url, "crossDocument", false)
       const previous = state.documentsByLoader.get(f.loaderId)
       const document = commit(
         state,
         frame,
-        { loaderId: f.loaderId, url: f.url, origin: f.securityOrigin },
+        { loaderId: f.loaderId, url, origin: f.securityOrigin },
         (navigation) =>
           restored && previous !== undefined
             ? { _tag: "Restored", navigation: navigation!.id, from: previous.id }

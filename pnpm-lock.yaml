@@ -297,6 +297,9 @@ importers:
 
   packages/vitest:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
       '@usestrider/browser':
         specifier: workspace:^
         version: link:../browser

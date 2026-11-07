@@ -130,6 +130,8 @@ export const fromRemote = (value: Adapter.RemoteValue): Effect.Effect<unknown, F
   })
 
 export interface Call {
+  /** The operation sending a write; absent for read-only queries. */
+  readonly dispatch?: Operation.Record | undefined
   readonly realm: Target.RealmId
   readonly functionDeclaration: string
   readonly arguments: ReadonlyArray<Adapter.LocalValue>
@@ -146,14 +148,16 @@ export interface Call {
 /** Calls a function in a realm, until the deadline: its result, or why there is none. */
 export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Adapter.RemoteValue, Failure> =>
   Effect.gen(function*() {
-    const evaluated = runtime.model.adapter.evaluate(options.realm, {
+    if (options.dispatch !== undefined) options.dispatch.markSent()
+    const call = runtime.model.adapter.evaluate(options.realm, {
       functionDeclaration: options.functionDeclaration,
       arguments: options.arguments,
       awaitPromise: true,
       result: options.result,
       ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
-    }).pipe(
+    })
+    const evaluated = (options.dispatch === undefined ? call : Operation.answered(options.dispatch, call)).pipe(
       Effect.mapError((error) => fromAdapter(error, options.id, runtime.backend)),
       BrowserClock.until(options.at),
       Effect.flatMap(Option.match({
@@ -296,8 +300,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
       return yield* Effect.gen({ self: this }, function*() {
         const rest = yield* toLocal(args, this.realm, 1)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const value = yield* call(this.runtime, {
+          dispatch: record,
           realm: this.realm,
           functionDeclaration: fn.toString(),
           arguments: [localOf(this as HandleImpl<unknown>), ...rest],

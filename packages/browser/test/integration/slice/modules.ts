@@ -39,11 +39,11 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
-import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
 
 const timeout = 60_000
 
@@ -372,6 +372,44 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       // ── PageNavigation ──
 
+      it.effect("preserves the fragment in page.url after cross-document navigation", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const requested = `${origin}/json?token=url-test#details`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(requested)
+            const href = yield* page.evaluateInMainWorld(() => location.href)
+            assert.strictEqual(href, requested)
+            assert.strictEqual(yield* page.url, href)
+          }))
+        }), timeout)
+
+      it.effect("preserves page.url through same-document fragment changes and removal", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("navigation.sameDocument"))) return
+          const { origin } = yield* site
+          const base = `${origin}/json?token=url-test`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${base}#initial`)
+            for (const requested of [`${base}#changed`, base]) {
+              const next = yield* PageNavigation.next(page)
+              if (requested === base) {
+                yield* page.evaluateInMainWorld(() => history.pushState(null, "", location.pathname + location.search))
+              } else {
+                yield* page.evaluateInMainWorld(() => {
+                  location.hash = "changed"
+                })
+              }
+              assert.strictEqual((yield* next)._tag, "SameDocument")
+              const href = yield* page.evaluateInMainWorld(() => location.href)
+              assert.strictEqual(href, requested)
+              assert.strictEqual(yield* page.url, href)
+            }
+          }))
+        }), timeout)
+
       it.effect("runs call site 2: waits for the navigation a click causes", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => `<a href="/orders">Orders</a>`)
@@ -415,29 +453,20 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       )
 
       it.effect("fails a navigation's wait with the reason goto gives", () =>
-        Effect.gen(function*() {
-          // A port nothing listens on, and that browsers don't refuse outright as they do 9 or 1
-          const port = yield* Effect.promise(() =>
-            new Promise<number>((resolve) => {
-              const server = net.createServer()
-              server.listen(0, "127.0.0.1", () => {
-                const { port } = server.address() as net.AddressInfo
-                server.close(() => resolve(port))
-              })
-            })
-          )
-          const { url } = yield* fixture(() => `<a href="http://127.0.0.1:${port}/nowhere">Broken</a>`)
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* navigationFailure
+          const { url } = yield* fixture(() => `<a href="${origin}/nowhere">Broken</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const broken = yield* PageNavigation.next(page, { url: `http://127.0.0.1:${port}/*` })
+            const broken = yield* PageNavigation.next(page, { url: `${origin}/*` })
             yield* page.getByRole("link", { name: "Broken" }).click()
             const error = yield* broken.pipe(Effect.flip)
             assert(Page.isPageError(error), String(error))
             assert.strictEqual(error.reason._tag, "NavigationFailed")
             assert.strictEqual(error.operation, "PageNavigation.next")
           }))
-        }), timeout)
+        })), timeout)
 
       it.effect("reports a frame's own navigations when asked, each naming its frame", () =>
         Effect.gen(function*() {

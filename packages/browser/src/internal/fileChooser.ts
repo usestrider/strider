@@ -132,6 +132,7 @@ const prepareMade = Effect.fnUntraced(function*(
       ? failure.reason
       : record.timeout(Option.some("The page didn't answer before the deadline; the files may have been set"))
   const apply = yield* FileInputImpl.prepareMade(runtime, node, files, {
+    dispatch: record,
     page: Option.some(page),
     at: record.budget.at,
     id: record.id

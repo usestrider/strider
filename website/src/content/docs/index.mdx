@@ -229,7 +229,6 @@ strider -s login -p main fill 'label=Email' 'ada@example.com'
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-mkdir -p auth
 strider -s login state save ./auth/shop.state
 strider -s login stop
 ```

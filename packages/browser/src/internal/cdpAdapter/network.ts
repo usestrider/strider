@@ -263,9 +263,16 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
-      // A request that fails gets no more: what waits is its last hop's, and its response goes with the headers
-      // it has
-      expectExtraInfo(state, request, request.ahead.map((extra) => extra.phase))
+      // Keep the failed hop eligible for late sent headers. Earlier redirect obligations
+      // still consume their own ExtraInfo first; failure itself settles public waits.
+      const phases = new Set<ExtraInfo["phase"]>(["request", ...request.ahead.map((extra) => extra.phase)])
+      expectExtraInfo(
+        state,
+        request,
+        Array.from(phases).filter((phase) =>
+          !request.owed.some((entry) => entry.hop === request.hop && entry.phase === phase)
+        )
+      )
       release(state, request)
       state.buffer.emit({
         _tag: "RequestFailed",

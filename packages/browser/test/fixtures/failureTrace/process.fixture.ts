@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import * as fs from "node:fs"
 import type { Readable, Writable } from "node:stream"
 import { expect, it } from "vitest"
 it("retains owned stderr and exit", async () => {
@@ -19,5 +20,6 @@ it("retains owned stderr and exit", async () => {
     child.on("error", reject)
     child.on("close", () => resolve())
   })
+  if (process.env.STRIDER_UNRELATED_TRACE) fs.writeFileSync(process.env.STRIDER_UNRELATED_TRACE, "unrelated trace\n")
   expect(false).toBe(true)
 })

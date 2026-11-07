@@ -676,6 +676,7 @@ export const applyState = (
             id
           )
           yield* Evaluation.call(runtime, {
+            dispatch: record,
             realm,
             functionDeclaration: writeOrigin.toString(),
             arguments: [{ _tag: "Value", value: { type: "string", value: data } }],

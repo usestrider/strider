@@ -18,20 +18,27 @@ type Result = Measurements["scenarios"][number]
 export const runScenarios = async (
   chosen: ReadonlyArray<Scenario>,
   runs: number,
-  runners: (scenario: Scenario) => Record<"strider" | "playwright", () => Promise<string>>,
+  runners: (scenario: Scenario) => {
+    readonly strider: () => Promise<string>
+    readonly playwright?: (() => Promise<string>) | undefined
+  },
   log: (line: string) => void
 ): Promise<Array<Result>> => {
   const results: Array<Result> = []
   for (const scenario of chosen) {
     log(`scenario ${scenario.name}`)
     const run = runners(scenario)
+    // A scenario without a Playwright twin runs Strider's program alone
+    const libraries = run.playwright === undefined
+      ? (["strider"] as const)
+      : (["strider", "playwright"] as const)
     const outcome = {
       strider: await outcomeOf(run.strider, scenario.expected),
-      playwright: await outcomeOf(run.playwright, scenario.expected)
+      playwright: run.playwright === undefined ? undefined : await outcomeOf(run.playwright, scenario.expected)
     }
-    for (const library of ["strider", "playwright"] as const) {
+    for (const library of libraries) {
       const result = outcome[library]
-      if (result._tag === "Failed") {
+      if (result?._tag === "Failed") {
         log(`${scenario.name}, ${library}, initial outcome: failed: ${result.error}`)
       }
     }
@@ -39,11 +46,11 @@ export const runScenarios = async (
     const attempts = { strider: 0, playwright: 0 }
     const failures: Array<Result["failures"][number]> = []
     for (let i = 0; i < runs; i++) {
-      const order = i % 2 === 0 ? (["strider", "playwright"] as const) : (["playwright", "strider"] as const)
+      const order = i % 2 === 0 ? libraries : [...libraries].reverse()
       for (const library of order) {
         attempts[library]++
         const started = performance.now()
-        const result = await outcomeOf(run[library], scenario.expected)
+        const result = await outcomeOf(run[library]!, scenario.expected)
         if (result._tag === "Read") times[library].push(performance.now() - started)
         else {
           failures.push({ library, repetition: i + 1, error: result.error })
@@ -67,7 +74,7 @@ export const publish = (results: ReadonlyArray<Result>, write: () => void): numb
   write()
   return results.some((result) =>
       result.failures.length > 0 || result.outcome.strider._tag === "Failed" ||
-      result.outcome.playwright._tag === "Failed"
+      result.outcome.playwright?._tag === "Failed"
     )
     ? 1
     : 0

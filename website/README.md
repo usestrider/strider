@@ -65,7 +65,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | 1. Getting started        | (top)     | introduction, installation, first program, errors, deadlines, Playwright users |
 | 2. Pages and locators     | `pages/`  | locators, actions, expectations and reads, contexts, attached browsers |
 | 3. Events and the network | `events/` | events, navigations, popups, dialogs and downloads, requests and responses, routes, init scripts, page clock |
-| 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files |
+| 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files, video |
 | 5. Agents and the command line | `agents/` | snapshots, the agent toolkit, the `strider` CLI |
 | 6. Browsers               | `browsers/` | browser support, Chromium, Firefox, WebKit                |
 

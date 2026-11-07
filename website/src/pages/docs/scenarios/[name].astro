@@ -3,19 +3,20 @@
 import { Code } from "astro-expressive-code/components"
 import Rail from "../../../components/Rail.astro"
 import ScenarioNav from "../../../components/ScenarioNav.astro"
-import { type Scenario, scenarios } from "../../../features/scenarios/scenarios.ts"
+import { comparedWith, type Scenario, scenarios } from "../../../features/scenarios/scenarios.ts"
 import DocShell from "../../../layouts/DocShell.astro"
 
 export const getStaticPaths = () => scenarios().map((scenario) => ({ params: { name: scenario.name }, props: { scenario } }))
 
 const { scenario } = Astro.props as { scenario: Scenario }
+const browserNames = { chromium: "Chromium", firefox: "Firefox" } as const
+// The same program on another browser, shown beside this one
+const other = comparedWith(scenario)
 const sites: Record<string, string> = {
   "the-internet": "The Internet, a site of examples for practicing automation"
 }
-// A public demo site is replayed from a recording; any other scenario drives a page of the local site
-const site = scenario.recording === undefined
-  ? undefined
-  : `${sites[scenario.recording] ?? scenario.recording}, replayed from a recording of the site`
+// A public demo site, which the program visits as written; any other scenario drives a page of the local site
+const site = scenario.recording === undefined ? undefined : sites[scenario.recording] ?? scenario.recording
 ---
 
 <DocShell
@@ -29,6 +30,8 @@ const site = scenario.recording === undefined
     slot="rail"
     groups={[
       { label: "The program", href: "#program" },
+      ...(scenario.video === undefined ? [] : [{ label: "The run", href: "#run" }]),
+      ...(other === undefined ? [] : [{ label: `On ${browserNames[other.browser]}`, href: "#compare" }]),
       { label: "What it calls", href: "#calls" }
     ]}
   />
@@ -38,10 +41,35 @@ const site = scenario.recording === undefined
   <article class="prose">
     <h2 id="program">The program</h2>
     <p>
-      It drives {site ?? <>a page of its own, served locally at <code>origin</code></>}, and returns
+      {scenario.browser === "firefox" ? "On Firefox, it" : "It"} drives {
+        site ?? <>a page of its own, served locally at <code>origin</code></>
+      }, and returns
       <code>{scenario.expected}</code>.
     </p>
     <Code code={scenario.code} lang="ts" />
+    {
+      scenario.video !== undefined && (
+        <>
+          <h2 id="run">The run</h2>
+          <p>The video it recorded, in one run:</p>
+          <video src={`/videos/${scenario.video}`} width="1280" height="720" controls muted loop playsinline />
+        </>
+      )
+    }
+    {
+      other !== undefined && (
+        <>
+          <h2 id="compare">On {browserNames[other.browser]}</h2>
+          <p>{other.description}</p>
+          <Code code={other.code} lang="ts" />
+          {
+            other.video !== undefined && (
+              <video src={`/videos/${other.video}`} width="1280" height="720" controls muted loop playsinline />
+            )
+          }
+        </>
+      )
+    }
     <h2 id="calls">What it calls</h2>
     <ul>
       {

@@ -8,6 +8,10 @@
  * history; individual payloads keep 32 Ki characters, and late failed-test cleanup has a separate 256 KiB budget.
  * The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
  *
+ * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
+ * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
+ * acquisition is pending records that observation too; later records can show its eventual failure.
+ *
  * Capture covers Strider pipe and WebSocket transports and decoded stock WebKit inspector messages in Vitest,
  * including public-layer slices and the Strider upstream cases selected by the integration configuration.
  * Owned Chromium child-process pipes also cover the selected upstream Playwright baselines; their `pipe-send` and
@@ -28,7 +32,8 @@
  *
  * Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
  * WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
- * receive observations may be ignored by the link. Failures above the inspector socket are not instrumented;
+ * receive observations may be ignored by the link. Apart from native trace video failures, failures above the
+ * inspector socket are not instrumented;
  * interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
  * pids and process arguments, rather than an explicit connection-to-process identifier. Launch and page-creation
  * preludes can be evicted from bounded histories; no protected head is kept. Shared-artifact links identify context

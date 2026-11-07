@@ -74,11 +74,11 @@ export interface RoleOptions {
    */
   readonly level?: number | undefined
   /**
-   * Match a native checkbox or radio, or aria-checked on checkbox, radio, switch, menuitemcheckbox,
-   * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
-   * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
-   * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
-   * roles they match false, as do all other values except "mixed".
+   * Match native checked state or aria-checked on checkbox, radio, switch, menuitemcheckbox,
+   * menuitemradio, option or treeitem. ARIA keywords are ASCII case-insensitive without trimming.
+   * Mixed matches false on radio, menuitemradio and switch; on the other four roles it matches
+   * neither boolean. Native indeterminate inputs match neither boolean. Absent, empty, undefined
+   * and unrecognized values match neither boolean on option/treeitem and false on the other roles.
    *
    * **Example** (Filter by checked)
    *
@@ -668,12 +668,13 @@ export interface ReadonlyLocator
    *
    * **Details**
    *
-   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
-   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
-   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
-   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
-   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
-   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
+   * Native checkbox and radio inputs use their checked property, including when indeterminate.
+   * ARIA roles checkbox, radio, switch, menuitemcheckbox, menuitemradio, option and treeitem use
+   * aria-checked keywords ASCII case-insensitively, without trimming. True reads true; false and
+   * mixed read false. Absent, empty, undefined and unrecognized values read false on the first five
+   * roles; on option/treeitem they fail with WrongElement, as do check/uncheck before input.
+   * Use explicit true, false or mixed tokens to make option/treeitem checkable.
+   * Selection through aria-selected is independent. Other elements fail with WrongElement.
    *
    * **Example** (Reading a preference)
    *
@@ -1110,9 +1111,10 @@ export interface Locator extends ReadonlyLocator {
    * It follows `check`, using the checked state and optional checkability described by `isChecked`. The
    * selected element's own checked state takes precedence. Otherwise a selected label, or an ordinary
    * descendant's nearest DOM label, supplies its associated control. The selected element remains the
-   * click target and position origin. If already unchecked, nothing is sent. Otherwise it clicks and
-   * reads the state again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays
-   * checked.
+   * click target and position origin. If already unchecked, nothing is sent. A checked native radio
+   * fails with `WrongElement` before input, including with `trial: true`; check another radio in its
+   * group instead. Page-managed ARIA radios can be unchecked. Otherwise it clicks and reads the state
+   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -1212,6 +1214,13 @@ export interface Locator extends ReadonlyLocator {
    *   digits with an optional fractional part (or a leading decimal point and digits), and an optional exponent
    *   such as `1e2`. Whitespace, a leading plus, a trailing decimal point, hexadecimal and non-finite values fail
    *   with `InvalidInput` before focus, selection or mutation. The input's min, max and step don't restrict fill.
+   * - In a design-mode document, filling a non-input target blurs a different active input or textarea,
+   *   including one inside open shadow roots. The target is resolved and its effective checks run again
+   *   after blur handlers, before selection. If refocusing prevents preparation until the deadline,
+   *   the timeout reports focus preparation in its history.
+   * - Firefox cannot focus inputs in top-level design-mode documents. Filling one is unsupported:
+   *   native typing can insert into the document body instead. Strider does not change design mode
+   *   or synthesize input to work around this browser limitation.
    * - A `Redacted` value is typed into the page but never shown in spans, traces or errors.
    *
    * **Example** (Choosing a delivery date)
@@ -1252,6 +1261,7 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
+   * Accepts a string or a `Redacted` string; any other value fails with `InvalidInput` before contacting the browser.
    * `\n` is Enter and `\t` is Tab; `delay` waits between keys. A `Redacted` text is never shown in spans, traces or
    * errors.
    *

@@ -46,6 +46,7 @@ import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
+import * as ExpectSource from "./expectSource.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
@@ -118,13 +119,16 @@ const observeMembers = (owner: ObservedOwner) => {
       target: { _tag: "Page", id: entry.id },
       operation: "Page.status.waitFor"
     }),
-    url: Watchable.make({
-      ref: entry.state,
-      project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
-      ended: pageEnded,
-      target: { _tag: "Page", id: entry.id },
-      operation: "Page.url.waitFor"
-    }),
+    url: ExpectSource.mark(
+      Watchable.make({
+        ref: entry.state,
+        project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
+        ended: pageEnded,
+        target: { _tag: "Page", id: entry.id },
+        operation: "Page.url.waitFor"
+      }),
+      "SourceURL"
+    ),
     frames: Watchable.make({
       ref: entry.state,
       project: (state: Model.PageState) => Option.some(frameTree(entry.id, state)),
@@ -271,8 +275,8 @@ export const make = (owner: PageOwner): Page.Page => {
         const values = yield* Evaluation.toLocal(args, realm)
         const group = yield* Evaluation.groupFor(runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const value = yield* Evaluation.call(runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn.toString(),
           arguments: values,
@@ -312,13 +316,18 @@ export const make = (owner: PageOwner): Page.Page => {
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
     get title() {
-      return Effect.gen(function*() {
-        const record = yield* Operation.record
-        const response = yield* Runtime.send(runtime, entry, { op: "title" }, record.id, record.budget.at).pipe(
-          Effect.mapError(fromSend("Page.title", record))
-        )
-        return response._tag === "Title" ? response.title : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
-      }).pipe(Operation.named("Page.title", { attributes: { "browser.page.id": entry.id } }))
+      return ExpectSource.mark(
+        Effect.gen(function*() {
+          const record = yield* Operation.record
+          const response = yield* Runtime.send(runtime, entry, { op: "title" }, record.id, record.budget.at).pipe(
+            Effect.mapError(fromSend("Page.title", record))
+          )
+          return response._tag === "Title"
+            ? response.title
+            : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
+        }).pipe(Operation.named("Page.title", { attributes: { "browser.page.id": entry.id } })),
+        "SourceTitle"
+      )
     },
     get readHtml() {
       return Effect.gen(function*() {

@@ -46,7 +46,11 @@ export interface Hops<H extends Ending<End>, End> {
   readonly values: () => ReadonlyArray<H>
 }
 
-export const hops = <H extends Ending<End>, End>(max: number, forgotten: End): Hops<H, End> => {
+export const hops = <H extends Ending<End>, End>(
+  max: number,
+  forgotten: End,
+  forget: (hop: H) => void = () => {}
+): Hops<H, End> => {
   const map = new Map<NetworkRequest.HopId, H>()
   return {
     get: (id) => Option.fromUndefinedOr(map.get(id)),
@@ -56,11 +60,13 @@ export const hops = <H extends Ending<End>, End>(max: number, forgotten: End): H
       for (const [each, entry] of map) {
         if (Deferred.isDoneUnsafe(entry.end)) {
           map.delete(each)
+          forget(entry)
           return
         }
       }
       const [oldest, entry] = map.entries().next().value!
       map.delete(oldest)
+      forget(entry)
       Deferred.doneUnsafe(entry.end, Effect.succeed(forgotten))
     },
     values: () => Array.from(map.values())

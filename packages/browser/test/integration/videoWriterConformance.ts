@@ -1,0 +1,168 @@
+/** Output checks shared by codec-backed VideoWriter layers. */
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, layer } from "@effect/vitest"
+import { VideoWriter } from "@usestrider/browser"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import * as Stream from "effect/Stream"
+import { execFileSync } from "node:child_process"
+import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
+import { deflateSync } from "node:zlib"
+import * as BrowserClock from "../../src/internal/browserClock.ts"
+import * as Video from "../../src/internal/video.ts"
+
+const png = (width: number, height: number, color: readonly number[]) => {
+  const chunk = (kind: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(kind), data])
+    let crc = 0xffffffff
+    for (const byte of body) {
+      crc ^= byte
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+    }
+    const size = Buffer.alloc(4)
+    size.writeUInt32BE(data.length)
+    const checksum = Buffer.alloc(4)
+    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0)
+    return Buffer.concat([size, body, checksum])
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 2
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => color).flat())])
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+    chunk("IEND", Buffer.alloc(0))
+  ])
+}
+
+export const writerConformance = (
+  name: string,
+  writer: Layer.Layer<VideoWriter.VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>
+) => {
+  layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
+    it.effect(
+      `${name} preserves the later four-second frame after normalizing a backward source time`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-order-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [255, 0, 0])
+          const file = yield* Video.record(
+            Effect.succeed({
+              frames: Stream.fromIterable([0, 5e6, 3e6, 4e9]).pipe(Stream.map((at) => ({
+                frame: { at, format: "png" as const, data, width: 2, height: 2 },
+                take: Effect.void
+              }))),
+              ended: Effect.never
+            }),
+            encoder,
+            directory
+          ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+            now: () => 0 as ReturnType<BrowserClock.BrowserClock["now"]>,
+            sleep: () => Effect.never
+          }))
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            yield* file
+          ], { encoding: "utf8" }))
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.005, 0.005, 4, 4]
+          )
+          assert.closeTo(Number(probe.format.duration), 4, 0.002)
+        }),
+      60_000
+    )
+
+    it.effect(
+      `${name} writer conformance: preserves variable frame times and fits changing odd sizes`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-conformance-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const file = yield* encoder.write(
+            Stream.make(
+              { at: 0, format: "png", width: 321, height: 243, data: png(321, 243, [255, 0, 0]) },
+              { at: 237e6, format: "png", width: 161, height: 243, data: png(161, 243, [0, 0, 255]) },
+              { at: 2391e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) },
+              { at: 4127e6, format: "png", width: 643, height: 243, data: png(643, 243, [0, 255, 0]) }
+            ),
+            { path: path.join(directory, "conformance.webm"), width: 321, height: 243 }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          assert.strictEqual(probe.frames.length, 4)
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.237, 2.391, 4.127]
+          )
+          assert.closeTo(Number(probe.format.duration), 4.127, 0.002, "still duration includes the final timestamp")
+          for (const frame of probe.frames) assert.deepStrictEqual([frame.width, frame.height], [321, 243])
+          const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+            "-v",
+            "error",
+            "-i",
+            file,
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1"
+          ], { maxBuffer: 2_000_000 })
+          const frameBytes = 321 * 243 * 3
+          assert.strictEqual(pixels.length, frameBytes * 4)
+          assert.isAbove(pixels[(121 * 321 + 160) * 3]!, 200, "first frame is red")
+          assert.isAbove(pixels[frameBytes + (121 * 321 + 160) * 3 + 2]!, 200, "second frame is blue")
+          assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + 160) * 3 + 1]!, 200, "wide third frame is scaled green")
+          for (const x of [5, 315]) {
+            assert.isAbove(pixels[frameBytes * 2 + (121 * 321 + x) * 3 + 1]!, 200, "wide image fills fitted width")
+          }
+          for (const y of [65, 177]) {
+            assert.isAbove(pixels[frameBytes * 2 + (y * 321 + 160) * 3 + 1]!, 200, "wide image fills fitted height")
+          }
+          for (const y of [20, 220]) {
+            for (let channel = 0; channel < 3; channel++) {
+              assert.isBelow(
+                pixels[frameBytes * 2 + (y * 321 + 160) * 3 + channel]!,
+                20,
+                "scaled image has centred black padding"
+              )
+            }
+          }
+          for (const x of [40, 280]) {
+            for (let channel = 0; channel < 3; channel++) {
+              assert.isBelow(pixels[frameBytes + (121 * 321 + x) * 3 + channel]!, 20, "padding is centred and black")
+            }
+          }
+        }),
+      60_000
+    )
+  })
+}

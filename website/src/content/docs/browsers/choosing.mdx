@@ -130,3 +130,11 @@ const steadyScreenshot = Effect.fn("steadyScreenshot")(function*(page: Page.Page
 })
 ```
 
+
+## Platform coverage
+
+Linux integration tests cover Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1 in a pinned Nix
+environment. The macOS entry point covers the Chromium and Firefox adapter and public API slice suites with
+Chrome for Testing 155.0.8059.79 and Firefox 158.0 on Apple Silicon; its first CI run is pending. Browser
+versions are checked exactly on both platforms. macOS uses the runner's fonts and native display, so its
+rendering can differ from Linux. Safari, Intel macOS and Windows are not covered by this macOS entry point.

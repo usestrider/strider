@@ -25,7 +25,7 @@ import * as Runtime from "./runtime.ts"
 const known: Readonly<Record<string, { readonly entry: string; readonly backends: string }>> = {
   AxTree: { entry: "capability.axTree", backends: "Chromium's (CDP)" },
   Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP)" },
-  Video: { entry: "capability.video", backends: "Firefox's, launched by the program" }
+  Video: { entry: "capability.video", backends: "Chromium with VideoWriter, or Firefox launched by the program" }
 }
 
 const capabilityError = (capability: string, reason: Capability.CapabilityErrorReason, id: Diagnostics.OperationId) =>
