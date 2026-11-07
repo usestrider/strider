@@ -27,6 +27,7 @@ import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
+import * as GVariant from "../src/internal/gvariant.ts"
 import * as Launch from "../src/internal/launch.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
@@ -566,6 +567,7 @@ describe("WebKit launcher", () => {
       behavior: (spawn: number) => {
         readonly held: boolean
         readonly silentSession?: boolean | undefined
+        readonly closeHandshake?: "before session reply" | "before automation target" | undefined
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
@@ -712,6 +714,35 @@ describe("WebKit launcher", () => {
           connected.push(port)
           yield* Effect.addFinalizer(() => Effect.sync(() => closed.push(port)))
           yield* connect
+          const handshake = behavior(ports.indexOf(port)).closeHandshake
+          if (handshake !== undefined) {
+            const sent = yield* Deferred.make<void>()
+            let replied = false
+            const pull = Deferred.await(sent).pipe(Effect.andThen(Effect.suspend(() => {
+              if (handshake === "before automation target" && !replied) {
+                replied = true
+                const name = new TextEncoder().encode("DidStartAutomationSession\0")
+                const parameters = GVariant.encode("(ss)", ["MiniBrowser", "2.54.1"])
+                const frame = new Uint8Array(5 + name.length + parameters.length)
+                new DataView(frame.buffer).setUint32(0, name.length + parameters.length, false)
+                frame[4] = 1
+                frame.set(name, 5)
+                frame.set(parameters, 5 + name.length)
+                return Effect.succeed([frame] as const)
+              }
+              return Effect.fail(
+                new Socket.SocketError({
+                  reason: new Socket.SocketReadError({ cause: "controlled handshake closure" })
+                })
+              )
+            })))
+            const write = () =>
+              Effect.sync(() => {
+                written.push(port)
+                Deferred.doneUnsafe(sent, Effect.void)
+              })
+            return { pull, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
+          }
           const write = () =>
             Effect.andThen(
               Effect.sync(() => written.push(port)),
@@ -734,6 +765,21 @@ describe("WebKit launcher", () => {
       )
       return { exit, ports, stopped, connected, closed, written }
     })
+
+    for (const stage of ["before session reply", "before automation target"] as const) {
+      it.effect(`reports socket loss ${stage} instead of waiting for the startup deadline`, () =>
+        Effect.gen(function*() {
+          const result = yield* scriptedLaunch(() => ({ held: true, closeHandshake: stage }))
+          assert.strictEqual(result.ports.length, 1)
+          assert.deepStrictEqual(result.written, result.ports)
+          assert.deepStrictEqual(result.closed, result.ports)
+          assert.deepStrictEqual(result.stopped, [0])
+          assert(result.exit._tag === "Failure")
+          const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
+          assert(error.reason._tag === "ConnectionFailed")
+          assert.include(error.reason.hint, "An error occurred during Read")
+        }))
+    }
 
     it.effect("writes nothing to a silent foreign listener, and starts owned on the next port its collision picks", () =>
       Effect.gen(function*() {
