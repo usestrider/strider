@@ -122,7 +122,7 @@ const PageNavigation = Schema.Union([
   Schema.TaggedStruct("SameDocument", {
     id: Id, url: Url.Url, document: Target.DocumentId, via: Schema.Literals(["fragment", "historyApi", "intercepted"]) }),
   Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),    // back/forward cache
-  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),   // prerender
+  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),   // prerender activation is not implemented
   Schema.TaggedStruct("BecameDownload", { id: Id, url: Url.Url }),                          // only from goto with accept
   Schema.TaggedStruct("NoContent", { id: Id, url: Url.Url, response: Schema.Option(NetworkResponse.NetworkResponse) })   // likewise
 ])

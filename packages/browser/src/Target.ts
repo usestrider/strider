@@ -173,24 +173,6 @@ export class AccessReleased extends Schema.Error<AccessReleased>("@usestrider/br
 }
 
 /**
- * Reason for a page that ended because a prerendered document took its place.
- *
- * @stability unstable
- * @category reasons
- * @since 0.1.0
- */
-export class PrerenderActivated
-  extends Schema.Error<PrerenderActivated>("@usestrider/browser/Target/PrerenderActivated")({
-    _tag: Schema.tag("PrerenderActivated"),
-    hint: hinted("Use the page the prerendered one became")
-  })
-{
-  override get message(): string {
-    return `A prerendered page took over (${this.hint})`
-  }
-}
-
-/**
  * Reason for a target that ended because its page's renderer crashed.
  *
  * @stability unstable
@@ -418,7 +400,7 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  *
  * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
  *   of the browser's state).
- * - Context and access: `UserContextRemoved`, `AccessReleased`, `PrerenderActivated`.
+ * - Context and access: `UserContextRemoved`, `AccessReleased`.
  * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
  * - Dialogs, file choosers, paused requests, downloads and request hops: `ObligationEnded` (a dialog, file chooser
  *   or paused request), `DownloadEnded`, `HopEnded`.
@@ -439,7 +421,6 @@ export const CloseReason = Schema.Union([
   ModelUnavailable,
   UserContextRemoved,
   AccessReleased,
-  PrerenderActivated,
   PageClosed,
   ObligationEnded,
   DownloadEnded,
