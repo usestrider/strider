@@ -195,6 +195,11 @@ export interface Recording extends Declaration.Registration {
  *   the Console tab explains the missing video as pending, without a browser error. Later exports show the
  *   actual outcome: the video once acquired, or its failure reason. They do not retain a stale pending message.
  *
+ * When `TestRun` is available and names a running test, recording captures its identity at the start.
+ * The context header's `title` is its test ID; `striderTest` preserves `project`, `file`, `id` and `attempt`
+ * (zero for the first run). Later exports retain that identity, even after the running test changes. Without
+ * a named test, neither field is added. Test names and file paths are exported as written.
+ *
  * **Example** (Exporting a trace when checkout fails)
  *
  * ```ts import.meta.vitest

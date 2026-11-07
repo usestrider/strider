@@ -24,7 +24,8 @@ class RecordingFailure extends Data.TaggedError("RecordingFailure")<{ readonly m
 export const scenario = Effect.fnUntraced(
   function*(
     stage?: "acquisition" | "pending" | "pending-success" | "pending-failure" | "stop" | "file-read",
-    interruptAt?: "stop" | "file-read"
+    interruptAt?: "stop" | "file-read",
+    beforeExport?: () => void
   ) {
     const gate = yield* Deferred.make<void>()
     let acquisitions = 0
@@ -107,6 +108,7 @@ export const scenario = Effect.fnUntraced(
     }, yield* Effect.scope)
     yield* Effect.yieldNow
     assert.strictEqual(acquisitions, 1)
+    beforeExport?.()
     yield* trace.exportTrace("/first.zip")
     if (stage === "pending-success" || stage === "pending-failure") {
       yield* Deferred.succeed(gate, undefined)
