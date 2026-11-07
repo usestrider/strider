@@ -1279,3 +1279,14 @@ network capture, with screencast off; explicit settings can reduce capture, and 
 disabling snapshots. These defaults make failed-test traces useful without changing direct `Trace.record` calls.
 Rejected: changing the general recording defaults, which adds capture cost outside tests, and owning recordings
 in the memoized browser layer, which shares one callback's identity with later callbacks.
+
+## Operation caller stacks
+
+Capture six caller frames in the operation constructor before calling the formatting helper,
+and defer formatting until a recording or failure rendering needs the frame. This keeps construction-time source
+links for prebuilt operations while reducing work on every unrecorded successful call. When capture is enabled but
+no user caller is available, retain the operation name without a location in failures, and omit unavailable source
+locations. The informational name is an accepted trade-off for avoiding eager formatting: Effect's frame contract
+cannot lazily omit a node. Reject eager caller resolution on every success and dependency changes to remove that
+rare location-free line. Capture remains independent of recording so failures outside recordings and operations
+built before recording retain their callers.
