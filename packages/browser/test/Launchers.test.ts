@@ -71,6 +71,19 @@ describe("DevToolsActivePort", () => {
         assert.isUndefined(DevToolsActivePort.parse(text))
       }))
   }
+  // Chromium writes `port\n/devtools/browser/<lowercase v4 UUID>` with no final newline, so a read torn inside the
+  // path still has both lines; only the identifier's shape shows the write isn't finished.
+  it.effect("rejects a browser path cut short inside its identifier", () =>
+    Effect.sync(() => {
+      const id = "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+      assert.deepStrictEqual(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`), {
+        port: 9222,
+        browserPath: `/devtools/browser/${id}`
+      })
+      for (const length of [1, 8, 20, 35]) {
+        assert.isUndefined(DevToolsActivePort.parse(`9222\n/devtools/browser/${id.slice(0, length)}`))
+      }
+    }))
   layer(NodeServices.layer)("readiness", (it) => {
     for (const content of ["9222\n", "65536\n/devtools/browser/test", undefined]) {
       it.effect(`bounds waiting for ${JSON.stringify(content)} on the live clock`, () =>
