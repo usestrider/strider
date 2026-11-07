@@ -59,6 +59,9 @@ describe("Request header lifetime", () => {
         })
         const sent = request(0, { _tag: "Worker", realm })
         yield* fold.sink({ _tag: "RequestSent", request: sent })
+        const other = request(1, { _tag: "Unattributed" })
+        yield* fold.sink({ _tag: "RequestSent", request: other })
+        const unrelated = Option.getOrThrow(fold.hop(other.hop))
         const hop = Option.getOrThrow(fold.hop(sent.hop))
         assert.isTrue(Option.isNone(hop.page))
         assert.strictEqual(Option.getOrThrow(hop.context).id, context)
@@ -72,6 +75,8 @@ describe("Request header lifetime", () => {
           assert.isTrue(Deferred.isDoneUnsafe(hop.end))
         }
         assert.isTrue(Deferred.isDoneUnsafe(hop.sentKnown), "owner loss must release the existing header waiter")
+        assert.strictEqual(Deferred.isDoneUnsafe(unrelated.sentKnown), terminal === "disconnect")
+        if (terminal !== "disconnect") assert.isFalse(Deferred.isDoneUnsafe(hop.end))
       }))
   }
 
@@ -87,6 +92,12 @@ describe("Request header lifetime", () => {
         url: "about:blank" as Url.Url
       })
       yield* fold.sink({ _tag: "FrameAdded", frame, parent: page, page })
+      const child = "child" as Target.NavigableId
+      yield* fold.sink({ _tag: "FrameAdded", frame: child, parent: frame, page })
+      const descendant = request(1, { _tag: "Document", navigable: child, navigation: Option.none() })
+      const unrelated = request(2, { _tag: "Document", navigable: page, navigation: Option.none() })
+      yield* fold.sink({ _tag: "RequestSent", request: descendant })
+      yield* fold.sink({ _tag: "RequestSent", request: unrelated })
       const sent = request(0, { _tag: "Document", navigable: frame, navigation: Option.none() })
       yield* fold.sink({ _tag: "RequestSent", request: sent })
       const hop = Option.getOrThrow(fold.hop(sent.hop))
@@ -99,5 +110,8 @@ describe("Request header lifetime", () => {
       })
       assert.isFalse(Deferred.isDoneUnsafe(Option.getOrThrow(fold.page(page)).closed))
       assert.isTrue(Deferred.isDoneUnsafe(hop.sentKnown), "frame loss must release the existing header waiter")
+      assert.isTrue(Deferred.isDoneUnsafe(Option.getOrThrow(fold.hop(descendant.hop)).sentKnown))
+      assert.isFalse(Deferred.isDoneUnsafe(Option.getOrThrow(fold.hop(unrelated.hop)).sentKnown))
+      assert.isFalse(Deferred.isDoneUnsafe(hop.end))
     }))
 })

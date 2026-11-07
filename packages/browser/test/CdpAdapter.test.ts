@@ -1195,11 +1195,35 @@ describe("Chromium public sent-header waiting", () => {
         { wall: 0, monotonic: request.at },
         { detail: "full", include: new Set(), bodies: { _tag: "Embed" } }
       )
+      const retained = Option.getOrThrow(hop)
+      assert.strictEqual(Option.getOrThrow(retained.state.getUnsafe().sent).cookie, "flavor=oat")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
       const recorded = entry.request
       assert.deepStrictEqual({
         published: late.length,
         recordedCookie: recorded.headers.find((header) => header.name.toLowerCase() === "cookie")?.value
-      }, { published: 1, recordedCookie: "flavor=oat" })
+      }, { published: 1, recordedCookie: "flavor=REDACTED" })
+    }).pipe(onTestClock))
+
+  it.effect("gives late failure headers to earlier redirect obligations first", () =>
+    Effect.gen(function*() {
+      const { browser, request, send, barrier, facts } = yield* sentHeaders()
+      yield* send(captured[3]!)
+      yield* barrier
+      const requests = facts.filter((fact) => fact._tag === "RequestSent")
+      const last = requests[requests.length - 1]!.request
+      yield* browser.receive({
+        method: "Network.loadingFailed",
+        sessionId: "S1",
+        params: { requestId: captured[0]!.params.requestId, timestamp: 772297, type: "Fetch", errorText: "net::ERR_FAILED" }
+      })
+      yield* send(captured[1]!)
+      yield* barrier
+      const headers = () => facts.filter((fact) => fact._tag === "HopHeaders" && fact.phase === "request")
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop])
+      yield* send(captured[4]!)
+      yield* barrier
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop, last.hop])
     }).pipe(onTestClock))
 
   it.effect("waits for attribution, then returns the network headers", () =>
