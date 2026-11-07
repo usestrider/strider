@@ -348,6 +348,7 @@ describe("wait observations", () => {
   it("preserves values, Causes, interruption and original cleanup order despite observer errors", async () => {
     const Effect = await import("effect/Effect")
     const Exit = await import("effect/Exit")
+    const Cause = await import("effect/Cause")
     const { waitTrace } = await import("./integration/waitTrace.ts")
     const order: Array<string> = []
     const trace = waitTrace("fixture", (kind) => {
@@ -356,12 +357,11 @@ describe("wait observations", () => {
     })
     const value = {}
     expect(await Effect.runPromise(trace.observe("value", Effect.succeed(value)))).toBe(value)
-    for (const effect of [Effect.fail(value), Effect.die(value), Effect.interrupt]) {
+    for (const effect of [Effect.fail(value), Effect.die(value), Effect.failCause(Cause.interrupt(42))]) {
       const original = await Effect.runPromiseExit(effect)
       const observed = await Effect.runPromiseExit(trace.observe("exit", effect))
       expect(Exit.isFailure(observed)).toBe(true)
-      // Interrupt fiber IDs differ between runs; other Causes retain their original value.
-      if (effect !== Effect.interrupt) expect(observed).toEqual(original)
+      expect(observed).toEqual(original)
     }
     order.length = 0
     await Effect.runPromise(trace.observe(
