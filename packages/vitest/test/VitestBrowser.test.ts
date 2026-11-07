@@ -62,3 +62,12 @@ it("names traces deterministically without traversal or slug collisions", () => 
     assert.isBelow(other.length, 150)
   }
 })
+
+it("never starts a trace filename with a hyphen, which shell commands read as an option", () => {
+  for (const id of ["../a/b", "-rf", " > pays", "/tests/cart > pays"]) {
+    const name = VitestBrowser.traceFileName(
+      new TestRun.TestInfo({ project: "", file: "/a.test.ts", id, attempt: 0, worker: "1", shard: "" })
+    )
+    assert.notMatch(name, /^-/)
+  }
+})
