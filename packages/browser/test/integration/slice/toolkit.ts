@@ -327,6 +327,37 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       }
 
       it.effect(
+        "exports an unnamed framed password query that keeps its recorded frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const frames = (first: string, second: string) =>
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(`<iframe srcdoc='${first}'></iframe><iframe srcdoc='${second}'></iframe>`)
+              }`
+            yield* page.goto(frames("<input data-frame=first type=password>", "<p>second</p>"))
+            yield* Expect.toHaveCount(page.frame(page.locator("iframe").nth(0)).locator("input"), 1)
+            const snapshot = yield* page.snapshot()
+            const nodes = [...snapshot.refs.values()].filter((each) =>
+              each.role._tag === "Inferred" && each.role.evidence.includes("password") && each.name._tag === "None"
+            )
+            assert.lengthOf(nodes, 1)
+            const query = ExportTest.locatorOf("page", Option.getOrThrow(nodes[0]!.ref), snapshot)
+            // Replay where the recorded frame has no password and another frame does.
+            yield* page.goto(frames("<p>first</p>", "<input data-frame=second type=password>"))
+            yield* Expect.toHaveCount(page.frame(page.locator("iframe").nth(1)).locator("input"), 1)
+            const replayed = yield* exportedLocator(query, page).pipe(
+              Effect.flatMap((locator) => locator.readAttribute("data-frame")),
+              Deadline.within("1 second"),
+              Effect.option
+            )
+            assert.notDeepEqual(replayed, Option.some(Option.some("second")), query)
+          })),
+        timeout
+      )
+
+      it.effect(
         "refuses unnamed password exports spanning multiple frame documents",
         () =>
           Effect.scoped(Effect.gen(function*() {
