@@ -33,7 +33,7 @@ const interval = (values) => {
   return [estimates[249], estimates[9749]]
 }
 const summary = []
-for (const action of ["url", "title", "count", "click"]) {
+for (const action of ["url", "fn-url", "title", "count", "click"]) {
   for (const control of ["named-off", "off"]) {
     const rows = data.raw.filter((row) => row.action === action && row.control === control)
     const on = rows.filter((row) => row.mode === "on")

@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { Browser, Deadline } from "@usestrider/browser"
+import { Browser, Deadline, Operation } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as assert from "node:assert/strict"
@@ -19,7 +19,7 @@ const layer = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
 })).pipe(Layer.provideMerge(NodeServices.layer))
 const site = await start()
 interface Request {
-  action: "url" | "title" | "count" | "click" | "stop"
+  action: "url" | "fn-url" | "title" | "count" | "click" | "stop"
   calls: number
 }
 // IPC requests are strictly sequential. Install the listener before announcing readiness.
@@ -35,6 +35,10 @@ try {
       yield* page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
       const button = page.getByRole("button", { name: "Increment" })
       const count = page.locator("#count")
+      // Definition capture is outside timing, as for functions defined by library modules.
+      const readUrl = Operation.fn("benchmark.readUrl")(function*() {
+        return yield* page.url
+      })
       let clicks = 0
       let ready = false
       while (true) {
@@ -62,6 +66,8 @@ try {
           // Construct a fresh operation inside the timer, including getter construction.
           if (request.action === "url") {
             assert.equal(yield* page.url, `${site.origin}/benchmark`)
+          } else if (request.action === "fn-url") {
+            assert.equal(yield* readUrl(), `${site.origin}/benchmark`)
           } else if (request.action === "title") {
             assert.equal(yield* page.title, "Benchmark")
           } else if (request.action === "count") {
