@@ -1341,3 +1341,40 @@ describe("CDP proxy and website challenge separation", () => {
       }))
   }
 })
+
+for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
+  it.effect(`cleans up a worker's proxy authentication attempt on ${terminal}`, () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      page.context.proxy = {
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+      }
+      const worker: State.TargetEntry = { ...target, kind: "worker", page: undefined }
+      state.workerContexts.set(worker, page.context)
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const request = sent(`${origin}/worker`).request
+      handlers.apply("Fetch.requestPaused", {
+        requestId: "F1",
+        networkId: "R1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request
+      }, { state, target: worker })
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request,
+        authChallenge: { source: "Proxy", origin: "http://proxy.test:8080", scheme: "basic", realm: "proxy" }
+      }, { state, target: worker })
+      assert.strictEqual(worker.proxyAuth?.size, 1)
+      handlers.apply(terminal, { requestId: "R1", encodedDataLength: 0, errorText: "canceled" }, {
+        state,
+        target: worker
+      })
+      assert.strictEqual(worker.proxyAuth?.size, 0)
+      yield* state.buffer.flush
+    }))
+}
