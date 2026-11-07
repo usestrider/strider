@@ -316,9 +316,11 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 Deadline.within("1 second"),
                 Effect.flip
               )
+              assert.instanceOf(failure, Error, query)
               assert.match(String(failure), /ambiguous/i, query)
               assert.match(String(failure), /password/i, query)
               assert.match(String(failure), /frame|document/i, query)
+              assert.match(String(failure), /narrow.*manually/i, query)
             })),
           timeout
         )
