@@ -424,13 +424,6 @@ const startProcess = Effect.fnUntraced(function*(
   const timeout = Duration.fromInputUnsafe(settings.timeout ?? "30 seconds")
   const deadline = (BrowserClock.now() + Duration.toMillis(timeout) * 1e6) as MonotonicInstant.MonotonicInstant
   const within = `within ${Duration.format(timeout)}`
-  const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
-    Deferred.await(deferred).pipe(
-      byDeadline(deadline),
-      Effect.flatMap((value) =>
-        Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
-      )
-    )
   const { connection, launched } = yield* spawnProcess(settings, index, options, deadline, startup)
   const socket = yield* InspectorSocket.connect(connection)
   startup.mark("inspector")
@@ -438,6 +431,14 @@ const startProcess = Effect.fnUntraced(function*(
   const automationReady = yield* Deferred.make<bigint>()
   const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
   const ended = yield* Deferred.make<Transport.ConnectionLost>()
+  const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
+    Deferred.await(deferred).pipe(
+      Effect.raceFirst(Deferred.await(ended).pipe(Effect.flatMap((reason) => Launch.refused(reason.description)))),
+      byDeadline(deadline),
+      Effect.flatMap((value) =>
+        Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
+      )
+    )
   const automationLink = yield* Link.make()
   let connectionId = 0n
   let automationTarget: bigint | undefined
