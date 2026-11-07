@@ -56,7 +56,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Fetch.requestPaused, (params, { state, target }) => {
       if (target === undefined) return
-      if (target.page?.context.proxy?.credentials !== undefined && params.responseStatusCode === undefined) {
+      const proxy = target.page?.context.proxy ?? state.workerContexts.get(target)?.proxy
+      if (proxy?.credentials !== undefined && params.responseStatusCode === undefined) {
         target.proxyAuth ??= new Map()
         if (!target.proxyAuth.has(params.requestId)) {
           target.proxyAuth.set(params.requestId, { networkId: params.networkId, attempted: false })
