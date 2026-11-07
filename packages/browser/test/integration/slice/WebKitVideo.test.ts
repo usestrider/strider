@@ -25,6 +25,7 @@ import { site } from "../adapter/harness.ts"
 import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { startMiniBrowser, useXvfb } from "../stockWebKit.ts"
+import { lastVideoFrame } from "../videoFrames.ts"
 
 const encoder = VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! })
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.scoped, Effect.provide(NodeServices.layer))
@@ -159,25 +160,13 @@ describe("WebKit polled video", () => {
             const info = probe(file)
             const video = info.streams[0]
             assert.strictEqual(video.codec_name, "vp8")
+            assert.strictEqual(samples[0]!.at, 0)
+            assert.strictEqual(Number(info.format.start_time), 0)
             assert.strictEqual(Number(video.nb_read_frames), samples.length)
             assert.closeTo(Number(info.format.duration), samples.at(-1)!.at / 1e9, 0.002)
             assert.deepStrictEqual([video.width, video.height], [640, 480])
             assert.isAtLeast(Number(video.nb_read_frames), 3)
-            const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
-              "-v",
-              "error",
-              "-sseof",
-              "-0.1",
-              "-i",
-              file,
-              "-frames:v",
-              "1",
-              "-f",
-              "rawvideo",
-              "-pix_fmt",
-              "rgb24",
-              "pipe:1"
-            ], { maxBuffer: 2_000_000 })
+            const pixels = lastVideoFrame(file, Number(video.nb_read_frames))
             assert.strictEqual(pixels.length, 640 * 480 * 3)
             assert.isAbove(pixels[(300 * 640 + 320) * 3 + 2]!, 200)
             assert.isBelow(pixels[0]!, 20, "unused width is black")
