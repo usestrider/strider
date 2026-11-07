@@ -982,7 +982,7 @@ LanguageModel.generateText({ prompt, toolkit })
 McpServer.toolkit(toolkit)
 ```
 
-- **No tool waits after it acts.** Each result carries the outcome of the call, then a digest of what the event logs recorded since the previous call: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. Its boundaries are calls, not time windows, and it reports what was seen without claiming what caused it.
+- **Waits for later events are explicit.** Action tools do not add a wait for later page events, but they await browser/protocol completion, which can include navigation or a busy page responding. Input completion is not guaranteed to be immediate. Each result carries the outcome of the call, then a digest of what the event logs recorded since the previous call: navigations, popups, dialogs and who decided them, downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. Its boundaries are calls, not time windows, and it reports what was seen without claiming what caused it.
 - **Changes are diffed, not guessed.** Whether the page changed is a question for `snapshot.diff`, asked explicitly.
 - **Waiting is a tool like any other:** `next` and `await` for events, `expect` for conditions.
 - **Failures go back to the model.** Tools are `effect/ai` `Tool`s with `failureMode: "return"`, so a `LocatorError`, `Timeout` or stale ref reaches the model as data, hint included, instead of ending the conversation. Because results and errors are Schemas, they encode for the model without a hand-written serializer.
