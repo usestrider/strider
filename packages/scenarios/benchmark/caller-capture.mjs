@@ -19,13 +19,25 @@ const control = (mode) => {
   if (mode === "off") source = stub(source, "trace", "/**\n * The stack frames `Effect.fn`")
   return source
 }
+const switchable =
+  original.replace("const namedCaller =", "let namedCaller =").replace("const trace =", "let trace =") + `
+// Benchmark-only bindings. The on functions retain their original bodies.
+const benchmarkNamedCaller = namedCaller
+const benchmarkTrace = trace
+export const benchmarkSetCapture = (mode) => {
+  namedCaller = mode === "on" ? benchmarkNamedCaller : () => undefined
+  trace = mode === "off" ? () => undefined : benchmarkTrace
+}
+`
 if (process.argv[2] === "child") {
   const mode = process.argv[3]
   registerHooks({
     load(url, context, nextLoad) {
       const loaded = nextLoad(url, context)
       if (url === sourceUrl) process.env.STRIDER_CAPTURE_LOADED = mode
-      return url === sourceUrl && mode !== "on" ? { ...loaded, source: control(mode) } : loaded
+      return url === sourceUrl && mode !== "on"
+        ? { ...loaded, source: mode === "switchable" ? switchable : control(mode) }
+        : loaded
     }
   })
   await import("./caller-capture-worker.ts")
@@ -37,6 +49,8 @@ if (process.argv[2] === "child") {
   for (const mode of ["named-off", "off"]) {
     writeFileSync(`${output}/${mode}.operation.ts`, control(mode))
   }
+  const sameProcess = process.argv[4] === "same-process"
+  if (sameProcess) writeFileSync(`${output}/switchable.operation.ts`, switchable)
   const children = new Map()
   const request = (child, message) =>
     new Promise((resolve, reject) => {
@@ -63,7 +77,11 @@ if (process.argv[2] === "child") {
   const metadata = {}
   try {
     for (const mode of ["on", "named-off", "off"]) {
-      const child = fork(fileURLToPath(import.meta.url), ["child", mode], {
+      if (sameProcess && mode !== "on") {
+        children.set(mode, children.get("on"))
+        continue
+      }
+      const child = fork(fileURLToPath(import.meta.url), ["child", sameProcess ? "switchable" : mode], {
         stdio: ["ignore", "inherit", "inherit", "ipc"]
       })
       children.set(mode, child)
@@ -78,7 +96,7 @@ if (process.argv[2] === "child") {
         for (let pair = -8; pair < 40; pair++) {
           const order = pair % 2 === 0 ? ["on", controlMode] : [controlMode, "on"]
           for (const mode of order) {
-            const result = await request(children.get(mode), { action, calls: action === "click" ? 10 : 200 })
+            const result = await request(children.get(mode), { action, mode, calls: action === "click" ? 10 : 200 })
             if (result.error) throw new Error(result.error)
             if (pair >= 0) raw.push({ action, control: controlMode, pair, order, mode, ...result })
           }
@@ -89,6 +107,7 @@ if (process.argv[2] === "child") {
           JSON.stringify(
             {
               commit,
+              sameProcess,
               date: new Date().toISOString(),
               metadata,
               warmupPairs: 8,
@@ -102,7 +121,7 @@ if (process.argv[2] === "child") {
       }
     }
   } finally {
-    for (const child of children.values()) child.send({ action: "stop" })
+    for (const child of new Set(children.values())) child.send({ action: "stop" })
   }
   process.stdout.write(`Evidence: ${output}\n`)
 }

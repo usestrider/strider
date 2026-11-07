@@ -17,10 +17,15 @@ const layer = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
   const { transport } = yield* ChromiumLauncher.launch({ executablePath })
   return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
 })).pipe(Layer.provideMerge(NodeServices.layer))
+const augmented = await import("../../browser/src/internal/operation.ts")
+const setCapture = process.argv[3] === "switchable"
+  ? (augmented as unknown as { benchmarkSetCapture: (mode: string) => void }).benchmarkSetCapture
+  : undefined
 const site = await start()
 interface Request {
   action: "url" | "fn-url" | "title" | "count" | "click" | "stop"
   calls: number
+  mode: string
 }
 // IPC requests are strictly sequential. Install the listener before announcing readiness.
 let receive: ((request: Request) => void) | undefined
@@ -60,6 +65,7 @@ try {
         // Only the first request has no preceding action; subsequent readiness comes from the result below.
         const request = yield* Effect.promise(() => waiting)
         if (request.action === "stop") break
+        setCapture?.(request.mode)
         const timings: Array<number> = []
         for (let i = 0; i < request.calls; i++) {
           const started = performance.now()
