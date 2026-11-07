@@ -274,3 +274,34 @@ it.effect("renders a preconstructed named failure outside a recording", () =>
       `at Page.failed (${file}:${line + 1}:${lines[line]!.indexOf("Operation.named") + 11})`
     )
   }))
+
+for (const enclosing of [false, true]) {
+  for (const inside of [false, true]) {
+    it(`omits unavailable named failure frames with enclosing frame: ${enclosing}, rendered inside: ${inside}`, () => {
+      const prepare = Error.prepareStackTrace
+      const parent = enclosing
+        ? { name: "enclosing", stack: () => `at enclosing (${file}:50:2)`, parent: undefined }
+        : undefined
+      const expected = "Error: failed" + (enclosing ? `\n    at enclosing (${file}:50:2)` : "")
+      try {
+        Error.prepareStackTrace = () => "Error"
+        const render = (exit: Exit.Exit<unknown, string>) => {
+          assert(Exit.isFailure(exit))
+          return Cause.pretty(exit.cause)
+        }
+        const failing = Effect.suspend(() => Effect.fail("failed"))
+        const operation = (inside ? Effect.map(Effect.exit(failing), render) : failing).pipe(
+          Operation.named("Page.unavailable"),
+          Effect.provideService(Tracing.TracerDisabledWhen, () => true),
+          Effect.provideService(References.CurrentStackFrame, parent)
+        )
+        const rendered = inside
+          ? Effect.runSync(operation)
+          : render(Effect.runSync(Effect.exit(operation)))
+        assert.strictEqual(rendered, expected)
+      } finally {
+        Error.prepareStackTrace = prepare
+      }
+    })
+  }
+}
