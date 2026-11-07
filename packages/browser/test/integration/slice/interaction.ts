@@ -2662,7 +2662,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       (kind === "own" || kind === "own-ancestor")
                         ? `role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault();this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"`
                         : ""
-                    } style="display:inline-block;width:100px;height:30px">Toggle</${targetTag}>`
+                    } style="display:inline-block;position:relative;left:0.4px;top:0.4px;width:100px;height:30px">Toggle</${targetTag}>`
                   const wrapped = kind === "ancestor" || kind === "own-ancestor" ?
                     `<button>${target}</button>` :
                     kind === "link-ancestor" ?
@@ -2696,6 +2696,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const page = yield* Browser.newPage()
                     yield* page.goto(url)
                     const target = page.locator("#target")
+                    // CDP accepts fractional viewport input; BiDi and WebKit require integer coordinates.
+                    const roundsInput = (yield* Browser.Browser).info.protocol !== "cdp"
+                    const expectedPoint = yield* page.evaluateInMainWorld((roundsInput) => {
+                      const element = document.querySelector("#target")!
+                      const rect = element.getBoundingClientRect()
+                      const style = getComputedStyle(element)
+                      const viewportX = rect.left + parseFloat(style.borderLeftWidth) + 7
+                      const viewportY = rect.top + parseFloat(style.borderTopWidth) + 9
+                      const x = (roundsInput ? Math.round(viewportX) : viewportX) - rect.left
+                      const y = (roundsInput ? Math.round(viewportY) : viewportY) - rect.top
+                      return `target:${x}:${y}`
+                    }, roundsInput)
                     const action = () =>
                       checked
                         ? target.check({ position: { x: 7, y: 9 } })
@@ -2705,11 +2717,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                         const error = yield* action().pipe(Effect.flip)
                         assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
                         assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                       } else {
                         yield* action()
                         assert.strictEqual(yield* (own ? target : page.locator("#box")).isChecked, checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                         yield* page.evaluateInMainWorld(() => {
                           document.querySelector("#out")!.textContent = "reset"
                         })

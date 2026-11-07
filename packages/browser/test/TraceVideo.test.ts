@@ -55,6 +55,23 @@ describe("native trace video", () => {
         assert.notInclude(errors[0].text, "failed")
       }
     })))
+  it.effect("retains the no-frame failure when export stops recording before its first image", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { files, reads, stops } = yield* scenario("before-frame")
+      assert.strictEqual(stops, 1)
+      assert.strictEqual(reads, 0)
+      for (const file of files) {
+        const events = new TextDecoder().decode(file.get("trace.trace")).trim().split("\n").map((line) =>
+          JSON.parse(line)
+        )
+        assert.strictEqual(events.filter((event) => event.type === "video").length, 0)
+        const errors = events.filter((event) => event.type === "console" && event.messageType === "error")
+        assert.strictEqual(errors.length, 1)
+        assert.include(errors[0].text, "failed during stop")
+        assert.include(errors[0].text, "The recording ended before receiving a frame; no writer was started")
+      }
+    })))
+
   it.effect("keeps successful video bytes and reads them only on the first export", () =>
     Effect.scoped(Effect.gen(function*() {
       const { files, reads, stops, bytes } = yield* scenario()

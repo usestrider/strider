@@ -15,6 +15,7 @@ import * as Events from "../../src/internal/events.ts"
 import type * as Model from "../../src/internal/model.ts"
 import type * as Runtime from "../../src/internal/runtime.ts"
 import * as Trace from "../../src/internal/trace.ts"
+import * as Video from "../../src/internal/video.ts"
 import * as Target from "../../src/Target.ts"
 
 vi.mock("../../src/internal/capabilities.ts", () => ({ acquire: vi.fn() }))
@@ -23,7 +24,7 @@ class RecordingFailure extends Data.TaggedError("RecordingFailure")<{ readonly m
 
 export const scenario = Effect.fnUntraced(
   function*(
-    stage?: "acquisition" | "pending" | "pending-success" | "pending-failure" | "stop" | "file-read",
+    stage?: "acquisition" | "pending" | "pending-success" | "pending-failure" | "stop" | "file-read" | "before-frame",
     interruptAt?: "stop" | "file-read",
     beforeExport?: () => void
   ) {
@@ -45,6 +46,14 @@ export const scenario = Effect.fnUntraced(
               message: "ACQUISITION_REASON https://user:pass@example.test/video?token=secret#fragment"
             })
           )
+        }
+        if (stage === "before-frame") {
+          const file = yield* Video.record(
+            Effect.succeed({ frames: Stream.fromEffect(Effect.never), ended: Effect.never }),
+            { write: () => Effect.die("No frame was delivered, so the writer must not start") },
+            "/tmp"
+          )
+          return { file: Effect.sync(() => stops++).pipe(Effect.andThen(file)) }
         }
         return yield* Effect.succeed({
           file: Effect.suspend(() => {

@@ -584,7 +584,9 @@ export const engine = (backend: Backend) =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
-              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`
+              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`,
+              // Supply the rendering opportunity this geometry case requires, independently of frame scheduling.
+              "() => { globalThis.requestAnimationFrame = callback => { queueMicrotask(() => callback(performance.now())); return 0 } }"
             )
             const response = yield* send({
               ...point(0),

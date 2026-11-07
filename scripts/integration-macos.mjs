@@ -15,6 +15,7 @@ const root = fileURLToPath(new URL("../", import.meta.url))
 const pins = JSON.parse(
   await readFile(new URL("../packages/browser/test/integration/browsers.macos.json", import.meta.url), "utf8")
 )
+const videoPins = JSON.parse(await readFile(new URL("./ffmpeg.macos.json", import.meta.url), "utf8"))
 const opensslPrefix = spawnSync("brew", ["--prefix", "openssl@3"], { encoding: "utf8" })
 if (opensslPrefix.status !== 0) throw new Error("Install the TLS fixture tool with brew install openssl@3")
 const openssl = path.join(opensslPrefix.stdout.trim(), "bin/openssl")
@@ -31,13 +32,21 @@ const run = (command, args, env = process.env) => {
   if (result.status !== 0) throw new Error(`${command} exited with ${result.status} (${result.signal})`)
 }
 try {
-  for (const [name, pin] of Object.entries(pins)) {
-    const archive = path.join(directory, name === "chromium" ? "chrome.zip" : "firefox.dmg")
+  for (const [name, pin] of Object.entries({ ...pins, ...videoPins })) {
+    const archive = path.join(
+      directory,
+      name === "chromium" ? "chrome.zip" : name === "firefox" ? "firefox.dmg" : `${name}.zip`
+    )
     run("curl", ["--fail", "--location", "--retry", "3", "--output", archive, pin.url])
     const hash = createHash("sha256")
     for await (const chunk of createReadStream(archive)) hash.update(chunk)
     if (hash.digest("hex") !== pin.sha256) throw new Error(`${name}: download SHA-256 mismatch`)
     console.log(`${name} ${pin.version}: SHA-256 verified`)
+  }
+  for (const name of ["ffmpeg", "ffprobe"]) {
+    run("ditto", ["-x", "-k", path.join(directory, `${name}.zip`), directory])
+    run("chmod", ["+x", path.join(directory, name)])
+    run(path.join(directory, name), ["-version"])
   }
   run("ditto", ["-x", "-k", path.join(directory, "chrome.zip"), directory])
   const mount = path.join(directory, "firefox-volume")
@@ -57,6 +66,8 @@ try {
     ),
     STRIDER_FIREFOX: path.join(directory, "Firefox.app/Contents/MacOS/firefox"),
     STRIDER_OPENSSL: openssl,
+    STRIDER_FFMPEG: path.join(directory, "ffmpeg"),
+    STRIDER_FFPROBE: path.join(directory, "ffprobe"),
     TZ: "UTC",
     LANG: "en_US.UTF-8",
     LC_ALL: "en_US.UTF-8"
