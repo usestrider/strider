@@ -263,6 +263,51 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  for (const order of ["in order", "out of order"] as const) {
+    it.effect(`leaves no reservation behind when overlapping traversals reply ${order}`, () =>
+      Effect.gen(function*() {
+        // Synthetic ordering, not captured Firefox traffic: two traversals overlap, neither is announced.
+        const url = "http://restored.example/"
+        const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        const entered = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        let calls = 0
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            const call = calls++
+            return Effect.andThen(Deferred.succeed(entered[call]!, undefined), Deferred.await(gates[call]!))
+          }).pipe(Effect.as({})),
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[0])
+        const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[1])
+        const replies = order === "in order" ? [0, 1] : [1, 0]
+        yield* Deferred.succeed(gates[replies[0]!]!, undefined)
+        const one = yield* Fiber.join(replies[0] === 0 ? first : second)
+        yield* Deferred.succeed(gates[replies[1]!]!, undefined)
+        const two = yield* Fiber.join(replies[1] === 0 ? first : second)
+        assert(Option.isSome(one) && Option.isSome(two))
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://restored.example"
+        }, { state })
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() => facts.some((fact) => fact._tag === "NavigationEnded") ? true : undefined)
+        yield* state.buffer.flush
+        assert.strictEqual(page.restoring, undefined)
+        assert.deepStrictEqual(
+          page.expected.list.map((expected) => expected.id),
+          [],
+          "no traversal reservation may leak"
+        )
+      }))
+  }
+
   it.effect("releases a traversal interrupted during its location lookup", () =>
     Effect.gen(function*() {
       const entered = yield* Deferred.make<void>()
