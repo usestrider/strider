@@ -1400,11 +1400,18 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const state = element.getAttribute("aria-checked")
-    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
-      return { state: null, checked: null }
+    const token = element.getAttribute("aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    if (token === "true") return { state: true, checked: true }
+    if (token === "false") return { state: false, checked: false }
+    if (token === "mixed") {
+      return {
+        state: role === "radio" || role === "menuitemradio" || role === "switch" ? false : "mixed",
+        checked: false
+      }
     }
-    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+    // Invalid optional state must not authorize check/uncheck input.
+    const fallback = role === "option" || role === "treeitem" ? null : false
+    return { state: fallback, checked: fallback }
   }
 
   const checkedOf = (element: Element): boolean | null => checkedState(element).checked
