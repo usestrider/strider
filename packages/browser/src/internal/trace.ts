@@ -35,6 +35,7 @@ import * as Expect from "../Expect.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
+import * as TestRun from "../test/TestRun.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -351,6 +352,15 @@ export const start = Effect.fnUntraced(function*(
   settings: Settings,
   scope: Scope.Scope
 ) {
+  const run = yield* Effect.serviceOption(TestRun.TestRun)
+  const info = Option.isSome(run) ? run.value.info : undefined
+  // Copy scalar fields now: export may run in another test or after its retry count changes.
+  const test = info === undefined || info.id === "" ? undefined : {
+    project: info.project,
+    file: info.file,
+    id: info.id,
+    attempt: info.attempt
+  }
   const own = yield* Scope.fork(scope)
   const clock = Recordings.anchor()
   const steps: Array<Step> = []
@@ -848,7 +858,8 @@ export const start = Effect.fnUntraced(function*(
         "unknown",
       wallTime: clock.wall,
       monotonicTime: Recordings.millis(clock.monotonic),
-      options: {}
+      options: {},
+      ...(test === undefined ? {} : { title: test.id, striderTest: test })
     }
     const lines = [header, ...events.map((each) => each.event)].map((line) => JSON.stringify(line)).join("\n")
     files.unshift({ path: "trace.trace", content: `${lines}\n` })

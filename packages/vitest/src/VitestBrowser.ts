@@ -10,6 +10,7 @@ import type * as Browser from "@usestrider/browser/Browser"
 import { TestRun } from "@usestrider/browser/test"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { createHash } from "node:crypto"
 import { recordArtifact, TestRunner } from "vitest"
 
 declare module "vitest" {
@@ -90,6 +91,10 @@ const testRun: TestRun.TestRun = {
  * The browser starts where the layer is built: given to `@effect/vitest`'s `layer`, once for the block, whose tests
  * share it; provided to one effect, as below, once for that effect.
  *
+ * Test identity uses Vitest's global current-test lookup, which is not isolated between concurrent tests.
+ * Capture filenames and start recordings in sequential tests; a shared layer cannot reliably identify
+ * which concurrent test is running.
+ *
  * Vitest's default `testTimeout` is five seconds for the whole test, shorter than Strider's thirty-second budget
  * per operation, so a slow step can end with Vitest's generic timeout before Strider reports its failure.
  * Raise `testTimeout` in your Vitest config to allow time for all the test's operations:
@@ -129,3 +134,42 @@ const testRun: TestRun.TestRun = {
 export const layer = <E, R>(
   backend: Layer.Layer<Browser.Browser, E, R>
 ): Layer.Layer<Browser.Browser | TestRun.TestRun, E, R> => Layer.merge(backend, Layer.succeed(TestRun.TestRun, testRun))
+
+/**
+ * Builds a deterministic trace ZIP filename from a captured test identity.
+ *
+ * **Details**
+ *
+ * The basename contains only ASCII letters, digits, hyphens and underscores, followed by `.zip`. A readable
+ * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID and attempt distinguishes
+ * identities whose prefixes match. Workers and shards do not change the name. Repeated exports for the same
+ * identity use the same name, so choose another directory to keep separate runs or recordings.
+ * Capture `TestRun.info` beside `Trace.record`, before another test or retry starts. No file is written or attached.
+ *
+ * **Example** (Exporting a trace named for its test)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Trace } from "@usestrider/browser"
+ * import { TestRun } from "@usestrider/browser/test"
+ * import { VitestBrowser } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const record = Effect.fn("record")(function*(page: Page.Page) {
+ *   const { info } = yield* TestRun.TestRun
+ *   const name = VitestBrowser.traceFileName(info)
+ *   const trace = yield* Trace.record(page)
+ *   yield* page.getByRole("button", { name: "Pay" }).click()
+ *   yield* trace.exportTrace(`traces/${name}`)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const traceFileName = (info: TestRun.TestInfo): string => {
+  const identity = JSON.stringify([info.project, info.file, info.id, info.attempt])
+  const digest = createHash("sha256").update(identity).digest("hex")
+  const prefix = info.id.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 48) || "test"
+  return `${prefix}-retry-${String(info.attempt).replace(/[^a-zA-Z0-9_-]/g, "-")}-${digest}.zip`
+}

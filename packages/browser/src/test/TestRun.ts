@@ -93,15 +93,15 @@ export interface TestRun {
 /**
  * The service tag for `TestRun`.
  *
- * **Example** (Naming a file after the running test)
+ * **Example** (Reading the running test)
  *
  * ```ts import.meta.vitest
  * import { TestRun } from "@usestrider/browser/test"
  * import { Effect } from "effect"
  *
- * const tracePath = Effect.gen(function*() {
+ * const testIdentity = Effect.gen(function*() {
  *   const { info } = yield* TestRun.TestRun
- *   return `traces/${info.id.replace(/\W+/g, "-")}-attempt-${info.attempt}.zip`
+ *   return { test: info.id, attempt: info.attempt }
  * })
  * ```
  *

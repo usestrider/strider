@@ -11,3 +11,7 @@ The Vitest adapter: a browser layer for `@effect/vitest`, with `TestRun` for the
 *layers*
 
 - `const layer: <E, R>(backend: Layer.Layer<Browser.Browser, E, R>) => Layer.Layer<Browser.Browser | TestRun.TestRun, E, R>`
+
+*constructors*
+
+- `const traceFileName: (info: TestRun.TestInfo) => string`

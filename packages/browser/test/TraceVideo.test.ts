@@ -130,7 +130,7 @@ describe("trace test identity", () => {
       Effect.scoped(Effect.gen(function*() {
         let current = info(attempt)
         const { files } = yield* scenario(undefined, undefined, () => {
-          current = info(99)
+          current = new TestRun.TestInfo({ ...info(99), project: "other", file: "/other.test.ts", id: "another test" })
         }).pipe(
           Effect.provideService(TestRun.TestRun, {
             get info() {
@@ -157,6 +157,16 @@ describe("trace test identity", () => {
   it.effect("keeps standalone headers free of test metadata", () =>
     Effect.scoped(Effect.gen(function*() {
       const { files } = yield* scenario()
+      const header = JSON.parse(new TextDecoder().decode(files[0]!.get("trace.trace")).split("\n")[0]!)
+      assert.notProperty(header, "title")
+      assert.notProperty(header, "striderTest")
+    })))
+  it.effect("omits metadata when the adapter has no running test", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { files } = yield* scenario().pipe(Effect.provideService(TestRun.TestRun, {
+        info: new TestRun.TestInfo({ project: "", file: "", id: "", attempt: 0, worker: "", shard: "" }),
+        attach: () => Effect.void
+      }))
       const header = JSON.parse(new TextDecoder().decode(files[0]!.get("trace.trace")).split("\n")[0]!)
       assert.notProperty(header, "title")
       assert.notProperty(header, "striderTest")
