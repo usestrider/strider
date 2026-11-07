@@ -72,7 +72,7 @@ if (process.argv[2] === "child") {
         child.once("exit", (code) => reject(new Error(`Child exited ${code}`)))
       })
     }
-    for (const action of ["url", "count", "click"]) {
+    for (const action of ["url", "title", "count", "click"]) {
       for (const controlMode of ["named-off", "off"]) {
         for (let pair = -8; pair < 40; pair++) {
           const order = pair % 2 === 0 ? ["on", controlMode] : [controlMode, "on"]

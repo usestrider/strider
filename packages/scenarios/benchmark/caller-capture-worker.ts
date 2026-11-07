@@ -19,7 +19,7 @@ const layer = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
 })).pipe(Layer.provideMerge(NodeServices.layer))
 const site = await start()
 interface Request {
-  action: "url" | "count" | "click" | "stop"
+  action: "url" | "title" | "count" | "click" | "stop"
   calls: number
 }
 // IPC requests are strictly sequential. Install the listener before announcing readiness.
@@ -28,6 +28,7 @@ process.on("message", (request: Request) => receive!(request))
 try {
   await Effect.runPromise(
     Effect.scoped(Effect.gen(function*() {
+      assert.equal(process.env["STRIDER_CAPTURE_LOADED"], process.argv[3])
       const browser = yield* Browser.Browser
       assert.equal(browser.info.version, browsers.chromium.version)
       const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
@@ -61,6 +62,8 @@ try {
           // Construct a fresh operation inside the timer, including getter construction.
           if (request.action === "url") {
             assert.equal(yield* page.url, `${site.origin}/benchmark`)
+          } else if (request.action === "title") {
+            assert.equal(yield* page.title, "Benchmark")
           } else if (request.action === "count") {
             assert.equal(yield* count.count, 1)
           } else {

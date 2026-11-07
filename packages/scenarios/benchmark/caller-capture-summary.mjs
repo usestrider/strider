@@ -18,8 +18,22 @@ const stats = (values) => {
   }
 }
 const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length
+// Deterministic percentile bootstrap of whole paired batches, never individual correlated calls.
+let seed = 283
+const interval = (values) => {
+  const estimates = []
+  for (let i = 0; i < 10000; i++) {
+    const sample = values.map(() => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      return values[Math.floor(seed / 4294967296 * values.length)]
+    })
+    estimates.push(stats(sample).median)
+  }
+  estimates.sort((a, b) => a - b)
+  return [estimates[249], estimates[9749]]
+}
 const summary = []
-for (const action of ["url", "count", "click"]) {
+for (const action of ["url", "title", "count", "click"]) {
   for (const control of ["named-off", "off"]) {
     const rows = data.raw.filter((row) => row.action === action && row.control === control)
     const on = rows.filter((row) => row.mode === "on")
@@ -35,6 +49,12 @@ for (const action of ["url", "count", "click"]) {
       control,
       onMs: stats(on.flatMap((row) => row.timings)),
       controlMs: stats(off.flatMap((row) => row.timings)),
+      medianPairedMsBootstrap95: interval(paired.map((pair) => pair.ms)),
+      medianPairedPercentBootstrap95: interval(paired.map((pair) => pair.percent)),
+      pairedMsByOrder: {
+        onFirst: stats(paired.filter((pair) => pair.pair % 2 === 0).map((pair) => pair.ms)),
+        controlFirst: stats(paired.filter((pair) => pair.pair % 2 !== 0).map((pair) => pair.ms))
+      },
       pairedMs: stats(paired.map((pair) => pair.ms)),
       pairedPercent: stats(paired.map((pair) => pair.percent)),
       pairedSharePercent: stats(paired.map((pair) => pair.sharePercent)),
