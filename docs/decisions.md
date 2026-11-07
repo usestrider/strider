@@ -1271,10 +1271,9 @@ and reconstructed failures do not inherit source classification, because arbitra
 type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
 and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.
 
-
 ## Operation caller stacks
 
-Capture caller stacks in the operation constructor before calling the formatting helper,
+Capture six caller frames in the operation constructor before calling the formatting helper,
 and defer formatting until a recording or failure rendering needs the frame. This keeps construction-time source
 links for prebuilt operations while reducing work on every unrecorded successful call. When capture is enabled but
 no user caller is available, retain the operation name without a location in failures, and omit unavailable source

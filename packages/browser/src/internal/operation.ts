@@ -569,6 +569,8 @@ const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
   let error: Error | undefined
   if (limit !== 0) {
     try {
+      // Six frames: namedWith, named, up to three library wrappers, then the caller.
+      // Locator.fill needs all six; TraceSources tests its preconstructed guarded caller.
       // Capture here so the formatting helper does not consume a caller frame.
       Error.stackTraceLimit = 6
       error = new Error()
