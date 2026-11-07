@@ -567,7 +567,11 @@ describe("WebKit launcher", () => {
       behavior: (spawn: number) => {
         readonly held: boolean
         readonly silentSession?: boolean | undefined
-        readonly closeHandshake?: "before session reply" | "before automation target" | undefined
+        readonly closeHandshake?:
+          | "before session reply"
+          | "before automation target"
+          | "before anchor announcement"
+          | undefined
         readonly foreign?: boolean | undefined
         readonly collides?: boolean | undefined
         readonly vanishes?: boolean | undefined
@@ -717,18 +721,42 @@ describe("WebKit launcher", () => {
           const handshake = behavior(ports.indexOf(port)).closeHandshake
           if (handshake !== undefined) {
             const sent = yield* Deferred.make<void>()
-            let replied = false
+            const commands = [yield* Deferred.make<number>(), yield* Deferred.make<number>()]
+            let command = 0
+            let read = 0
+            const frame = (label: string, type: string, values: GVariant.Value) => {
+              const name = new TextEncoder().encode(`${label}\0`)
+              const parameters = GVariant.encode(type, values)
+              const bytes = new Uint8Array(5 + name.length + parameters.length)
+              new DataView(bytes.buffer).setUint32(0, name.length + parameters.length, false)
+              bytes[4] = 1
+              bytes.set(name, 5)
+              bytes.set(parameters, 5 + name.length)
+              return [bytes] as const
+            }
             const pull = Deferred.await(sent).pipe(Effect.andThen(Effect.suspend(() => {
-              if (handshake === "before automation target" && !replied) {
-                replied = true
-                const name = new TextEncoder().encode("DidStartAutomationSession\0")
-                const parameters = GVariant.encode("(ss)", ["MiniBrowser", "2.54.1"])
-                const frame = new Uint8Array(5 + name.length + parameters.length)
-                new DataView(frame.buffer).setUint32(0, name.length + parameters.length, false)
-                frame[4] = 1
-                frame.set(name, 5)
-                frame.set(parameters, 5 + name.length)
-                return Effect.succeed([frame] as const)
+              const step = read++
+              if (handshake !== "before session reply" && step === 0) {
+                return Effect.succeed(frame("DidStartAutomationSession", "(ss)", ["MiniBrowser", "2.54.1"]))
+              }
+              if (handshake === "before anchor announcement") {
+                if (step === 1) {
+                  return Effect.succeed(frame("SetTargetList", "(ta(tsssb))", [
+                    1n,
+                    [[1n, "Automation", "", "", false], [2n, "WebPage", "", "", false]]
+                  ]))
+                }
+                if (step === 2 || step === 3) {
+                  return Deferred.await(commands[step - 2]!).pipe(
+                    Effect.map((id) =>
+                      frame("SendMessageToFrontend", "(tts)", [
+                        1n,
+                        1n,
+                        JSON.stringify({ id, result: { handle: `window-${step}`, presentation: "Window" } })
+                      ])
+                    )
+                  )
+                }
               }
               return Effect.fail(
                 new Socket.SocketError({
@@ -736,10 +764,20 @@ describe("WebKit launcher", () => {
                 })
               )
             })))
-            const write = () =>
+            const write = (bytes: Uint8Array) =>
               Effect.sync(() => {
                 written.push(port)
                 Deferred.doneUnsafe(sent, Effect.void)
+                const nul = bytes.indexOf(0, 5)
+                const name = new TextDecoder().decode(bytes.subarray(5, nul))
+                if (name === "SendMessageToBackend") {
+                  const values = GVariant.decode("(tts)", bytes.subarray(nul + 1), true) as ReadonlyArray<
+                    GVariant.Value
+                  >
+                  const message = JSON.parse(values[2] as string)
+                  assert.strictEqual(message.method, "Automation.createBrowsingContext")
+                  Deferred.doneUnsafe(commands[command++]!, Effect.succeed(message.id))
+                }
               })
             return { pull, upgrade: () => Effect.void, write, writeAll: write, close: Effect.void }
           }
@@ -766,12 +804,18 @@ describe("WebKit launcher", () => {
       return { exit, ports, stopped, connected, closed, written }
     })
 
-    for (const stage of ["before session reply", "before automation target"] as const) {
+    for (const stage of ["before session reply", "before automation target", "before anchor announcement"] as const) {
       it.effect(`reports socket loss ${stage} instead of waiting for the startup deadline`, () =>
         Effect.gen(function*() {
-          const result = yield* scriptedLaunch(() => ({ held: true, closeHandshake: stage }))
+          // The live startup deadline is ten seconds; the independent one-second bound must win
+          // if loss is only reported at that deadline.
+          const result = yield* scriptedLaunch(
+            () => ({ held: true, closeHandshake: stage }),
+            Effect.void,
+            "10 seconds"
+          ).pipe(Effect.timeout("1 second"))
           assert.strictEqual(result.ports.length, 1)
-          assert.deepStrictEqual(result.written, result.ports)
+          assert.strictEqual(result.written.length, stage === "before anchor announcement" ? 5 : 1)
           assert.deepStrictEqual(result.closed, result.ports)
           assert.deepStrictEqual(result.stopped, [0])
           assert(result.exit._tag === "Failure")
