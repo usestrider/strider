@@ -3,6 +3,7 @@ import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
 import { pipeObserver } from "./tracePipe.ts"
+import { stderrText } from "./traceStderr.ts"
 import { prepareChild } from "./traceTransfer.ts"
 import type { SpawnOptions } from "./traceTransfer.ts"
 
@@ -27,7 +28,7 @@ if (!prototype[patched]) {
       const emit = this.stderr.emit
       this.stderr.emit = function(event: string, ...values: Array<unknown>) {
         if (event === "data") {
-          const text = String(values[0])
+          const text = stderrText(values[0])
           observedBytes += Buffer.byteLength(text)
           trace("stderr", text)
         }

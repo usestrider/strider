@@ -31,19 +31,23 @@ const filename = (task: RunnerTask, suffix: string) =>
   path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-${suffix}.ndjson`)
 const save = (file: string, trace: TraceBuffer, scope: string) => {
   fs.mkdirSync(directory, { recursive: true })
-  fs.writeFileSync(
-    file,
-    [
+  const fd = fs.openSync(file, "w")
+  try {
+    fs.writeSync(
+      fd,
       JSON.stringify({
         kind: "context",
-        scope,
+        scope: scope.slice(0, 4096),
         ...(file === sharedFile ? {} : { sharedArtifact: path.basename(sharedFile) }),
         note:
-          "Bounded tail; send records attempted writes. Shared connections can deliver background events during a test."
-      }),
-      ...trace.entries().map((entry) => JSON.stringify(entry))
-    ].join("\n") + "\n"
-  )
+          "Independent parent/child tails; child selection uses origin timestamps, output sequence orders collection."
+      }) + "\n"
+    )
+    // Serialize one line at a time instead of constructing a second artifact-sized string.
+    for (const entry of trace.entries()) fs.writeSync(fd, JSON.stringify(entry) + "\n")
+  } finally {
+    fs.closeSync(fd)
+  }
   console.error(`Integration failure trace: ${file}`)
 }
 install({
@@ -76,7 +80,8 @@ install({
               fs.appendFileSync(
                 done.file,
                 JSON.stringify({
-                  ...entry,
+                  timestamp: new Date().toISOString(),
+                  connection: "recorder",
                   kind: "overflow",
                   payload: "Late cleanup budget exhausted; subsequent entries omitted",
                   sequence: done.sequence

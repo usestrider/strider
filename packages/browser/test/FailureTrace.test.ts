@@ -537,10 +537,18 @@ it("keeps child transfer overflow markers out of the parent history budget", asy
     trace.record("child-transfer", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
   )
   const directory = scope.open()
-  fs.writeFileSync(path.join(directory, "0-0"), JSON.stringify({
-    sequence: 2, timestamp: "2026-11-07T12:00:00.000Z", connection: "daemon", kind: "receive", payload: "tail", pid: 1
-  }) + "\n")
+  fs.writeFileSync(
+    path.join(directory, "0-0"),
+    JSON.stringify({
+      sequence: 2,
+      timestamp: "2026-11-07T12:00:00.000Z",
+      connection: "daemon",
+      kind: "receive",
+      payload: "tail",
+      pid: 1
+    }) + "\n"
+  )
   scope.close()
-  expect(trace.entries().map(entry => entry.payload)).toContain("PARENT_NEAR_FULL")
-  expect(trace.entries().some(entry => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_NEAR_FULL")
+  expect(trace.entries().some((entry) => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
 })

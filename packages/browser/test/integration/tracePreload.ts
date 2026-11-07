@@ -5,6 +5,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { install, TraceBuffer } from "./failureTrace.ts"
 import { instrument } from "./tracePlugin.ts"
+import { stderrText } from "./traceStderr.ts"
 import { processSlots, segmentBytes, transferVariable } from "./traceTransfer.ts"
 
 const directory = process.env[transferVariable]
@@ -12,15 +13,19 @@ if (directory !== undefined) {
   let slot: number | undefined
   for (let candidate = 0; candidate < processSlots; candidate++) {
     try {
-      const fd = fs.openSync(path.join(directory, `${candidate}.claim`), "wx", 0o600)
-      fs.closeSync(fd)
+      fs.unlinkSync(path.join(directory, `${candidate}.claim`))
       slot = candidate
       break
     } catch { /* Another process owns this slot, or the originating test has finished. */ }
   }
   if (slot === undefined) {
     try {
-      fs.writeFileSync(path.join(directory, "overflow"), "Child process slot budget exhausted", { flag: "wx" })
+      const fd = fs.openSync(path.join(directory, "overflow"), "r+")
+      try {
+        fs.writeSync(fd, "Child process slot budget exhausted")
+      } finally {
+        fs.closeSync(fd)
+      }
     } catch { /* Closed or already marked. */ }
   }
   if (slot !== undefined) {
@@ -46,10 +51,13 @@ if (directory !== undefined) {
           segment = 1 - segment
           bytes = 0
         }
-        fs.writeFileSync(path.join(directory, `${slot}-${segment}`), line, {
-          flag: bytes === 0 ? "w" : "a",
-          mode: 0o600
-        })
+        const fd = fs.openSync(path.join(directory, `${slot}-${segment}`), "r+")
+        try {
+          if (bytes === 0) fs.ftruncateSync(fd, 0)
+          fs.writeSync(fd, line, bytes, "utf8")
+        } finally {
+          fs.closeSync(fd)
+        }
         bytes += Buffer.byteLength(line)
       } catch {
         stopped = true
@@ -67,7 +75,7 @@ if (directory !== undefined) {
     // Observe the daemon's own writes too: its stderr is redirected to a startup file by the shell.
     const stderrWrite = process.stderr.write
     process.stderr.write = function(this: typeof process.stderr, ...args: Parameters<typeof stderrWrite>) {
-      write(lifecycle, "node-stderr", String(args[0]))
+      write(lifecycle, "node-stderr", stderrText(args[0]))
       return stderrWrite.apply(this, args)
     } as typeof stderrWrite
     process.on("exit", (code) => write(lifecycle, "node-exit", { code }))

@@ -20,16 +20,37 @@ export class TransferScope {
   open() {
     if (this.directory === undefined) {
       this.directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-test-trace-"))
+      // Children claim slots by removing a token. They only open existing files: no writer can
+      // add directory entries while collection/removal runs, even with an already-open descriptor.
+      for (let slot = 0; slot < processSlots; slot++) {
+        fs.writeFileSync(path.join(this.directory, `${slot}.claim`), "")
+        for (let segment = 0; segment < 2; segment++) {
+          fs.writeFileSync(path.join(this.directory, `${slot}-${segment}`), "")
+        }
+      }
+      fs.writeFileSync(path.join(this.directory, "overflow"), "")
       this.record = this.connect()
     }
     return this.directory
   }
   close() {
-    const directory = this.directory
-    if (directory === undefined) return
+    const writerDirectory = this.directory
+    if (writerDirectory === undefined) return
+    const directory = `${writerDirectory}.closed`
+    // Retire the only path children know before reading. Existing descriptors can finish writes,
+    // but pre-created files opened without O_CREAT cannot repopulate a directory during removal.
+    fs.renameSync(writerDirectory, directory)
+    let markerSequence = 0
+    const overflow = (payload: unknown) =>
+      this.record?.("overflow", payload, {
+        pid: 0,
+        connection: "recorder:child-transfer",
+        sequence: ++markerSequence,
+        timestamp: new Date().toISOString()
+      })
     try {
-      if (fs.existsSync(path.join(directory, "overflow"))) {
-        this.record?.("overflow", "Child process slot budget exhausted")
+      if (fs.statSync(path.join(directory, "overflow")).size > 0) {
+        overflow("Child process slot budget exhausted")
       }
       for (let slot = 0; slot < processSlots; slot++) {
         const entries: Array<RecordedChild> = []
@@ -55,7 +76,7 @@ export class TransferScope {
         }
         entries.sort((a, b) => a.sequence - b.sequence)
         if (entries[0]?.sequence && entries[0].sequence > 1) {
-          this.record?.("overflow", { slot, note: "Earlier child records evicted" })
+          overflow({ slot, note: "Earlier child records evicted" })
         }
         for (const entry of entries) {
           const { payload, kind, ...origin } = entry
