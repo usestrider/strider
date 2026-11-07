@@ -336,6 +336,68 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  for (const order of ["in order", "out of order"] as const) {
+    it.effect(`preserves an announced traversal commit while overlapping replies arrive ${order}`, () =>
+      Effect.gen(function*() {
+        const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        const entered = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        let calls = 0
+        const { facts, page, state, sent } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            const call = calls++
+            return Effect.andThen(Deferred.succeed(entered[call]!, undefined), Deferred.await(gates[call]!))
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[0])
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "announced",
+          url: "http://announced.example/",
+          timestamp: 1
+        }, { state })
+        const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[1])
+        const commit = () =>
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: page.bidi,
+            navigation: "announced",
+            url: "http://announced.example/",
+            timestamp: 2
+          }, { state })
+        commit()
+        const replies = order === "in order" ? [0, 1] : [1, 0]
+        yield* Deferred.succeed(gates[replies[0]!]!, undefined)
+        const one = yield* Fiber.join(replies[0] === 0 ? first : second)
+        yield* Deferred.succeed(gates[replies[1]!]!, undefined)
+        const two = yield* Fiber.join(replies[1] === 0 ? first : second)
+        assert(Option.isSome(one) && Option.isSome(two))
+        const firstId = order === "in order" ? one.value : two.value
+        const secondId = order === "in order" ? two.value : one.value
+        commit()
+        yield* state.buffer.flush
+        const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(starts, 1)
+        assert(starts[0]!._tag === "NavigationStarted")
+        assert.strictEqual(starts[0]!.navigation, firstId)
+        assert.strictEqual(starts[0]!.initiatedAs, "traversal")
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1, "an ambiguous second command has no outcome")
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.strictEqual(ended[0]!.navigation, firstId)
+        assert.notStrictEqual(ended[0]!.navigation, secondId)
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
+        assert.isFalse(sent.includes("script.evaluate"))
+        assert.strictEqual(page.restoring, undefined)
+        assert.lengthOf(page.expected.list, 0)
+      }))
+  }
+
   it.effect("keeps an invalidated unannounced restoration ambiguous until a document is observed", () =>
     Effect.gen(function*() {
       const { facts, page, realm, state, sent } = yield* withPage({
