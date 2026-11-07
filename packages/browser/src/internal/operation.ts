@@ -534,27 +534,39 @@ const libraryPaths = /\/(?:src|dist)\/$/.test(libraryDirectory.pathname)
   : [Recorders.filePath(libraryDirectory.href)]
 
 /** Synchronous public wrappers and getters still have their caller when they construct an operation. */
-const namedCaller = (): string | undefined => {
+const namedCaller = (): (() => string | undefined) | undefined => {
   const limit = Error.stackTraceLimit
   if (limit === 0) return undefined
-  let stack: string | undefined
+  let error: Error | undefined
   try {
     Error.stackTraceLimit = 20
-    stack = new Error().stack
+    error = new Error()
   } catch {
     return undefined
   } finally {
     Error.stackTraceLimit = limit
   }
-  for (const line of stack?.split("\n").slice(1) ?? []) {
-    const location = Recorders.location(line)
-    if (location === undefined) continue
-    if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
-    // Once execution has entered Effect, the immediate public call has already returned.
-    if (/\/effect\/(?:src|dist)\//.test(location.file)) return undefined
-    return line.trim()
+  let call: string | undefined
+  return () => {
+    if (error === undefined) return call
+    const captured = error
+    // Release V8's structured call sites after the first read, including when no caller is available.
+    error = undefined
+    try {
+      for (const line of captured.stack?.split("\n").slice(1) ?? []) {
+        const location = Recorders.location(line)
+        if (location === undefined) continue
+        if (libraryPaths.some((directory) => location.file.startsWith(directory))) continue
+        // Once execution has entered Effect, the immediate public call has already returned.
+        if (/\/effect\/(?:src|dist)\//.test(location.file)) break
+        call = line.trim()
+        break
+      }
+    } catch {
+      // A custom stack formatter may fail; caller capture remains optional.
+    }
+    return call
   }
-  return undefined
 }
 
 /**
@@ -580,7 +592,7 @@ const namedWith = (name: string, options: Spans.Options, fromFn: boolean) => {
         (parent) =>
           call === undefined || fromFn && Recorders.isFrame(parent) && parent?.name === name
             ? parent
-            : Recorders.frame(name, () => call, parent)
+            : Recorders.frame(name, call, parent)
       )
     )
 }
