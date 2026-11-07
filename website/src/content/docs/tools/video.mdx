@@ -78,14 +78,5 @@ option names.
 - **The recording ends with its page.** Closing the scope, page or context ends it; a writer then has up to five
   seconds on the browser's clock to finish, and a writer that fails fails `file`.
 
-Chromium and WebKit recordings written by `VideoWriter.layerFfmpeg` preserve capture timestamps, so the first
-frame can have a nonzero timestamp. FFmpeg can then exit successfully with no picture when extracting near the
-end. For a near-end picture, put `-seek_timestamp 1` before the input seek, as verified with FFmpeg 9.0.1:
-
-```sh
-ffmpeg -seek_timestamp 1 -sseof -0.01 -i recording.webm -frames:v 1 -fps_mode passthrough near-end.png
-```
-
-This extracts a picture near the end, which need not be the exact last frame. When the exact last picture matters,
-decode the video and select the last frame by its decoded frame index. The flag does not ensure output if the seek
-falls after the last frame's timestamp, such as when the final packet lasts longer than the seek distance.
+Chromium and WebKit recordings show the first captured picture from time zero, while keeping each captured
+frame at its original time and repeating the final picture at recording stop.

@@ -160,6 +160,8 @@ describe("WebKit polled video", () => {
             const info = probe(file)
             const video = info.streams[0]
             assert.strictEqual(video.codec_name, "vp8")
+            assert.strictEqual(samples[0]!.at, 0)
+            assert.strictEqual(Number(info.format.start_time), 0)
             assert.strictEqual(Number(video.nb_read_frames), samples.length)
             assert.closeTo(Number(info.format.duration), samples.at(-1)!.at / 1e9, 0.002)
             assert.deepStrictEqual([video.width, video.height], [640, 480])

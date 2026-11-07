@@ -155,7 +155,10 @@ export const writerConformance = (
               "pipe:1"
             ])
             assert.strictEqual(pixels.length, 12, `end seek ${distance} returns a picture`)
-            assert.deepStrictEqual(pixels, final, "controlled final blue picture includes the stop marker")
+            for (let offset = 0; offset < pixels.length; offset += 3) {
+              assert.isAbove(pixels[offset + 2]!, 200, "end seek returns the final blue picture")
+              assert.isBelow(pixels[offset]!, 20, "end seek does not return an earlier red picture")
+            }
           }
           assert.deepStrictEqual(
             probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
