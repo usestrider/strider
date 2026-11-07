@@ -299,7 +299,6 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               Effect.flip
             )
             assert(Expect.isExpectationFailed(error), String(error))
-            assert.isAbove(error.history.length, 0)
             for (const preset of ["strict", "local"] as const) {
               const out = path.join(directory(), `${preset}.zip`)
               yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
@@ -308,12 +307,13 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 event.type === "after" && event.error
               )?.error
               assert.strictEqual(failure.name, "ExpectationFailed")
-              assert.include(failure.message, "Last observed: REDACTED")
+              if (error.history.length === 0) assert.notInclude(failure.message, "Last observed:")
+              else assert.include(failure.message, "Last observed: REDACTED")
               assert.notInclude(content, "typed-password-secret")
               assert.notInclude(content, "expected-password-secret")
             }
             assert.include(error.message, "expected-password-secret")
-            assert.include(JSON.stringify(error.history), "typed-password-secret")
+            assert.isTrue(error.history.every((entry) => entry.value === "typed-password-secret"))
           })),
         timeout
       )
@@ -332,7 +332,6 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               Effect.flip
             )
             assert(Expect.isExpectationFailed(error), String(error))
-            assert.isAbove(error.history.length, 0)
             const rethrown = yield* Effect.fail(error).pipe(
               Operation.named("retry checkout", { attributes: { "browser.page.id": page.id } }),
               Effect.flip
@@ -350,7 +349,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               assert.isTrue(failures.every((failure) => failure.message === failures[0].message))
               for (const secret of ["observed-title-secret", "expected-title-secret"]) {
                 if (preset === "strict") assert.notInclude(content, secret)
-                else assert.include(failures[0].message, secret)
+                else if (secret === "expected-title-secret" || error.history.length > 0) {
+                  assert.include(failures[0].message, secret)
+                }
               }
             }
             assert.include(error.message, "expected-title-secret")

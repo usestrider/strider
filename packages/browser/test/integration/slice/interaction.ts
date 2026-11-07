@@ -2696,6 +2696,14 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const page = yield* Browser.newPage()
                     yield* page.goto(url)
                     const target = page.locator("#target")
+                    const expectedPoint = yield* page.evaluateInMainWorld(() => {
+                      const element = document.querySelector("#target")!
+                      const rect = element.getBoundingClientRect()
+                      const style = getComputedStyle(element)
+                      const x = Math.round(rect.left + parseFloat(style.borderLeftWidth) + 7) - rect.left
+                      const y = Math.round(rect.top + parseFloat(style.borderTopWidth) + 9) - rect.top
+                      return `target:${x}:${y}`
+                    })
                     const action = () =>
                       checked
                         ? target.check({ position: { x: 7, y: 9 } })
@@ -2705,11 +2713,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                         const error = yield* action().pipe(Effect.flip)
                         assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
                         assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                       } else {
                         yield* action()
                         assert.strictEqual(yield* (own ? target : page.locator("#box")).isChecked, checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                         yield* page.evaluateInMainWorld(() => {
                           document.querySelector("#out")!.textContent = "reset"
                         })

@@ -274,3 +274,23 @@ describe("Chromium video writer", () => {
 })
 
 writerConformance("ffmpeg", VideoWriter.layerFfmpeg({ path: process.env["STRIDER_FFMPEG"]! }))
+
+// Keep optional-service refusal separate from conformance with a real encoder.
+describe("Chromium video without a writer", () => {
+  layer(Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(NodeServices.layer)), {
+    excludeTestServices: true
+  })((it) => {
+    it.effect("refuses video when no writer is configured", () =>
+      Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        assert.strictEqual(
+          (yield* browser.capabilities).entries.find((entry) => entry.name === "capability.video")!.status,
+          "unsupported"
+        )
+        const page = yield* Browser.newPage()
+        const error = yield* page.capability(Capability.Video).pipe(Effect.flip)
+        assert(Capability.isCapabilityError(error), String(error))
+        assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "capability.video" })
+      }), 60_000)
+  })
+})
