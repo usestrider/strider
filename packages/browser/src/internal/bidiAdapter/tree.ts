@@ -252,6 +252,7 @@ export const addNavigable = (state: State, info: {
   const parent = info.parent === null || info.parent === undefined ? undefined : state.navigables.get(info.parent)
   if (info.parent !== null && info.parent !== undefined && parent === undefined) return undefined
   const context = contextFor(state, info.userContext)
+  context.proxyUsed = true
   const navigable: NavigableEntry = {
     bidi: info.context,
     id: state.ids.navigable(),

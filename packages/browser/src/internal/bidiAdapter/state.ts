@@ -29,6 +29,8 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  /** A navigable has existed, so setup rollback cannot establish that the proxy cache stayed unused. */
+  proxyUsed?: boolean | undefined
   proxy?: Adapter.ProxyOptions | undefined
   proxyIntercept?: Network.Intercept | undefined
   proxyAttempts?: Set<string> | undefined
@@ -167,7 +169,11 @@ export interface HandleEntry {
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface State {
-  readonly proxyBindings: Map<string, Adapter.ProxyOptions["credentials"]>
+  readonly proxyBindings: Map<string, {
+    readonly credentials: Adapter.ProxyOptions["credentials"]
+    pending: number
+    retained: boolean
+  }>
   /** Connection-owned declaration cleanup can finish after its caller stops waiting. */
   readonly cleanupScope: Scope.Scope
   readonly options: Adapter.ConnectOptions

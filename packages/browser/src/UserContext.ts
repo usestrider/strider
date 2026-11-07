@@ -397,8 +397,10 @@ export interface Options {
    * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
    * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
    * Firefox credentials require a freshly launched browser. Firefox shares its proxy authentication cache:
-   * each endpoint keeps its first credential pair (or no credentials) for the connection's life. A conflicting
-   * configuration is refused with `Unsupported`, even after the earlier context closes.
+   * each successfully created context binds its endpoint's credential pair (or no credentials) for the connection's
+   * life. Conflicting pending creations are refused. A confirmed creation rejection or unused setup
+   * rollback releases only that creation's reservation; an uncertain outcome keeps it. Conflicting settings fail
+   * with `Unsupported`, even after a successfully created context closes.
    * SOCKS and HTTPS proxy endpoints are refused with `Unsupported`.
    *
    * **Example** (An authenticated proxy)

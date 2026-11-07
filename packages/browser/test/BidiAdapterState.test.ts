@@ -2774,13 +2774,19 @@ describe("Firefox proxy reservation lifetime", () => {
     it.effect(`releases only its own concurrent reservation when the other creation ${otherSucceeds ? "succeeds" : "fails"}`, () =>
       Effect.gen(function*() {
         const first = yield* Deferred.make<void>()
+        const firstEntered = yield* Deferred.make<void>()
         const second = yield* Deferred.make<void>()
         const entered = yield* Deferred.make<void>()
         let calls = 0
         const { state } = yield* withPage({
           "browser.createUserContext": Effect.suspend(() => {
             const call = ++calls
-            if (call === 1) return Deferred.await(first).pipe(Effect.andThen(Effect.fail(refused())))
+            if (call === 1) {
+              return Deferred.succeed(firstEntered, undefined).pipe(
+                Effect.andThen(Deferred.await(first)),
+                Effect.andThen(Effect.fail(refused()))
+              )
+            }
             if (call === 2) {
               return Deferred.succeed(entered, undefined).pipe(
                 Effect.andThen(Deferred.await(second)),
@@ -2792,6 +2798,7 @@ describe("Firefox proxy reservation lifetime", () => {
           "network.addIntercept": { intercept: "auth" }
         })
         const a = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
+        yield* Deferred.await(firstEntered)
         const b = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
         yield* Deferred.await(entered)
         yield* Deferred.succeed(first, undefined)

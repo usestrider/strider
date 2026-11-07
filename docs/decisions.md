@@ -1308,9 +1308,11 @@ loopback destinations direct. Use native per-context proxy settings on CDP/BiDi 
 overrides for launched stock WebKit, whose command-line proxy setting does not apply in automation mode. Keep
 proxy credentials separate from endpoint URLs and Redacted through protocol encoding. Answer only positively
 identified proxy challenges, once per request, retaining website auth routes. Reject WebKit credentials and
-configured credentials on attached Firefox. Firefox reserves each endpoint's first credential pair (including none)
-for the connection lifetime and refuses conflicts because its native proxy auth cache crosses context boundaries
-and survives their removal. Reject silently reusing another context's credentials, clearing a shared cache,
+configured credentials on attached Firefox. Firefox reserves each endpoint's credential pair (including none)
+synchronously before creation and retains it for the connection lifetime after successful creation or an uncertain
+outcome, because its native proxy auth cache crosses context boundaries and survives removal. Each pending creation
+owns a share; confirmed pre-creation rejection or confirmed unused rollback releases only that share. Reject both
+permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
 preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
 shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
 unverified wildcard, CIDR, SOCKS or HTTPS-to-proxy configurations.

@@ -472,9 +472,11 @@ Configured credentials are submitted at most once per request, then canceled if 
 challenges continue through the ordinary obligations and auth routes; Firefox's missing challenge fields are read
 from WWW-Authenticate, never inferred from its potentially stale 407 status. Attempt state is removed when requests
 finish or their owner ends. Firefox's native proxy auth cache spans user contexts: a connection reserves each proxy
-endpoint's first credentials (including none) and refuses conflicting configurations for its lifetime. Configured
-credentials on an attached Firefox are refused because the pre-existing cache is unowned. This binding survives
-context cleanup intentionally; interceptor and request state do not.
+endpoint's credentials (including none) before yielding. Each creation owns a share: a confirmed pre-creation
+rejection or confirmed unused rollback releases only its share. Another pending creation, prior successful context,
+observed navigable or uncertain remote outcome retains the binding. Conflicting configurations are refused. Configured
+credentials on an attached Firefox are refused because the pre-existing cache is unowned. Retained bindings survive
+later context cleanup; interceptor and request state do not.
 
 
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.

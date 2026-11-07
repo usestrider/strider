@@ -89,7 +89,9 @@ credentials are submitted once per request and a second proxy challenge is cance
 cause an endless loop. Basic authentication is covered by the browser tests.
 
 Firefox credentials require a freshly launched browser. Firefox shares cached proxy credentials across contexts,
-so the first credential pair for an endpoint, including no credentials, holds for the browser connection's life.
-A later conflicting configuration fails with `Unsupported`, even after the earlier context closes. Use separate
+so a successfully created context binds its endpoint's credential pair, including no credentials, for the browser
+connection's life. Conflicting pending creations also fail with `Unsupported`. A confirmed rejection before creation
+or a confirmed unused setup rollback releases that creation's reservation. A timeout or uncertain removal keeps it,
+because the context may exist or have used the cache. Closing a successfully created context keeps its binding. Use separate
 proxy endpoints or browser launches when credentials differ. Attaching to Firefox refuses configured proxy
 credentials because its existing cache is outside the program's ownership.

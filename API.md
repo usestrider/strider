@@ -350,8 +350,9 @@ interface Emulation {
   auth routes retain their decisions. Passwords stay `Redacted` through protocol encoding and are absent from logs
   and trace exports. Firefox uses Proxy-Authenticate to identify proxy challenges and WWW-Authenticate when its
   origin challenge metadata is missing. Firefox credentials require a freshly launched browser: a proxy endpoint's
-  first credential pair (including none) is bound for the connection's life because Firefox shares its auth cache
-  across contexts. Conflicting settings fail `Unsupported{userContexts.proxy.credentials.isolation}`, including
+  successful context binds its credential pair (including none) for the connection's life because Firefox shares
+  its auth cache across contexts. Pending creations also reserve their pair. Confirmed pre-creation rejection or
+  confirmed unused setup rollback releases only that creation's share; uncertain outcomes retain it. Conflicting settings fail `Unsupported{userContexts.proxy.credentials.isolation}`, including
   after context removal; attached Firefox credentials fail `Unsupported{userContexts.proxy.credentials}`.
   Launched WebKit routes through isolated child-process environment settings and refuses credentials with
   `Unsupported{userContexts.proxy.credentials}`. An existing WebKit process cannot be reconfigured.

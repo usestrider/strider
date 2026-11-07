@@ -11,6 +11,7 @@ import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Network from "../../bidi-protocol/Network.ts"
 import type * as Download from "../../Download.ts"
+import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
@@ -93,6 +94,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
+  let settle = (_retain: boolean): void => {}
   if (Option.isSome(options.proxy)) {
     const { server, credentials } = options.proxy.value
     if (credentials !== undefined && state.options.ownership !== "launched") {
@@ -103,9 +105,10 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         )
       )
     }
-    const previous = state.proxyBindings.get(server)
+    const binding = state.proxyBindings.get(server)
+    const previous = binding?.credentials
     if (
-      state.proxyBindings.has(server) && (previous?.username !== credentials?.username ||
+      binding !== undefined && (previous?.username !== credentials?.username ||
         (previous !== undefined && credentials !== undefined &&
           Redacted.value(previous.password) !== Redacted.value(credentials.password)))
     ) {
@@ -116,30 +119,56 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         )
       )
     }
-    // Firefox's proxy auth cache outlives user contexts. Keep this binding for the connection's lifetime too.
-    // Reserve before yielding so concurrent context creations cannot admit conflicting credentials.
-    state.proxyBindings.set(server, credentials)
+    // Reserve before yielding. Each creation owns one share; another pending or successful creation
+    // must survive this one's confirmed rejection or unused rollback.
+    const reservation = binding ?? { credentials, pending: 0, retained: false }
+    reservation.pending++
+    state.proxyBindings.set(server, reservation)
+    let pending = true
+    settle = (retain) => {
+      if (!pending) return
+      pending = false
+      reservation.pending--
+      reservation.retained ||= retain
+      if (!reservation.retained && reservation.pending === 0 && state.proxyBindings.get(server) === reservation) {
+        state.proxyBindings.delete(server)
+      }
+    }
   }
   return yield* Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       // Keep ownership of a successful create reply until setup has installed its rollback path.
-      const { userContext } = yield* Kit.protocol(state.send(BrowserBidi.createUserContext({
-        ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
-        ...(Option.isSome(options.proxy)
-          ? {
-            proxy: {
-              proxyType: "manual",
-              httpProxy: options.proxy.value.server,
-              sslProxy: options.proxy.value.server,
-              noProxy: [...options.proxy.value.bypass]
+      const { userContext } = yield* Kit.protocol(
+        state.send(BrowserBidi.createUserContext({
+          ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
+          ...(Option.isSome(options.proxy)
+            ? {
+              proxy: {
+                proxyType: "manual",
+                httpProxy: options.proxy.value.server,
+                sslProxy: options.proxy.value.server,
+                noProxy: [...options.proxy.value.bypass]
+              }
             }
-          }
-          : {})
-      })))
+            : {})
+        })).pipe(Effect.onError((cause) =>
+          Effect.sync(() => {
+            const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+            // Only local encode failure or a definite pre-creation refusal proves no context exists.
+            // A lost/undecodable reply, interruption or unknown remote error may follow successful creation.
+            if (
+              error instanceof Protocol.ProtocolError &&
+              (error.reason._tag === "Encode" || error.reason._tag === "Unsupported" ||
+                (error.reason._tag === "Rejected" && error.reason.reason === "InvalidArgument"))
+            ) settle(false)
+          })
+        ))
+      )
       const entry: ContextEntry = {
         id: state.ids.userContext(),
         bidi: userContext,
         removing: false,
+        proxyUsed: state.contextsByBidi.get(userContext)?.proxyUsed ?? false,
         proxy: Option.getOrUndefined(options.proxy)
       }
       state.contexts.set(entry.id, entry)
@@ -151,7 +180,9 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       // Seed only this context; every failure, including interruption, attempts rollback under a fresh budget.
       yield* Effect.gen(function*() {
         if (entry.proxy?.credentials !== undefined) {
-          const { intercept } = yield* Kit.protocol(state.send(Network.addIntercept({ phases: ["authRequired"] })))
+          const { intercept } = yield* Kit.protocol(
+            state.send(Network.addIntercept({ phases: ["authRequired"] }))
+          )
           entry.proxyIntercept = intercept
           entry.proxyAttempts = new Set()
         }
@@ -160,14 +191,19 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         restore,
         Effect.onError(() =>
           Cleanup.report(
-            Cleanup.bounded(removeUserContext(state, entry.id)),
+            Cleanup.bounded(removeUserContext(state, entry.id)).pipe(Effect.tap(() =>
+              Effect.sync(() => {
+                settle(entry.proxyUsed === true || state.contexts.has(entry.id))
+              })
+            )),
             `BiDi context ${entry.id} initialization rollback could not confirm removal`
           )
         )
       )
+      settle(true)
       return entry.id
     })
-  )
+  ).pipe(Effect.onError(() => Effect.sync(() => settle(true))))
 })
 
 export const removeUserContext = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
