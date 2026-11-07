@@ -22,6 +22,7 @@ if (process.argv[2] === 'CHILD_FAIL') {
   daemon.unref()
 } else if (process.argv[2] === 'DAEMON_FAIL') {
   console.error('DAEMON_OWN_STDERR')
+  process.stderr.write(new TextEncoder().encode('BYTE_STDERR_é'))
   trace('send', 'DAEMON_ORDER_ONE')
   trace('receive', 'DAEMON_ORDER_TWO')
 } else if (process.argv[2] === 'LATE_PASS') {

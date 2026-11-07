@@ -362,6 +362,7 @@ it("transfers bounded child and detached daemon records with process-local order
   expect(text).toContain("DAEMON_ORDER_ONE")
   expect(text).toContain("DAEMON_ORDER_TWO")
   expect(text).toContain("DAEMON_OWN_STDERR")
+  expect(text).toContain("BYTE_STDERR_é")
   expect(text).toContain("node-stderr")
   expect(text).toContain("FLOOD_TAIL")
   expect(text).toContain("overflow")
@@ -422,4 +423,52 @@ it("keeps the test's own records when replayed child records exceed the artifact
   scope.close()
   expect(trace.entries().some((entry) => entry.kind === "node-stderr")).toBe(true)
   expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+}, 30_000)
+
+it("retains recent early-slot daemon evidence independently of parent history and slot replay order", () => {
+  const trace = new TraceBuffer()
+  trace.record("parent", "receive", "PARENT_FAILURE_EVIDENCE")
+  trace.record("child-transfer", "receive", "RECENT_EARLY_DAEMON", {
+    pid: 1, connection: "daemon", sequence: 1, timestamp: "2026-11-07T12:00:00.000Z"
+  })
+  // Later slots replay old traffic after the daemon. Their combined volume exceeds the child budget.
+  for (let pid = 2; pid <= 9; pid++) {
+    for (let sequence = 1; sequence <= 40; sequence++) {
+      trace.record("child-transfer", "node-stderr", "x".repeat(8000), {
+        pid, connection: `client:${pid}`, sequence, timestamp: "2026-11-07T11:00:00.000Z"
+      })
+    }
+  }
+  expect(trace.entries().map(entry => entry.payload)).toContain("RECENT_EARLY_DAEMON")
+  expect(trace.entries().map(entry => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+  expect(trace.entries().some(entry => entry.kind === "overflow")).toBe(true)
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+})
+
+it("retires the writer-visible path before collecting and removing a live child's spool", async () => {
+  const { spawn } = await import("node:child_process")
+  const { once } = await import("node:events")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  let directory = ""
+  let observations = 0
+  const scope = new TransferScope(() => () => {
+    observations++
+    expect(fs.existsSync(directory)).toBe(false)
+  })
+  directory = scope.open()
+  const child = spawn(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "process.stdout.write('ready'); setInterval(() => process.stderr.write('x'.repeat(8000)), 1)"
+  ], { env: { ...process.env, [transferVariable]: directory }, stdio: ["ignore", "pipe", "ignore"] })
+  try {
+    await once(child.stdout!, "data")
+    scope.close()
+    expect(observations).toBeGreaterThan(0)
+    expect(fs.existsSync(directory)).toBe(false)
+    expect(fs.existsSync(`${directory}.closed`)).toBe(false)
+  } finally {
+    child.kill()
+    await once(child, "close")
+  }
 }, 30_000)
