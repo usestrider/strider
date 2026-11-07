@@ -283,6 +283,47 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Condition
         ) as Effect.Effect<Locator.Locator>
 
+      for (const count of [1, 2]) {
+        it.effect(
+          `exports an unnamed framed password query preserving ${
+            count === 1 ? "frame context" : "same-frame ambiguity"
+          }`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const served = yield* site
+              const page = yield* Browser.newPage()
+              const fields = "<input data-target=secret type=password>".repeat(count)
+              yield* page.goto(`${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  `<input type=password aria-label=Decoy><iframe srcdoc='${fields}'></iframe>`
+                )
+              }`)
+              const framed = page.frame(page.locator("iframe")).locator("input[type=password]")
+              yield* Expect.toHaveCount(framed, count)
+              const snapshot = yield* page.snapshot()
+              const nodes = [...snapshot.refs.values()].filter((each) =>
+                each.role._tag === "Inferred" && each.role.evidence.includes("password") && each.name._tag === "None"
+              )
+              assert.lengthOf(nodes, count)
+              const query = ExportTest.locatorOf("page", Option.getOrThrow(nodes[0]!.ref), snapshot)
+              const locator = yield* exportedLocator(query, page)
+              // Read the replayed target without dispatching frame input events.
+              const matched = yield* locator.count.pipe(
+                Effect.catch((error) => Effect.sync(() => assert.fail(`${query}: ${JSON.stringify(error)}`)))
+              )
+              assert.strictEqual(matched, count, query)
+              if (count === 1) {
+                assert.deepEqual(yield* locator.readAttribute("data-target"), Option.some("secret"), query)
+              } else {
+                const error = yield* locator.readAttribute("data-target").pipe(Effect.flip)
+                assert(error._tag === "LocatorError", query)
+                assert.strictEqual(error.reason._tag, "StrictViolation", query)
+              }
+            })),
+          timeout
+        )
+      }
+
       it.effect(
         "exports a named password query that still finds a field appearing after it runs",
         () =>
