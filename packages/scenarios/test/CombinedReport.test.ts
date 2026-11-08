@@ -82,3 +82,11 @@ it("keeps reviewed observations tied to their measured source commit", async () 
   expect(Report.combine(runs, { sourceCommit: "abc123", observations: ["reviewed cleanup warning"] }))
     .toContain("reviewed cleanup warning")
 })
+
+// `pnpm scenarios --runs` changes the sample count, so the combined report has to describe the count each run has
+it("describes the estimator for the runs' own sample count", async () => {
+  const runs = await Promise.all([measurements("chromium"), measurements("firefox")])
+  const written = Report.combine(runs.map((run) => ({ ...run, runs: 3 })))
+  expect(written).not.toContain("with ten samples")
+  expect(written).toContain("3 scheduled repetitions")
+})
