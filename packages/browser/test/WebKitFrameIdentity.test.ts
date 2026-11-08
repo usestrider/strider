@@ -11,7 +11,7 @@ import type * as Automation from "../src/webkit-automation-protocol/Automation.t
 const handle = "page" as Automation.BrowsingContextHandle
 const childHandle = "child" as Automation.FrameHandle
 
-const fixture = (mode: "normal" | "replace" | "removed" | "error" = "normal") => {
+const fixture = (mode: "normal" | "replace" | "removed" | "error" | "cleanup replacement" = "normal") => {
   let marks = 0
   const windows = [{}, {}]
   const contexts = windows.map((window) => vm.createContext({ window }))
@@ -55,6 +55,9 @@ const fixture = (mode: "normal" | "replace" | "removed" | "error" = "normal") =>
           const params = command.params as Automation.EvaluateJavaScriptFunctionParams
           if (params.function.includes("timeOrigin")) return { result: JSON.stringify("[100,\"about:srcdoc\"]") }
           if (params.function.includes("Object.defineProperty")) marks++
+          if (params.function.includes("delete window") && mode === "cleanup replacement") {
+            frames[1]!.document = { ...frames[1]!.document } as State.DocumentEntry
+          }
           return { result: JSON.stringify(vm.runInContext(`(${params.function})()`, contexts[1]!)) ?? "null" }
         })
     }
@@ -87,7 +90,7 @@ describe("WebKit frame identity", () => {
       clean()
     }))
 
-  for (const mode of ["normal", "replace", "removed", "error"] as const) {
+  for (const mode of ["normal", "replace", "removed", "error", "cleanup replacement"] as const) {
     it.effect(`rejects reverse lookup for ${mode === "normal" ? "a sibling" : mode} and cleans the mark`, () =>
       Effect.gen(function*() {
         const { clean, frames, process } = fixture(mode)
@@ -104,8 +107,8 @@ describe("WebKit frame identity", () => {
       Effect.gen(function*() {
         const { clean, frames, process } = fixture(mode)
         const candidates = mode === "normal" ? [frames[0]!] : [frames[1]!]
-        const result = yield* Input.matchFrame(process, handle, childHandle, candidates).pipe(Effect.option)
-        assert.isTrue(Option.isNone(result) || Option.isNone(result.value))
+        const result = yield* Input.matchFrame(process, handle, childHandle, candidates)
+        assert.isTrue(Option.isNone(result))
         clean()
       }))
   }
