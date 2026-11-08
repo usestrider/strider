@@ -1447,21 +1447,21 @@ export function engine(render: (root: SnapNode) => string) {
 
   const pressedOf = (element: Element): boolean | "mixed" => {
     if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
-    const value = element.getAttribute("aria-pressed")?.toLowerCase()
+    const value = element.getAttribute("aria-pressed")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === "mixed" ? "mixed" : value === "true"
   }
 
   const expandedOf = (element: Element): boolean | undefined => {
     if (element instanceof HTMLDetailsElement) return element.open
     if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
-    const value = element.getAttribute("aria-expanded")?.toLowerCase()
+    const value = element.getAttribute("aria-expanded")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === undefined ? undefined : value === "true"
   }
 
   const selectedOf = (element: Element): boolean => {
     if (element instanceof HTMLOptionElement) return element.selected
     return SELECTED_ROLES.has(roleOf(element) ?? "") &&
-      element.getAttribute("aria-selected")?.toLowerCase() === "true"
+      element.getAttribute("aria-selected")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) === "true"
   }
 
   const LABEL_WIDGET_ROLES = new Set([
@@ -2231,14 +2231,11 @@ export function engine(render: (root: SnapNode) => string) {
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
     if (checkedOf(element) === true) states.push("checked")
-    if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
-    if (
-      element.getAttribute("aria-selected") === "true" ||
-      (element instanceof HTMLOptionElement && element.selected)
-    ) states.push("selected")
+    if (expandedOf(element) === true) states.push("expanded")
+    if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (element.getAttribute("aria-pressed") === "true") states.push("pressed")
+    if (pressedOf(element) === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
