@@ -104,6 +104,43 @@ describe("UserContext.withCookies", () => {
       assert.strictEqual(calls, 1)
     })))
 
+  it.effect("does no cookie work until execution and leaves other contexts untouched", () =>
+    run(Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      let reads = 0
+      let writes = 0
+      const selected = {
+        ...context,
+        cookies: {
+          ...context.cookies,
+          listFor: (url: string) =>
+            Effect.suspend(() => {
+              reads++
+              return context.cookies.listFor(url)
+            }),
+          set: (cookie: Parameters<typeof context.cookies.set>[0]) =>
+            Effect.suspend(() => {
+              writes++
+              return context.cookies.set(cookie)
+            })
+        }
+      }
+      const base = HttpClient.make((request) =>
+        Effect.succeed(response(request, ["value=hello%20world; Path=/", "foreign=no; Domain=other.example.com"]))
+      )
+      const wrapped = base.pipe(UserContext.withCookies(selected))
+      assert.strictEqual(reads, 0)
+      assert.strictEqual(writes, 0)
+      yield* base.get(origin)
+      assert.strictEqual(reads, 0)
+      assert.strictEqual(writes, 0)
+      yield* wrapped.get(origin)
+      assert.strictEqual(reads, 1)
+      assert.strictEqual(writes, 1)
+      const cookies = yield* context.cookies.listFor(origin)
+      assert.strictEqual(Redacted.value(cookies[0].value), "hello%20world")
+    })))
+
   it.effect("stores redirect cookies before sending the next hop", () =>
     run(Effect.gen(function*() {
       const context = yield* Browser.newContext()
