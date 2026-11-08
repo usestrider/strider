@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import { assertApiLink, assertDecision, assertValueGaps } from "../packages/tools/docs/src/matrix-evidence.ts"
 import { commit, extract, hash } from "./playwright-reference.mjs"
 
-const root = "website/src/features/playwright/"
+const root = "scripts/playwright-matrix/"
 const read = (file) => JSON.parse(readFileSync(file, "utf8"))
 const upstream = read(`${root}upstream.json`)
 const matrix = read(`${root}matrix.json`)
@@ -180,17 +180,14 @@ if (checkout) {
   }
 }
 
+// The inventory isn't published, so the built check confirms that the reference pages its API links name were rendered
 if (args.includes("--built")) {
-  const html = readFileSync("website/dist/docs/playwright-matrix/index.html", "utf8")
-  for (const row of matrix.rows) assert.ok(html.includes(`id="${row.id}"`), `Built page omitted ${row.id}`)
   const urls = new Set(
-    [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]).filter((url) => url.startsWith("/docs"))
+    matrix.rows.flatMap((row) => row.api.map((api) => api.url)).filter((url) => url.startsWith("/docs"))
   )
   for (const url of urls) {
     const [pathname, fragment] = url.split("#")
-    const file = pathname.endsWith(".json")
-      ? `website/dist${pathname}`
-      : `website/dist${pathname.replace(/\/$/, "")}/index.html`
+    const file = `website/dist${pathname.replace(/\/$/, "")}/index.html`
     assert.ok(existsSync(file), `Broken built link ${url}`)
     if (fragment) {
       assert.ok(
@@ -199,9 +196,7 @@ if (args.includes("--built")) {
       )
     }
   }
-  const downloaded = read("website/dist/docs/playwright-matrix.json")
-  assert.deepEqual(downloaded, { matrix, upstream, browsers: currentBrowsers }, "Machine-readable download drifted")
-  process.stdout.write(`Checked ${urls.size} local built links and all row anchors.\n`)
+  process.stdout.write(`Checked ${urls.size} built API reference links.\n`)
 }
 process.stdout.write(
   `Playwright ${upstream.version}: ${upstream.classes.length} classes, ${members.size} members covered by ${matrix.rows.length} rows; provenance, API links, decisions and browser statuses valid.\n`

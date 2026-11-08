@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { assertApiLink, assertDecision, assertValueGaps } from "../../tools/docs/src/matrix-evidence.ts"
 
 const root = fileURLToPath(new URL("../../../", import.meta.url))
-const matrix = JSON.parse(readFileSync(`${root}website/src/features/playwright/matrix.json`, "utf8"))
+const matrix = JSON.parse(readFileSync(`${root}scripts/playwright-matrix/matrix.json`, "utf8"))
 const rows: Array<any> = matrix.rows
 const row = (id: string) => rows.find((row) => row.id === id)
 
