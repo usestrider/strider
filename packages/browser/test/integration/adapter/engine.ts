@@ -153,6 +153,20 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
+            const result = yield* call(Engine.run, [string(JSON.stringify(point(0)))])
+            assert(result._tag === "Value")
+            assert(result.value.type === "string")
+            const response = JSON.parse(result.value.value)
+            assert.strictEqual(response._tag, "Ready")
+            assert.isAtLeast(response.__rendering.events.length, 1)
+            assert.isAtMost(response.__rendering.events.length, 32)
+            assert.strictEqual(response.__rendering.events[0].winner, "callback")
+            assert.strictEqual(response.__rendering.events[0].clock, "page-performance-ms")
+            assert.isNumber(response.__rendering.events[0].callback)
+          }), timeout)
         for (const state of ["pressed", "expanded", "selected"] as const) {
           it.effect(`includes ASCII case-insensitive ${state} in snapshots as in role filters`, () =>
             Effect.gen(function*() {

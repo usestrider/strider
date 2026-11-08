@@ -1,7 +1,10 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Operation from "../../../src/internal/operation.ts"
-const timeout = (name: string) => Effect.runSync(Operation.named(name)(Effect.map(Operation.record, (record) => record.timeout(Option.some("diagnostic refusal")))))
+const timeout = (name: string) =>
+  Effect.runSync(
+    Operation.named(name)(Effect.map(Operation.record, (record) => record.timeout(Option.some("diagnostic refusal"))))
+  )
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { connection } from "../../integration/failureTrace.ts"
 let shared: ReturnType<typeof connection>

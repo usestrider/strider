@@ -13,6 +13,10 @@ fs.writeFileSync(
 const connection = (label) => globalThis[Symbol.for("strider.integration.failureTrace")]?.connection(label) ?? (() => {})
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
+const Effect = await import(${JSON.stringify(import.meta.resolve("effect/Effect"))})
+const Option = await import(${JSON.stringify(import.meta.resolve("effect/Option"))})
+const Operation = await import(${JSON.stringify(new URL("../../../src/internal/operation.ts", import.meta.url).href)})
+Effect.runSync(Operation.named(process.argv[2])(Effect.map(Operation.record, record => record.timeout(Option.none()))))
 const directory = ${JSON.stringify(directory)}
 const trace = connection('child-probe')
 trace('receive', process.argv[2])

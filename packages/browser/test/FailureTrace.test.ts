@@ -1,5 +1,8 @@
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
+import { stripTypeScriptTypes } from "node:module"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
@@ -66,6 +69,110 @@ describe("integration-only source interception", () => {
       expect(source).not.toContain("__rendering")
     }
   })
+  it("correlates callback and timer winners with bounded per-round page-clock evidence", async () => {
+    const url = new URL("../src/internal/engine.ts", import.meta.url)
+    const output = instrument(fs.readFileSync(url, "utf8"), url.pathname)!.code
+    const body = output.slice(output.indexOf("  const nextFrame ="), output.indexOf("  const fire ="))
+    const compiled = stripTypeScriptTypes(body) + "\nreturn nextFrame"
+    let timer: () => void = () => {}
+    let frame: () => void = () => {}
+    let time = 10
+    let cleared = 0
+    const document = { visibilityState: "hidden" }
+    const next = new Function("setTimer", "clearTimer", "onFrame", "now", "document", compiled)(
+      (callback: () => void) => {
+        timer = callback
+        return 1
+      },
+      () => {
+        cleared++
+      },
+      (callback: () => void) => {
+        frame = callback
+      },
+      () => time,
+      document
+    )
+    const first = { events: [] as Array<any>, omitted: 0 }
+    const second = { events: [] as Array<any>, omitted: 0 }
+    const waiting = next(100, first)
+    time = 110
+    timer()
+    expect(await waiting).toBe(false)
+    expect(first.events[0]).toMatchObject({
+      start: 10,
+      cap: 100,
+      timer: 110,
+      callback: null,
+      winner: "timer",
+      visibility: "hidden",
+      clock: "page-performance-ms"
+    })
+    time = 115
+    frame()
+    expect(first.events[0]).toMatchObject({ callback: 115, winner: "timer" })
+    document.visibilityState = "visible"
+    for (let i = 0; i < 40; i++) {
+      const waiting = next(7, second)
+      frame()
+      expect(await waiting).toBe(true)
+    }
+    expect(second.events).toHaveLength(32)
+    expect(second.omitted).toBe(8)
+    expect(second.events[0]).toMatchObject({ cap: 7, visibility: "visible", winner: "callback", timer: null })
+    expect(first.events).toHaveLength(1)
+    expect(cleared).toBe(41)
+  })
+  it("attributes runtime replies to their operation, document, realm and distinct round", () => {
+    const url = new URL("../src/internal/runtime.ts", import.meta.url)
+    const output = instrument(fs.readFileSync(url, "utf8"), url.pathname)!.code
+    const start = output.indexOf("const callEngine =")
+    const end = output.indexOf("/**", start)
+    const code = stripTypeScriptTypes(output.slice(start, end))
+    const entries: Array<{ kind: string; payload: any }> = []
+    const call = (_runtime: unknown, _realm: unknown, _declaration: unknown, args: Array<string>) => {
+      const request = JSON.parse(args[0]!)
+      return Effect.succeed({
+        _tag: "Value",
+        value: { type: "string", value: JSON.stringify({ _tag: "NotReady", __rendering: request.__rendering }) }
+      })
+    }
+    const callEngine = new Function(
+      "Effect",
+      "Option",
+      "engineRealm",
+      "call",
+      "string",
+      "__failureConnection",
+      "const Engine = { missing: \"missing\" }; let __roundSequence = 0;" + code + ";return callEngine"
+    )(
+      Effect,
+      Option,
+      () => Effect.succeed("realm-a"),
+      call,
+      (s: string) => s,
+      () => (kind: string, payload: any) => entries.push({ kind, payload })
+    )
+    Effect.runSync(callEngine({}, "document-a", "run", JSON.stringify({ op: "act", cap: 100 }), "operation-a"))
+    Effect.runSync(callEngine({}, "document-b", "run", JSON.stringify({ op: "act", cap: 50 }), "operation-b"))
+    const replies = entries.filter((entry) => entry.kind === "engine-round-reply").map((entry) => entry.payload)
+    expect(replies).toHaveLength(2)
+    expect(replies[0]).toMatchObject({
+      round: 1,
+      document: "document-a",
+      realm: "realm-a",
+      operationId: "operation-a",
+      cap: 100,
+      rendering: { round: 1, events: [], omitted: 0 }
+    })
+    expect(replies[1]).toMatchObject({
+      round: 2,
+      document: "document-b",
+      operationId: "operation-b",
+      cap: 50,
+      rendering: { round: 2 }
+    })
+  })
   it("fails loudly if a transport changes instead of silently losing capture", () => {
     expect(() => instrument("changed", "/src/protocol/Transport.ts")).toThrow("no longer matches")
     expect(instrument("unchanged", "/src/internal/model.ts")).toBeUndefined()
@@ -73,6 +180,52 @@ describe("integration-only source interception", () => {
 })
 
 describe("failure trace runner lifecycle", () => {
+  it("caps aggregate passing artifacts without retaining raw traffic", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "retention.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "1" }
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    expect(run.stderr).toContain("retention budget exhausted")
+    const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+    expect(paths.length).toBeGreaterThan(0)
+    expect(paths.reduce((bytes, file) => bytes + fs.statSync(file).size, 0)).toBeLessThanOrEqual(16 * 1024 * 1024)
+    for (const file of paths) fs.unlinkSync(file)
+  }, 30_000)
+
+  it("can retain passing diagnostic evidence for a bounded investigation", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "lifecycle.fixture",
+      "-t",
+      "passing test discarded"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "1" }
+    })
+    const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+    const passing = paths.filter((file) => file.endsWith("-test.ndjson"))
+    expect(passing).toHaveLength(1)
+    expect(fs.readFileSync(passing[0]!, "utf8")).toContain("Passing.operation")
+    expect(fs.readFileSync(passing[0]!, "utf8")).not.toContain("PASS_ONLY")
+    for (const file of paths) fs.unlinkSync(file)
+  }, 30_000)
+
   it("retains failures and shared hook context, discards passes, and observes owned processes", async () => {
     const { spawnSync } = await import("node:child_process")
     const directory = new URL("../../../.data/integration-failures/", import.meta.url)
@@ -97,7 +250,12 @@ describe("failure trace runner lifecycle", () => {
     const payloads = test.map((entry) => entry.payload)
     expect(payloads).toContain("FAIL_ONLY")
     const deadlines = test.filter((entry) => entry.kind === "host-timeout").map((entry) => JSON.parse(entry.payload))
-    expect(deadlines).toContainEqual(expect.objectContaining({ operation: "Unrelated.failure", hint: { _tag: "Some", value: "diagnostic refusal" } }))
+    expect(deadlines).toContainEqual(
+      expect.objectContaining({
+        operation: "Unrelated.failure",
+        hint: expect.objectContaining({ _tag: "Some", value: "diagnostic refusal" })
+      })
+    )
     expect(deadlines.some((entry) => entry.operation === "Passing.operation")).toBe(false)
     expect(payloads).toContain("SETUP_ONLY")
     expect(payloads).toContain("TEARDOWN_ONLY")
@@ -382,6 +540,12 @@ it("transfers bounded child and detached daemon records with process-local order
   expect(text).not.toContain("CHILD_PASS")
   expect(text).not.toContain("LATE_CHILD_PASS")
   const entries = text.trimEnd().split("\n").map((line) => JSON.parse(line))
+  const childTimeout = entries.find((entry) =>
+    entry.kind === "host-timeout" && JSON.parse(entry.payload).operation === "DAEMON_FAIL"
+  )
+  expect(childTimeout?.origin.pid).toBeGreaterThan(0)
+  expect(entries.some((entry) => entry.kind === "host-timeout" && JSON.parse(entry.payload).operation === "CHILD_PASS"))
+    .toBe(false)
   const children = entries.filter((entry) => entry.kind === "send" || entry.kind === "receive").map((entry) => ({
     ...entry.origin,
     payload: entry.payload

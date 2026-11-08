@@ -18,6 +18,29 @@
  * payloads 8 Ki characters, and late failed-test cleanup has a separate 256 KiB serialized UTF-16 budget.
  * The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
  *
+ * Recorder-only interception also covers engine action rendering waits and host operation deadlines. Runtime
+ * round IDs are process-local; operation/document/realm IDs correlate each round with its response, not with
+ * unrelated traffic. At most 32 rendering races per round are returned, with an omitted count. Each reports its
+ * requested cap, callback/timer winner, page performance-clock milliseconds and document visibility at start/end.
+ * Null callback/timer means unobserved when serialized, never proof it did not run later. Callbacks after response
+ * serialization are unavailable; no extra wait or evaluation collects them. A host-interrupted/lost evaluation may
+ * have a start and no reply: its page observations are unavailable. Direct adapter engine calls have page evidence
+ * in protocol replies but no runtime round ID. Non-action requests currently have no rendering observations.
+ * Host deadline/timeout entries name the operation, chosen deadline and budget, source (enclosing/default where
+ * known), phase, last refusal and hint. Host monotonic nanoseconds and page performance milliseconds have distinct
+ * origins; neither may be subtracted from the other or from NDJSON UTC timestamps. A custom browser clock is
+ * labelled separately from the host live clock; last-refusal timestamps remain on the adapter host-live clock. visibilityState does not measure OS occlusion or compositor work.
+ * Clock reads, serialization and recorder writes add observation overhead; timings describe the instrumented run.
+ * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
+ * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
+ *
+ * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine diagnostic entries (plus overflow/attribution)
+ * from passing scopes for an investigation; passing raw protocol traffic is discarded. Existing per-scope memory,
+ * child spool and payload bounds remain in force. Passing artifacts together consume at most 16 MiB UTF-8 per test
+ * file (including a conservative 32 KiB allowance per context line); exhaustion is logged. Failed scopes retain
+ * their ordinary independent budgets. Passing late cleanup is not retained. This is a per-file disk bound, so
+ * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
+ *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
  * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
  * acquisition is pending records that observation too; later records can show its eventual failure.
@@ -68,6 +91,10 @@
  * are unsupported. Fatal signals and failures before the preload runs cannot produce a node-exit record. Ignored
  * browser stderr remains unavailable; native writes bypassing process.stderr.write are not intercepted.
  *
+ * The manual rendering probe uses `test/fixtures/renderingFailureTrace/vitest.config.ts` with
+ * `-t 'fills an unknown input type as text'` in the same pinned shell as the CLI probe below. It deliberately
+ * fails after a different ordinary fill test so its shared runtime/engine evidence can be inspected.
+ *
  * The manual `test/fixtures/cliFailureTrace/vitest.config.ts` probe deliberately fails real CLI cases after their
  * cleanup. In the pinned Linux shell it has verified launched Chromium, Firefox and stock WebKit and attachment to
  * all three: daemon-owned send/receive, closure and node-exit, plus owned-browser exits for launches. The ordinary
@@ -93,7 +120,7 @@
  * Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
  * WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
  * receive observations may be ignored by the link. Apart from native trace video failures, failures above the
- * inspector socket are not instrumented;
+ * inspector socket, apart from rendering rounds and host operation deadlines, are not instrumented;
  * interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
  * pids and process arguments, rather than an explicit connection-to-process identifier. Only child startup prefixes
  * are protected; parent and later page-creation preludes can be evicted. Shared-artifact links identify context
