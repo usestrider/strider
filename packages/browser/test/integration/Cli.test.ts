@@ -1402,6 +1402,41 @@ describe("strider", () => {
   }
 
   it.live(
+    "refuses fork snapshot export for profiles and sessions loaded from a state file",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const state = path.join(env.XDG_RUNTIME_DIR, "initial.json")
+        fs.writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }))
+        for (const mode of ["profile", "state"] as const) {
+          const flags = mode === "profile"
+            ? ["--user-data-dir", path.join(env.XDG_RUNTIME_DIR, "profile")]
+            : ["--state", state]
+          const started = yield* run("start", "--name", mode, "--chromium", chromium.executable, ...flags)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const test = path.join(env.XDG_RUNTIME_DIR, mode + ".test.ts")
+            const destination = path.join(env.XDG_RUNTIME_DIR, mode + ".json")
+            const refused = yield* run("-s", mode, "export", "test", test, "--state", destination)
+            assert.strictEqual(refused.code, 15, refused.err)
+            assert.include(refused.err, "--fork")
+            assert.isFalse(fs.existsSync(destination))
+            assert.isFalse(fs.existsSync(test))
+            const normal = yield* run("-s", mode, "export", "test", test)
+            assert.strictEqual(normal.code, 0, normal.err)
+            const text = fs.readFileSync(test, "utf8")
+            if (mode === "profile") assert.include(text, "profile replay is unsupported")
+            else assert.include(text, JSON.stringify(state))
+          } finally {
+            yield* run("-s", mode, "stop")
+          }
+        }
+      })),
+    timeout
+  )
+
+  it.live(
     "forks a session's state, lists and prunes one a crash left behind",
     () =>
       Effect.scoped(Effect.gen(function*() {
@@ -1486,6 +1521,27 @@ describe("strider", () => {
             assert.notStrictEqual(collision.code, 0)
             assert.include(collision.err, "different")
             assert.strictEqual(JSON.parse(fs.readFileSync(saved, "utf8")).cookies[0].value, "oat")
+            for (const kind of ["symlink", "hardlink"] as const) {
+              const alias = path.join(repo, kind)
+              if (kind === "symlink") fs.symlinkSync(saved, alias)
+              else fs.linkSync(saved, alias)
+              const aliased = yield* run("-s", "second", "export", "test", alias, "--state", saved)
+              assert.notStrictEqual(aliased.code, 0)
+              assert.include(aliased.err, "different")
+            }
+            const missing = path.join(repo, "missing")
+            const dangling = path.join(repo, "dangling")
+            fs.symlinkSync(missing, dangling)
+            const aliased = yield* run("-s", "second", "export", "test", missing, "--state", dangling)
+            assert.notStrictEqual(aliased.code, 0)
+            assert.include(aliased.err, "different")
+            assert.isFalse(fs.existsSync(missing))
+            fs.writeFileSync(path.join(repo, ".gitignore"), "private/")
+            const privateState = path.join(repo, "private", "initial.json")
+            const ignored = yield* run("-s", "second", "export", "test", test, "--state", privateState)
+            assert.strictEqual(ignored.code, 0, ignored.err)
+            assert.notInclude(ignored.err, "plaintext credentials")
+            assert.strictEqual(fs.statSync(privateState).mode & 0o777, 0o600)
             const unsupported = yield* run("-s", "first", "export", "test", test, "--state", saved)
             assert.notStrictEqual(unsupported.code, 0)
             assert.include(unsupported.err, "--fork")

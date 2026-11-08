@@ -309,7 +309,7 @@ export const render = (options: {
       `// The session started from session ${options.fork}'s state (start --fork), which no file holds: this test's context starts empty`
     ]),
     ...(options.userDataDir === undefined ? [] : [
-      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
+      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: profile replay is unsupported; this test's starts with an empty one`
     ])
   ]
   const body: Array<string> = options.browser._tag === "Attach" && options.browser.backend === "webkit"
