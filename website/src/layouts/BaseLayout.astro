@@ -38,6 +38,8 @@ const previewImage = new URL("/og.png", Astro.site)
     />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/heron.svg" type="image/svg+xml" />
+    <!-- Page views, counted without cookies through the site's own Worker (website/worker.ts) -->
+    <script is:inline defer data-domain="usestrider.dev" data-api="/a/event" src="/a/script.js"></script>
     <Font cssVariable="--font-garamond" preload />
     <Font cssVariable="--font-source-serif" preload />
     <Font cssVariable="--font-plex-sans" preload />
