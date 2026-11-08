@@ -22,7 +22,8 @@ export const runScenarios = async (
     readonly strider: () => Promise<string>
     readonly playwright?: (() => Promise<string>) | undefined
   },
-  log: (line: string) => void
+  log: (line: string) => void,
+  onAttempt: (scenario: string, sample: Result["samples"][number]) => void = () => {}
 ): Promise<Array<Result>> => {
   const results: Array<Result> = []
   for (const scenario of chosen) {
@@ -45,13 +46,18 @@ export const runScenarios = async (
     const times = { strider: [] as Array<number>, playwright: [] as Array<number> }
     const attempts = { strider: 0, playwright: 0 }
     const failures: Array<Result["failures"][number]> = []
+    const samples: Array<Result["samples"][number]> = []
     for (let i = 0; i < runs; i++) {
       const order = i % 2 === 0 ? libraries : [...libraries].reverse()
       for (const library of order) {
         attempts[library]++
         const started = performance.now()
         const result = await outcomeOf(run[library]!, scenario.expected)
-        if (result._tag === "Read") times[library].push(performance.now() - started)
+        const ms = performance.now() - started
+        const sample = { library, repetition: i + 1, ms, outcome: result }
+        samples.push(sample)
+        onAttempt(scenario.name, sample)
+        if (result._tag === "Read") times[library].push(ms)
         else {
           failures.push({ library, repetition: i + 1, error: result.error })
           log(`${scenario.name}, ${library}, timed repetition ${i + 1}: failed: ${result.error}`)
@@ -63,6 +69,7 @@ export const runScenarios = async (
       outcome,
       attempts,
       failures,
+      samples,
       times: { strider: stats(times.strider), playwright: stats(times.playwright) }
     })
   }

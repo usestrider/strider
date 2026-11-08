@@ -1,0 +1,7 @@
+{
+  "sourceCommit": "fca7e7c1c179d96766ba7839ae649e4f6f4bb9b1",
+  "observations": [
+    "Chromium emitted six Browser.setDownloadBehavior declaration-release rejections during the concurrent workload because the context no longer existed. They fall inside Strider's timed arms; outcomes passed, and those timings include the rejected round trips and logging. This is a separate correctness observation, not a harness error.",
+    "The recorded Internet login failed for Strider on Firefox, while Playwright passed. The same recording passed Chromium and the separate local HAR recording/replay passed Firefox. The failure's cause is not established; its timing gap is withheld. Protocol traces were not captured by this harness."
+  ]
+}

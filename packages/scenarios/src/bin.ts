@@ -1,6 +1,6 @@
 /**
- * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, writing
- * `packages/scenarios/RESULTS.md`.
+ * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, printing
+ * a single-run report. `pnpm scenarios:report` regenerates the combined `packages/scenarios/RESULTS.md`.
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
@@ -20,15 +20,15 @@ import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
-import { chromium } from "playwright-core"
-import type * as Playwright from "playwright-core"
+import { chromium, firefox as playwrightFirefox } from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
 import { recordingProblems, replaying } from "./replay.ts"
-import { type Measurements, report } from "./report.ts"
+import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
 import { start } from "./site.ts"
@@ -39,6 +39,14 @@ const option = (name: string) => {
   return index === -1 ? undefined : argv[index + 1]
 }
 const runs = Number(option("--runs") ?? "10")
+if (!Number.isSafeInteger(runs) || runs < 1) throw new Error("--runs must be a positive integer")
+const engine = option("--browser") ?? "chromium"
+if (engine !== "chromium" && engine !== "firefox") throw new Error("--browser must be chromium or firefox")
+const output = option("--output")
+const patchedFirefox = option("--playwright-firefox")
+if (engine === "firefox" && patchedFirefox === undefined) {
+  throw new Error("Firefox requires --playwright-firefox pointing to the provisioned patched executable")
+}
 const only = option("--only")
 
 // The focused Q82 path uses the same fixture and profiler without requiring demo recordings.
@@ -61,7 +69,9 @@ if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || process.env["STR
   process.stderr.write("Run the scenarios with `pnpm scenarios`, which enters the integration environment.\n")
   process.exit(1)
 }
-const executablePath = process.env["STRIDER_CHROMIUM"]
+const executablePath = process.env[engine === "firefox" ? "STRIDER_FIREFOX" : "STRIDER_CHROMIUM"]!
+const playwrightType = engine === "firefox" ? playwrightFirefox : chromium
+const playwrightOptions = { executablePath: engine === "firefox" ? patchedFirefox! : executablePath, headless: true }
 const root = path.resolve(import.meta.dirname, "../../..")
 const recordingsDirectory = path.join(root, ".data/scenarios")
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-scenarios-"))
@@ -71,7 +81,44 @@ const files: Files = {
 }
 
 const ffmpeg = fs.realpathSync(process.env["STRIDER_FFMPEG"]!)
-const layer = Chromium.layer({ executablePath }).pipe(
+if (output !== undefined) {
+  if (!path.isAbsolute(output) || output === root || output.startsWith(`${root}/`)) {
+    throw new Error("--output must be absolute and outside the worktree")
+  }
+  fs.mkdirSync(output, { recursive: false })
+  fs.writeFileSync(
+    path.join(output, "start.json"),
+    JSON.stringify(
+      {
+        started: new Date().toISOString(),
+        argv,
+        cwd: root,
+        node: process.version,
+        platform: process.platform,
+        architecture: process.arch,
+        release: os.release(),
+        cpus: os.cpus(),
+        memory: os.totalmem(),
+        load: os.loadavg(),
+        environment: Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => /^(STRIDER_|FONTCONFIG_|ALSA_|LANG$|LC_|TZ$)/.test(key))
+        )
+      },
+      null,
+      2
+    )
+  )
+  for (const file of ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "replay.ts", "measure.ts"]) {
+    fs.copyFileSync(path.join(import.meta.dirname, file), path.join(output, file))
+  }
+  for (const file of ["flake.nix", "flake.lock", "pnpm-lock.yaml"]) {
+    fs.copyFileSync(path.join(root, file), path.join(output, file))
+  }
+}
+const selectedLayer = engine === "firefox"
+  ? Firefox.layer({ executablePath }).pipe(Layer.provide(NodeSocket.layerWebSocketConstructor))
+  : Chromium.layer({ executablePath })
+const layer = selectedLayer.pipe(
   Layer.provide(VideoWriter.layerFfmpeg({ path: ffmpeg })),
   Layer.provideMerge(NodeServices.layer)
 )
@@ -90,6 +137,11 @@ const elapsed = async (run: () => Promise<unknown>) => {
 }
 
 const log = (line: string) => process.stdout.write(`${line}\n`)
+const onAttempt = (scenario: string, sample: Measurements["scenarios"][number]["samples"][number]) => {
+  if (output !== undefined) {
+    fs.appendFileSync(path.join(output, "attempts.jsonl"), `${JSON.stringify({ scenario, ...sample })}\n`)
+  }
+}
 
 // ── Recording the demo sites ──────────────────────────────────────────────────
 
@@ -105,8 +157,21 @@ if (argv.includes("--record")) {
   process.exit(0)
 }
 
-const chosen = scenarios.filter((scenario) => only === undefined || scenario.name === only)
+const unsupported = engine === "firefox"
+  ? [
+    "video and video-firefox: no equivalent Playwright video twin; Chromium screencast and Firefox native capture perform different work",
+    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
+  ]
+  : []
+const chosen = scenarios.filter((scenario) =>
+  (only === undefined || scenario.name === only) &&
+  (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
+)
+if (chosen.length === 0) throw new Error("No supported scenarios selected")
 const problems = recordingProblems(chosen, files.recording)
+if (output !== undefined) {
+  fs.writeFileSync(path.join(output, "recording-validation.json"), JSON.stringify({ problems }, null, 2))
+}
 if (problems.length > 0) {
   process.stderr.write(
     `${
@@ -121,27 +186,48 @@ const origin = site.origin
 
 // ── Launch ────────────────────────────────────────────────────────────────────
 
-log("launch")
-const launch = { strider: [] as Array<number>, playwright: [] as Array<number> }
-for (let i = 0; i < Math.min(runs, 5); i++) {
-  const runtime = ManagedRuntime.make(layer)
-  launch.strider.push(
-    await elapsed(() =>
-      runtime.runPromise(Effect.scoped(Effect.flatMap(Browser.newPage(), (page) => page.goto(`${origin}/`))))
-    )
-  )
-  await runtime.dispose()
-  let browser: Playwright.Browser | undefined
-  launch.playwright.push(
-    await elapsed(async () => {
-      browser = await chromium.launch({ executablePath })
-      const page = await browser.newPage()
-      await page.goto(`${origin}/`)
-      await page.close()
-    })
-  )
-  await browser?.close()
-}
+const launchScenario = {
+  name: "launch",
+  title: "Launch, first page, and shutdown",
+  description:
+    "Launches a fresh browser, creates one page, loads and reads the local fixture, then closes the page/context and browser. Includes shutdown equally on both sides.",
+  expected: "0"
+} as typeof scenarios[number]
+const launchResults = await runScenarios(
+  [launchScenario],
+  runs,
+  () => ({
+    strider: async () => {
+      const runtime = ManagedRuntime.make(layer)
+      try {
+        return await runtime.runPromise(Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/benchmark`)
+          return yield* page.locator("#count").readText
+        })))
+      } finally {
+        await runtime.dispose()
+      }
+    },
+    playwright: async () => {
+      const browser = await playwrightType.launch(playwrightOptions)
+      try {
+        const page = await browser.newPage()
+        try {
+          await page.goto(`${origin}/benchmark`)
+          return (await page.locator("#count").textContent()) ?? ""
+        } finally {
+          await page.close()
+        }
+      } finally {
+        await browser.close()
+      }
+    }
+  }),
+  log,
+  onAttempt
+)
+if (output !== undefined) fs.writeFileSync(path.join(output, "launch.json"), JSON.stringify(launchResults, null, 2))
 
 // One browser each from here on
 const before = browserPids()
@@ -149,11 +235,39 @@ const runtime = ManagedRuntime.make(layer)
 const info = await runtime.runPromise(Effect.gen(function*() {
   return (yield* Browser.Browser).info
 }))
-const striderArgs = browserArgs()
+const striderArgs = engine === "chromium"
+  ? browserArgs()
+  : descendants().find((proc) => proc.args.some((arg) => arg.startsWith("--remote-debugging-port")))?.args ?? []
 const striderPids = browserPids()
-const browser = await chromium.launch({ executablePath })
-const playwrightPid = [...browserPids()].find((pid) => !striderPids.has(pid) && !before.has(pid))
-const playwrightArgs = descendants().find((proc) => proc.pid === playwrightPid)?.args ?? []
+const browser = await playwrightType.launch(playwrightOptions).catch(async (error: unknown) => {
+  await runtime.dispose()
+  await site.close()
+  throw error
+})
+const playwrightProcesses = descendants().filter((proc) => !striderPids.has(proc.pid) && !before.has(proc.pid))
+const playwrightArgs = engine === "chromium"
+  ? playwrightProcesses.find((proc) => proc.args.includes("--remote-debugging-pipe"))?.args ?? []
+  : playwrightProcesses.find((proc) => proc.args.includes("-juggler-pipe"))?.args ?? []
+const pins = JSON.parse(fs.readFileSync(path.join(root, "packages/browser/test/integration/browsers.json"), "utf8"))
+if (info.version !== pins[engine].version) {
+  await browser.close()
+  await runtime.dispose()
+  await site.close()
+  throw new Error(`Unexpected stock browser: ${info.product} ${info.version}`)
+}
+const playwrightPins = JSON.parse(
+  fs.readFileSync(
+    path.join(path.dirname(createRequire(import.meta.url).resolve("playwright-core/package.json")), "browsers.json"),
+    "utf8"
+  )
+)
+const playwrightPin = playwrightPins.browsers.find((entry: { name: string }) => entry.name === engine)
+if (engine === "firefox" && browser.version() !== playwrightPin.browserVersion) {
+  await browser.close()
+  await runtime.dispose()
+  await site.close()
+  throw new Error(`Unexpected patched Firefox: ${browser.version()}`)
+}
 // A scenario that runs on Firefox, such as its video, gets the environment's Firefox, launched once it's needed
 let firefoxRuntime: ManagedRuntime.ManagedRuntime<Browser.Browser | NodeServices.NodeServices, unknown> | undefined
 const firefox = () =>
@@ -173,16 +287,22 @@ const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firef
 // A program writes its files beside it, as a reader's would, which here is into `.data/scenarios/`
 process.chdir(recordingsDirectory)
 
-const results = await runScenarios(chosen, runs, (scenario) => ({
-  strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
-  playwright: scenario.playwright === undefined
-    ? undefined
-    : () => scenario.playwright!(browser, origin, files)
-}), log)
+const results = await runScenarios(
+  chosen,
+  runs,
+  (scenario) => ({
+    strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
+    playwright: scenario.playwright === undefined
+      ? undefined
+      : () => scenario.playwright!(browser, origin, files)
+  }),
+  log,
+  onAttempt
+)
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
 
-const measured = only === undefined
+const measured = only === undefined && engine === "chromium"
 const waitMs = 3000
 // The renderers' CPU time per second of wall time, while `run` runs
 const cpuWhile = async (run: () => Promise<unknown>) => {
@@ -190,39 +310,61 @@ const cpuWhile = async (run: () => Promise<unknown>) => {
   const time = await elapsed(run)
   return ((rendererCpu() - cpu) / time) * 1000
 }
+const diagnosticFailures: Array<{ section: string; error: string }> = []
+const diagnosticFailure = (section: string, error: unknown) => {
+  const failure = { section, error: String(error) }
+  diagnosticFailures.push(failure)
+  log(`diagnostic ${section} failed: ${failure.error}`)
+  if (output !== undefined) {
+    fs.appendFileSync(path.join(output, "diagnostic-failures.jsonl"), `${JSON.stringify(failure)}\n`)
+  }
+}
 const q82: Array<Measurements["q82"][number]> = []
 if (measured) {
-  log("Q82")
-  const heavy = `${origin}/heavy?after=${waitMs}`
-  const samples = Math.max(3, Math.min(runs, 5))
-  const striderCase = Effect.fnUntraced(function*(wait: boolean) {
-    const page = yield* Browser.newPage()
-    yield* page.goto(heavy, { waitUntil: "load" })
-    const cpu = rendererCpu()
-    const started = performance.now()
-    yield* wait ? page.locator("#ready").pipe(Expect.toBeVisible) : Effect.sleep(`${waitMs} millis`)
-    return ((rendererCpu() - cpu) / (performance.now() - started)) * 1000
-  })
-  const playwrightCase = async (wait: boolean) => {
-    const page = await browser.newPage()
-    try {
-      await page.goto(heavy)
-      return await cpuWhile(() => (wait ? page.locator("#ready").waitFor() : page.waitForTimeout(waitMs)))
-    } finally {
-      await page.close()
+  try {
+    log("Q82")
+    const heavy = `${origin}/heavy?after=${waitMs}`
+    const samples = Math.max(3, Math.min(runs, 5))
+    const striderCase = Effect.fnUntraced(function*(wait: boolean) {
+      const page = yield* Browser.newPage()
+      yield* page.goto(heavy, { waitUntil: "load" })
+      const cpu = rendererCpu()
+      const started = performance.now()
+      yield* wait ? page.locator("#ready").pipe(Expect.toBeVisible) : Effect.sleep(`${waitMs} millis`)
+      return ((rendererCpu() - cpu) / (performance.now() - started)) * 1000
+    })
+    const playwrightCase = async (wait: boolean) => {
+      const page = await browser.newPage()
+      try {
+        await page.goto(heavy)
+        return await cpuWhile(() => (wait ? page.locator("#ready").waitFor() : page.waitForTimeout(waitMs)))
+      } finally {
+        await page.close()
+      }
     }
-  }
-  for (
-    const [label, run] of [
-      ["Strider, idle", () => strider(striderCase(false))],
-      ["Strider, `Expect.toBeVisible` waiting", () => strider(striderCase(true))],
-      ["Playwright, idle", () => playwrightCase(false)],
-      ["Playwright, `locator.waitFor()` waiting", () => playwrightCase(true)]
-    ] as const
-  ) {
-    const values: Array<number> = []
-    for (let i = 0; i < samples; i++) values.push(await run())
-    q82.push({ label, cpu: stats(values) })
+    for (
+      const [label, run] of [
+        ["Strider, idle", () => strider(striderCase(false))],
+        ["Strider, `Expect.toBeVisible` waiting", () => strider(striderCase(true))],
+        ["Playwright, idle", () => playwrightCase(false)],
+        ["Playwright, `locator.waitFor()` waiting", () => playwrightCase(true)]
+      ] as const
+    ) {
+      const values: Array<number> = []
+      for (let i = 0; i < samples; i++) {
+        const value = await run()
+        values.push(value)
+        if (output !== undefined) {
+          fs.appendFileSync(
+            path.join(output, "diagnostics.jsonl"),
+            `${JSON.stringify({ section: "Q82", label, repetition: i + 1, rendererCpuMsPerSecond: value })}\n`
+          )
+        }
+      }
+      q82.push({ label, cpu: stats(values) })
+    }
+  } catch (error) {
+    diagnosticFailure("Q82", error)
   }
 }
 
@@ -230,39 +372,52 @@ if (measured) {
 
 const q103: Array<Measurements["q103"][number]> = []
 if (measured) {
-  log("Q103")
-  const many = `${origin}/many?n=300`
-  const never = `${origin}/never/**`
-  const striderLoad = Effect.fnUntraced(function*(route: boolean) {
-    const page = yield* Browser.newPage()
-    if (route) yield* page.route(never, () => Route.abort())
-    const started = performance.now()
-    yield* page.goto(many, { waitUntil: "load" })
-    return performance.now() - started
-  })
-  const playwrightLoad = async (route: boolean) => {
-    const page = await browser.newPage()
-    try {
-      if (route) await page.route(never, (intercepted) => intercepted.abort())
+  try {
+    log("Q103")
+    const many = `${origin}/many?n=300`
+    const never = `${origin}/never/**`
+    const striderLoad = Effect.fnUntraced(function*(route: boolean) {
+      const page = yield* Browser.newPage()
+      if (route) yield* page.route(never, () => Route.abort())
       const started = performance.now()
-      await page.goto(many, { waitUntil: "load" })
+      yield* page.goto(many, { waitUntil: "load" })
       return performance.now() - started
-    } finally {
-      await page.close()
+    })
+    const playwrightLoad = async (route: boolean) => {
+      const page = await browser.newPage()
+      try {
+        if (route) await page.route(never, (intercepted) => intercepted.abort())
+        const started = performance.now()
+        await page.goto(many, { waitUntil: "load" })
+        return performance.now() - started
+      } finally {
+        await page.close()
+      }
     }
-  }
-  for (
-    const [label, run] of [
-      ["Strider, no route (its interceptor is always installed, Q103)", () => strider(striderLoad(false))],
-      ["Strider, a route matching nothing on the page", () => strider(striderLoad(true))],
-      ["Playwright, no route", () => playwrightLoad(false)],
-      ["Playwright, a route matching nothing on the page", () => playwrightLoad(true)]
-    ] as const
-  ) {
-    await run()
-    const values: Array<number> = []
-    for (let i = 0; i < runs; i++) values.push(await run())
-    q103.push({ label, load: stats(values) })
+    for (
+      const [label, run] of [
+        ["Strider, no user route (document challenge interception retained)", () => strider(striderLoad(false))],
+        ["Strider, a route matching nothing on the page", () => strider(striderLoad(true))],
+        ["Playwright, no route", () => playwrightLoad(false)],
+        ["Playwright, a route matching nothing on the page", () => playwrightLoad(true)]
+      ] as const
+    ) {
+      await run()
+      const values: Array<number> = []
+      for (let i = 0; i < runs; i++) {
+        const value = await run()
+        values.push(value)
+        if (output !== undefined) {
+          fs.appendFileSync(
+            path.join(output, "diagnostics.jsonl"),
+            `${JSON.stringify({ section: "Q103", label, repetition: i + 1, ms: value })}\n`
+          )
+        }
+      }
+      q103.push({ label, load: stats(values) })
+    }
+  } catch (error) {
+    diagnosticFailure("Q103", error)
   }
 }
 
@@ -270,18 +425,22 @@ if (measured) {
 
 let tells: Measurements["tells"] = { strider: {}, playwright: {} }
 if (measured) {
-  log("tells")
-  type Tells = Record<string, unknown>
-  const striderTells = await strider(Effect.gen(function*() {
-    const page = yield* Browser.newPage()
-    yield* page.goto(`${origin}/tells`, { waitUntil: "load" })
-    return yield* page.evaluateInMainWorld(() => (window as unknown as { tells: Promise<Tells> }).tells)
-  }))
-  const page = await browser.newPage()
-  await page.goto(`${origin}/tells`)
-  const playwrightTells = await page.evaluate(() => (window as unknown as { tells: Promise<Tells> }).tells)
-  await page.close()
-  tells = { strider: striderTells, playwright: playwrightTells }
+  try {
+    log("tells")
+    type Tells = Record<string, unknown>
+    const striderTells = await strider(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto(`${origin}/tells`, { waitUntil: "load" })
+      return yield* page.evaluateInMainWorld(() => (window as unknown as { tells: Promise<Tells> }).tells)
+    }))
+    const page = await browser.newPage()
+    await page.goto(`${origin}/tells`)
+    const playwrightTells = await page.evaluate(() => (window as unknown as { tells: Promise<Tells> }).tells)
+    await page.close()
+    tells = { strider: striderTells, playwright: playwrightTells }
+  } catch (error) {
+    diagnosticFailure("tells", error)
+  }
 }
 
 await browser.close()
@@ -313,35 +472,79 @@ const commit = head.startsWith("ref: ")
   })()
   : head
 const launchStats: { strider: Stats; playwright: Stats } = {
-  strider: stats(launch.strider),
-  playwright: stats(launch.playwright)
+  strider: launchResults[0]!.times.strider,
+  playwright: launchResults[0]!.times.playwright
 }
-const written = report({
+const hash = (file: string) => createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+const metadata = {
+  diagnosticFailures,
+  engine,
+  stockExecutable: executablePath,
+  playwrightOptions,
+  launchArguments: { strider: striderArgs, playwright: playwrightArgs },
+  stockInfo: info,
+  executableHashes: {
+    strider: hash(fs.realpathSync(executablePath)),
+    playwright: hash(fs.realpathSync(playwrightOptions.executablePath))
+  },
+  patchedFirefoxBuild:
+    engine === "firefox" && fs.existsSync(path.join(path.dirname(playwrightOptions.executablePath), "application.ini"))
+      ? fs.readFileSync(path.join(path.dirname(playwrightOptions.executablePath), "application.ini"), "utf8")
+      : undefined,
+  stockVersion: info.version,
+  playwrightVersion: browser.version(),
+  playwrightBrowserPin: engine === "firefox"
+    ? JSON.parse(
+      fs.readFileSync(path.join(path.dirname(require.resolve("playwright-core/package.json")), "browsers.json"), "utf8")
+    ).browsers.find((entry: { name: string }) => entry.name === "firefox")
+    : undefined,
+  sourceCommit: commit,
+  sourceHashes: Object.fromEntries(
+    ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "replay.ts", "measure.ts"].map((
+      file
+    ) => [file, hash(path.join(import.meta.dirname, file))])
+  ),
+  lockHash: hash(path.join(root, "pnpm-lock.yaml")),
+  flakeHash: hash(path.join(root, "flake.lock")),
+  recordings: Object.fromEntries(
+    [...new Set(chosen.flatMap((scenario) => scenario.recording === undefined ? [] : [scenario.recording]))].map((
+      name
+    ) => [name, hash(files.recording(name))])
+  ),
+  environment: Object.fromEntries(
+    ["STRIDER_ENVIRONMENT", "FONTCONFIG_FILE", "LANG", "LC_ALL", "TZ", "ALSA_CONFIG_PATH"].map((
+      key
+    ) => [key, process.env[key]])
+  ),
+  fairness: engine === "firefox"
+    ? "Stock Firefox over BiDi versus Playwright-patched Firefox over Juggler: different versions and patches, not an isolated library comparison."
+    : "Same pinned stock executable; each library retains its default launch arguments.",
+  launchBoundary:
+    "Fresh browser through verified first page and shutdown, one warmup then alternating pairs; no filesystem cache reset."
+}
+const measurements: Measurements = {
+  metadata,
+  unsupported,
   date: new Date().toISOString().slice(0, 10),
   machine: `${os.cpus()[0]?.model ?? "unknown CPU"}, ${os.cpus().length} threads, ${
     Math.round(os.totalmem() / 2 ** 30)
   } GiB, Linux ${os.release()}, load ${os.loadavg().map((load) => load.toFixed(1)).join(" ")} at the end`,
   node: process.version,
-  browser: info.product,
+  browser: `${info.product} ${info.version}`,
   striderCommit: commit.slice(0, 7),
   playwright: (require("playwright-core/package.json") as { version: string }).version,
   runs,
   launch: launchStats,
-  scenarios: results,
+  scenarios: [...launchResults, ...results],
   q82,
   q82WaitMs: waitMs,
   q103,
   tells,
   flags: { strider: striderArgs.slice(1), playwright: playwrightArgs.slice(1) },
   source: fs.readFileSync(path.join(import.meta.dirname, "scenarios.ts"), "utf8")
-})
-// One scenario is a check, printed; RESULTS.md is the full run's record
-process.exitCode = publish(results, () => {
-  if (only === undefined) {
-    const out = path.join(import.meta.dirname, "../RESULTS.md")
-    fs.writeFileSync(out, written)
-    log(`wrote ${path.relative(root, out)}`)
-  } else {
-    process.stdout.write(written)
-  }
-})
+}
+// A single browser run prints its report and can save an explicitly selected artifact directory.
+// Only scenarios:report writes the checked-in combined report.
+process.exitCode = publish([...launchResults, ...results], () => writeRunReport(measurements, output))
+
+if (diagnosticFailures.length > 0) process.exitCode = 1

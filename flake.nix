@@ -37,6 +37,22 @@
           firefox = pkgs.firefox;
           # Stock WebKit: its MiniBrowser, launched in automation mode or attached, which has no headless mode
           webkitgtk = pkgs.webkitgtk_6_0;
+          # playwright-core 1.64.1's Firefox 157.0, revision 1555. Stock Firefox cannot speak Juggler.
+          # Pin the downloaded tree as well as its revision; reuse nixpkgs' ELF patching dependencies.
+          scenario-firefox = pkgs.stdenv.mkDerivation {
+            name = "scenario-playwright-firefox-157.0-1555";
+            src = pkgs.fetchzip {
+              url = "https://cdn.playwright.dev/dbazure/download/playwright/builds/firefox/1555/firefox-debian-12.zip";
+              hash = "sha256-PCLfh8+Gm8NFq/6ysLwFaDI+yDK2AaZ6BCTPcWmL6Rg=";
+            };
+            inherit (pkgs.firefox-bin.unwrapped)
+              nativeBuildInputs buildInputs runtimeDependencies appendRunpaths patchelfFlags;
+            buildPhase = ''
+              mkdir -p $out/firefox
+              cp -R . $out/firefox
+            '';
+            meta.platforms = [ "x86_64-linux" ];
+          };
         };
     in
     {
