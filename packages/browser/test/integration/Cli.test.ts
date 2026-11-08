@@ -1125,6 +1125,37 @@ describe("strider", () => {
       assert.strictEqual((yield* run("-s", "shop", "pages")).code, 20)
     })), timeout)
 
+  it.live(
+    "keeps existing redaction when adding a page creation failure hint",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = { ...environment(), SECRET_PW: "password" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run(
+          "start",
+          "--name",
+          "once",
+          "--chromium",
+          chromium.executable,
+          "--secret",
+          "password=SECRET_PW"
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const failure = yield* run("-s", "once", "page", "new", "http://127.0.0.1:9/?pw=%password%&typo=%pasword%")
+          assert.strictEqual(failure.code, 11, failure.err)
+          assert.include(failure.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
+          assert.include(failure.err, "%pasword% names no secret")
+          assert.notInclude(failure.err, "pw=password")
+          assert.notInclude(failure.err, "was sent")
+        } finally {
+          yield* run("-s", "once", "stop")
+          fs.rmSync(env.XDG_RUNTIME_DIR, { recursive: true, force: true })
+        }
+      })),
+    timeout
+  )
+
   it.live("finishes stop cleanup while keeping the session directory", () =>
     Effect.gen(function*() {
       const env = environment()

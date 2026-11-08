@@ -971,11 +971,18 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const diagnosed = Object.fromEntries(
     Object.entries(handlers).map(([name, handler]) => [
       name,
-      (params: never) =>
-        Effect.map(handler(params), (result) => ({
-          ...result,
-          sinceLast: [...result.sinceLast, ...conceal(Secrets.diagnostics(params, values.keys()))]
-        }))
+      (params: never) => {
+        const diagnostics = conceal(Secrets.diagnostics(params, values.keys()))
+        return handler(params).pipe(
+          Effect.map((result) => ({ ...result, sinceLast: [...result.sinceLast, ...diagnostics] })),
+          Effect.mapError((failure) =>
+            diagnostics.length === 0 ? failure : new Tools.ToolFailure({
+              ...failure,
+              message: [failure.message, ...diagnostics].join("\n")
+            })
+          )
+        )
+      }
     ])
   ) as typeof handlers
   const handlerContext = yield* Tools.toolkit.toHandlers(diagnosed)

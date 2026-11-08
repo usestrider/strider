@@ -610,7 +610,20 @@ export const commands = (getDaemon: () => Daemon) => {
               const { name: named, page: opened } = yield* getDaemon().session.open({
                 name: Option.getOrUndefined(name),
                 url: Option.getOrUndefined(url)
-              }).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+              }).pipe(Effect.mapError((failure) =>
+                new CommandFailed(
+                  {
+                    ...failure,
+                    message: [
+                      failure.message,
+                      ...getDaemon().session.conceal(Secrets.diagnostics(
+                        Option.getOrUndefined(url),
+                        Object.keys(getDaemon().secretVariables)
+                      ))
+                    ].join("\n")
+                  }
+                )
+              ))
               getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)

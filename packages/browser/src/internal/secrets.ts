@@ -50,10 +50,13 @@ export const diagnostics = (input: unknown, names: Iterable<string>): ReadonlyAr
           const next = parts[index]!.slice(pattern.lastIndex, pattern.lastIndex + 2)
           if (
             /^[A-Fa-f][0-9A-Fa-f]$/.test(name) ||
-            (/^[A-Fa-f][0-9A-Fa-f]/.test(name) && /^[0-9A-Fa-f]{2}$/.test(next))
+            (/^[A-Fa-f][0-9A-Fa-f]/.test(name) && /^[0-9A-Fa-f]{2}$/.test(next) &&
+              !known.some((candidate) => close(name, candidate)))
           ) {
             // Two hex digits are a URL escape. Also preserve escaped bytes followed by text
-            // up to the next escape, as in %ACtext%20. Revisit the closing percent.
+            // up to the next escape, as in %ACtext%20, unless a configured name is close.
+            // This ambiguous syntax gives plausible typos precedence over longer escape-like text.
+            // Revisit the closing percent.
             pattern.lastIndex--
           } else unknown.add(match[1]!)
         }
@@ -74,6 +77,6 @@ export const diagnostics = (input: unknown, names: Iterable<string>): ReadonlyAr
     const suggestion = candidates.length === 1 && /^[A-Za-z][A-Za-z0-9_-]*$/.test(candidates[0]!)
       ? ` Did you mean %${candidates[0]}%?`
       : ""
-    return `%${name}% names no secret and was sent as written; configured: ${configured}.${suggestion}`
+    return `%${name}% names no secret; kept as written in the input; configured: ${configured}.${suggestion}`
   })
 }

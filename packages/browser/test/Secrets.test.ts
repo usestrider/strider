@@ -26,6 +26,11 @@ describe("secret diagnostics", () => {
     const [message] = Secrets.diagnostics("%adminpas%2024", ["adminpass"])
     assert.include(message!, "%adminpas% names no secret")
     assert.include(message!, "Did you mean %adminpass%?")
+    const [ambiguous] = Secrets.diagnostics("%adminpas%2024", ["adminpass", "adminpat"])
+    assert.include(ambiguous!, "%adminpas% names no secret")
+    assert.notInclude(ambiguous!, "Did you mean")
+    assert.deepStrictEqual(Secrets.diagnostics("%ad%2024", ["add"]), [])
+    assert.include(Secrets.diagnostics("%ACtext%20", ["ACtextt"])[0]!, "Did you mean %ACtextt%?")
   })
 
   it("quotes arbitrary configured names on one line for exported comments", () => {
