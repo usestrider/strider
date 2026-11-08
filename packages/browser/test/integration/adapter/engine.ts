@@ -149,6 +149,40 @@ const revalidate = Effect.fnUntraced(function*(
   return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
 })
 
+const fillRequest: Extract<Engine.Request, { op: "act" }> = {
+  ...point(0),
+  checks: { ...all, stable: 0, editable: true, inViewport: false, receivesPointer: false },
+  action: { _tag: "Fill", value: "filled" }
+}
+
+/** Keep capture and consumption in one browser task; wire latency cannot decide freshness for this test. */
+const revalidateFill = Effect.fnUntraced(function*(
+  call: Effect.Success<ReturnType<typeof open>>["call"],
+  between: string,
+  apply = false,
+  second: Partial<Extract<Engine.Request, { op: "act" }>> = {}
+) {
+  const result = yield* call(
+    `async (json, secondJson) => {
+    const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})]
+    const request = JSON.parse(json)
+    const first = JSON.parse(await engine.run(JSON.stringify({ ...request, stability: "capture" })))
+    if (first._tag !== "Ready" || typeof first.stability !== "string") throw new Error("No fill rendering evidence")
+    ${between}
+    const before = globalThis.engineTestFrames
+    const response = await engine.run(JSON.stringify({
+      ...request, ...JSON.parse(secondJson), apply: ${apply}, stability: first.stability
+    }))
+    return JSON.stringify({ response, frames: globalThis.engineTestFrames - before })
+  }`,
+    [string(JSON.stringify(fillRequest)), string(JSON.stringify(second))]
+  )
+  assert(result._tag === "Value", result._tag === "Exception" ? result.text : "")
+  assert(result.value.type === "string")
+  const measured = JSON.parse(result.value.value) as { response: string; frames: number }
+  return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
+})
+
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
@@ -856,6 +890,177 @@ export const engine = (backend: Backend) =>
               assert.strictEqual(result.response.reason._tag, reason)
             }), timeout)
         }
+
+        for (const between of ["", "await Promise.resolve()"] as const) {
+          it.effect(`reuses fill rendering evidence before the next native update ${between}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, `<input id="go">`, countFrames())
+              const result = yield* revalidateFill(call, between)
+              assert.strictEqual(result.response._tag, "Ready")
+              assert.strictEqual(result.frames, 0)
+            }), timeout)
+        }
+
+        for (
+          const [name, between] of [
+            ["movement", `document.getElementById("go").style.marginLeft = "40px"`],
+            [
+              "replacement with identical geometry",
+              `const old = document.getElementById("go"); old.replaceWith(old.cloneNode(true))`
+            ],
+            ["an intervening rendering update", `await new Promise(requestAnimationFrame)`],
+            ["consumption", `await engine.run(JSON.stringify({ ...request, stability: first.stability }))`],
+            ["supersession", `await engine.run(JSON.stringify({ ...request, stability: "capture" }))`],
+            [
+              "a failed revalidation",
+              `const duplicate = document.getElementById("go").cloneNode(true); document.body.append(duplicate); await engine.run(JSON.stringify({ ...request, apply: true, stability: first.stability })); duplicate.remove()`
+            ],
+            [
+              "a failed intervening action",
+              `await engine.run(JSON.stringify({ ...request, steps: [{_tag:"Css", selector:"#missing"}], cap: 0 }))`
+            ]
+          ] as const
+        ) {
+          it.effect(`resamples fill rendering evidence after ${name}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, `<input id="go">`, countFrames())
+              const result = yield* revalidateFill(call, between)
+              assert.strictEqual(result.response._tag, "Ready")
+              assert.isAtLeast(result.frames, 1)
+            }), timeout)
+        }
+
+        it.effect("expires fill rendering evidence at the next update before its expiry callback runs", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              `<input id="go">`,
+              `() => {
+              const frame = requestAnimationFrame.bind(globalThis)
+              let registrations = 0
+              globalThis.engineTestFrames = 0
+              globalThis.requestAnimationFrame = callback => {
+                // Delay only capture's expiry callback. A real native update must invalidate evidence even
+                // before that callback is delivered; all rendering waits still use native callbacks.
+                if (++registrations === 2) return 0
+                return frame(time => { globalThis.engineTestFrames++; callback(time) })
+              }
+            }`
+            )
+            const result = yield* revalidateFill(call, "await new Promise(requestAnimationFrame)")
+            assert.strictEqual(result.response._tag, "Ready")
+            assert.isAtLeast(result.frames, 1)
+          }), timeout)
+
+        it.effect("does not reuse fill rendering evidence for another action or stability requirement", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, `<input id="go">`, countFrames())
+            for (
+              const second of [
+                { action: { _tag: "Focus" } as const },
+                { checks: { ...fillRequest.checks, stable: 2 } }
+              ]
+            ) {
+              const result = yield* revalidateFill(call, "", false, second)
+              assert.strictEqual(result.response._tag, "Ready")
+              assert.isAtLeast(result.frames, second.checks?.stable ?? 1)
+            }
+          }), timeout)
+
+        for (
+          const [name, between, tag, reason] of [
+            ["disabled", `document.getElementById("go").disabled = true`, "NotReady", "Disabled"],
+            ["hidden", `document.getElementById("go").style.visibility = "hidden"`, "NotReady", "NotVisible"],
+            ["inert", `document.getElementById("go").inert = true`, "NotReady", "Inert"],
+            ["read-only", `document.getElementById("go").readOnly = true`, "NotReady", "ReadOnly"],
+            ["not editable", `document.getElementById("go").type = "button"`, "Final", "NotEditable"],
+            ["ambiguous", `document.body.append(document.getElementById("go").cloneNode(true))`, "Strict", ""],
+            ["detached", `document.getElementById("go").remove()`, "NotReady", "NoMatch"]
+          ] as const
+        ) {
+          it.effect(`reruns fill readiness when fresh evidence becomes ${name}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, `<input id="go">`, countFrames())
+              const result = yield* revalidateFill(call, between, true, { cap: 100 })
+              assert.strictEqual(result.response._tag, tag, JSON.stringify(result.response))
+              if (result.response._tag === "NotReady") {
+                assert.strictEqual(result.response.reason._tag, reason)
+              }
+              if (result.response._tag === "Final") {
+                assert.strictEqual(result.response.final._tag, reason)
+              }
+            }), timeout)
+        }
+
+        for (
+          const [name, handler, tag, reason] of [
+            ["moves the target", `this.style.marginLeft='40px'`, "Ready", ""],
+            ["replaces the target", `this.replaceWith(this.cloneNode(true))`, "Ready", ""],
+            ["disables the target", `this.disabled=true`, "NotReady", "Disabled"],
+            ["hides the target", `this.style.visibility='hidden'`, "NotReady", "NotVisible"],
+            ["makes the target inert", `this.inert=true`, "NotReady", "Inert"],
+            ["makes the target read-only", `this.readOnly=true`, "NotReady", "ReadOnly"],
+            ["makes the target not editable", `this.type='button'`, "Final", "NotEditable"],
+            ["makes the selector ambiguous", `document.body.append(this.cloneNode(true))`, "Strict", ""]
+          ] as const
+        ) {
+          it.effect(`rechecks fill after a focus handler ${name}`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(
+                backend,
+                `<input id="go" onfocus="this.removeAttribute('onfocus');${handler}">`,
+                countFrames()
+              )
+              const result = yield* revalidateFill(call, "", true, { cap: 100 })
+              assert.strictEqual(result.response._tag, tag, JSON.stringify(result.response))
+              if (tag === "Ready") {
+                assert.isAtLeast(result.frames, 1)
+              }
+              if (result.response._tag === "NotReady") {
+                assert.strictEqual(result.response.reason._tag, reason)
+              }
+              if (result.response._tag === "Final") {
+                assert.strictEqual(result.response.final._tag, reason)
+              }
+            }), timeout)
+        }
+
+        it.effect("refuses expired fill rendering evidence when rendering stops", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              `<input id="go">`,
+              `() => {
+              const frame = requestAnimationFrame.bind(globalThis)
+              globalThis.engineTestFrames = 0
+              globalThis.engineTestRendering = true
+              globalThis.requestAnimationFrame = callback => globalThis.engineTestRendering ? frame(time => {
+                globalThis.engineTestFrames++
+                callback(time)
+              }) : 0
+            }`
+            )
+            const result = yield* revalidateFill(
+              call,
+              `await new Promise(requestAnimationFrame); globalThis.engineTestRendering = false`,
+              true,
+              { cap: 100 }
+            )
+            assert(result.response._tag === "NotReady", JSON.stringify(result.response))
+            assert.strictEqual(result.response.reason._tag, "NoRenderingOpportunity")
+          }), timeout)
+
+        it.effect("refuses fill rendering evidence when no native frame arrives", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<input id="go">`,
+              "() => { globalThis.requestAnimationFrame = () => 0 }"
+            )
+            const response = yield* send({ ...fillRequest, cap: 100, stability: "capture" })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "NoRenderingOpportunity")
+          }), timeout)
 
         it.effect("samples stability immediately, then across the configured rendering updates", () =>
           Effect.gen(function*() {
