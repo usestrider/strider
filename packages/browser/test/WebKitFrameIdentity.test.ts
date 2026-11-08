@@ -11,7 +11,10 @@ import type * as Automation from "../src/webkit-automation-protocol/Automation.t
 const handle = "page" as Automation.BrowsingContextHandle
 const childHandle = "child" as Automation.FrameHandle
 
-const fixture = (mode: "normal" | "replace" | "removed" | "error" | "cleanup replacement" = "normal") => {
+const fixture = (
+  mode: "normal" | "replace" | "removed" | "error" | "cleanup replacement" = "normal",
+  origins: ReadonlyArray<number> = [101, 101]
+) => {
   let marks = 0
   const windows = [{}, {}]
   const contexts = windows.map((window) => vm.createContext({ window }))
@@ -21,7 +24,9 @@ const fixture = (mode: "normal" | "replace" | "removed" | "error" | "cleanup rep
       send: (command: Protocol.Command<string, unknown, unknown>) =>
         Effect.suspend(() => {
           const { expression } = command.params as { expression: string }
-          if (expression.includes("timeOrigin")) return Effect.succeed({ result: { value: "[101,\"about:srcdoc\"]" } })
+          if (expression.includes("timeOrigin")) {
+            return Effect.succeed({ result: { value: `[${origins[index]},"about:srcdoc"]` } })
+          }
           if (mode === "error") {
             return Effect.fail(
               new Protocol.ProtocolError({
@@ -88,6 +93,15 @@ describe("WebKit frame identity", () => {
       assert.strictEqual(Option.getOrThrow(result), childHandle)
       assert.strictEqual(state.frameHandles.get(frame), childHandle)
       clean()
+    }))
+
+  // Automation reads the target's time origin 1 ms off its inspector read (100 against 101), as in the retained
+  // stock WebKit trace, while a sibling srcdoc frame begun a millisecond earlier reads 100 from the inspector.
+  it.effect("does not accept a sibling whose fingerprint alone matches a time origin read off by one", () =>
+    Effect.gen(function*() {
+      const { frames, process } = fixture("normal", [100, 101])
+      const result = yield* Input.matchFrame(process, handle, childHandle, frames)
+      assert.strictEqual(Option.getOrUndefined(result), frames[1], "the marked window is the target, not the sibling")
     }))
 
   for (const mode of ["normal", "replace", "removed", "error", "cleanup replacement"] as const) {
