@@ -1,5 +1,15 @@
 # @usestrider/vitest
 
+## 0.2.0
+
+### Breaking changes
+
+- **Requires Effect 4.1.2** (#188): `effect` and `@effect/platform-node` `^4.1.2`.
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.7.0.
+
 ## 0.1.6
 
 ### Patch Changes
