@@ -1,8 +1,8 @@
 # macOS integration
 
 CI runs it as the `integration-macos` job in `.github/workflows/integration.yml`, on GitHub's standard Apple Silicon
-`macos-15` runner ([runner image labels](https://github.com/actions/runner-images#available-images)). It runs after
-the Linux job, after Linux failures too, nightly when `main` has changed and on manual dispatch.
+`macos-15` runner ([runner image labels](https://github.com/actions/runner-images#available-images)). It runs independently
+of the Linux job, every night and on manual dispatch.
 No macOS browser execution has been validated on the Linux development machine.
 
 Run locally on Apple Silicon macOS with Node 24 and the repository's pinned pnpm:
