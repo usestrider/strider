@@ -101,6 +101,9 @@ const browsers = [{ id: "chromium", label: "Chromium" }, { id: "firefox", label:
   summary { cursor: pointer; font-weight: 600; }
   summary span { font-weight: 400; font-size: .8em; }
   table { min-width: 60rem; }
+  .capabilities td { white-space: normal; min-width: 9rem; max-width: 24rem; }
+  .capabilities td:last-child { min-width: 20rem; }
+  :global(.matrix-commit) { overflow-wrap: anywhere; }
   small { display: block; font-size: .8em; font-weight: 400; margin-top: .4rem; }
   td p { margin-block: .5rem; }
   [hidden] { display: none !important; }

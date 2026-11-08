@@ -51133,10 +51133,6 @@
       ],
       "valueCoverage": [
         {
-          "value": "jpeg",
-          "status": "has"
-        },
-        {
           "value": "png",
           "status": "has"
         },
@@ -51145,7 +51141,7 @@
           "status": "has"
         },
         {
-          "value": "jpeg on stock WebKit",
+          "value": "jpeg",
           "status": "missing",
           "gap": "option-locator-screenshot-type-value-jpeg-on-stock-webkit"
         }
@@ -53185,10 +53181,6 @@
       ],
       "valueCoverage": [
         {
-          "value": "jpeg",
-          "status": "has"
-        },
-        {
           "value": "png",
           "status": "has"
         },
@@ -53197,7 +53189,7 @@
           "status": "has"
         },
         {
-          "value": "jpeg on stock WebKit",
+          "value": "jpeg",
           "status": "missing",
           "gap": "option-page-screenshot-type-value-jpeg-on-stock-webkit"
         }
@@ -65375,10 +65367,6 @@
       ],
       "valueCoverage": [
         {
-          "value": "jpeg",
-          "status": "has"
-        },
-        {
           "value": "png",
           "status": "has"
         },
@@ -65387,7 +65375,7 @@
           "status": "has"
         },
         {
-          "value": "jpeg on stock WebKit",
+          "value": "jpeg",
           "status": "missing",
           "gap": "option-elementhandle-screenshot-type-value-jpeg-on-stock-webkit"
         }
@@ -108938,7 +108926,7 @@
       ],
       "requirements": [],
       "parent": "option-locator-screenshot-type",
-      "value": "jpeg on stock WebKit",
+      "value": "jpeg",
       "notes": "Stock WebKit screenshots are PNG-only.",
       "option": "type",
       "browserOverrides": {
@@ -109150,7 +109138,7 @@
       ],
       "requirements": [],
       "parent": "option-page-screenshot-type",
-      "value": "jpeg on stock WebKit",
+      "value": "jpeg",
       "notes": "Stock WebKit screenshots are PNG-only.",
       "option": "type",
       "browserOverrides": {
@@ -109452,7 +109440,7 @@
       ],
       "requirements": [],
       "parent": "option-elementhandle-screenshot-type",
-      "value": "jpeg on stock WebKit",
+      "value": "jpeg",
       "notes": "Stock WebKit screenshots are PNG-only.",
       "option": "type",
       "browserOverrides": {
