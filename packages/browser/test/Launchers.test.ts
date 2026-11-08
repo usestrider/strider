@@ -307,6 +307,50 @@ describe("Chromium launcher", () => {
         assert.include(error.reason.hint, "scripted socket refusal")
       }))
 
+    // A launch's `timeout` is its only bound: no outer deadline runs around it. An exited browser whose stderr a
+    // descendant (or a wrapper's detached child) still holds must fail within that bound, with what it wrote so far.
+    it.effect("reports an exited browser within the launch timeout while a descendant keeps its stderr open", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const noEndpoint: FileSystem.FileSystem = {
+          ...fs,
+          // Nothing is at /fake/profile, so DevToolsActivePort is never readable.
+          exists: (path) => path === "/fake/chromium" ? Effect.succeed(true) : fs.exists(path)
+        }
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000002),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(3)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.make(new TextEncoder().encode("early diagnostic\n")).pipe(Stream.concat(Stream.never)),
+            all: Stream.never,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const result = yield* ChromiumLauncher.launchWithPort({
+          executablePath: "/fake/chromium",
+          userDataDir: "/fake/profile",
+          timeout: "200 millis"
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, noEndpoint),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.scoped,
+          Effect.exit,
+          Effect.timeoutOption("3 seconds"),
+          BrowserClock.onLive
+        )
+        assert(Option.isSome(result), "the launch outlived its 200 ms timeout by more than 3 seconds")
+        assert(result.value._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.value))
+        assert(error.reason._tag === "ProcessExited")
+        assert.include(error.reason.stderrTail, "early diagnostic")
+      }))
+
     it.effect("reports a browser that exits before it is ready, with its exit code and stderr", () =>
       Effect.gen(function*() {
         const failing = "/bin/sh"
