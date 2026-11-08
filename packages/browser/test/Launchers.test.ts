@@ -15,7 +15,9 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import type * as CommandLine from "effect/process/CommandLine"
 import * as Random from "effect/Random"
+import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Sink from "effect/Sink"
 import * as Socket from "effect/socket/Socket"
@@ -35,6 +37,9 @@ import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 import type * as UserContext from "../src/UserContext.ts"
+
+/** A child process's argument or environment value as the test wrote it. */
+const plain = (word: CommandLine.Word): string => Redacted.isRedacted(word) ? Redacted.value(word) : word
 
 describe("DevToolsActivePort", () => {
   for (const port of [1, 9222, 65535]) {
@@ -696,7 +701,7 @@ describe("WebKit launcher", () => {
             const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
             assert.isString(endpoint)
             const connected = yield* Deferred.make<void>()
-            connections.set(Number(endpoint!.split(":")[1]), connected)
+            connections.set(Number(plain(endpoint!).split(":")[1]), connected)
             // The existing server accepts before the new child reports EADDRINUSE.
             const stderr = Stream.fromEffect(Deferred.await(connected)).pipe(
               Stream.map(() => new TextEncoder().encode(`Failed to start remote inspector server on ${endpoint}\n`)),
@@ -799,7 +804,7 @@ describe("WebKit launcher", () => {
         const spawner = ChildProcessSpawner.make((command) =>
           Effect.gen(function*() {
             assert(command._tag === "StandardCommand")
-            port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
+            port = Number(plain(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!).split(":")[1])
             spawned++
             onSpawn()
             yield* Effect.addFinalizer(() =>
@@ -1146,7 +1151,7 @@ describe("WebKit launcher", () => {
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.gen(function*() {
           assert(command._tag === "StandardCommand")
-          const port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
+          const port = Number(plain(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!).split(":")[1])
           const spawn = ports.push(port) - 1
           yield* Effect.addFinalizer(() => Effect.sync(() => stopped.push(spawn)))
           const line = new TextEncoder().encode(`Failed to start remote inspector server on 127.0.0.1:${port}\n`)
