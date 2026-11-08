@@ -5,11 +5,11 @@
   "type": "module",
   "description": "Strider and Playwright side by side on the same stock Chromium: scenarios, two costs and the automation tells; never published",
   "devDependencies": {
-    "@effect/platform-node": "^4.0.6",
+    "@effect/platform-node": "^4.1.2",
     "@types/node": "^26.6.5",
     "@usestrider/browser": "workspace:^",
     "astro": "7.4.2",
-    "effect": "^4.0.6",
+    "effect": "^4.1.2",
     "playwright-core": "1.64.1",
     "vite": "8.3.4",
     "vitest": "5.0.5"

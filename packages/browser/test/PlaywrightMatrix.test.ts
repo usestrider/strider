@@ -154,7 +154,7 @@ describe("Playwright matrix", () => {
 
   it("rejects an Effect source link for the wrong module", () => {
     const api = row("method-page-waitfortimeout").api[0]
-    expect(() => assertApiLink({ ...api, url: "https://unpkg.com/effect@4.0.6/src/Fiber.ts" }))
+    expect(() => assertApiLink({ ...api, url: "https://unpkg.com/effect@4.1.2/src/Fiber.ts" }))
       .toThrow()
   })
 })
