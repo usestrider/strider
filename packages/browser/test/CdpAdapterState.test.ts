@@ -1051,6 +1051,64 @@ describe("CDP restoration cleanup", () => {
       })))
   }
 
+  it.effect("holds disposal until a download restore already sent to the context has replied", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const restoreSent = yield* Deferred.make<void>()
+      const finishRestore = yield* Deferred.make<void>()
+      const order: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+        }) =>
+          Effect.suspend(() => {
+            if (command.method === "Target.disposeBrowserContext") {
+              order.push("dispose")
+              return Effect.succeed({})
+            }
+            if (
+              command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default" &&
+              command.params.browserContextId === "disposing"
+            ) {
+              order.push("restore sent")
+              return Deferred.succeed(restoreSent, undefined).pipe(
+                Effect.andThen(Deferred.await(finishRestore)),
+                Effect.andThen(Effect.sync(() => order.push("restore replied"))),
+                Effect.as({})
+              )
+            }
+            return Effect.succeed({})
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const closing = {
+        id: state.ids.userContext(),
+        browserContextId: "disposing",
+        isDefault: false,
+        removing: false
+      }
+      state.contexts.set(closing.id, closing)
+      state.contextsByCdp.set("disposing", closing)
+      state.pages.set(page.id, { ...page, context: closing })
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "Browser" }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Deny" }
+      }).pipe(Scope.provide(lifetime))
+      const releasing = yield* Scope.close(lifetime, Exit.void).pipe(Effect.forkScoped)
+      yield* Deferred.await(restoreSent)
+      const removing = yield* Contexts.removeUserContext(state, closing.id).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(order, ["restore sent"], "disposal waits for the restore in flight")
+      yield* Deferred.succeed(finishRestore, undefined)
+      yield* Fiber.join(releasing)
+      yield* Fiber.join(removing)
+      assert.deepStrictEqual(order, ["restore sent", "restore replied", "dispose"])
+    })))
+
   it.effect("continues download cleanup after an ended context and warns for a rejected one", () =>
     Effect.gen(function*() {
       const { state, page } = yield* withPage()
