@@ -203,7 +203,8 @@ Features that only some backends have, each reached through a handle bound to on
 
 *models*
 
-- `interface Capability<out H>`
+- `interface Capability<out H, out Access extends "inspect" | "control" = "inspect">`
+  - `readonly access: Access`
   - `readonly [TypeId]: () => H`
   - `readonly name: string`
 - `interface AxNode`
@@ -236,13 +237,17 @@ Features that only some backends have, each reached through a handle bound to on
 
 *guards*
 
-- `const isCapability: (u: unknown) => u is Capability<unknown>`
+- `const isCapability: (u: unknown) => u is Capability<unknown> | Capability<unknown, "control">`
 - `const isCapabilityError: (u: unknown) => u is CapabilityError`
 
 *errors*
 
 - `class CapabilityError: Schema.TaggedError "CapabilityError" { capability, reason, diagnostics }`
   - `override get cause(): unknown`
+
+*capabilities*
+
+- `const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "control">`
 
 ### Condition
 
@@ -1362,6 +1367,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `evaluate<Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args): Effect.Effect<JSHandle.Serialized<A>, PageError | Targe…`
   - `capability<H>(capability: Capability.Capability<H>): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>`
 - `interface Page extends ReadonlyPage`
+  - `capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect< H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout…`
   - `getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator`
   - `getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
   - `getByLabel(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator`
@@ -1906,6 +1912,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`
   - `readonly focus?: "system" | "emulated" | undefined`
@@ -1980,6 +1987,32 @@ Read-only views of state that changes, kept up to date from the browser's events
 *errors*
 
 - `class Ended: Schema.TaggedError "Ended" { operation, value, diagnostics }`
+
+### WebAuthn
+
+Native virtual authenticators and the credentials they hold on one Chromium page.
+
+*models*
+
+- `type Credential = typeof Credential.Type`
+- `interface VirtualAuthenticator`
+  - `readonly credentials: Effect.Effect<ReadonlyArray<Credential>, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly addCredential: (credential: Credential) => Effect.Effect<void, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly removeCredential: (credentialId: Uint8Array) => Effect.Effect<void, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly clearCredentials: Effect.Effect<void, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly setUserVerified: (verified: boolean) => Effect.Effect<void, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly setAutomaticPresenceSimulation: (enabled: boolean) => Effect.Effect<void, WebAuthnError | Target.TargetGone | Deadline.Timeout>`
+- `type WebAuthnErrorReason = typeof WebAuthnErrorReason.Type`
+
+*schemas*
+
+- `const Credential = Schema.Struct({ credentialId, isResidentCredential: Schema.Boolean, rpId: Schema.String.check(Schema.makeFilter((value) => { const url = URL.parse(`https: return value.length > 0 && url !== null && u…`
+- `const WebAuthnErrorReason = Schema.Union([Reason.InvalidInput, Reason.BackendFailure, Reason.Unsupported])`
+
+*errors*
+
+- `class WebAuthnError: Schema.TaggedError "WebAuthnError" { reason, diagnostics }`
+  - `override get cause(): unknown`
 
 ## `@usestrider/browser/ai`
 

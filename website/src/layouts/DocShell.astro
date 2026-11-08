@@ -7,7 +7,7 @@ import BaseLayout from "./BaseLayout.astro"
 interface Props {
   readonly title: string
   readonly description?: string | undefined
-  readonly area: "guides" | "scenarios" | "reference"
+  readonly area: "guides" | "scenarios" | "reference" | "changelog"
   /** Where the page is: GUIDE / CHAPTER 1 / START HERE */
   readonly crumbs: ReadonlyArray<{ readonly label: string; readonly href?: string | undefined }>
 }

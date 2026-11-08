@@ -30,6 +30,8 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
+      entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
@@ -135,6 +137,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
+      entry("capability.virtualAuthenticator", "unsupported", [
+        "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
+      ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
       entry(
@@ -189,6 +194,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
     userContexts: ["supported", ["each context is a browser process of its own"]],
+    "userContexts.proxy": ["supported", [
+      "isolated process environment; HTTP proxy endpoints only; loopback stays direct"
+    ]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],

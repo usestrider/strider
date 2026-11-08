@@ -8,8 +8,11 @@
  * UTF-16 parent history and 2 MiB of child history: 4 MiB per scope, including entry metadata. Child replay never
  * consumes the parent budget. Parent eviction follows observation order; child eviction follows origin timestamps,
  * with PID then process-local sequence as deterministic equal-timestamp tie breakers, regardless of slot replay order.
- * A recent daemon observation therefore survives older clients even when its slot is collected first. This is a
- * recency policy, not a protected daemon allocation: genuinely newer child traffic can evict older daemon records.
+ * Startup records replayed from protected spool prefixes reserve up to 512 KiB of the child budget, in slot order.
+ * The remaining capacity (at least 1536 KiB) retains recent child observations, independent of slot replay order.
+ * Prefixes beyond the aggregate reservation compete for tail capacity; startup is bounded, not guaranteed for every
+ * process. Large startup traffic can exhaust a process prefix before its launch handshake. No semantic filtering
+ * chooses commands: the prefix preserves the first records, including identity and ordinary launch handshakes.
  * Output retains collection sequence and each process's local order. Clock adjustments can affect recency selection;
  * timestamps do not establish causation across processes. Individual parent payloads keep 32 Ki characters, child
  * payloads 8 Ki characters, and late failed-test cleanup has a separate 256 KiB serialized UTF-16 budget.
@@ -33,16 +36,17 @@
  * where an existing consumer drains it; ignored or inherited stderr is marked unavailable. No extra reader is added.
  *
  * Child transfer uses a private temporary spool per test/shared context, with 128 lifetime process slots, each
- * retaining two rotating 128 KiB segments (at most 32 MiB per scope, plus 128 empty claim tokens and a fixed
- * overflow marker). All 256 segments and the overflow marker exist before children get the path. Children claim a
+ * retaining a fixed 64 KiB startup prefix and two rotating 96 KiB tail segments (at most 32 MiB per scope,
+ * plus 128 empty claim tokens and a fixed overflow marker). All 384 segments and the overflow marker exist before
+ * children get the path. Prefix capacity is taken from the former tail allocation, not added to it. Children claim a
  * slot by unlinking a token, then only open existing files without O_CREAT. Completion atomically renames the spool
  * to a path children do not know before collection/removal, preventing new opens; in-flight descriptors can finish
  * writes to existing files but cannot add directory entries during removal. Passing and failing spools are removed,
  * without retries, delays or waiting for child exit. Later writes fail and cannot enter another test's spool.
  *
  * There is no transfer queue. Each child write retains one record (at most 64 KiB serialized UTF-16 before its
- * process metadata); collection reads at most two 128 KiB segments for one process at a time, plus bounded parsed
- * entries. Vitest-side retention totals 4 MiB per active scope: N active tests and W shared worker contexts retain
+ * process metadata); collection reads at most one 64 KiB prefix and two 96 KiB segments for one process
+ * at a time, plus bounded parsed entries. Vitest-side retention totals 4 MiB per active scope: N active tests and W shared worker contexts retain
  * at most 4*(N+W) MiB of serialized history and 32*(N+W) MiB of named spool data across their children.
  * Unlinked data can remain allocated until an in-flight descriptor closes; removal does not wait for it.
  * These are payload/metadata budgets, not exact JS heap measurements: arrays, parsed objects, source protocol values,
@@ -52,8 +56,9 @@
  * There is one test artifact per failed test and one shared artifact per failed file; retained disk across runs is
  * proportional to failures/runs, with CI's existing 14-day retention, not a global recorder quota.
  *
- * Slot exhaustion and evicted prefixes are marked as overflow. A write already in flight at retirement can leave
- * an incomplete final line; that observation can be missing. Child ordering is local to each process, with no claimed
+ * Slot exhaustion and gaps between retained process-local sequences are marked as overflow. Aggregate eviction
+ * has a separate omitted-entry count; protected prefixes can leave intermediate gaps before the retained tail.
+ * A write already in flight at retirement can leave an incomplete final line; that observation can be missing. Child ordering is local to each process, with no claimed
  * total order between parent and daemon. A worker killed before cleanup can leave its bounded temporary spool,
  * as well as lose its in-memory artifact.
  *
@@ -90,13 +95,14 @@
  * receive observations may be ignored by the link. Apart from native trace video failures, failures above the
  * inspector socket are not instrumented;
  * interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
- * pids and process arguments, rather than an explicit connection-to-process identifier. Launch and page-creation
- * preludes can be evicted from bounded histories; no protected head is kept. Shared-artifact links identify context
- * files but do not guarantee their prelude survives eviction. No real abnormal-loss probe has validated browser kill
- * or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
+ * pids and process arguments, rather than an explicit connection-to-process identifier. Only child startup prefixes
+ * are protected; parent and later page-creation preludes can be evicted. Shared-artifact links identify context
+ * files but do not guarantee their complete prelude survives eviction. No real abnormal-loss probe has validated
+ * browser kill or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
  */
 import { Buffer } from "node:buffer"
 export interface Origin {
+  readonly startup?: boolean
   readonly pid: number
   readonly sequence: number
   readonly timestamp: string
@@ -118,6 +124,8 @@ export interface Entry {
 
 export class TraceBuffer {
   private history: Array<{ entry: Entry; size: number }> = []
+  private startupHistory: Array<{ entry: Entry; size: number }> = []
+  private startupBytes = 0
   private childHistory: Array<{ entry: Entry; size: number }> = []
   private sequence = 0
   private dropped = 0
@@ -158,7 +166,17 @@ export class TraceBuffer {
       this.history.push({ entry, size })
       this.parentBytes += size
     } else {
-      if (size > this.childLimit) {
+      if (origin.startup && this.startupBytes + size <= 512 * 1024) {
+        this.startupHistory.push({ entry, size })
+        this.startupBytes += size
+        this.childBytes += size
+        while (this.childBytes > this.childLimit) {
+          this.childBytes -= this.childHistory.shift()!.size
+          this.childDropped++
+        }
+        return
+      }
+      if (size > this.childLimit - this.startupBytes) {
         this.childDropped++
         return
       }
@@ -183,7 +201,7 @@ export class TraceBuffer {
     }
   }
   entries(): Array<Entry> {
-    const entries = [...this.history, ...this.childHistory].map(({ entry }) => entry)
+    const entries = [...this.history, ...this.startupHistory, ...this.childHistory].map(({ entry }) => entry)
       .sort((a, b) => a.sequence - b.sequence)
     const overflow = (dropped: number, connection: string): Array<Entry> =>
       dropped === 0 ? [] : [{
@@ -191,13 +209,15 @@ export class TraceBuffer {
         timestamp: entries[0]?.timestamp ?? new Date().toISOString(),
         connection,
         kind: "overflow",
-        payload: `${dropped} earlier entries omitted`
+        payload: `${dropped} entries omitted from history`
       }]
     return [...overflow(this.dropped, "recorder"), ...overflow(this.childDropped, "recorder:children"), ...entries]
   }
   clear() {
     this.history = []
     this.childHistory = []
+    this.startupHistory = []
+    this.startupBytes = 0
     this.parentBytes = 0
     this.childBytes = 0
     this.dropped = 0

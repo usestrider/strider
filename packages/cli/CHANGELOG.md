@@ -1,5 +1,13 @@
 # @usestrider/cli
 
+## 0.2.2
+
+### Patch Changes
+
+- **`strider eval`** (#154): run a JavaScript expression or function file in a page and print the result.
+- **`strider stop` waits for its cleanup** (#134): it returns once the browser, session directory and ledger record are gone, and a failed cleanup exits non-zero.
+- Uses `@usestrider/browser` 0.5.0.
+
 ## 0.2.1
 
 ### Patch Changes

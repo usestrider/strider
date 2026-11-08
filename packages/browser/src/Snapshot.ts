@@ -160,6 +160,15 @@ export type Name = typeof Name.Type
 /**
  * Schema for a state a node can be in.
  *
+ * **Details**
+ *
+ * Pressed, expanded and selected appear only when their role-filter reader returns true.
+ * ARIA keywords are ASCII case-insensitive without trimming; unsupported roles contribute no marker.
+ * Native option selection and details open state take precedence over ARIA attributes.
+ * Open details carries expanded even with its ordinary group role; group expanded filters remain invalid.
+ * Summary expansion is not inferred. These markers describe Strider's query policy rather than browser
+ * accessibility-tree state, which can differ for conflicting native and ARIA values.
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0

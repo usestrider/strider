@@ -1299,3 +1299,27 @@ descendants and leaves unrelated owners alone. Owner loss does not imply a netwo
 deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
 may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
 redirect hops was rejected because attribution must remain correct.
+
+## Context proxy routing and authentication
+
+Route a context through an HTTP proxy at its creation, leaving omitted proxy settings unchanged and keeping
+loopback destinations direct. Use native per-context proxy settings on CDP/BiDi and isolated process environment
+overrides for launched stock WebKit, whose command-line proxy setting does not apply in automation mode. Keep
+proxy credentials separate from endpoint URLs and Redacted through protocol encoding. Answer only positively
+identified proxy challenges, once per request, retaining website auth routes. Reject WebKit credentials and
+configured credentials on attached Firefox. Firefox reserves each endpoint's credential pair (including none)
+synchronously before creation and retains it for the connection lifetime after successful creation or an uncertain
+outcome, because its native proxy auth cache crosses context boundaries and survives removal. Each pending creation
+owns a share; confirmed pre-creation rejection or confirmed unused rollback releases only that share. Reject both
+permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
+preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
+shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
+unverified wildcard, CIDR, SOCKS or HTTPS-to-proxy configurations.
+
+## Native passkey testing
+
+Virtual authenticators use native Chromium WebAuthn and belong to one page's scope, with one live acquisition per page so cleanup cannot disable another caller's environment. Credentials may be explicitly exported and imported into a second page or popup; those copies keep separate signature counters. Chromium's native environment follows a frame tree rather than a browser context, so context-wide sharing is not offered. Replacing `navigator.credentials.create/get` with a shared JavaScript implementation was rejected because it would test our emulation instead of the browser's WebAuthn. Firefox's classic WebDriver commands are outside Strider's BiDi transport, and stock WebKit's declared Automation credential commands are not implemented; these backends refuse acquisition rather than substituting behavior.
+
+## Shared snapshot and role-filter states
+
+Snapshots and role filters use the same pressed, expanded and selected readers, with positive snapshot markers only for exactly true. Preserve the documented query defaults and ASCII case-insensitive keywords without trimming, rather than introducing browser-dependent accessibility error handling or new malformed-token defaults. Native option selection and details open state take precedence over ARIA; open ordinary details is a native exception to snapshot role gating, without admitting group expanded filters or adding summary semantics. Reject independent attribute-only snapshot parsing because it contradicts query results, and reject copying browser accessibility trees because their native/ARIA conflict resolution can differ from Strider's existing native-property query contract.

@@ -169,8 +169,9 @@ export const queryOf = (
       // Match computed names, or unnamed framed controls, without choosing a first match.
       return `pipe((page) => Effect.gen(function*() {
           let matches = page.locator(":not(*)")
-          yield* Expect.that(page.snapshot().pipe(Effect.map((snapshot) => {
+          yield* Expect.that(page.snapshot().pipe(Effect.flatMap((snapshot) => Effect.gen(function*() {
             let found = false
+            let documentPrefix
             for (const [ref, node] of snapshot.refs) {
               if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
                 ${
@@ -178,13 +179,18 @@ export const queryOf = (
           ? `node.name._tag === "None" && ref.startsWith(${quote(target.slice(0, target.indexOf("e")) + "e")})`
           : `node.name._tag !== "None" && node.name.value === ${quote(name)}`
       }) {
+                const prefix = ref.slice(0, ref.indexOf("e"))
+                if (found && prefix !== documentPrefix) {
+                  return yield* Effect.fail(new Error("Ambiguous password matches across documents: narrow the exported locator manually to one frame or document."))
+                }
+                documentPrefix = prefix
                 const current = snapshot.ref(ref)
                 matches = found ? matches.or(current) : current
                 found = true
               }
             }
             return found
-          })), Condition.make(${
+          }))), Condition.make(${
         quote(
           name === undefined
             ? `an unnamed password control in recorded snapshot frame ${target.slice(0, target.indexOf("e"))}`

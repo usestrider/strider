@@ -95,6 +95,7 @@ export interface RoleOptions {
   readonly checked?: boolean | undefined
   /**
    * Match aria-pressed on buttons. Mixed matches neither boolean; absent or invalid values match false.
+   * Keywords are ASCII case-insensitive without trimming, shared with snapshot pressed markers.
    *
    * **Example** (Filter by pressed)
    *
@@ -111,7 +112,10 @@ export interface RoleOptions {
   readonly pressed?: boolean | undefined
   /**
    * Match aria-expanded on roles that support expansion, or the open state of details with a supported role.
-   * Absent ARIA values match neither boolean; present values other than case-insensitive "true" match false.
+   * Absent ARIA values match neither boolean; present values other than ASCII case-insensitive "true" match false,
+   * without trimming. Native details.open takes precedence over aria-expanded.
+   * Snapshots share this reader and also mark ordinary open details as expanded, but its group role
+   * does not support expanded filters. No expansion state is inferred for summary.
    *
    * **Example** (Filter by expanded)
    *
@@ -129,6 +133,8 @@ export interface RoleOptions {
   /**
    * Match a native option’s selected property or aria-selected on gridcell, option, row, tab, rowheader,
    * columnheader or treeitem. Absent or invalid ARIA values match false.
+   * Keywords are ASCII case-insensitive without trimming. Native option selection takes precedence over
+   * aria-selected in filters and snapshots, even when browser accessibility state follows ARIA instead.
    *
    * **Example** (Filter by selected)
    *

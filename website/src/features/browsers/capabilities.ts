@@ -37,6 +37,8 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Contexts, pages and frames",
     names: {
       userContexts: "New contexts and pages",
+      "userContexts.proxy": "HTTP proxies for a context",
+      "userContexts.proxy.credentials": "Proxy credentials",
       isolatedWorlds: "Isolated worlds, where `page.evaluate` and Strider's engine run",
       "pauseOnStart.frames": "Declarations in place before a frame's first script",
       "pauseOnStart.workers": "Declarations in place before a worker's first script",
@@ -59,6 +61,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "input.pointerModifiers": "Modifiers on pointer actions",
       "input.dragAndDrop": "Native HTML drag and drop",
       "input.touch": "Touch input, `tap`",
+      "capability.virtualAuthenticator": "Native virtual passkeys on one page, `Capability.VirtualAuthenticator`",
       "evaluation.userActivation": "Evaluating as a user gesture, `Page.withUserGesture`"
     }
   },
