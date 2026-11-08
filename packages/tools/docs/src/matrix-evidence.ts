@@ -70,15 +70,17 @@ export const assertDecision = (decision: Decision): void => {
   let start = source.indexOf(marker)
   if (start >= 0) start += marker.length
   else {
-    assert.ok(
-      !["principles", "the-public-api-l2", "the-browser-model-l1"].includes(decision.anchor),
-      "A section heading is not a specific decision"
-    )
     const headings = [...source.matchAll(/^## (.+)$/gm)]
     const heading = headings.find((match) =>
       match[1]!.toLowerCase().replace(/[^\w -]/g, "").replaceAll(" ", "-") === decision.anchor
     )
     assert.ok(heading, `Missing decision anchor ${decision.anchor}`)
+    const following = headings.find((match) => match.index! > heading.index!)
+    const section = source.slice(heading.index! + heading[0].length, following?.index)
+    assert.ok(
+      !/^\*\*[^\n]+\*\*/m.test(section),
+      "A section heading containing separate decisions is not a specific decision"
+    )
     start = heading.index! + heading[0].length
   }
   const rest = source.slice(start).trimStart()
