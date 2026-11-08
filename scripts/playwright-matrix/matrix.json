@@ -112823,7 +112823,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "53ead4888e95ec5cd662f0887388d5a691e21574a8b62d51555b7c901cd52794",
+    "docs/decisions.md": "bb884c5c2241764ce57c46b89d6b7852c7167417f2d01b5e7436174ee7256e4a",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",

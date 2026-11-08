@@ -1182,6 +1182,10 @@ consumer that stops reading holds back new frames until its scope closes. This b
 without blocking the page's renderer. Rejected: acknowledging separately per consumer, which bypasses backpressure,
 and restarting the native stream for an idle join, which disrupts existing consumers.
 
+## Capabilities extend through explicit services; emulation stays separate
+
+A capability is native or `Unsupported`: native support uses a browser channel Strider speaks, and the capability table records why unavailable support is refused. A backend gains support only through an optional service explicitly provided to its browser layer, with the table reflecting that service and the caller's capability handle unchanged; Chromium's optional `VideoWriter` is the existing precedent. An emulation must be a separate capability with documented fidelity limits. A fallback between native and emulated capabilities must be the caller's explicit choice, and its result must identify which one it acquired. Separate capabilities preserve the meaning of native support while optional services let callers supply backend extensions consistently. Rejected: silent emulation fallback, which hides a fidelity drop and violates nothing implicit; and refusing all layering, which leaves callers to build inconsistent extensions themselves. Emulated authenticator and fallback APIs remain unbuilt, with their shapes undecided. This rule adds no Firefox channel: virtual authenticator acquisition on launched and attached Firefox remains `Unsupported`.
+
 ## Video files use an optional writer service
 
 `VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
