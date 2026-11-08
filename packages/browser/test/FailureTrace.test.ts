@@ -552,3 +552,31 @@ it("keeps child transfer overflow markers out of the parent history budget", asy
   expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_NEAR_FULL")
   expect(trace.entries().some((entry) => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
 })
+
+
+it("protects startup through spool rotation and aggregate child pressure", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer()
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "process.stderr.write('LAUNCH_HANDSHAKE'); for(let i=0;i<200;i++) process.stderr.write('x'.repeat(8000)); process.stderr.write('RECENT_PROTOCOL')"
+  ], { env: { ...process.env, [transferVariable]: directory }, stdio: "ignore" })
+  scope.close()
+  for (let sequence = 1; sequence <= 300; sequence++) {
+    trace.record("child", "receive", "new".repeat(2600), {
+      pid: 999, sequence, connection: "other", timestamp: "2099-01-01T00:00:00.000Z"
+    })
+  }
+  const entries = trace.entries()
+  expect(entries.some((entry) => entry.kind === "node-start")).toBe(true)
+  expect(entries.map((entry) => entry.payload)).toContain("LAUNCH_HANDSHAKE")
+  expect(entries.some((entry) => entry.kind === "overflow")).toBe(true)
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+  expect(fs.existsSync(directory)).toBe(false)
+})
