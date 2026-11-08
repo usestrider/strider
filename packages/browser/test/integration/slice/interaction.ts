@@ -14,17 +14,20 @@ import {
   Locator,
   Mouse,
   Operation,
+  type Page,
+  Route,
   type UserContext
 } from "@usestrider/browser"
 import { Protocol } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
-import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import * as Layer from "effect/Layer"
+import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Scope from "effect/Scope"
 import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
@@ -33,6 +36,8 @@ import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
+import { newPage } from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -96,19 +101,85 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
   return rounds
 })
 
-/**
- * The context every case's page opens in, one for the suite: stock WebKit starts a browser process for each context,
- * which took most of a case's time. The cases keep nothing in it: no storage, cookies, permissions or other page.
- */
-class Shared extends Context.Service<Shared, UserContext.UserContext>()("interaction/Shared") {}
-
-/** A page in the suite's context, closed with the scope. */
-const newPage = Effect.flatMap(Effect.service(Shared), (context) => context.newPage)
-
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
-    const shared = Layer.effect(Shared, Browser.newContext()).pipe(Layer.provideMerge(backend))
-    layer(shared, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+
+      // The guard itself: each thing a case can leave in the shared context is reported, and the cases after get a
+      // new context. Each is left through a scope that is never closed, as a case's own leak would be. A popup closes
+      // with its opener's scope where the backend knows its opener, so it can be left only where it doesn't
+      suite.effect(
+        "the shared context reports what a case leaves in it, and is replaced",
+        () =>
+          Effect.gen(function*() {
+            const shared = yield* SharedContext.Shared
+            const { url, origin } = yield* fixture(() =>
+              `<button onclick="window.open(location.href)">Open</button>${out}`
+            )
+            const inContext =
+              <A, E>(f: (context: UserContext.UserContext) => Effect.Effect<A, E, Scope.Scope>) =>
+              (leaked: Scope.Scope) => Effect.flatMap(shared.current, f).pipe(Scope.provide(leaked))
+            const inPage = (act: (page: Page.Page) => Effect.Effect<unknown, unknown>) => () =>
+              Effect.scoped(Effect.gen(function*() {
+                const page = yield* newPage
+                yield* page.goto(url)
+                yield* act(page)
+              }))
+            const leaks: ReadonlyArray<
+              readonly [
+                string | undefined,
+                (leaked: Scope.Scope) => Effect.Effect<unknown, unknown, SharedContext.Shared>
+              ]
+            > = [
+              ["page(s) open", inContext((context) => context.newPage)],
+              [
+                (yield* supports("popups.opener")) ? undefined : "page(s) open",
+                inPage((page) =>
+                  page.getByRole("button", { name: "Open" }).click().pipe(
+                    Effect.andThen(page.context.pages.waitFor((pages) => pages.length > 1))
+                  )
+                )
+              ],
+              ["route(s) on the context", inContext((context) => context.route("**/never", () => Route.fallthrough))],
+              ["InitScript declaration on the context", inContext((context) => context.addInitScript(() => {}))],
+              [
+                "a cookie left",
+                inPage((page) => page.evaluateInMainWorld(() => void (document.cookie = "left=1; path=/")))
+              ],
+              [
+                "localStorage item(s)",
+                inPage((page) => page.evaluateInMainWorld(() => localStorage.setItem("left", "1")))
+              ],
+              ...((yield* supports("permissions"))
+                ? [
+                  [
+                    "a grant of geolocation",
+                    inContext((context) => context.grant(["geolocation"], { origin }))
+                  ] as const
+                ]
+                : [])
+            ]
+            for (const [index, [expected, leak]] of leaks.entries()) {
+              const leaked = yield* Scope.make()
+              const before = yield* shared.current
+              yield* leak(leaked)
+              const left = yield* shared.settle
+              if (expected === undefined) {
+                assert.deepStrictEqual(left, [], `${index}: nothing is left`)
+                assert.strictEqual(yield* shared.current, before, `${index}: a clean context is kept`)
+              } else {
+                assert(left.some((each) => each.includes(expected)), `${index}, ${expected}: ${JSON.stringify(left)}`)
+                assert.notStrictEqual(yield* shared.current, before, `${index}, ${expected}: the context is replaced`)
+              }
+              yield* Scope.close(leaked, Exit.void)
+            }
+            const kept = yield* shared.current
+            assert.deepStrictEqual(yield* shared.settle, [], "a clean context")
+            assert.strictEqual(yield* shared.current, kept, "a clean context is kept")
+          }),
+        timeout
+      )
       it.effect(
         "reports an unsupported role filter in a nested branch beyond a missing frame",
         () =>
@@ -1995,11 +2066,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")))
                     }
                     const failure = yield* (operation === "read" ? target.isChecked : target.check()).pipe(
-                        Effect.match({
-                          onFailure: (error) => error,
-                          onSuccess: () => undefined
-                        })
-                      )
+                      Effect.match({
+                        onFailure: (error) => error,
+                        onSuccess: () => undefined
+                      })
+                    )
                     assert.deepStrictEqual(yield* page.locator("body").readAttribute("data-events"), Option.some("0"))
                     if (kind === "native option") {
                       assert.strictEqual(yield* page.locator("#selection").readValue, "a")
