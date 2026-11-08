@@ -65,8 +65,10 @@ retained traces; do not turn macOS findings into skips.
 ## Focused Firefox print diagnostic
 
 Dispatch Integration with `diagnostic=firefox-print` to skip Linux and the full macOS suite. Two sequential steps each
-use the verified installer: the direct BiDi probe with screenshot enabled, followed by only Firefox's existing
-“captures screenshots and PDFs, and reads response bodies” conformance case. Each runs once, with no test retry.
+use the verified installer: 20 direct BiDi probe trials with screenshot enabled, followed by only Firefox's existing
+“captures screenshots and PDFs, and reads response bodies” conformance case with `--repeats=19 --retry=0` (20 trials).
+The probe loop reuses one verified browser installation, launching a fresh browser and profile per trial.
+Both paths continue after failed trials, without retries or delays, and fail their step if any trial fails.
 The second step runs even if the probe fails, provided dependency installation succeeded and the run was not cancelled.
 A failed step still fails the job.
 
@@ -76,7 +78,13 @@ base64 screenshot/PDF data, with a 30-second deadline and owned-process cleanup.
 not a reproduction already confirmed on macOS.
 
 The artifact `integration-macos-log` is retained for 14 days even when both paths pass. It includes
-`firefox-print-probe.log`, `firefox-print-conformance.log` and the conformance protocol/process traces in
+`firefox-print-probe.log`, `firefox-print-conformance.log`, and `.data/firefox-print/probe/` with a separate
+`trial-01.log` through `trial-20.log`, `results.json` and `summary.json`. Conformance protocol/process traces are in
 `.data/integration-failures/`. For this step alone, `STRIDER_KEEP_INTEGRATION_TRACES=1` retains the existing bounded
-trace buffers for passing tests and shared setup/teardown too. Truncation and overflow limits still apply.
+trace buffers for passing trials and shared setup/teardown too. The runner saves each trial after its cleanup,
+using repeat and retry indices in its trace filename; an outcomes NDJSON file records each trial individually,
+and a summary NDJSON file records explicit pass/fail counts. It captures per-trial state before Vitest folds
+repeat outcomes into the final test result. Late events from an earlier trial stay with that trial's trace.
+The shared trace covers the file's setup/teardown. Each path reports total, passed and failed counts;
+non-passing conformance outcomes count as failures in the summary. Truncation and overflow limits still apply.
 Ordinary nightly and default dispatch runs retain their existing full-suite and failure-only artifact behavior.

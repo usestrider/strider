@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       diagnostic:
-        description: Focused macOS Firefox print diagnostic (one probe and one conformance case)
+        description: Focused macOS Firefox print diagnostic (20 trials per path)
         type: choice
         options: [none, firefox-print]
         default: none
@@ -106,7 +106,7 @@ jobs:
         run: >-
           pnpm test:integration:macos packages/browser/test/integration/adapter/Firefox.adapter.test.ts
           -t 'captures screenshots and PDFs, and reads response bodies' --no-file-parallelism
-          --retry=0 --repeats=0 2>&1 | tee firefox-print-conformance.log
+          --retry=0 --repeats=19 2>&1 | tee firefox-print-conformance.log
       - name: Keep the macOS log
         if: failure() || cancelled() || inputs.diagnostic == 'firefox-print'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -116,6 +116,7 @@ jobs:
             integration-macos.log
             firefox-print-probe.log
             firefox-print-conformance.log
+            .data/firefox-print/
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14

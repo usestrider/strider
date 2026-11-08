@@ -21,7 +21,8 @@ installTransfer(() => {
     ? transfers.get(id) ?? sharedTransfer
     : sharedTransfer
 })
-const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
+const active = new Map<string, { trace: TraceBuffer; inBody: boolean; key: string }>()
+const outcomes = new Map<string, Array<{ trial: number; retry: number; status: string; trace: string }>>()
 let sharedFile = ""
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
@@ -60,13 +61,14 @@ install({
     const current = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
     // Anonymous Effect layers acquire once in beforeEach, then keep their resources until afterAll.
     // Setup acquisitions follow the observing test rather than becoming owned by the first test.
-    const owner = !ambiguous && current !== undefined && active.get(current)?.inBody === true ? current : undefined
+    const ownerTask = !ambiguous && current !== undefined && active.get(current)?.inBody === true ? current : undefined
+    const owner = ownerTask === undefined ? undefined : active.get(ownerTask)?.key
     const record = (kind: string, value: unknown, origin?: Origin) => {
       const payload = serialize(value)
       // A connection created by a test remains that test's, even after its completion.
       if (owner !== undefined) {
-        const running = active.get(owner)
-        if (running !== undefined) running.trace.record(id, kind, payload, origin)
+        const running = ownerTask === undefined ? undefined : active.get(ownerTask)
+        if (running !== undefined && running.key === owner) running.trace.record(id, kind, payload, origin)
         else {
           const done = completed.get(owner)
           if (done?.file !== undefined && !done.overflow) {
@@ -117,14 +119,23 @@ export default class FailureTraceRunner extends TestRunner {
     shared.clear()
     active.clear()
     completed.clear()
+    outcomes.clear()
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)
     // Vitest returns early for skipped/todo tasks without calling onAfterRunTask.
-    if (task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
-      active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+    if (!retainPassing && task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
+      active.set(task.id, { trace: new TraceBuffer(), inBody: false, key: task.id })
       transfers.set(task.id, new TransferScope(() => connection("child-transfer")))
     }
+  }
+  override onBeforeTryTask(task: RunnerTestCase, options: { retry: number; repeats: number }) {
+    super.onBeforeTryTask(task, options)
+    if (!retainPassing) return
+    // Task hooks surround all repeats; try hooks surround each trial and its per-test cleanup.
+    const key = `${task.id}-repeat-${options.repeats + 1}-retry-${options.retry}`
+    active.set(task.id, { trace: new TraceBuffer(), inBody: false, key })
+    transfers.set(task.id, new TransferScope(() => connection("child-transfer")))
   }
   async runTask(task: RunnerTestCase) {
     const running = active.get(task.id)
@@ -137,7 +148,25 @@ export default class FailureTraceRunner extends TestRunner {
       if (running !== undefined) running.inBody = false
     }
   }
-  onAfterRetryTask(task: RunnerTestCase) {
+  onAfterRetryTask(task: RunnerTestCase, options: { retry: number; repeats: number }) {
+    if (retainPassing) {
+      const suffix = `repeat-${String(options.repeats + 1).padStart(2, "0")}-retry-${options.retry}-test`
+      const file = this.finishTrace(task, suffix)
+      if (file !== undefined) {
+        const outcome = {
+          trial: options.repeats + 1,
+          retry: options.retry,
+          status: task.result?.state ?? "unknown",
+          trace: path.basename(file)
+        }
+        const results = outcomes.get(task.id) ?? []
+        results.push(outcome)
+        outcomes.set(task.id, results)
+        fs.appendFileSync(filename(task, "outcomes"), JSON.stringify(outcome) + "\n")
+        console.log("Firefox conformance trial", JSON.stringify(outcome))
+      }
+      return
+    }
     // Runtime skip returns before onAfterRunTask; this hook still runs after per-test cleanup.
     if ((task.result && "pending" in task.result && task.result.pending) || task.result?.state === "skip") {
       transfers.get(task.id)?.close()
@@ -148,16 +177,36 @@ export default class FailureTraceRunner extends TestRunner {
   }
   override onAfterRunTask(task: RunnerTask) {
     super.onAfterRunTask(task)
+    if (retainPassing) {
+      const results = outcomes.get(task.id)
+      if (results !== undefined) {
+        const passed = results.filter((result) => result.status === "pass").length
+        const summary = {
+          path: "conformance",
+          test: task.name,
+          total: results.length,
+          passed,
+          failed: results.length - passed
+        }
+        fs.writeFileSync(filename(task, "summary"), JSON.stringify(summary) + "\n")
+        console.log("Firefox print summary", JSON.stringify(summary))
+      }
+      return
+    }
+    this.finishTrace(task, "test")
+  }
+  private finishTrace(task: RunnerTask, suffix: string) {
     const running = active.get(task.id)
     if (running === undefined) return
     transfers.get(task.id)?.close()
     transfers.delete(task.id)
     active.delete(task.id)
-    const file = (task.result?.state === "fail" || retainPassing) ? filename(task, "test") : undefined
+    const file = (task.result?.state === "fail" || retainPassing) ? filename(task, suffix) : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
     if (file !== undefined) save(file, running.trace, task.name)
-    if (file !== undefined) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
+    if (file !== undefined) completed.set(running.key, { file, sequence, bytes: 0, overflow: false })
     running.trace.clear()
+    return file
   }
   override async onAfterRunSuite(suite: RunnerTestSuite) {
     await super.onAfterRunSuite(suite)

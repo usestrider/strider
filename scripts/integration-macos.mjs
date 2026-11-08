@@ -61,7 +61,7 @@ try {
   run(
     probe ? process.execPath : "pnpm",
     probe
-      ? [path.join(root, "scripts/firefox-print-probe.mjs"), "--screenshot"]
+      ? [path.join(root, "scripts/firefox-print-trials.mjs")]
       : ["exec", "vitest", "--run", "--config", "vitest.integration.macos.config.ts", ...process.argv.slice(2)],
     {
       ...process.env,
