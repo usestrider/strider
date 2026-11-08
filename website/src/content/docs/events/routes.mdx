@@ -67,6 +67,9 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 Each decision is an Effect, so a handler returns it directly. After other work in a generator, use
 `return yield*` to return its decision, as in the response handler below.
 
+On Chromium, requests a page sends through speculation rules can bypass both page and context routes and
+configured extra headers.
+
 A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
 
