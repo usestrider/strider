@@ -32,6 +32,7 @@ import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcess from "effect/process/ChildProcess"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
@@ -786,6 +787,11 @@ ${expressionSource}
           const resolved = yield* resolvePath(path)
           yield* writeUserFile(resolved, text, { mode: 0o600 })
           yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
+          if (yield* stateFileCouldBeCommitted(resolved)) {
+            yield* Console.error(
+              `Warning: ${resolved} contains plaintext credentials and Git could commit it. Save outside the work tree or ensure the file is untracked and ignored.`
+            )
+          }
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
   )
@@ -879,6 +885,31 @@ const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, op
   yield* fs.makeDirectory(paths.dirname(path), { recursive: true }).pipe(Effect.mapError(failedWith))
   yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
+
+/** Checks a file after saving; Git inspection is advisory and must never prevent a save. */
+export const stateFileCouldBeCommitted = Effect.fnUntraced(
+  function*(path: string) {
+    const fs = yield* FileSystem.FileSystem
+    const paths = yield* Path.Path
+    // Resolve symlinked directories and files to the destination Git would actually see.
+    const real = yield* fs.realPath(path)
+    const cwd = paths.dirname(real)
+    const run = (args: ReadonlyArray<string>) =>
+      Effect.scoped(Effect.gen(function*() {
+        const child = yield* ChildProcess.make("git", args, {
+          cwd,
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore"
+        })
+        return yield* child.exitCode
+      }))
+    if ((yield* run(["rev-parse", "--show-toplevel"])) !== 0) return false
+    // Without --no-index, tracked files are never considered ignored.
+    return (yield* run(["check-ignore", "--quiet", "--", real])) === 1
+  },
+  Effect.orElseSucceed(() => false)
+)
 
 /** A `--site`'s host, with or without a scheme, or nothing if it names none. */
 const siteHost = (site: string) =>

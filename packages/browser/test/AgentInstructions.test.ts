@@ -19,10 +19,6 @@ describe("agent guide examples", () => {
               assert.isTrue(line === "" || line.startsWith("#"), "Only comments and blank lines are raw shell text")
               continue
             }
-            if (line[0] === "mkdir") {
-              assert.deepStrictEqual(line, ["mkdir", "-p", "auth"])
-              continue
-            }
             const prefix = line[0] === "pnpx" ? 2 : 1
             assert.isTrue(line[0] === "strider" || (line[0] === "pnpx" && line[1] === "@usestrider/cli"))
             const result = yield* Effect.result(
@@ -54,6 +50,15 @@ describe("agent guide examples", () => {
           assert.strictEqual(result._tag, "Failure", args.join(" "))
         }
       }))
+  })
+
+  it.skipIf(process.platform === "win32")("expands the home directory in saved-state examples", () => {
+    const result = spawnSync("sh", ["-c", shellCommand(["printf", "%s", "$HOME/.local/state/strider/shop.state"])], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: "/home/example user" }
+    })
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, "/home/example user/.local/state/strider/shop.state")
   })
 
   it.skipIf(process.platform === "win32")(
