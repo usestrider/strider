@@ -22,6 +22,7 @@ import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
 import { inspect } from "node:util"
+import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -776,7 +777,8 @@ describe("WebKit launcher", () => {
         around: (
           start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
           progress: OwnershipProgress
-        ) => Effect.Effect<Launch.LaunchError, WebKitAutomation.Group> = (start) => start
+        ) => Effect.Effect<Launch.LaunchError, WebKitAutomation.Group> = (start) => start,
+        onSpawn: () => void = () => {}
       ) {
         const fs = yield* FileSystem.FileSystem
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
@@ -799,6 +801,7 @@ describe("WebKit launcher", () => {
             assert(command._tag === "StandardCommand")
             port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
             spawned++
+            onSpawn()
             yield* Effect.addFinalizer(() =>
               Effect.sync(() => {
                 stopped++
@@ -980,74 +983,94 @@ describe("WebKit launcher", () => {
       }))
 
     for (const mode of ["unreadable", "unreadable-after", "unreadable-collision"] as const) {
-      it.effect(`waits on the original deadline after ${mode} procfs, with cleanup before waiting`, () =>
-        Effect.gen(function*() {
-          const expire = yield* Deferred.make<void>()
-          const armed = yield* Deferred.make<void>()
-          const sleeps: Array<number> = []
-          const descriptor = Object.getOwnPropertyDescriptor(BrowserClock.live, "sleep")!
-          const result = yield* Effect.acquireUseRelease(
-            Effect.sync(() =>
-              Object.defineProperty(BrowserClock.live, "sleep", {
-                ...descriptor,
-                value: (millis: number) => {
-                  sleeps.push(millis)
-                  Deferred.doneUnsafe(armed, Effect.void)
-                  return Deferred.await(expire)
-                }
-              })
-            ),
-            () =>
-              ownershipAttempt(
-                mode,
-                Effect.fnUntraced(
-                  function*(
-                    start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
-                    progress: OwnershipProgress
-                  ) {
-                    const fiber = yield* Effect.forkChild(start)
-                    yield* Deferred.await(progress.failed)
-                    if (mode === "unreadable-after") yield* Deferred.await(progress.connectionClosed)
-                    yield* Deferred.await(armed)
-                    // Longer than the 100 ms readiness poll, so a resumed ownership attempt would show in `reads`.
-                    const finished = yield* Fiber.await(fiber).pipe(Effect.timeoutOption("250 millis"))
-                    assert.isTrue(Option.isNone(finished), "the controlled launch deadline has not expired")
-                    assert.strictEqual(
-                      progress.stops(),
-                      0,
-                      "the child remains available for exit observation until the deadline"
-                    )
-                    assert.strictEqual(sleeps.length, 1, "no timer or budget is restarted after the error")
-                    assert.isAbove(sleeps[0]!, 0)
-                    assert.isAtMost(sleeps[0]!, 50, "only the configured budget's remaining time is used")
-                    assert.strictEqual(progress.reads(), mode === "unreadable-after" ? 2 : 1)
-                    assert.deepStrictEqual(
-                      progress.events,
-                      mode !== "unreadable-after"
-                        ? ["read", "access-failed"]
-                        : ["read", "connect", "read", "access-failed", "closed"]
-                    )
-                    yield* Deferred.succeed(expire, undefined)
-                    return yield* Fiber.join(fiber)
-                  }
-                )
-              ),
-            () =>
+      for (const [elapsed, remaining] of [[20, 30], [50, 0], [75, 0]] as const) {
+        it.effect(`waits on the original deadline after ${mode} procfs with ${elapsed}ms elapsed, with cleanup before waiting`, () =>
+          Effect.gen(function*() {
+            const expire = yield* Deferred.make<void>()
+            const armed = yield* Deferred.make<void>()
+            const sleeps: Array<number> = []
+            let millis = 0
+            const descriptor = Object.getOwnPropertyDescriptor(BrowserClock.live, "sleep")!
+            const result = yield* Effect.acquireUseRelease(
               Effect.sync(() => {
-                Object.defineProperty(BrowserClock.live, "sleep", descriptor)
-              })
-          )
-          assert(result.error.reason._tag === "ConnectionFailed")
-          assert.strictEqual(result.error.reason.stage, "refused")
-          assert.include(
-            result.error.reason.hint,
-            "PermissionDenied: FileSystem.readFileString (/proc/9000001/net/tcp)"
-          )
-          assert.include(result.error.reason.hint, "WebKit.layerAttach")
-          assert.strictEqual(result.spawned, 1)
-          assert.strictEqual(result.stopped, 1)
-          assert.strictEqual(result.writes, 0)
-        }))
+                const now = vi.spyOn(performance, "now")
+                const restore = () => {
+                  Object.defineProperty(BrowserClock.live, "sleep", descriptor)
+                  now.mockRestore()
+                }
+                try {
+                  // Both deadline creation and live.now read this same advancing clock.
+                  now.mockImplementation(() => millis)
+                  Object.defineProperty(BrowserClock.live, "sleep", {
+                    ...descriptor,
+                    value: (millis: number) => {
+                      sleeps.push(millis)
+                      Deferred.doneUnsafe(armed, Effect.void)
+                      return Deferred.await(expire)
+                    }
+                  })
+                  return restore
+                } catch (error) {
+                  restore()
+                  throw error
+                }
+              }),
+              () =>
+                ownershipAttempt(
+                  mode,
+                  Effect.fnUntraced(
+                    function*(
+                      start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
+                      progress: OwnershipProgress
+                    ) {
+                      const fiber = yield* Effect.forkChild(start)
+                      yield* Deferred.await(progress.failed)
+                      if (mode === "unreadable-after") yield* Deferred.await(progress.connectionClosed)
+                      yield* Deferred.await(armed)
+                      // Longer than the 100 ms readiness poll, so a resumed ownership attempt would show in `reads`.
+                      const finished = yield* Fiber.await(fiber).pipe(Effect.timeoutOption("250 millis"))
+                      assert.isTrue(Option.isNone(finished), "the controlled launch deadline has not expired")
+                      assert.strictEqual(
+                        progress.stops(),
+                        0,
+                        "the child remains available for exit observation until the deadline"
+                      )
+                      assert.strictEqual(sleeps.length, 1, "no timer or budget is restarted after the error")
+                      assert.deepStrictEqual(
+                        sleeps,
+                        [remaining],
+                        "only the original deadline's remaining budget is used"
+                      )
+                      assert.strictEqual(progress.reads(), mode === "unreadable-after" ? 2 : 1)
+                      assert.deepStrictEqual(
+                        progress.events,
+                        mode !== "unreadable-after"
+                          ? ["read", "access-failed"]
+                          : ["read", "connect", "read", "access-failed", "closed"]
+                      )
+                      yield* Deferred.succeed(expire, undefined)
+                      return yield* Fiber.join(fiber)
+                    }
+                  ),
+                  // Spawning occurs after the original deadline is created and before the ownership race.
+                  () => {
+                    millis = elapsed
+                  }
+                ),
+              (restore) => Effect.sync(restore)
+            )
+            assert(result.error.reason._tag === "ConnectionFailed")
+            assert.strictEqual(result.error.reason.stage, "refused")
+            assert.include(
+              result.error.reason.hint,
+              "PermissionDenied: FileSystem.readFileString (/proc/9000001/net/tcp)"
+            )
+            assert.include(result.error.reason.hint, "WebKit.layerAttach")
+            assert.strictEqual(result.spawned, 1)
+            assert.strictEqual(result.stopped, 1)
+            assert.strictEqual(result.writes, 0)
+          }))
+      }
     }
 
     it.effect("refuses a listener not held by the spawned PID without looking for descendants", () =>
