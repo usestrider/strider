@@ -1453,7 +1453,23 @@ describe("strider", () => {
             )
             const saved = path.join(repo, "fork-state.json")
             fs.writeFileSync(saved, "old", { mode: 0o644 })
-            yield* run("-s", "second", "-p", "home", "eval", "document.cookie = 'flavor=changed; path=/'")
+            const changed = yield* run(
+              "-s",
+              "second",
+              "-p",
+              "home",
+              "eval",
+              "document.cookie = 'flavor=changed; path=/'"
+            )
+            assert.strictEqual(changed.code, 0, changed.err)
+            const live = path.join(env.XDG_RUNTIME_DIR, "live-state.json")
+            assert.strictEqual((yield* run("-s", "second", "state", "save", live)).code, 0)
+            assert.strictEqual(
+              JSON.parse(fs.readFileSync(live, "utf8")).cookies.find((cookie: { name: string }) =>
+                cookie.name === "flavor"
+              ).value,
+              "changed"
+            )
             const result = yield* run("-s", "second", "export", "test", test, "--state", saved)
             assert.strictEqual(result.code, 0, result.err)
             assert.include(result.err, "plaintext credentials")
