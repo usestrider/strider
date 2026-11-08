@@ -615,3 +615,24 @@ it("caps protected startup allocation while retaining the newest child tail", ()
   expect(trace.entries()).toEqual([])
   expect(trace.bytes).toBe(0)
 })
+
+it("retains a child record up to the documented 64 KiB serialized bound", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  // 8 Ki characters, within the child payload limit; JSON escaping makes the record about 56 KiB in UTF-16.
+  const text = "\u0001".repeat(4000) + "a".repeat(4192)
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    `process.stderr.write(${JSON.stringify(text)})`
+  ], {
+    env: { ...process.env, [transferVariable]: directory },
+    stdio: "ignore"
+  })
+  scope.close()
+  expect(records.filter(([kind]) => kind === "node-stderr")).toHaveLength(1)
+  expect(records.map(([kind]) => kind)).not.toContain("overflow")
+})
