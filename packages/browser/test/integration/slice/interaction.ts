@@ -23,6 +23,7 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schedule from "effect/Schedule"
 import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
@@ -97,6 +98,140 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "compares one cross-site iframe click through L1 preparation",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const nativeEvents = (frame: "parent" | "child") =>
+              `<script>
+                window.inputDiagnostics = [];
+                const retain = (entry) => {
+                  if (inputDiagnostics.length < 32) inputDiagnostics.push(entry);
+                  ${frame === "child" ? "parent.postMessage({ inputDiagnostic: entry }, '*');" : ""}
+                };
+                for (const type of ['pointermove', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
+                  addEventListener(type, (event) => retain({
+                    frame: '${frame}', type, target: event.target.tagName, id: event.target.id,
+                    x: event.clientX, y: event.clientY, screenX: event.screenX, screenY: event.screenY,
+                    button: event.button, buttons: event.buttons, trusted: event.isTrusted,
+                    time: performance.now(), eventTime: event.timeStamp, readyState: document.readyState
+                  }), true);
+                }
+                requestAnimationFrame((time) => retain({ frame: '${frame}', type: 'animationFrame', time }));
+              </script>`
+            const child = `<body style="margin:0">${
+              nativeEvents("child")
+            }<button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*')</script></body>`
+            yield* page.goto(
+              fixtureUrl(
+                served.origin,
+                `<body style="margin:0">${
+                  nativeEvents("parent")
+                }<script>window.got = []; addEventListener('message', (e) => {
+                  if (e.data && e.data.inputDiagnostic) {
+                    if (inputDiagnostics.length < 32) inputDiagnostics.push(e.data.inputDiagnostic);
+                  } else got.push(e.data);
+                })</script><iframe id="cross" src="${
+                  fixtureUrl(served.crossSite, child)
+                }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
+              )
+            )
+            const locator = page.frame(page.locator("#cross")).locator("button")
+            assert(locator instanceof LocatorImpl)
+            const adapter = locator.owner.runtime.model.adapter
+            const evaluate = adapter.evaluate
+            const dispatchInput = adapter.dispatchInput
+            const checks: Array<unknown> = []
+            const gestures: Array<ReadonlyArray<Adapter.InputEvent>> = []
+            // Observe actual L1 calls without replacing the engine or adding browser round trips.
+            yield* Effect.acquireRelease(
+              Effect.sync(() =>
+                Object.assign(adapter, {
+                  evaluate: ((realm, call) =>
+                    evaluate(realm, call).pipe(Effect.tap((result) =>
+                      Effect.sync(() => {
+                        const arg = call.arguments[0]
+                        if (
+                          call.functionDeclaration !== Engine.run || arg?._tag !== "Value" ||
+                          arg.value.type !== "string"
+                        ) return
+                        const request = JSON.parse(arg.value.value) as Engine.Request
+                        if (request.op !== "act" && request.op !== "frame") return
+                        checks.push({ request, result })
+                      })
+                    ))) as typeof evaluate,
+                  dispatchInput: ((id, events, frame) =>
+                    Effect.suspend(() => {
+                      // Fail before a second dispatch: even an existing guard retry must not replay this probe.
+                      assert.strictEqual(gestures.length, 0, "L1 probe attempted another native gesture")
+                      gestures.push(events)
+                      assert.deepStrictEqual(
+                        events.map((event) =>
+                          event._tag === "Mouse"
+                            ? { type: event.type, x: event.x, y: event.y } :
+                            event._tag
+                        ),
+                        [
+                          { type: "move", x: 148, y: 83 },
+                          { type: "down", x: 148, y: 83 },
+                          { type: "up", x: 148, y: 83 }
+                        ]
+                      )
+                      return dispatchInput(id, events, frame)
+                    })) as typeof dispatchInput
+                })
+              ),
+              () => Effect.sync(() => Object.assign(adapter, { evaluate, dispatchInput }))
+            )
+            const messages = () => page.evaluateInMainWorld(() => (window as unknown as { got: Array<string> }).got)
+            const loaded = messages().pipe(Effect.flatMap((got) =>
+              got.includes("loaded")
+                ? Effect.void :
+                Effect.fail("iframe child loaded message was not received")
+            ))
+            const diagnostics = page.evaluateInMainWorld(() => {
+              const state = window as unknown as { got: Array<string>; inputDiagnostics: Array<unknown> }
+              return {
+                messages: state.got,
+                nativeEvents: state.inputDiagnostics,
+                paint: performance.getEntriesByType("paint").map(({ name, startTime }) => ({ name, startTime }))
+              }
+            }).pipe(
+              Effect.tap((native) =>
+                Effect.sync(() =>
+                  console.log(
+                    "Iframe L1 input diagnostics",
+                    JSON.stringify({
+                      checks,
+                      gestures,
+                      native,
+                      guarantee: "DOM actionability checks only; compositor readiness is not established"
+                    })
+                  )
+                )
+              ),
+              Effect.ignore
+            )
+            yield* Effect.gen(function*() {
+              yield* loaded.pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }))
+              // Same local (40,25) point, hence page (148,83); normal L1 checks and guard, one native click.
+              yield* locator.click().pipe(Deadline.within("3 seconds"))
+              yield* messages().pipe(
+                Effect.flatMap((got) =>
+                  got.includes("clicked")
+                    ? Effect.void :
+                    Effect.fail("iframe button clicked message was not received")
+                ),
+                Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") })
+              )
+              assert.strictEqual(gestures.length, 1)
+            }).pipe(Effect.ensuring(diagnostics))
+          })),
+        timeout
+      )
+
       it.effect(
         "reports an unsupported role filter in a nested branch beyond a missing frame",
         () =>
