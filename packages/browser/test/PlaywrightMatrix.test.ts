@@ -105,4 +105,34 @@ describe("Playwright matrix", () => {
       )
     ).toBe(true)
   })
+  it("maps cancellation only for implemented parents and preserves browser limits", () => {
+    const implemented = row("option-locator-click-signal")
+    expect(implemented.status).toBe("has")
+    expect(implemented.api.some((api: any) => api.package === "effect" && api.symbol === "interrupt")).toBe(true)
+    expect(implemented.browsers["webkit.attached"].status).toBe("missing")
+    expect(implemented.notes).toMatch(/cooperative/)
+    expect(implemented.notes).toMatch(/does not undo/)
+    expect(row("option-apirequestcontext-delete-signal").status).toBe("missing")
+  })
+  it("backs caller delays with Effect.sleep and its fiber clock", () => {
+    for (const owner of ["page", "frame"]) {
+      const delay = row(`method-${owner}-waitfortimeout`)
+      expect(delay.status).toBe("has")
+      expect(delay.api.some((api: any) => api.package === "effect" && api.symbol === "sleep")).toBe(true)
+      expect(delay.notes).toMatch(/TestClock/)
+    }
+  })
+  it("accounts for every wait state with count and visibility compositions", () => {
+    for (const method of ["locator-waitfor", "page-waitforselector", "frame-waitforselector", "elementhandle-waitforselector"]) {
+      const state = row(`option-${method}-state`)
+      expect(state.status).toBe("has")
+      expect(state.valueCoverage.map((entry: any) => [entry.value, entry.status])).toEqual([
+        ["attached", "has"], ["detached", "has"], ["hidden", "has"], ["visible", "has"]
+      ])
+      expect(state.api.some((api: any) => api.symbol === "toHaveCount")).toBe(true)
+      expect(state.notes).toMatch(/strict/)
+      expect(state.notes).toMatch(/identity/)
+    }
+  })
+
 })
