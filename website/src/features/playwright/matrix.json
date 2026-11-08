@@ -30111,74 +30111,114 @@
       "upstream": [
         "method:Screencast.start"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "Screencast",
+          "url": "/docs/api/browser/Capability#Screencast"
+        },
+        {
+          "module": "Capability",
+          "symbol": "Video",
+          "url": "/docs/api/browser/Capability#Video"
+        }
+      ],
+      "notes": "Acquire scoped native frames through Capability.Screencast, or a file recording through Capability.Video. Frame delivery and file recording are separate acquisitions; onFrame and path options below show their browser limits.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-stop",
       "upstream": [
         "method:Screencast.stop"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "Screencast",
+          "url": "/docs/api/browser/Capability#Screencast"
+        },
+        {
+          "module": "Capability",
+          "symbol": "Video",
+          "url": "/docs/api/browser/Capability#Video"
+        }
+      ],
+      "notes": "Close the scope owning the frame stream or video recording. Video completion still waits for its writer; no global stop method ends unrelated acquisitions.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-showoverlay",
@@ -30187,7 +30227,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30215,7 +30255,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-showchapter",
@@ -30224,7 +30273,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30252,7 +30301,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-showactions",
@@ -30261,7 +30319,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30289,7 +30347,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-showoverlays",
@@ -30298,7 +30365,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30326,7 +30393,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-hideactions",
@@ -30335,7 +30411,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30363,7 +30439,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-screencast-hideoverlays",
@@ -30372,7 +30457,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30400,7 +30485,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-selectors-register",
@@ -30650,7 +30744,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-startchunk",
@@ -30659,7 +30762,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "Trace.record can make independent recordings, but has no chunk boundaries within one running recorder. Starting another scoped recording is not a rollover operation.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30687,118 +30790,177 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-starthar",
       "upstream": [
         "method:Tracing.startHar"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Har",
+          "symbol": "record",
+          "url": "/docs/api/browser/Har#record"
+        }
+      ],
+      "notes": "Start Har.record on the page/context before requests. Recording is scoped; request bodies must be explicitly included when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-group",
       "upstream": [
         "method:Tracing.group"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Operation",
+          "symbol": "named",
+          "url": "/docs/api/browser/Operation#named"
+        },
+        {
+          "module": "Operation",
+          "symbol": "fn",
+          "url": "/docs/api/browser/Operation#fn"
+        }
+      ],
+      "notes": "Wrap the grouped effects in a named operation, which records their span/steps in an active trace. The group ends with the effect, not an imperative groupEnd call. Caller location is captured; arbitrary location override is not available.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-groupend",
       "upstream": [
         "method:Tracing.groupEnd"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Operation",
+          "symbol": "named",
+          "url": "/docs/api/browser/Operation#named"
+        }
+      ],
+      "notes": "The grouped operation ends when its wrapped effect completes, fails or is interrupted. There is no global imperative group stack.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-stop",
@@ -30841,7 +31003,16 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-stopchunk",
@@ -30850,7 +31021,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "notes": "Trace.record can make independent recordings, but has no chunk boundaries within one running recorder. Starting another scoped recording is not a rollover operation.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -30878,155 +31049,293 @@
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-tracing-stophar",
       "upstream": [
         "method:Tracing.stopHar"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Har",
+          "symbol": "Recording.exportHar",
+          "url": "/docs/api/browser/Har#Recording.exportHar"
+        }
+      ],
+      "notes": "Remove the HAR registration or end its scope, then exportHar to the chosen path; there is no imperative stopHar member.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      }
     },
     {
       "id": "method-video-delete",
       "upstream": [
         "method:Video.delete"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "Video",
+          "url": "/docs/api/browser/Capability#Video"
+        },
+        {
+          "module": "Capability",
+          "symbol": "VideoRecording.file",
+          "url": "/docs/api/browser/Capability#VideoRecording.file"
+        }
+      ],
+      "notes": "VideoRecording.file waits for the finished local file. Keep its owning context alive while using it; copy it with Effect FileSystem for saveAs, or remove it for delete. These are explicit file operations, not Video methods.",
+      "capabilities": [
+        "capability.video"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "written where the page's context downloads to"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox writes the file on its own host, out of the program's reach"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      },
+      "configuration": {
+        "chromium": "Provide a VideoWriter service.",
+        "webkit": "Provide polling options and a VideoWriter service."
+      }
     },
     {
       "id": "method-video-path",
       "upstream": [
         "method:Video.path"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "Video",
+          "url": "/docs/api/browser/Capability#Video"
+        },
+        {
+          "module": "Capability",
+          "symbol": "VideoRecording.file",
+          "url": "/docs/api/browser/Capability#VideoRecording.file"
+        }
+      ],
+      "notes": "VideoRecording.file waits for the finished local file. Keep its owning context alive while using it; copy it with Effect FileSystem for saveAs, or remove it for delete. These are explicit file operations, not Video methods.",
+      "capabilities": [
+        "capability.video"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "written where the page's context downloads to"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox writes the file on its own host, out of the program's reach"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      },
+      "configuration": {
+        "chromium": "Provide a VideoWriter service.",
+        "webkit": "Provide polling options and a VideoWriter service."
+      }
     },
     {
       "id": "method-video-saveas",
       "upstream": [
         "method:Video.saveAs"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "Video",
+          "url": "/docs/api/browser/Capability#Video"
+        },
+        {
+          "module": "Capability",
+          "symbol": "VideoRecording.file",
+          "url": "/docs/api/browser/Capability#VideoRecording.file"
+        }
+      ],
+      "notes": "VideoRecording.file waits for the finished local file. Keep its owning context alive while using it; copy it with Effect FileSystem for saveAs, or remove it for delete. These are explicit file operations, not Video methods.",
+      "capabilities": [
+        "capability.video"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "written where the page's context downloads to"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox writes the file on its own host, out of the program's reach"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts",
+          "packages/browser/src/Trace.ts",
+          "packages/browser/src/Har.ts",
+          "packages/browser/src/Operation.ts"
+        ],
+        "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+      },
+      "configuration": {
+        "chromium": "Provide a VideoWriter service.",
+        "webkit": "Provide polling options and a VideoWriter service."
+      }
     },
     {
       "id": "method-weberror-page",
@@ -102858,10 +103167,18 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "ScreencastControl.frames",
+          "url": "/docs/api/browser/Capability#ScreencastControl.frames"
+        }
+      ],
+      "notes": "Consume the frames stream with Stream.runForEach. It delivers timestamped JPEG frames, with scope-controlled subscription and backpressure.",
+      "capabilities": [
+        "capability.screencast"
+      ],
       "id": "option-screencast-start-onframe",
       "upstream": [
         "method:Screencast.start"
@@ -102869,37 +103186,59 @@
       "option": "onFrame",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+          ]
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Screencast domain"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Screencast domain"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts"
+        ],
+        "scope": "Public recording operations inspected; scope, file lifetime and operation-group behavior are stated explicitly."
+      }
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Capability",
+          "symbol": "VideoRecording.file",
+          "url": "/docs/api/browser/Capability#VideoRecording.file"
+        }
+      ],
+      "notes": "VideoRecording.file returns the completed local path; use explicit file copying to choose another path.",
+      "capabilities": [
+        "capability.video"
+      ],
       "id": "option-screencast-start-path",
       "upstream": [
         "method:Screencast.start"
@@ -102907,31 +103246,53 @@
       "option": "path",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Chromium video requires a VideoWriter service"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "written where the page's context downloads to"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox writes the file on its own host, out of the program's reach"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Stock WebKit video requires video polling options and a VideoWriter service"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [],
+      "audit": {
+        "sources": [
+          "packages/browser/src/Capability.ts"
+        ],
+        "scope": "Public recording operations inspected; scope, file lifetime and operation-group behavior are stated explicitly."
+      },
+      "configuration": {
+        "chromium": "Provide a VideoWriter service.",
+        "webkit": "Provide polling options and a VideoWriter service."
+      }
     },
     {
       "status": "missing",
@@ -110242,6 +110603,7 @@
     "packages/browser/src/internal/cdpAdapter.ts": "c9b262db5ec66087824f582215c24c8513dcc638008bb0d93bd0d38f32c43288",
     "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
     "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a8ee2a4f501fcd7af88dfc14d2dae4744b16dcf0702146674cde8fc8e5f373b8",
-    "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1"
+    "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
+    "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52"
   }
 }
