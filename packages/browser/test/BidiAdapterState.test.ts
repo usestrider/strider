@@ -2393,6 +2393,10 @@ describe("BidiAdapter state", () => {
               undefined,
               "test"
             )
+            // A commit alone can preserve the initial blank document's realm.
+            yield* state.buffer.flush
+            assert.isUndefined(running.pollUnsafe())
+            handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
           } else Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
           yield* state.buffer.flush
           const settled = yield* Fiber.join(running).pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
