@@ -39,7 +39,16 @@ const previewImage = new URL("/og.png", Astro.site)
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/heron.svg" type="image/svg+xml" />
     <!-- Page views, counted without cookies through the site's own Worker (website/worker.ts) -->
-    <script is:inline defer data-domain="usestrider.dev" data-api="/a/event" src="/a/script.js"></script>
+    <script is:inline async src="/a/script.js"></script>
+    <script is:inline>
+      window.plausible = window.plausible || function() {
+        ;(plausible.q = plausible.q || []).push(arguments)
+      }
+      plausible.init = plausible.init || function(i) {
+        plausible.o = i || {}
+      }
+      plausible.init()
+    </script>
     <Font cssVariable="--font-garamond" preload />
     <Font cssVariable="--font-source-serif" preload />
     <Font cssVariable="--font-plex-sans" preload />
