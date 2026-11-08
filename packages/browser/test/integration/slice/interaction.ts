@@ -24,6 +24,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -2647,6 +2648,33 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }),
         timeout
       )
+
+      it.effect("label descendant geometry requires the parsed fixture", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url, origin } = yield* fixture(() =>
+            `<script src="/parser-gate.js"></script><label><input id="box" type="checkbox"><span id="target">Toggle</span></label>`
+          )
+          const page = yield* newPage
+          const requested = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          yield* page.route(`${origin}/parser-gate.js`, () =>
+            Effect.gen(function*() {
+              yield* Deferred.succeed(requested, undefined)
+              yield* Deferred.await(release)
+              return yield* Route.fulfill(HttpServerResponse.text("", { contentType: "text/javascript" }))
+            }))
+          // Hold parsing at a real resource boundary, without a sleep or machine load.
+          yield* Effect.gen(function*() {
+            yield* page.goto(url)
+            yield* Deferred.await(requested)
+            const width = yield* page.evaluateInMainWorld(() =>
+              document.querySelector("#target")!.getBoundingClientRect().width
+            )
+            assert.isAbove(width, 0)
+            yield* page.locator("#target").check()
+            assert.isTrue(yield* page.locator("#box").isChecked)
+          }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+        })), timeout)
 
       // A label acts for its control, or the target is checkable itself, both ways. Every other kind is refused before
       // any input, the same way for check and uncheck, so each is one of the engine's rules, checked once: `button`
