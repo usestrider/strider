@@ -582,6 +582,74 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         timeout
       )
 
+      it.effect("replays a form navigation through a 303 HAR redirect", () =>
+        Effect.gen(function*() {
+          if (!(yield* fullySupports("interception.redirects"))) return
+          const origin = "https://login.example.test"
+          const body = "username=tomsmith&password=SuperSecretPassword%21"
+          const entry = (
+            method: string,
+            pathname: string,
+            status: number,
+            text: string,
+            headers: Array<{ name: string; value: string }> = []
+          ) => ({
+            startedDateTime: "2026-11-08T00:00:00.000Z",
+            time: 0,
+            request: {
+              method,
+              url: origin + pathname,
+              httpVersion: "HTTP/1.1",
+              cookies: [],
+              headers: [],
+              queryString: [],
+              headersSize: -1,
+              bodySize: method === "POST" ? body.length : 0,
+              ...(method === "POST" ? { postData: { mimeType: "application/x-www-form-urlencoded", text: body } } : {})
+            },
+            response: {
+              status,
+              statusText: "",
+              httpVersion: "HTTP/1.1",
+              cookies: [],
+              headers: [{ name: "content-type", value: "text/html;charset=utf-8" }, ...headers],
+              content: { size: text.length, mimeType: "text/html", text },
+              redirectURL: status === 303 ? origin + "/secure" : "",
+              headersSize: -1,
+              bodySize: text.length
+            },
+            cache: {},
+            timings: { send: 0, wait: 0, receive: 0 }
+          })
+          const file = path.join(directory(), "form-redirect.har")
+          fs.writeFileSync(
+            file,
+            JSON.stringify({
+              log: {
+                version: "1.2",
+                creator: { name: "local regression", version: "1" },
+                entries: [
+                  entry(
+                    "GET",
+                    "/login",
+                    200,
+                    "<form action=\"/authenticate\" method=\"post\"><label>Username<input name=\"username\"></label><label>Password<input name=\"password\" type=\"password\"></label><button>Login</button></form>"
+                  ),
+                  entry("POST", "/authenticate", 303, "", [{ name: "location", value: origin + "/secure" }]),
+                  entry("GET", "/secure", 200, "<p>You logged into a secure area!</p>")
+                ]
+              }
+            })
+          )
+          const page = yield* Browser.newPage()
+          yield* page.route("**/*", yield* Route.fromHar(file).pipe(Effect.provide(NodeFileSystem.layer)))
+          yield* page.goto(origin + "/login")
+          yield* page.getByLabel("Username").fill("tomsmith")
+          yield* page.getByLabel("Password").fill("SuperSecretPassword!")
+          yield* page.getByRole("button", { name: "Login" }).click()
+          yield* page.getByText("You logged into a secure area!").pipe(Expect.toBeVisible)
+        }), timeout)
+
       it.effect(
         "records a trace that nests in the program's spans, with screenshots, console, errors and network",
         () =>
