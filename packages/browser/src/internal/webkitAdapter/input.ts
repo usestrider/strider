@@ -211,8 +211,7 @@ const pageWorldOf = (frame: FrameEntry) =>
 
 /**
  * Whether Automation's frame is `candidate`: a mark Automation leaves on the frame's window, which the inspector
- * looks for in the candidate's, removed at once. For two frames whose documents began at the same moment at
- * the same URL.
+ * looks for in the candidate's, removed at once. Used when document fingerprints are ambiguous or disagree.
  */
 const isMarked = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process,
@@ -220,8 +219,9 @@ const isMarked = Effect.fnUntraced(function*(
   frameHandle: Automation.FrameHandle,
   candidate: FrameEntry
 ) {
+  const document = candidate.document
   const realm = pageWorldOf(candidate)
-  if (realm === undefined) return false
+  if (candidate.removed || realm === undefined) return false
   const mark = JSON.stringify(`__strider_frame_${crypto.randomUUID().replaceAll("-", "")}`)
   const inFrame = (body: string) =>
     Automation.evaluateJavaScriptFunction({
@@ -241,7 +241,8 @@ const isMarked = Effect.fnUntraced(function*(
     ),
     Effect.map((reply) => reply.result.value === true),
     Effect.orElseSucceed(() => false),
-    Effect.ensuring(inFrame(`delete window[${mark}]`).pipe(Effect.ignore))
+    Effect.ensuring(inFrame(`delete window[${mark}]`).pipe(Effect.ignore)),
+    Effect.map((confirmed) => confirmed && !candidate.removed && candidate.document === document && !realm.ended)
   )
 })
 
@@ -260,8 +261,8 @@ export const matchFrame = Effect.fnUntraced(function*(
     const ours = yield* identityOf(candidate)
     if (Option.isSome(ours) && ours.value === theirs.value) alike.push(candidate)
   }
-  if (alike.length <= 1) return Option.fromUndefinedOr(alike[0])
-  for (const candidate of alike) {
+  if (alike.length === 1) return Option.some(alike[0]!)
+  for (const candidate of alike.length === 0 ? candidates : alike) {
     if (yield* isMarked(process, handle, frameHandle, candidate)) return Option.some(candidate)
   }
   return Option.none<FrameEntry>()
@@ -282,6 +283,7 @@ export const frameHandleOf = (
     const ours = yield* identityOf(frame)
     if (Option.isNone(parent) || Option.isNone(ours)) return Option.none()
     // The parent's frames, as `window.frames` orders them, whose documents are alike
+    const children: Array<Automation.FrameHandle> = []
     const alike: Array<Automation.FrameHandle> = []
     for (let ordinal = 0; ordinal < 1000; ordinal++) {
       const child = yield* Automation.resolveChildFrameHandle({
@@ -291,10 +293,11 @@ export const frameHandleOf = (
       }).pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), answered)
       // Past the last frame, Automation answers with the main frame's handle (QUIRKS.md, Q227)
       if (Option.isNone(child) || child.value === mainFrameHandle) break
+      children.push(child.value)
       const theirs = yield* automationIdentityOf(process, handle, child.value)
       if (Option.isSome(theirs) && theirs.value === ours.value) alike.push(child.value)
     }
-    for (const child of alike) {
+    for (const child of alike.length === 0 ? children : alike) {
       if (alike.length === 1 || (yield* isMarked(process, handle, child, frame))) {
         state.frameHandles.set(frame, child)
         return Option.some(child)

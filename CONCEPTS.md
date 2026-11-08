@@ -392,6 +392,7 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - Node and handle continuity are proven separately from document continuity.
   - Current adapters do not implement prerender activation or document and realm transfer between pages.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
+  Stock WebKit pairs Automation frame handles with inspector frames by their document fingerprint (time origin and URL). When no fingerprint matches, or several match, it confirms the window with a temporary mark instead of accepting a clock tolerance (QUIRKS.md, Q228). Both lookup directions use this check; a removed frame or a document replaced during confirmation is rejected. The mark is removed after the check, including a failed check, but page scripts can briefly see it in these cases too.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.
   - **The library's own code** runs in a utility isolated world wherever one exists. Stock WebKit has none, and says so as a capability: there the engine, the trace capture and the library's own reads run in the page's world, and a caller's `evaluate` is refused rather than moved there (QUIRKS.md, Q194).
