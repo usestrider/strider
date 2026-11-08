@@ -396,7 +396,7 @@ it("caps process slots, reports exhaustion and removes the transfer spool", asyn
   ], {
     env: { ...process.env, [transferVariable]: directory }
   })
-  expect(fs.readdirSync(directory)).toHaveLength(processSlots * 2 + 1)
+  expect(fs.readdirSync(directory)).toHaveLength(processSlots * 3 + 1)
   scope.close()
   expect(records).toContainEqual(["overflow", "Child process slot budget exhausted"])
   expect(fs.existsSync(directory)).toBe(false)
@@ -553,7 +553,6 @@ it("keeps child transfer overflow markers out of the parent history budget", asy
   expect(trace.entries().some((entry) => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
 })
 
-
 it("protects startup through spool rotation and aggregate child pressure", async () => {
   const { execFileSync } = await import("node:child_process")
   const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
@@ -567,10 +566,23 @@ it("protects startup through spool rotation and aggregate child pressure", async
     "-e",
     "process.stderr.write('LAUNCH_HANDSHAKE'); for(let i=0;i<200;i++) process.stderr.write('x'.repeat(8000)); process.stderr.write('RECENT_PROTOCOL')"
   ], { env: { ...process.env, [transferVariable]: directory }, stdio: "ignore" })
+  expect(
+    fs.readdirSync(directory).filter((name) => !name.endsWith(".claim"))
+      .reduce((sum, name) => sum + fs.statSync(path.join(directory, name)).size, 0)
+  ).toBeLessThanOrEqual(256 * 1024)
   scope.close()
+  const gap = trace.entries().find((entry) => entry.kind === "overflow" && entry.origin?.pid === 0)!
+  const omitted = JSON.parse(gap.payload)
+  expect(omitted.from).toBeGreaterThan(1)
+  expect(omitted.to).toBeGreaterThan(omitted.from)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("RECENT_PROTOCOL")
+  expect(trace.entries().some((entry) => entry.kind === "node-exit")).toBe(true)
   for (let sequence = 1; sequence <= 300; sequence++) {
     trace.record("child", "receive", "new".repeat(2600), {
-      pid: 999, sequence, connection: "other", timestamp: "2099-01-01T00:00:00.000Z"
+      pid: 999,
+      sequence,
+      connection: "other",
+      timestamp: "2099-01-01T00:00:00.000Z"
     })
   }
   const entries = trace.entries()
@@ -579,4 +591,27 @@ it("protects startup through spool rotation and aggregate child pressure", async
   expect(entries.some((entry) => entry.kind === "overflow")).toBe(true)
   expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
   expect(fs.existsSync(directory)).toBe(false)
+})
+
+it("caps protected startup allocation while retaining the newest child tail", () => {
+  const trace = new TraceBuffer()
+  for (let sequence = 1; sequence <= 400; sequence++) {
+    trace.record("child", "receive", String(sequence) + "s".repeat(8000), {
+      pid: 1,
+      sequence,
+      startup: true,
+      connection: "daemon",
+      timestamp: new Date(sequence).toISOString()
+    })
+  }
+  const entries = trace.entries().filter((entry) => entry.origin !== undefined)
+  expect(entries[0]?.origin?.sequence).toBe(1)
+  expect(entries.at(-1)?.origin?.sequence).toBe(400)
+  const prefix = entries.filter((entry) => entry.origin!.sequence < 100)
+  expect(prefix.reduce((sum, entry) => sum + JSON.stringify(entry).length * 2, 0)).toBeLessThanOrEqual(512 * 1024)
+  expect(entries.some((entry) => entry.origin!.sequence === 100)).toBe(false)
+  expect(trace.bytes).toBeLessThanOrEqual(trace.childLimit)
+  trace.clear()
+  expect(trace.entries()).toEqual([])
+  expect(trace.bytes).toBe(0)
 })

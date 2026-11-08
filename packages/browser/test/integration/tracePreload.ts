@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { install, TraceBuffer } from "./failureTrace.ts"
 import { instrument } from "./tracePlugin.ts"
 import { stderrText } from "./traceStderr.ts"
-import { processSlots, segmentBytes, transferVariable } from "./traceTransfer.ts"
+import { prefixBytes, processSlots, segmentBytes, transferVariable } from "./traceTransfer.ts"
 
 const directory = process.env[transferVariable]
 if (directory !== undefined) {
@@ -33,6 +33,8 @@ if (directory !== undefined) {
     let connectionId = 0
     let segment = 0
     let bytes = 0
+    let startupBytes = 0
+    let startupComplete = false
     let stopped = false
     const write = (connection: string, kind: string, value: unknown) => {
       if (stopped) return
@@ -45,20 +47,28 @@ if (directory !== undefined) {
           JSON.stringify(value, (_, v) => typeof v === "bigint" ? `${v}n` : v) ?? String(value)
       )
       const entry = trace.entries().at(-1)!
-      const line = JSON.stringify({ ...entry, sequence: ++sequence, pid: process.pid }) + "\n"
+      const startup = !startupComplete
+      let line =
+        JSON.stringify({ ...entry, sequence: ++sequence, pid: process.pid, ...(startup ? { startup: true } : {}) }) +
+        "\n"
+      if (startup && startupBytes + Buffer.byteLength(line) > prefixBytes) {
+        startupComplete = true
+        line = JSON.stringify({ ...entry, sequence, pid: process.pid }) + "\n"
+      }
       try {
-        if (bytes + Buffer.byteLength(line) > segmentBytes) {
+        if (startupComplete && bytes + Buffer.byteLength(line) > segmentBytes) {
           segment = 1 - segment
           bytes = 0
         }
-        const fd = fs.openSync(path.join(directory, `${slot}-${segment}`), "r+")
+        const fd = fs.openSync(path.join(directory, `${slot}-${startupComplete ? segment : 2}`), "r+")
         try {
-          if (bytes === 0) fs.ftruncateSync(fd, 0)
-          fs.writeSync(fd, line, bytes, "utf8")
+          if (startupComplete && bytes === 0) fs.ftruncateSync(fd, 0)
+          fs.writeSync(fd, line, startupComplete ? bytes : startupBytes, "utf8")
         } finally {
           fs.closeSync(fd)
         }
-        bytes += Buffer.byteLength(line)
+        if (startupComplete) bytes += Buffer.byteLength(line)
+        else startupBytes += Buffer.byteLength(line)
       } catch {
         stopped = true
       }
