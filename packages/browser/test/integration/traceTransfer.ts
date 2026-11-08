@@ -6,8 +6,10 @@ import type { Entry, Record } from "./failureTrace.ts"
 
 export const transferVariable = "STRIDER_TEST_TRACE_SPOOL"
 export const processSlots = 128
-export const segmentBytes = 128 * 1024
+export const prefixBytes = 64 * 1024
+export const segmentBytes = 96 * 1024
 export interface RecordedChild extends Entry {
+  readonly startup?: boolean
   readonly pid: number
 }
 export class TransferScope {
@@ -24,7 +26,7 @@ export class TransferScope {
       // add directory entries while collection/removal runs, even with an already-open descriptor.
       for (let slot = 0; slot < processSlots; slot++) {
         fs.writeFileSync(path.join(this.directory, `${slot}.claim`), "")
-        for (let segment = 0; segment < 2; segment++) {
+        for (let segment = 0; segment < 3; segment++) {
           fs.writeFileSync(path.join(this.directory, `${slot}-${segment}`), "")
         }
       }
@@ -54,13 +56,13 @@ export class TransferScope {
       }
       for (let slot = 0; slot < processSlots; slot++) {
         const entries: Array<RecordedChild> = []
-        for (let segment = 0; segment < 2; segment++) {
+        for (let segment = 0; segment < 3; segment++) {
           const file = path.join(directory, `${slot}-${segment}`)
           try {
             // A concurrent append may leave one incomplete final line. Never read above the segment bound.
             const fd = fs.openSync(file, "r")
             try {
-              const data = Buffer.alloc(segmentBytes)
+              const data = Buffer.alloc(segment === 2 ? prefixBytes : segmentBytes)
               const size = fs.readSync(fd, data, 0, data.length, 0)
               const lines = data.subarray(0, size).toString("utf8").split("\n")
               lines.pop()
@@ -75,8 +77,12 @@ export class TransferScope {
           } catch { /* Unused slot or a process that has not recorded yet. */ }
         }
         entries.sort((a, b) => a.sequence - b.sequence)
-        if (entries[0]?.sequence && entries[0].sequence > 1) {
-          overflow({ slot, note: "Earlier child records evicted" })
+        let previous = 0
+        for (const entry of entries) {
+          if (entry.sequence > previous + 1) {
+            overflow({ slot, from: previous + 1, to: entry.sequence - 1, note: "Intermediate child records evicted" })
+          }
+          previous = entry.sequence
         }
         for (const entry of entries) {
           const { payload, kind, ...origin } = entry
