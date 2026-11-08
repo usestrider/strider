@@ -258,13 +258,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#a").focus()
             const native = yield* page.evaluateInMainWorld(() => {
               const field = document.querySelector<HTMLInputElement>("#a")!
+              const hasFocus = document.hasFocus()
               field.blur()
               const events = document.querySelector("#events")!
               const recorded = events.textContent!
               events.textContent = ""
-              return recorded
+              return { hasFocus, events: recorded }
             })
-            assert.include(native, "focusout:a;")
+            assert.include(native.events, "focusout:a;")
+            if (native.hasFocus) assert.include(native.events, "blur:a;")
             yield* page.locator("#a").focus()
             yield* page.locator("#a").blur({ trial: true })
             yield* page.locator("#b").blur()
@@ -273,9 +275,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#plain").blur()
             yield* page.locator("#events").pipe(Expect.toHaveText(""))
             yield* page.locator("#a").blur()
-            yield* page.locator("#events").pipe(Expect.toHaveText(native))
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
             yield* page.locator("#a").blur()
-            yield* page.locator("#events").pipe(Expect.toHaveText(native))
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
             assert.notStrictEqual(yield* page.evaluateInMainWorld(() => document.activeElement?.id), "a")
             yield* page.evaluateInMainWorld(() => {
               document.querySelector("#events")!.textContent = ""
@@ -284,14 +286,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const nativeMath = yield* page.evaluateInMainWorld(() => {
               const events = document.querySelector("#events")!
               const field = document.querySelector<MathMLElement>("#math")!
+              const hasFocus = document.hasFocus()
               field.blur()
               const recorded = events.textContent!
               events.textContent = ""
-              return recorded
+              return { hasFocus, events: recorded }
             })
             yield* page.evaluateInMainWorld(() => document.querySelector<MathMLElement>("#math")!.focus())
             yield* page.locator("#math").blur()
-            yield* page.locator("#events").pipe(Expect.toHaveText(nativeMath))
+            yield* page.locator("#events").pipe(Expect.toHaveText(nativeMath.events))
             console.log("Native blur events", { html: native, math: nativeMath })
             yield* page.evaluateInMainWorld(() => {
               const foreign = document.createElementNS("urn:example", "widget")

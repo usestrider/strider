@@ -45,7 +45,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
 [`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer,
-preserving the browser's native focus events. Stock WebKitGTK's MiniBrowser can fire `focusout` without `blur`.
+preserving the browser's native focus events. In the tested stock WebKitGTK MiniBrowser case, `document.hasFocus()` was false and the native call fired `focusout` without `blur`. Focused WebKit window behavior was not tested.
 It waits for one match, accepts hidden,
 disabled and inert elements by default, and leaves an unfocused element unchanged.
 
