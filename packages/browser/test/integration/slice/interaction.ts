@@ -1313,6 +1313,61 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      for (const type of ["text", "date"] as const) {
+        for (
+          const [property, block, restore, check, reason] of [
+            ["hidden", "this.style.visibility='hidden'", "this.style.visibility='visible'", "visible", "NotVisible"],
+            ["inert", "this.inert=true", "this.inert=false", "notInert", "Inert"]
+          ] as const
+        ) {
+          for (
+            const mode of type === "text"
+              ? ["recovery", "override"] as const
+              : ["blocked", "recovery", "override"] as const
+          ) {
+            it.effect(`focus-time rendering: ${type} ${property} ${mode}`, () =>
+              Effect.scoped(Effect.gen(function*() {
+                const old = type === "date" ? "2020-03-02" : "old"
+                const value = type === "date" ? "2020-03-03" : "filled"
+                const { url } = yield* fixture(() =>
+                  `<input id="go" type="${type}" value="${old}" onfocus="this.removeAttribute('onfocus');${block};${
+                    mode === "recovery"
+                      ? `setTimeout(() => { before.textContent=this.value+'|'+out.textContent; ${restore} }, 250)`
+                      : ""
+                  }" oninput="out.textContent='input'" onchange="out.textContent+=';change'"><output id="out">untouched</output><output id="before"></output>`
+                )
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                // WebKit uses a synthetic missing-focus notification with native insertion, not native focus-event coverage.
+                yield* observeChecks(target, true)
+                const result = yield* target.fill(value, {
+                  checks: mode === "override" ? { [check]: false } : {}
+                }).pipe(Deadline.within("1 second"), Effect.result)
+                if (mode === "blocked") {
+                  assert(result._tag === "Failure")
+                  assert(Deadline.isTimeout(result.failure), String(result.failure))
+                  assert(result.failure.history.some((entry) => (entry.value as { _tag: string })._tag === reason))
+                  assert.strictEqual(yield* target.readValue, old)
+                  assert.strictEqual(yield* page.locator("#out").readText, "untouched")
+                } else {
+                  assert.strictEqual(result._tag, "Success")
+                  if (mode === "recovery") {
+                    assert.strictEqual(yield* page.locator("#before").readText, old + "|untouched")
+                    assert.strictEqual(yield* target.readValue, value)
+                    assert.isTrue((yield* page.locator("#out").readText).startsWith("input"))
+                  } else if (type === "date") {
+                    assert.strictEqual(yield* target.readValue, value)
+                    assert.strictEqual(yield* page.locator("#out").readText, "input;change")
+                  }
+                  // An override skips readiness; native typing can still refuse a hidden or inert target.
+                }
+              })), timeout)
+          }
+        }
+      }
+
       // A text input takes the typing path; a focus handler can make it read-only there too.
       it.effect("focus-time readOnly: a text input times out with ReadOnly, unchanged", () =>
         Effect.gen(function*() {
