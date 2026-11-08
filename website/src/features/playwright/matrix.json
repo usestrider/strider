@@ -7901,7 +7901,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -8895,7 +8895,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -9628,7 +9628,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Evaluate the frame\u2019s root locator and serialize its ownerDocument, including the doctype when needed. The read is immediate; no retained Frame object or load wait is supplied.",
+      "notes": "Evaluate the frame’s root locator and serialize its ownerDocument, including the doctype when needed. The read is immediate; no retained Frame object or load wait is supplied.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -10802,7 +10802,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -11912,7 +11912,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -11961,7 +11961,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Evaluate the frame\u2019s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
+      "notes": "Evaluate the frame’s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -13165,7 +13165,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyFrameLocator.owner"
         }
       ],
-      "notes": "The frame locator\u2019s owner is its iframe element locator; reading it does not wait for an attached document.",
+      "notes": "The frame locator’s owner is its iframe element locator; reading it does not wait for an attached document.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15174,7 +15174,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element\u2019s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15228,7 +15228,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element\u2019s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15430,7 +15430,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15473,7 +15473,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15862,7 +15862,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15905,7 +15905,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16021,7 +16021,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16064,7 +16064,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16107,7 +16107,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16254,7 +16254,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16297,7 +16297,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17006,7 +17006,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17049,7 +17049,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17214,7 +17214,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17409,7 +17409,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17712,7 +17712,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17863,7 +17863,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18179,7 +18179,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18421,7 +18421,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18464,7 +18464,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18729,7 +18729,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18772,7 +18772,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -21715,8 +21715,10 @@
           "limitations": []
         },
         "webkit.attached": {
-          "status": "has",
-          "limitations": []
+          "status": "missing",
+          "limitations": [
+            "activatePage: refuse(\"emulation.focus\", \"stock WebKit's inspector has no Emulation domain\")"
+          ]
         }
       },
       "audit": {
@@ -21725,7 +21727,15 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [
+        {
+          "unavailable": [
+            "webkit.attached"
+          ],
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "activatePage: refuse(\"emulation.focus\", \"stock WebKit's inspector has no Emulation domain\")"
+        }
+      ]
     },
     {
       "id": "method-page-cancelpicklocator",
@@ -23709,7 +23719,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -26170,7 +26180,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -28020,33 +28030,44 @@
       "upstream": [
         "method:Request.frame"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "has",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "Initiator",
+          "url": "/docs/api/browser/NetworkRequest#Initiator"
+        },
+        {
+          "module": "Page",
+          "symbol": "FrameTree",
+          "url": "/docs/api/browser/Page#FrameTree"
+        }
+      ],
+      "notes": "A Document initiator contains the navigable frame id, which can be matched in page.frames. Worker and Unattributed initiators have no frame. This returns identity data, not a retained Frame object, and a removed frame may no longer appear in the current tree.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -28222,33 +28243,39 @@
       "upstream": [
         "method:Request.isNavigationRequest"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "has",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "Initiator",
+          "url": "/docs/api/browser/NetworkRequest#Initiator"
+        }
+      ],
+      "notes": "For a Document initiator, navigation is Some for a navigation request and None for a subresource. Read this snapshot directly; no resource-type guess, wait or body collection is needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -28664,34 +28691,55 @@
       "upstream": [
         "method:Request.serviceWorker"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "Initiator",
+          "url": "/docs/api/browser/NetworkRequest#Initiator"
+        },
+        {
+          "module": "UserContext",
+          "symbol": "UserContext.workers",
+          "url": "/docs/api/browser/UserContext#UserContext.workers"
+        }
+      ],
+      "notes": "For a Worker initiator, match its realm to context.workers and inspect kind=service. Unattributed requests cannot name a worker. Worker discovery is capability-limited; no retained serviceWorker getter is supplied.",
+      "capabilities": [
+        "workers.service"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox reports service workers, but not whose context they are in"
+          ]
         },
         "firefox.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "Firefox reports service workers, but not whose context they are in"
+          ]
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit doesn't report service workers"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit doesn't report service workers"
+          ]
         }
       },
       "audit": {
@@ -29790,7 +29838,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -29851,7 +29899,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -29912,7 +29960,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -30016,7 +30064,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {

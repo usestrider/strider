@@ -99,7 +99,10 @@ describe("Playwright matrix", () => {
   })
   it("recognizes navigation attribution already present in request snapshots", () => {
     expect(row("method-request-isnavigationrequest").status).toBe("has")
-    expect(row("method-request-isnavigationrequest").api.some((api: any) => api.module === "NetworkRequest" && api.symbol === "Initiator")).toBe(true)
+    expect(
+      row("method-request-isnavigationrequest").api.some((api: any) =>
+        api.module === "NetworkRequest" && api.symbol === "Initiator"
+      )
+    ).toBe(true)
   })
-
 })
