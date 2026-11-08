@@ -22,6 +22,7 @@ import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
 import { readFile } from "node:fs/promises"
 import { inspect } from "node:util"
+import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -986,6 +987,11 @@ describe("WebKit launcher", () => {
           const armed = yield* Deferred.make<void>()
           const sleeps: Array<number> = []
           const descriptor = Object.getOwnPropertyDescriptor(BrowserClock.live, "sleep")!
+          // Deadline creation sees 0; the remaining-budget read sees the full 50 ms already elapsed.
+          const now = vi.spyOn(performance, "now").mockReturnValue(0)
+          const liveNow = vi.spyOn(BrowserClock.live, "now").mockReturnValue(
+            50_000_000 as ReturnType<typeof BrowserClock.now>
+          )
           const result = yield* Effect.acquireUseRelease(
             Effect.sync(() =>
               Object.defineProperty(BrowserClock.live, "sleep", {
@@ -1035,6 +1041,8 @@ describe("WebKit launcher", () => {
             () =>
               Effect.sync(() => {
                 Object.defineProperty(BrowserClock.live, "sleep", descriptor)
+                liveNow.mockRestore()
+                now.mockRestore()
               })
           )
           assert(result.error.reason._tag === "ConnectionFailed")
