@@ -1012,6 +1012,11 @@ describe("strider", () => {
         assert.include(cafe, "caf%C3%A9")
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
+        assert.notInclude(visited.out, "names no secret")
+        const warned = yield* shop("goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warned.code, 0, warned.err)
+        assert.include(warned.out, "%pasword% names no secret")
+        assert.include(warned.out, "Did you mean %password%?")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
         // State for a program, and a test of what ran, into directories that don't exist yet
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")

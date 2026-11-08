@@ -582,6 +582,9 @@ describe("strider export test", () => {
       `yield* main.goto(\`https://shop.example.com/caf%C3%A9?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)\n`
     )
     assert.include(text, `yield* main.getByLabel("Token").fill("%tokn%")\n`)
+    assert.include(text, "// %tokn% names no secret")
+    assert.include(text, "Did you mean %token%?")
+    assert.notInclude(text, "%C3% names no secret")
     assert.include(text, `yield* main.locator("#sale").pipe(Expect.toContainText("50%off%"))\n`)
   })
 

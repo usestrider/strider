@@ -744,10 +744,14 @@ describe("BrowserToolkit", () => {
       // A URL's percent-escapes are its own, not secrets
       const opened = yield* call("newPage", { name: "shop", url: "https://example.test/caf%C3%A9" })
       assert.deepStrictEqual(opened.outcome, { page: "shop", url: "https://example.test/caf%C3%A9" })
+      assert.notInclude(opened.sinceLast.join("\n"), "names no secret")
       // A mistyped name is sent as written too; the result shows the secret's value as its name again
       const url = "https://example.test/caf%C3%A9?token=%token%&typo=%tokn%"
       const went = yield* call("goto", { page: "shop", url })
       assert.deepStrictEqual(went.outcome, { url })
+      assert.include(went.sinceLast.join("\n"), "%tokn% names no secret")
+      assert.include(went.sinceLast.join("\n"), "Did you mean %token%?")
+      assert.notInclude(went.sinceLast.join("\n"), "abc")
       const shop = (yield* first.context.pages).find((page) => page.id !== first.id)!
       assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc&typo=%tokn%")
     })).pipe(Effect.provide(Browser.layerTest(""))))
