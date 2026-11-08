@@ -882,6 +882,113 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("uses each action's rendered default and honors both overrides", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="text"><input id="box" type="checkbox"><input id="checked" type="checkbox" checked><input id="file" type="file"><select id="select"><option value="a">A</option></select><button id="end">End</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const text = page.locator("#text")
+            assert(text instanceof LocatorImpl)
+            const rounds = yield* observeChecks(text)
+            const actions: ReadonlyArray<
+              readonly [boolean, (options: Locator.ActionOptions) => Effect.Effect<unknown, unknown>]
+            > = [
+              [true, (o) => text.click(o)],
+              [true, (o) => text.dblclick(o)],
+              [true, (o) => text.tap(o)],
+              [true, (o) => text.hover(o)],
+              [true, (o) => page.locator("#box").check(o)],
+              [true, (o) => page.locator("#checked").uncheck(o)],
+              [true, (o) => text.dragTo(page.locator("#end"), o)],
+              [false, (o) => text.fill("value", o)],
+              [false, (o) => text.clear(o)],
+              [false, (o) => text.focus(o)],
+              [false, (o) => text.press("a", o)],
+              [false, (o) => text.pressSequentially("a", o)],
+              [false, (o) => page.locator("#select").selectOption({ value: "a" }, o)],
+              [false, (o) => page.locator("#file").setInputFiles([], o)],
+              [false, (o) => text.scrollIntoView(o)]
+            ]
+            for (const [defaultRendered, act] of actions) {
+              for (const rendered of [undefined, false, true]) {
+                rounds.length = 0
+                yield* act({ trial: true, checks: { stable: false, ...(rendered === undefined ? {} : { rendered }) } })
+                assert.isAtLeast(rounds.length, 1)
+                for (const round of rounds) {
+                  assert.strictEqual(round.request.checks.rendered, rendered ?? defaultRendered)
+                  assert.strictEqual(round.frames, (rendered ?? defaultRendered) ? 1 : 0)
+                }
+              }
+            }
+          }))
+        }), timeout)
+
+      it.effect("applies the rendered choice to both drag endpoints", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<button id="start">Start</button><button id="end">End</button>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const start = page.locator("#start")
+            assert(start instanceof LocatorImpl)
+            const rounds = yield* observeChecks(start)
+            for (const rendered of [undefined, false, true]) {
+              rounds.length = 0
+              yield* start.dragTo(page.locator("#end"), {
+                checks: { stable: false, ...(rendered === undefined ? {} : { rendered }) }
+              })
+              assert(rounds.some((round) =>
+                round.request.steps.some((step) => step._tag === "Css" && step.selector === "#end")
+              ))
+              for (const round of rounds) {
+                assert.strictEqual(round.request.checks.rendered, rendered ?? true)
+                assert.strictEqual(round.frames, (rendered ?? true) ? 1 : 0)
+              }
+            }
+          }))
+        }), timeout)
+
+      it.effect("revalidates fill immediately under the input permit with rendered off", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            assert(field instanceof LocatorImpl)
+            const rounds = yield* observeChecks(field)
+            const input = field.owner.page.input
+            const original = input.withPermit
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                input.withPermit = (effect) =>
+                  original(Effect.andThen(
+                    page.evaluateInMainWorld(() => {
+                      ;(document.getElementById("field") as HTMLInputElement).disabled = true
+                    }).pipe(Effect.orDie),
+                    effect
+                  ))
+              }),
+              () =>
+                Effect.sync(() => {
+                  input.withPermit = original
+                })
+            )
+            const error = yield* field.fill("unsafe").pipe(Deadline.within("500 millis"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(yield* field.readValue, "")
+            assert(rounds.some((round) =>
+              round.request.apply && round.response._tag === "NotReady" && round.response.reason._tag === "Disabled"
+            ))
+            assert(rounds.every((round) =>
+              !round.request.checks.rendered
+            ))
+          }))
+        }), timeout)
+
       for (const action of ["click", "check", "uncheck"] as const) {
         for (const change of ["replaced", "moved", "disabled", "covered", "interrupted", "expired"] as const) {
           it.effect(`handles a queued ${action} when ${change}`, () =>

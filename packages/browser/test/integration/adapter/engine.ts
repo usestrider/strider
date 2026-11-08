@@ -897,6 +897,66 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(yield* framesRead(call), 4)
           }), timeout)
 
+        for (const stable of [0, 2]) {
+          it.effect(`checks immediately with rendered off and retains ${stable} stability frames`, () =>
+            Effect.gen(function*() {
+              const { call, send } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
+              const request = point(stable)
+              const response = yield* send({ ...request, checks: { ...request.checks, rendered: false } })
+              assert(response._tag === "Ready", JSON.stringify(response))
+              assert.strictEqual(yield* framesRead(call), stable)
+            }), timeout)
+        }
+
+        it.effect("retains the readiness reason without a rendering hint when rendered is off", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="go" disabled>Go</button>`,
+              "() => { globalThis.requestAnimationFrame = () => 0 }"
+            )
+            const request = point(0)
+            const response = yield* send({ ...request, cap: 100, checks: { ...request.checks, rendered: false } })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "Disabled")
+            assert(
+              !response.history.some((reason) =>
+                reason._tag === "NoRenderingOpportunity"
+              )
+            )
+          }), timeout)
+
+        it.effect("retains the stability reason with rendered off when frames never arrive", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="go">Go</button>`,
+              "() => { globalThis.requestAnimationFrame = () => 0 }"
+            )
+            const request = point(2)
+            const response = yield* send({ ...request, cap: 100, checks: { ...request.checks, rendered: false } })
+            assert(response._tag === "NotReady", JSON.stringify(response))
+            assert.strictEqual(response.reason._tag, "NotStable")
+            assert(
+              !response.history.some((reason) =>
+                reason._tag === "NoRenderingOpportunity"
+              )
+            )
+          }), timeout)
+
+        it.effect("waits for a frame to retry current layout with rendered off", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button id="go" disabled>Go</button>`,
+              countFrames("document.getElementById('go').disabled = false")
+            )
+            const request = point(0)
+            const response = yield* send({ ...request, checks: { ...request.checks, rendered: false } })
+            assert(response._tag === "Ready", JSON.stringify(response))
+            assert.strictEqual(yield* framesRead(call), 1)
+          }), timeout)
+
         it.effect("still waits for rendering when stability is disabled", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(backend, `<button id="go">Go</button>`, countFrames())
