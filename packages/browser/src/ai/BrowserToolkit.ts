@@ -139,7 +139,14 @@ export interface MakeOptions {
  * **Gotchas**
  *
  * A mistyped secret name isn't an error: `%pasword%` names no secret, so it is sent as written, and a field it fills
- * gets the text `%pasword%`.
+ * gets the text `%pasword%`. Successful results report unknown placeholder names in `sinceLast`; typed failures
+ * append the same hints to their message, preserving the error and reason. Hints describe the input, without
+ * claiming it reached the browser. A configured name is suggested when exactly one is within one insertion,
+ * deletion or substitution. Names start with an ASCII letter and continue with ASCII letters, digits, underscores
+ * or hyphens. Two hexadecimal digits are always treated as URL escapes. A longer candidate starting with a hex
+ * pair, whose closing `%` starts another hex escape, is also exempt unless any configured name is within one edit.
+ * This syntax is ambiguous: `%ACtext%20` normally stays quiet, but `%adminpas%2024` warns when `adminpass` is
+ * configured. Escaped URL text close to a configured name can therefore produce a warning too.
  *
  * **Example** (Building a toolkit for a context)
  *

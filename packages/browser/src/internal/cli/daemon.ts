@@ -58,6 +58,7 @@ import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as OperationImpl from "../operation.ts"
+import * as Secrets from "../secrets.ts"
 import * as Serialization from "../serialization.ts"
 import * as StorageStates from "../storageState.ts"
 import * as ToolkitImpl from "../toolkit.ts"
@@ -609,10 +610,31 @@ export const commands = (getDaemon: () => Daemon) => {
               const { name: named, page: opened } = yield* getDaemon().session.open({
                 name: Option.getOrUndefined(name),
                 url: Option.getOrUndefined(url)
-              }).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+              }).pipe(Effect.mapError((failure) =>
+                new CommandFailed(
+                  {
+                    ...failure,
+                    message: [
+                      failure.message,
+                      ...getDaemon().session.conceal(Secrets.diagnostics(
+                        Option.getOrUndefined(url),
+                        Object.keys(getDaemon().secretVariables)
+                      ))
+                    ].join("\n")
+                  }
+                )
+              ))
               getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
+              for (
+                const diagnostic of Secrets.diagnostics(
+                  Option.getOrUndefined(url),
+                  Object.keys(getDaemon().secretVariables)
+                )
+              ) {
+                yield* Console.log(diagnostic)
+              }
             }))
       ).pipe(Command.withDescription(Tools.newPage.description!)),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>

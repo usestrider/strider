@@ -430,6 +430,17 @@ export const render = (options: {
   }
   const viewports = new Map<string, string>()
   for (const step of options.steps) {
+    const input = step._tag === "Tool" ? step.params : step._tag === "NewPage" ? step.url : undefined
+    for (const diagnostic of Secrets.diagnostics(input, Object.keys(options.secrets))) {
+      body.push(
+        `// ${
+          diagnostic.replace(
+            /[\r\n\u2028\u2029]/g,
+            (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+          )
+        }`
+      )
+    }
     if (step._tag === "Viewport") {
       const page = use(step.page)
       const registration = fresh(`${page}Viewport`)

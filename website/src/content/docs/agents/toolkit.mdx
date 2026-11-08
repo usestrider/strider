@@ -91,7 +91,14 @@ A busy document may retain listeners until it executes the queued release or end
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a
-  URL, is sent as written, and so is a mistyped name.
+  URL, is sent as written, and so is a mistyped name. Successful results warn about unknown placeholder names in
+  `sinceLast`; typed failures append the hints to their message while keeping the original error and reason. A
+  configured name is suggested when exactly one is within one insertion, deletion or substitution. Hints describe
+  the input, without claiming that it reached the browser. Diagnostic names start with an ASCII letter and continue
+  with ASCII letters, digits, underscores or hyphens. Two hexadecimal digits are always URL escapes. A longer
+  candidate starting with a hex pair, whose closing `%` starts another hex escape, is exempt unless any configured
+  name is within one edit. The syntax is ambiguous: `%ACtext%20` normally stays quiet, but `%adminpas%2024` warns
+  when `adminpass` is configured. Escaped URL text close to a configured name can therefore warn too.
 
 ## Capture policy
 

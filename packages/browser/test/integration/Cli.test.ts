@@ -986,6 +986,7 @@ describe("strider", () => {
         const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(checked.code, 0, checked.err)
         assert.notInclude(checked.out, "hunter2")
+        assert.notInclude(checked.out, "names no secret")
         // page new puts a secret into its URL as goto does, and prints the URL with its name
         const vault = yield* run("-s", "shop", "page", "new", "--name", "vault", html(`<p id="pw">`, "</p>"))
         assert.strictEqual(vault.code, 0, vault.err)
@@ -994,24 +995,56 @@ describe("strider", () => {
         const unlocked = yield* run("-s", "shop", "-p", "vault", "expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(unlocked.code, 0, unlocked.err)
         // A navigation that fails doesn't print the secret either
-        const unsafe = "http://127.0.0.1:9/?pw=%password%"
+        const unsafe = "http://127.0.0.1:9/?pw=%password%&typo=%pasword%"
         const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
         assert.strictEqual(refused.code, 11, refused.err)
         assert.notInclude(refused.err, "hunter2")
+        assert.include(refused.err, "%pasword% names no secret")
+        assert.include(refused.err, "Did you mean %password%?")
+        assert.notInclude(refused.err, "was sent")
+        const plainFailure = yield* shop("--json", "goto", "http://127.0.0.1:9/?pw=%password%")
+        const typoFailure = yield* shop("--json", "goto", unsafe)
+        assert.strictEqual(plainFailure.code, 11, plainFailure.err)
+        assert.strictEqual(typoFailure.code, plainFailure.code, typoFailure.err)
+        const originalError = JSON.parse(plainFailure.out).outcome
+        const hintedError = JSON.parse(typoFailure.out).outcome
+        assert.strictEqual(hintedError._tag, "Failed")
+        assert.strictEqual(hintedError.error, originalError.error)
+        assert.strictEqual(hintedError.reason, originalError.reason)
+        assert.isString(hintedError.reason)
+        assert.include(hintedError.message, "%pasword% names no secret")
+        assert.include(typoFailure.err, "%pasword% names no secret")
+        assert.notInclude(typoFailure.out + typoFailure.err, "hunter2")
+        assert.notInclude(hintedError.message, "was sent")
         // It names the URL it was going to, with the secret's name back in
-        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password% failed")
+        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
         // Its page is closed again, so the session holds no page the exported test leaves out
         const held = names(yield* run("-s", "shop", "pages"))
         assert.notInclude(held, "refused")
         // A name that's taken fails before a page opens
-        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", url)
+        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", `${url}&typo=%pasword%`)
         assert.strictEqual(twice.code, 15, twice.err)
+        assert.include(twice.err, "A page is already named shop")
+        assert.include(twice.err, "%pasword% names no secret")
+        assert.notInclude(twice.err, "was sent")
         assert.deepStrictEqual(names(yield* run("-s", "shop", "pages")), held)
         // A URL's percent-escapes name no secret, so the URL is sent as written
         const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
         assert.include(cafe, "caf%C3%A9")
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
+        assert.notInclude(visited.out, "names no secret")
+        const escaped = yield* shop("goto", `${cafe}&escaped=%ACtext%20`)
+        assert.strictEqual(escaped.code, 0, escaped.err)
+        assert.notInclude(escaped.out, "names no secret")
+        const warned = yield* shop("goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warned.code, 0, warned.err)
+        assert.include(warned.out, "%pasword% names no secret")
+        assert.include(warned.out, "Did you mean %password%?")
+        assert.notInclude(warned.out, "hunter2")
+        const warnedJson = yield* shop("--json", "goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warnedJson.code, 0, warnedJson.err)
+        assert.include(JSON.parse(warnedJson.out).sinceLast.join("\n"), "%pasword% names no secret")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
         // State for a program, and a test of what ran, into directories that don't exist yet
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
@@ -1078,6 +1111,8 @@ describe("strider", () => {
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // A percent-escaped URL is the text the session sent
         assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
+        assert.include(exported, "// %pasword% names no secret")
+        assert.notInclude(exported, "%C3% names no secret")
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, help, p\d+/)
@@ -1089,6 +1124,37 @@ describe("strider", () => {
       assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "shop")))
       assert.strictEqual((yield* run("-s", "shop", "pages")).code, 20)
     })), timeout)
+
+  it.live(
+    "keeps existing redaction when adding a page creation failure hint",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = { ...environment(), SECRET_PW: "password" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run(
+          "start",
+          "--name",
+          "once",
+          "--chromium",
+          chromium.executable,
+          "--secret",
+          "password=SECRET_PW"
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const failure = yield* run("-s", "once", "page", "new", "http://127.0.0.1:9/?pw=%password%&typo=%pasword%")
+          assert.strictEqual(failure.code, 11, failure.err)
+          assert.include(failure.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
+          assert.include(failure.err, "%pasword% names no secret")
+          assert.notInclude(failure.err, "pw=password")
+          assert.notInclude(failure.err, "was sent")
+        } finally {
+          yield* run("-s", "once", "stop")
+          fs.rmSync(env.XDG_RUNTIME_DIR, { recursive: true, force: true })
+        }
+      })),
+    timeout
+  )
 
   it.live("finishes stop cleanup while keeping the session directory", () =>
     Effect.gen(function*() {
