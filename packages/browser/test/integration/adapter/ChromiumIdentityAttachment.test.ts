@@ -227,6 +227,80 @@ describe("Chromium identity by attachment", () => {
         60_000
       )
 
+      it.effect(
+        "closing a paused prerender target also destroys its native tab",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* serve
+            const { driver, targets } = yield* launch
+            const { targetId } = yield* Target.createTarget({ url: `${origin}/idle` }).pipe(Protocol.on(driver.browser))
+            const listed = yield* until(targets, (infos) =>
+              infos.some((info) => info.type === "tab" && info.url === `${origin}/idle`))
+            const tabId = listed.find((info) =>
+              info.type === "tab" && info.url === `${origin}/idle`
+            )!.targetId
+            const { sessionId } = yield* Target.attachToTarget({ targetId: tabId, flatten: true }).pipe(
+              Protocol.on(driver.browser)
+            )
+            const tab = yield* driver.session(sessionId)
+            const children: Array<Target.AttachedToTargetParams> = []
+            yield* Stream.runForEach(yield* tab.subscribe(Target.attachedToTarget), (event) =>
+              Effect.sync(() => {
+                children.push(event)
+              })).pipe(Effect.forkChild)
+            yield* Target.setAutoAttach({
+              autoAttach: true,
+              waitForDebuggerOnStart: false,
+              flatten: true,
+              filter: [{ exclude: false }]
+            }).pipe(Protocol.on(tab))
+            yield* until(Effect.sync(() => children), (events) =>
+              events.some((event) => event.targetInfo.targetId === targetId))
+            const main = yield* driver.session(
+              children.find((event) =>
+                event.targetInfo.targetId === targetId
+              )!.sessionId
+            )
+            yield* until(
+              Runtime.evaluate({ expression: "location.href + ' ' + document.readyState", returnByValue: true }).pipe(
+                Protocol.on(main)
+              ),
+              (reply) => reply.result.value === `${origin}/idle complete`
+            )
+            yield* Target.setAutoAttach({
+              autoAttach: true,
+              waitForDebuggerOnStart: true,
+              flatten: true,
+              filter: [{ exclude: false }]
+            }).pipe(Protocol.on(tab))
+            yield* Runtime.evaluate({
+              expression:
+                `(() => { const s = document.createElement('script'); s.type = 'speculationrules'; s.textContent = JSON.stringify({prerender:[{source:'list',urls:['${origin}/prerendered']}]}); document.head.append(s); })()`
+            }).pipe(Protocol.on(main))
+            yield* until(
+              Effect.sync(() => children),
+              (events) => events.some((event) => event.targetInfo.subtype === "prerender")
+            )
+            const speculative = children.find((event) => event.targetInfo.subtype === "prerender")!
+            assert.isTrue(speculative.waitingForDebugger)
+            yield* Target.closeTarget({ targetId: speculative.targetInfo.targetId }).pipe(
+              Protocol.on(driver.browser)
+            )
+            const remaining = yield* until(targets, (infos) =>
+              !infos.some((info) =>
+                info.targetId === tabId || info.targetId === targetId ||
+                info.targetId === speculative.targetInfo.targetId
+              ))
+            assert.isFalse(
+              remaining.some((info) =>
+                info.targetId === tabId
+              ),
+              "closeTarget on a prerender is not a tab-preserving cancellation"
+            )
+          }),
+        60_000
+      )
+
       for (const disposeOnDetach of [false, true]) {
         it.effect(
           `a tab after its context's client closes, disposeOnDetach ${disposeOnDetach}`,

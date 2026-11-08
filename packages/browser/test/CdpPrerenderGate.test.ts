@@ -1,6 +1,7 @@
 /** A prerender whose declarations can't be set up is cancelled, never run undeclared or promoted over its tab. */
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
@@ -141,10 +142,12 @@ describe("CDP prerender declaration gate failure", () => {
     Effect.gen(function*() {
       const run = yield* setup({ measurement: true })
       const context = { _tag: "UserContext", context: run.adapter.defaultContext } as const
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
       yield* run.adapter.declare(context, {
         _tag: "Override",
         override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
-      }).pipe(Effect.forkIn(yield* Scope.make()))
+      }).pipe(Effect.forkIn(scope))
       yield* run.settle
       yield* run.attachPrerender
       const speculative = run.pageOf("prerender")
