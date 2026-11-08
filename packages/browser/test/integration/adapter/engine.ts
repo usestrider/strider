@@ -1009,7 +1009,16 @@ export const engine = (backend: Backend) =>
               const { call } = yield* open(
                 backend,
                 `<input id="go" onfocus="this.removeAttribute('onfocus');${handler}">`,
-                countFrames()
+                `() => {
+                  (${countFrames()})();
+                  // Stock WebKit may omit focus notifications. Inject that boundary explicitly,
+                  // after native focus, without replacing native insertion or readiness checks.
+                  const focus = HTMLElement.prototype.focus;
+                  HTMLElement.prototype.focus = function(options) {
+                    focus.call(this, options);
+                    if (this.hasAttribute("onfocus")) this.dispatchEvent(new FocusEvent("focus"));
+                  };
+                }`
               )
               const result = yield* revalidateFill(call, "", true, { cap: 100 })
               assert.strictEqual(result.response._tag, tag, JSON.stringify(result.response))
