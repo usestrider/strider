@@ -240,6 +240,40 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "blurs only the matched element with native focus events and no input",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="a"><input id="b"><input id="hidden" hidden inert disabled><div id="plain"></div><p id="events"></p>
+            <script>
+              for (const type of ['blur', 'focusout', 'keydown', 'pointerdown', 'input'])
+                document.addEventListener(type, e => document.querySelector('#events').textContent += type + ':' + e.target.id + ';', true);
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#a").focus()
+            yield* page.locator("#b").blur()
+            yield* page.locator("#a").pipe(Expect.toBeFocused)
+            yield* page.locator("#hidden").blur()
+            yield* page.locator("#plain").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(""))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText("blur:a;focusout:a;"))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText("blur:a;focusout:a;"))
+            const strict = yield* page.locator("input").blur().pipe(Effect.flip)
+            assert(Locator.isLocatorError(strict))
+            assert.strictEqual(strict.reason._tag, "StrictViolation")
+            const missing = yield* page.locator("#absent").blur().pipe(Deadline.within("100 millis"), Effect.flip)
+            assert(Deadline.isTimeout(missing))
+            assert.strictEqual(missing.operation, "Locator.blur")
+            assert.deepStrictEqual(missing.diagnostics.dispatch, { _tag: "NotSent" })
+          })),
+        timeout
+      )
+
       for (const ancestor of [false, true]) {
         for (const action of ["click", "check", "fill"] as const) {
           it.effect(

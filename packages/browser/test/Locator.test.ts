@@ -196,3 +196,13 @@ describe("Locator.check refusal deadlines", () => {
     )
   }
 })
+
+describe("Locator.blur", () => {
+  it.effect("uses the owned action path and preserves backend refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#field").blur().pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
