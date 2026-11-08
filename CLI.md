@@ -20,7 +20,7 @@ interface SessionSpec {                                   // what `strider start
   readonly userDataDir: Option<FilePath.Local>            // None: profile/ in the session directory, deleted at stop
   readonly initialState:
     | { readonly _tag: "Empty" }
-    | { readonly _tag: "File"; readonly path: FilePath.Local }       // --state ./auth/shop.state
+    | { readonly _tag: "File"; readonly path: FilePath.Local }       // --state $HOME/.local/state/strider/shop.state
     | { readonly _tag: "Fork"; readonly session: SessionName }       // --fork shop-login: copied in memory, nothing on disk
   readonly lifetime: { readonly idle: Duration; readonly ownerPid: Option<number> }   // default: 1 hour idle
   readonly secrets: ReadonlyArray<BrowserToolkit.SecretName>   // --secret password=PASSWORD: Config.Redacted("PASSWORD") from the daemon's ConfigProvider; used as %password%
@@ -134,11 +134,11 @@ strider -s checkout tabs                        # the browser's pages the sessio
 strider -s checkout control N4 --name mail      # takes one, named, until `strider -s checkout release -p mail`
 strider -s checkout run pay.ts                  # a segment: the file's default export, run in the live session
 strider -s checkout -p shop route "**/analytics/**" abort   # → r1, a scoped handler; `strider remove r1` ends it
-strider -s checkout state save ./auth/shop.state
+strider -s checkout state save "$HOME/.local/state/strider/shop.state"
 strider -s checkout export test checkout.test.ts
 strider stop -s checkout
 
-strider start --name task-1 --chromium /usr/bin/chromium --state ./auth/shop.state   # a fork from a saved state
+strider start --name task-1 --chromium /usr/bin/chromium --state "$HOME/.local/state/strider/shop.state"   # a fork from a saved state
 strider start --name task-2 --chromium /usr/bin/chromium --fork checkout             # a fork from a running session
 
 strider -s checkout mcp                          # an MCP server over stdio for the session, for a client that runs no commands
@@ -226,6 +226,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Hard kills are reported, never reclaimed automatically.** After a SIGKILL or a power loss, the directory remains and nobody holds its lock. `strider sessions` reports it with its size. Starting that name again fails with a hint, and `strider prune <name>` removes the directory and any browser still running from it. This follows the ownership ledger's rule (CONCEPTS.md §3): candidates for reclaim, never automatic deletion. Every session's daemon also keeps a ledger record, in `$XDG_STATE_HOME/strider/ledger` (`~/.local/state` when unset), of the browser it launched and the directories it made. `strider prune` with no name lists what each dead program's record names, and `--yes` reclaims it: a browser still running from its profile is killed, and its directories removed. A program using the library writes records only if it provides `Ledger.layer`.
 - **A fork copies storage state into a new session.** `--fork` copies from a running session in memory. `--state` reads a file that `strider state save` wrote with mode 0600.
   - Both read the context the session's pages are in. The session's own context is saved whole. A tab taken with `control` stays in its browser's context, which holds that browser's every login, so only the held tabs' state is read: the cookies a tab's host is sent, and the storage of tabs open on it (`related`). Hosts rather than sites, since `siteOf` has no public-suffix list and `shop.co.uk` would be every `.co.uk` cookie. `state save --site okta.com` adds a domain and its subdomains; `--all` saves the whole context; widening is always asked for (principle 11). `--fork` takes the held tabs' state and has neither.
+  - Saved state contains plaintext credentials. `state save` warns on stderr if Git considers the resolved destination inside a work tree and not ignored, including tracked files. Git inspection has a five-second budget for resolving the destination and running both Git commands, with scoped child cleanup on timeout. It is advisory: missing Git, inspection failures or an exhausted budget skip the warning and do not fail the save. Repository, index and discovery environment overrides are removed from the Git children, while ordinary Git configuration and global ignore rules remain in effect. The path remains required.
   - `state save` says what it saved: counts and hosts, never values. It and `export test` create the directories on the way to the file they write. Pages in several contexts need `-p`, which reads the named page's. An attached session holding no page, whose own context is empty, fails rather than write an empty file.
   - Storage state covers cookies, localStorage and IndexedDB. Playwright made IndexedDB opt-in in 1.51 because Firebase Auth keeps its tokens there; ours includes it, because `exportStorageState` promises the full restorable state.
   - It doesn't carry sessionStorage, service workers, the HTTP cache, in-memory state, or logins bound to the device or a client certificate. Sites that depend on those need `--user-data-dir`.

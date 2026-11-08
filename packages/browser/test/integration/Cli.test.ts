@@ -1050,6 +1050,26 @@ describe("strider", () => {
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
         assert.strictEqual(fs.statSync(state).mode & 0o777, 0o600)
+        // The client resolves relative paths from its cwd, independently of the daemon's startup cwd.
+        const repo = path.join(env.XDG_RUNTIME_DIR, "repo")
+        fs.mkdirSync(repo)
+        yield* Effect.promise(() =>
+          new Promise<void>((resolve, reject) => {
+            execFile("git", ["init", repo], (error) => error ? reject(error) : resolve())
+          })
+        )
+        const saved = yield* Effect.promise(() =>
+          new Promise<{ out: string; err: string }>((resolve, reject) => {
+            execFile(process.execPath, [bin, "-s", "shop", "state", "save", "new/auth.state"], {
+              cwd: repo,
+              env: { ...process.env, ...env }
+            }, (error, out, err) => error ? reject(error) : resolve({ out, err }))
+          })
+        )
+        assert.include(saved.out, `to ${path.join(repo, "new/auth.state")}, readable by you alone`)
+        assert.include(saved.err, "plaintext credentials")
+        assert.include(saved.err, "Git")
+
         const test = path.join(env.XDG_RUNTIME_DIR, "tests", "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")

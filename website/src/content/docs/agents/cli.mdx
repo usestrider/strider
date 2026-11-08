@@ -198,14 +198,16 @@ strider -s login -p main fill 'label=Email' "ada@example.com"
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-strider -s login state save ./auth/shop.state
-strider start --name later --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s login state save "$HOME/.local/state/strider/shop.state"
+strider start --name later --chromium /usr/bin/chromium --state "$HOME/.local/state/strider/shop.state"
 strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
 
 ```
-saved 3 cookies and 1 origin for shop.example.com to /home/ada/shop/auth/shop.state, readable by you alone
+saved 3 cookies and 1 origin for shop.example.com to /home/ada/.local/state/strider/shop.state, readable by you alone
 ```
+
+Saved state contains cookies and other credentials in plaintext. Keep it private; the examples use an explicit home-directory path. `state save` warns on stderr when Git could commit the saved file.
 
 ## Managing sessions
 
@@ -282,14 +284,14 @@ tabs open on them. `--site` adds a domain and its subdomains, such as a sign-in 
 every login in the browser. With tabs in several contexts, `-p` names one:
 
 ```sh
-strider -s mine state save ./auth/mail.state
-strider -s mine state save ./auth/mail.state --site okta.com
-strider -s mine state save ./auth/browser.state --all
-strider -s mine -p mail state save ./auth/mail.state
+strider -s mine state save "$HOME/.local/state/strider/mail.state"
+strider -s mine state save "$HOME/.local/state/strider/mail.state" --site okta.com
+strider -s mine state save "$HOME/.local/state/strider/browser.state" --all
+strider -s mine -p mail state save "$HOME/.local/state/strider/mail.state"
 ```
 
 ```
-saved 14 cookies and 1 origin for mail.example.com to /home/ada/auth/mail.state, readable by you alone
+saved 14 cookies and 1 origin for mail.example.com to /home/ada/.local/state/strider/mail.state, readable by you alone
 ```
 
 Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging

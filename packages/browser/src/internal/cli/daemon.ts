@@ -32,6 +32,7 @@ import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcess from "effect/process/ChildProcess"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
@@ -808,6 +809,11 @@ ${expressionSource}
           const resolved = yield* resolvePath(path)
           yield* writeUserFile(resolved, text, { mode: 0o600 })
           yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
+          if (yield* stateFileCouldBeCommitted(resolved)) {
+            yield* Console.error(
+              `Warning: ${resolved} contains plaintext credentials and Git could commit it. Save outside the work tree or ensure the file is untracked and ignored.`
+            )
+          }
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
   )
@@ -901,6 +907,60 @@ const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, op
   yield* fs.makeDirectory(paths.dirname(path), { recursive: true }).pipe(Effect.mapError(failedWith))
   yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
+
+/** Repository identity must come from the saved destination, not the daemon's launching Git command. */
+const gitRepositoryEnvironment = new Set([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_PREFIX",
+  "GIT_INTERNAL_SUPER_PREFIX",
+  "GIT_GRAFT_FILE",
+  "GIT_SHALLOW_FILE",
+  "GIT_NAMESPACE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE"
+])
+
+/** Checks a file after saving; Git inspection is advisory and must never prevent a save. */
+export const stateFileCouldBeCommitted = Effect.fnUntraced(
+  function*(path: string) {
+    const fs = yield* FileSystem.FileSystem
+    const paths = yield* Path.Path
+    // Resolve symlinked directories and files to the destination Git would actually see.
+    const real = yield* fs.realPath(path)
+    const cwd = paths.dirname(real)
+    // Keep HOME, XDG_CONFIG_HOME and Git configuration, including global ignore settings.
+    const env = Object.fromEntries(
+      Object.entries(Node.process.env).filter(([key]) => !gitRepositoryEnvironment.has(key))
+    )
+    const run = (args: ReadonlyArray<string>) =>
+      Effect.scoped(Effect.gen(function*() {
+        const child = yield* ChildProcess.make("git", args, {
+          cwd,
+          env,
+          extendEnv: false,
+          // Advisory reads have no pending writes to preserve; scope cleanup must not wait for SIGTERM cooperation.
+          killSignal: "SIGKILL",
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore"
+        })
+        return yield* child.exitCode
+      }))
+    if ((yield* run(["rev-parse", "--show-toplevel"])) !== 0) return false
+    // Without --no-index, tracked files are never considered ignored.
+    return (yield* run(["check-ignore", "--quiet", "--", real])) === 1
+  },
+  Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
+  Effect.orElseSucceed(() => false)
+)
 
 /** A `--site`'s host, with or without a scheme, or nothing if it names none. */
 const siteHost = (site: string) =>

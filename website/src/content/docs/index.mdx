@@ -229,15 +229,17 @@ strider -s login -p main fill 'label=Email' 'ada@example.com'
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-strider -s login state save ./auth/shop.state
+strider -s login state save "$HOME/.local/state/strider/shop.state"
 strider -s login stop
 ```
+
+The saved file contains plaintext credentials; keep it private at an explicit home-directory path.
 
 Start each task from that file while the saved login is valid. Each session gets its own copy of the cookies, localStorage and IndexedDB,
 so multiple agents can work concurrently without sharing browser tabs. An agent checking orders starts its own session:
 
 ```sh
-strider start --name orders --chromium /usr/bin/chromium --state ./auth/shop.state
+strider start --name orders --chromium /usr/bin/chromium --state "$HOME/.local/state/strider/shop.state"
 strider -s orders page new --name main https://shop.example.com/orders
 strider -s orders -p main expect 'role=heading[name="Orders"]' visible
 ```
@@ -245,7 +247,7 @@ strider -s orders -p main expect 'role=heading[name="Orders"]' visible
 Another agent can use the same saved login to check the profile in a separate session:
 
 ```sh
-strider start --name profile --chromium /usr/bin/chromium --state ./auth/shop.state
+strider start --name profile --chromium /usr/bin/chromium --state "$HOME/.local/state/strider/shop.state"
 strider -s profile page new --name main https://shop.example.com/profile
 strider -s profile -p main expect 'role=heading[name="Profile"]' visible
 ```

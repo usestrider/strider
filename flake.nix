@@ -49,6 +49,7 @@
           toolchain = [
             pkgs.nodejs_24
             pkgs.pnpm
+            pkgs.git # Real repositories for state-save warning tests
           ];
         in
         assert pinned "pnpm" "pnpm@${pkgs.pnpm.version}" packageManager;
