@@ -1323,3 +1323,7 @@ Virtual authenticators use native Chromium WebAuthn and belong to one page's sco
 ## Shared snapshot and role-filter states
 
 Snapshots and role filters use the same pressed, expanded and selected readers, with positive snapshot markers only for exactly true. Preserve the documented query defaults and ASCII case-insensitive keywords without trimming, rather than introducing browser-dependent accessibility error handling or new malformed-token defaults. Native option selection and details open state take precedence over ARIA; open ordinary details is a native exception to snapshot role gating, without admitting group expanded filters or adding summary semantics. Reject independent attribute-only snapshot parsing because it contradicts query results, and reject copying browser accessibility trees because their native/ARIA conflict resolution can differ from Strider's existing native-property query contract.
+
+## Route declaration boundary
+
+A route is in force for requests that start after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select the current routes by precedence. This follows the browser's selection of interception stages at request start while keeping later handler selection current. Requiring retroactive response interception was rejected because it would require pausing responses from the start even without response routes.

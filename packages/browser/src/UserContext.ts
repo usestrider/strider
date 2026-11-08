@@ -251,6 +251,10 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Details**
    *
+   * The route is in force for requests that start after this declaration returns. On Chromium, a request
+   * already underway without response interception may miss a later response route. Existing response pauses
+   * select the current routes by precedence.
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.

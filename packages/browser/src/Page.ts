@@ -874,6 +874,7 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
+   * - The route is in force for requests that start after this declaration returns.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"` or `"auth"`) decides what the handler is given and may decide.
@@ -881,6 +882,9 @@ export interface Page extends ReadonlyPage {
    *   effect where `route` was called.
    *
    * **Gotchas**
+   *
+   * On Chromium, a request already underway without response interception may not pick up a later response
+   * route, even before its headers arrive. A response that does pause selects the current routes by precedence.
    *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
