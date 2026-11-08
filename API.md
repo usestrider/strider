@@ -579,8 +579,8 @@ Strider does not change design mode or synthesize input to work around this brow
 
 - **How a locator finds elements** is CONCEPTS.md §8, Queries: one engine of ours, in each document's utility world, the same on every backend. Text is text content with whitespace collapsed, never `innerText`; `getByText` finds the smallest element that says it; `getByRole` uses the explicit or HTML-AAM implicit role and the accname 1.2 name.
 - **Actionability is the CONCEPTS.md §8 predicate set**, evaluated together in the target document per attempt, with frame bounds read from each parent document. An attempt checks in the page for up to a second, waiting for rendering according to its checks and retrying at each animation frame; when the checks pass, the action takes the page's input permit, checks once more, and dispatches (CONCEPTS.md §5, Actions). At the deadline it fails with `Timeout{phase}`, `waitingForCondition`, or `resolving` when nothing ever matched, whose hint explains the last reason: "Another element covers the element's action point: div.toast "Saved"". Each action documents its checks:
-  - `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`: visible, stable, enabled, notInert, inViewport (scrolling into view), receivesPointer; a drag's target is checked visible, enabled, notInert and inViewport, with receivesPointer disabled (its default is the first geometric fragment centre, even when covered);
-  - `hover`: visible, stable, enabled, notInert, inViewport, receivesPointer;
+  - `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`: rendered, visible, stable, enabled, notInert, inViewport (scrolling into view), receivesPointer; a drag's target is checked rendered, visible, enabled, notInert and inViewport, with receivesPointer disabled (its default is the first geometric fragment centre, even when covered);
+  - `hover`: rendered, visible, stable, enabled, notInert, inViewport, receivesPointer;
   - `fill`, `clear`: visible, enabled, editable, notInert;
   - `focus`, `press`, `pressSequentially`: visible, notInert; `scrollIntoView`: visible, stable;
   - `selectOption`: visible, enabled; `setInputFiles`: none.

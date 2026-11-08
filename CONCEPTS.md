@@ -602,7 +602,7 @@ Each predicate yields `Ready`, `NotReady{reason}` or an observation error. A rea
 | Rendered | wait for a native rendering update before checking when stability is off; enabled by default for pointer actions, independently adjustable per call | `NoRenderingOpportunity` |
 | Connected | binding, generation and connectivity checked at use | `Replaced`, `Detached`, `Suspended` |
 | Visible | `checkVisibility({contentVisibilityAuto, opacityProperty, visibilityProperty})` and a non-empty rect; for `display: contents`, any visible child | `NoBox`, `ContentVisibilitySkipped` |
-| Stable | rect unchanged across *k* native rendering updates, independent of the application clock. *k* is a per-backend default measured by probe 10 (initially 2, or 6 on WebKit/Windows). It is shown in the action's span and in any error ("waited for 2 stable frames"), and can be overridden per call | `NoRenderingOpportunity{lastFrameAt}`, `ClockPaused` |
+| Stable | rect unchanged across *k* native rendering updates, independent of the application clock. *k* is a per-backend default measured by probe 10 (initially 2, or 6 on WebKit/Windows). It is shown in the action's span and in any error ("waited for 2 stable frames"), and can be overridden per call | `NotStable` |
 | Enabled | ARIA-disabled semantics: `disabled`, `fieldset` inheritance, `aria-disabled` | — |
 | Editable | enabled, not `readonly`/`aria-readonly`, and an editable element type | `NotEditableType` |
 | NotInert | not inside an inert subtree | `BlockedByModal{dialog}` |
