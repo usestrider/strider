@@ -56,6 +56,16 @@ describe("integration-only source interception", () => {
       expect(output.code.split("\n").length).toBe(source.split("\n").length)
     }
   })
+  it("instruments rendering rounds and host deadline selection only in the recorder build", () => {
+    for (const name of ["engine", "runtime", "operation"]) {
+      const url = new URL(`../src/internal/${name}.ts`, import.meta.url)
+      const source = fs.readFileSync(url, "utf8")
+      const output = instrument(source, url.pathname)!
+      expect(output.code).toContain(name === "engine" ? "__rendering" : "__failureConnection")
+      expect(output.code.split("\n").length).toBe(source.split("\n").length)
+      expect(source).not.toContain("__rendering")
+    }
+  })
   it("fails loudly if a transport changes instead of silently losing capture", () => {
     expect(() => instrument("changed", "/src/protocol/Transport.ts")).toThrow("no longer matches")
     expect(instrument("unchanged", "/src/internal/model.ts")).toBeUndefined()
@@ -86,6 +96,9 @@ describe("failure trace runner lifecycle", () => {
     const test = read("lifecycle.fixture").split("\n").filter(Boolean).map((line) => JSON.parse(line))
     const payloads = test.map((entry) => entry.payload)
     expect(payloads).toContain("FAIL_ONLY")
+    const deadlines = test.filter((entry) => entry.kind === "host-timeout").map((entry) => JSON.parse(entry.payload))
+    expect(deadlines).toContainEqual(expect.objectContaining({ operation: "Unrelated.failure", hint: { _tag: "Some", value: "diagnostic refusal" } }))
+    expect(deadlines.some((entry) => entry.operation === "Passing.operation")).toBe(false)
     expect(payloads).toContain("SETUP_ONLY")
     expect(payloads).toContain("TEARDOWN_ONLY")
     expect(payloads).not.toContain("PASS_ONLY")

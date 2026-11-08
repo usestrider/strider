@@ -1,3 +1,7 @@
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Operation from "../../../src/internal/operation.ts"
+const timeout = (name: string) => Effect.runSync(Operation.named(name)(Effect.map(Operation.record, (record) => record.timeout(Option.some("diagnostic refusal")))))
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { connection } from "../../integration/failureTrace.ts"
 let shared: ReturnType<typeof connection>
@@ -7,10 +11,12 @@ beforeAll(() => {
   shared("receive", "SETUP_ONLY")
 })
 it("passing test discarded", () => {
+  timeout("Passing.operation")
   passing = connection("passing")
   passing("send", "PASS_ONLY")
 })
 it("failing test retained", () => {
+  timeout("Unrelated.failure")
   const own = connection("failing")
   own("send", "FAIL_ONLY")
   passing("receive", "LATE_PASS_ONLY")
