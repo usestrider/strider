@@ -1,0 +1,52 @@
+---
+title: Playwright capability matrix
+description: Playwright 1.64's library, assertions, runner, reporters and experimental APIs alongside Strider's public APIs and browser limits.
+order: 6
+---
+
+import PlaywrightMatrix from "../../components/PlaywrightMatrix.astro"
+import { matrix } from "../../features/playwright/matrix.ts"
+
+A familiar method name can hide a missing option or a browser limit. This matrix pairs Playwright 1.64.0's JavaScript reference with Strider's public APIs so you can check a migration before committing to it.
+
+## Reading the matrix
+
+“Has it” means the core capability has a public API, with the differences and limits shown in the row. “Deliberately different” means an existing design decision supports the alternative. “Missing” means the Playwright contract has no public equivalent, or the adapter cannot provide it; it is not an exclusion or a promise to implement it.
+
+The columns describe browsers Strider launches. Attached-browser differences appear in the same cell. Chromium PDF requires headless mode; Chromium video needs an explicit writer service, and stock WebKit video also needs polling options. The WebKit column means WebKitGTK on Linux, not Safari. See [Browser support](/docs/browsers/choosing) for platforms and [Strider for Playwright users](/docs/playwright) for migration examples.
+
+Rows preserve each upstream member, including deprecated and experimental members, rather than treating a class as complete because some methods exist. Separate rows retain every top-level option expanded by the upstream parser, including launch, context, screenshot, role-query, PDF, navigation, clock, route and tracing differences. Nested settings and parameter shapes remain linked to their upstream definitions; a core capability row does not claim every overload or option value behaves identically. Inherited members appear under their declaring class. Non-JavaScript language bindings are outside this JavaScript comparison.
+
+Generic assertions, the Playwright Test runner, its fixtures and reporters remain marked missing even where a test framework supplies similar functionality. [Tests with Vitest](/docs/tools/testing) describes Strider's existing integration. The accepted 1.0 scope below leaves excluded capabilities marked missing.
+
+## Scope for 1.0
+
+Five capability groups are outside 1.0. Their rows remain missing: an exclusion records scope, not an implemented capability or a deliberately different API.
+
+{matrix.scopeDecisions.map((decision) => (
+  <p id={`scope-${decision.id}`}><strong>{decision.title}.</strong> {decision.note}</p>
+))}
+
+XPath in the locator constructor, RegExp test IDs and a context test-id attribute setting are planned, and remain missing until implemented. The selector forms `text=`, `>>` and custom selector engines, and the `networkidle` readiness state, are outside 1.0. Dedicated text, role and filter operations remain available; see [Locators](/docs/pages/locators) for their APIs. Other unsupported selector extensions are not automatically excluded by these decisions.
+
+The downloadable inventory records these scope and selector decisions separately from implementation statuses, with links to affected row IDs. Browser-specific assertions, visual baselines and useful recording/capture controls remain in scope. Optional Playwright Test integration remains separate from duplicating its runner.
+
+## Capabilities
+
+Search by class, method, option, value or difference, or expand a class to inspect its members. The classification filter matches any of the six launched/attached browser modes; clearing filters restores the sections that were open before filtering. Unsupported values have linked missing rows, so a supported parent capability does not hide them from the filter. Every Playwright link opens the pinned reference source; every Strider link opens its public API. The page works without JavaScript; filtering and expanding all classes use JavaScript.
+
+<PlaywrightMatrix />
+
+## Patched browsers
+
+These notes describe evidenced build or protocol dependencies separately from the capability classifications. A stock-browser limitation alone does not prove that a feature requires a patch.
+
+{matrix.patchedBrowserNotes.map((note) => (
+  <p id={`patch-${note.id}`}>{note.note} {note.evidence.map((source) => <a href={source.url}>Playwright source</a>)} {note.rows.length > 0 && <>Affected rows: {note.rows.map((id, index) => <span>{index > 0 && ", "}<a href={`#${id}`}>{id}</a></span>)}</>}</p>
+))}
+
+## Reference and updates
+
+The comparison pins [Playwright v1.64.0](https://github.com/microsoft/playwright/tree/606ecd8b34bac100db32561b6278ffd76e5eb3cd), whose tag resolves to commit <code className="matrix-commit">606ecd8b34bac100db32561b6278ffd76e5eb3cd</code>. It inventories the API, assertions, Test, reporter, Electron and Android reference directories through Playwright's own parser, including shared option templates and JavaScript language filtering.
+
+The [downloadable inventory](/docs/playwright-matrix.json) contains stable row IDs, member ownership, source hashes and locations, option names, API links, decision citations, browser statuses and patch evidence. The repository's [update instructions](https://github.com/usestrider/strider/blob/8ed3c2123dd614ca43b427bcca4763c8d7794236/scripts/playwright-matrix.md) explain the completeness, source-drift and built-link checks. These checks validate bookkeeping and links; the classifications also need a human review against the cited APIs.

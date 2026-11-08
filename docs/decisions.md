@@ -18,6 +18,8 @@ shipped, and there is no viewer of our own, since trace.playwright.dev already r
 user." There's no download default and no install command, because the tools that already install browsers remain:
 an operating system's packages, a vendor's installer, Nix.
 
+<a id="explicit-browser-path"></a>
+
 **A launch never picks a browser nobody named.** A launch takes an executable path. There are no channels, no
 default to an installed browser, and no lookup on `PATH`. Any of those would launch different programs from a
 terminal, an editor's test runner and CI. No channel table reaches NixOS, Snap, Flatpak, Guix or the open-source
@@ -26,6 +28,8 @@ Chromium ("I think that will fall apart on various flavors of linux, like NixOS"
 a program would call it at launch. On NixOS it lists the profile's link, which survives updates, not the store path.
 Any Chromium or Firefox version is accepted, because their protocols change slowly and compatibly. `Browser.Info`
 says what connected.
+
+<a id="locator-design"></a>
 
 **Playwright is evidence, not the template.** Each feature Strider shares with Playwright is there because one of our
 principles produces it:
@@ -40,6 +44,8 @@ principles produces it:
 - Snapshot text with refs: one rendering of a structured, evidence-tagged tree.
 - `Browser.newPage`: a convenience documented as its expansion.
 - Launch flags: a visible `LaunchProfile`, where Playwright adds them silently.
+
+<a id="typed-patterns-and-clock-modes"></a>
 
 Where Playwright's surface is a string DSL, or overlaps itself, ours isn't and doesn't. `toMatchAria` takes a typed
 `AriaPattern`, not a YAML template with its own matching rules to specify and parse. The page clock's modes are data
@@ -185,6 +191,8 @@ send back what they write.
 compatibility failure, not a broken invariant of the caller's program. A long-running service must be able to catch,
 report and isolate it without `catchCause` and without losing its other jobs. The error channel stays small because
 the failure is a reason, `BackendFailure{Rejected | IncompatibleResponse}`, inside the module's error.
+
+<a id="composable-operation-deadlines"></a>
 
 **An operation keeps its own deadline.** There is one deadline per operation, inherited by nested calls and only
 ever shortened. The operation reads the deadline and fails with its own evidence of how far it got, instead of being
@@ -373,6 +381,8 @@ the decisions valid for that dialog: an alert can't be dismissed. A route decisi
 the phases where it is valid. Contravariance allows a decision valid at more phases where fewer are required:
 `Decision<Phase>` is assignable to `Decision<"request">`, while `Decision<"auth">` is not. With an explicit `phase`
 option, a route handler must produce a decision compatible with that phase.
+
+<a id="effectful-handler-decisions"></a>
 
 **Handlers produce decisions through Effects.** Route's constructors and the decisions on `Dialog.Pending` and
 `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
