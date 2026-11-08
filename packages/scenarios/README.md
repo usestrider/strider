@@ -14,9 +14,9 @@ experiments and the human review required for public API or contract changes. Fi
 
 A private workspace package, never published. It runs the same scenarios with Strider
 and with Playwright against the same pinned stock Chromium, or pinned stock Firefox versus Playwright-patched Firefox, and writes what it
-found to [RESULTS.md](RESULTS.md). The captured full run at `c732173` (2026-11-05) records failures for both
+found to [RESULTS.md](RESULTS.md). A prior full run at `c732173` (2026-11-05) recorded failures for both
 libraries on The Internet's dynamic controls: the preserved `the-internet.har` lacks the
-`https://the-internet.herokuapp.com/dynamic_controls` URL, so replay aborts that navigation. Each library failed its
+`https://the-internet.herokuapp.com/dynamic_controls` URL, so replay aborts that navigation. In that prior run, each library failed its
 initial attempt and all ten timed repetitions. These are stale-recording failures, not established library or browser
 defects. The separate local HAR recording/replay scenario passed in that run; this does not resolve its earlier
 intermittent failure.
@@ -79,6 +79,14 @@ nix build .#scenario-firefox --out-link /absolute/evidence/playwright-firefox
 clutch lock browser -- pnpm scenarios --browser chromium --output /absolute/evidence/chromium
 clutch lock browser -- pnpm scenarios --browser firefox --playwright-firefox /absolute/evidence/playwright-firefox/firefox/firefox --output /absolute/evidence/firefox
 ```
+
+To retain both full reports in the repository after running both commands:
+
+```sh
+cat /absolute/evidence/chromium/RESULTS.md /absolute/evidence/firefox/RESULTS.md > packages/scenarios/RESULTS.md
+```
+
+The checked-in report also includes a summary recomputed from the two runs' raw measurements.
 
 Each output directory must be new, absolute and outside the worktree. It preserves raw ordered attempts (including
 failed durations), complete measurements, launch results, recording validation, environment details, source snapshots,
