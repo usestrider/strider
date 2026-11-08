@@ -170,6 +170,32 @@ const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effec
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    const withStderr = (
+      stderr: ChildProcessSpawner.ChildProcessHandle["stderr"],
+      running: boolean,
+      exitCode: ChildProcessSpawner.ChildProcessHandle["exitCode"]
+    ) =>
+      Launch.spawn("/fake/chromium", [], "/fake/profile", {}).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(9000002),
+              exitCode,
+              isRunning: Effect.succeed(running),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr,
+              all: stderr,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            }))
+          )
+        )
+      )
+
     it.effect("fails with ExecutableNotFound for a path where nothing is, pointing to strider browsers", () =>
       Effect.gen(function*() {
         const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
@@ -336,6 +362,96 @@ describe("Chromium launcher", () => {
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(3))
         assert.strictEqual(error.reason.stderrTail, expected)
+      }))
+
+    it.effect("keeps the bounded stderr tail when draining after exit", () =>
+      Effect.gen(function*() {
+        const release = yield* Deferred.make<void>()
+        const text = "x".repeat(12 * 1024) + "final diagnostic"
+        const stderr = Stream.fromEffect(Deferred.await(release)).pipe(
+          Stream.flatMap(() => Stream.make(new TextEncoder().encode(text)))
+        )
+        const launched = yield* withStderr(
+          stderr,
+          false,
+          Deferred.succeed(release, undefined).pipe(
+            Effect.as(ChildProcessSpawner.ExitCode(3))
+          )
+        )
+        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        assert(error.reason._tag === "ProcessExited")
+        assert.strictEqual(error.reason.stderrTail, text.slice(-8 * 1024))
+      }))
+
+    it.effect("reports collected stderr when the collector and exit-code read fail", () =>
+      Effect.gen(function*() {
+        const release = yield* Deferred.make<void>()
+        const readError = PlatformError.badArgument({
+          module: "ChildProcess",
+          method: "stderr",
+          description: "scripted failure"
+        })
+        const stderr = Stream.fromEffect(Deferred.await(release)).pipe(
+          Stream.flatMap(() => Stream.make(new TextEncoder().encode("partial diagnostic"))),
+          Stream.concat(Stream.fail(readError))
+        )
+        const launched = yield* withStderr(
+          stderr,
+          false,
+          Deferred.succeed(release, undefined).pipe(
+            Effect.andThen(Effect.fail(readError))
+          )
+        )
+        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        assert(error.reason._tag === "ProcessExited")
+        assert.isTrue(Option.isNone(error.reason.code))
+        assert.strictEqual(error.reason.stderrTail, "partial diagnostic")
+        assert.isTrue(Option.isNone(yield* launched.stderrLine(/never emitted/)))
+      }))
+
+    it.effect("reports a running process promptly and closes its open stderr with the scope", () =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const stopped = yield* Deferred.make<void>()
+        const stderr = Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))).pipe(
+          Stream.ensuring(Deferred.succeed(stopped, undefined))
+        )
+        yield* Effect.scoped(Effect.gen(function*() {
+          const launched = yield* withStderr(stderr, true, Effect.never)
+          yield* Deferred.await(started)
+          const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+          assert(error.reason._tag === "ConnectionFailed")
+          assert.isFalse(yield* Deferred.isDone(stopped))
+        }))
+        assert.isTrue(yield* Deferred.isDone(stopped))
+      }))
+
+    it.effect("interrupts an exited-process wait when inherited stderr stays open and cleans up the collector", () =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const stopped = yield* Deferred.make<void>()
+        const exitObserved = yield* Deferred.make<void>()
+        const stderr = Stream.make(new TextEncoder().encode("descendant holds the pipe\n")).pipe(
+          Stream.concat(Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))),
+          Stream.ensuring(Deferred.succeed(stopped, undefined))
+        )
+        yield* Effect.scoped(Effect.gen(function*() {
+          const launched = yield* withStderr(
+            stderr,
+            false,
+            Deferred.succeed(exitObserved, undefined).pipe(
+              Effect.as(ChildProcessSpawner.ExitCode(3))
+            )
+          )
+          yield* Deferred.await(started)
+          const waiting = yield* Launch.notReady(launched, "connecting").pipe(Effect.forkChild)
+          yield* Deferred.await(exitObserved)
+          yield* Fiber.interrupt(waiting)
+          assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(waiting)))
+          // Canceling the diagnostic waiter doesn't cancel collection owned by the launch scope.
+          assert.isFalse(yield* Deferred.isDone(stopped))
+        }))
+        assert.isTrue(yield* Deferred.isDone(stopped))
       }))
 
     it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
