@@ -113066,8 +113066,8 @@
       "id": "interactive-toolchain",
       "title": "Interactive debugger, recorder and inspection toolchain",
       "milestone": "1.0",
-      "disposition": "never",
-      "note": "A graphical debugger, recorder and inspection overlay aren't planned. The CLI's snapshots and `strider export test` cover recording a session as a test; useful recording and capture controls remain in scope.",
+      "disposition": "later",
+      "note": "Not part of the library. A graphical debugger, recorder or inspection overlay may come later as a separate package; until then the CLI's snapshots and `strider export test` cover recording a session as a test.",
       "rows": [
         "event-debugger-pausedstatechanged",
         "method-debugger-pauseddetails",
@@ -113083,7 +113083,7 @@
       "title": "WebMCP-specific APIs",
       "milestone": "1.0",
       "disposition": "later",
-      "note": "Reconsidered after 1.0, if the WebMCP proposal settles into a standard; it would belong with the agent toolkit.",
+      "note": "Not a separate API. If the WebMCP proposal settles, the agent toolkit would offer the tools a page registers beside its own browser tools.",
       "rows": [
         "method-webmcp-calltool",
         "method-webmcp-tools",
