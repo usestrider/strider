@@ -87,6 +87,9 @@ const main = () => {
       "--name must start with a letter or digit and contain only letters, digits, dots, underscores or hyphens."
     )
   }
+  if (output !== undefined && fs.existsSync(output)) {
+    throw new Error(`EEXIST: file already exists, mkdir '${output}'`)
+  }
   const startedAt = new Date().toISOString()
   const commit = git("rev-parse", "HEAD")
   name ??= `${startedAt.replaceAll(":", "-")}-${commit.slice(0, 8)}`
