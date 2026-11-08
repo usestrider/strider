@@ -35,13 +35,28 @@ describe("scenario runner", () => {
         if (++calls === 3) throw new Error("pair two failed")
         return "42 sold"
       },
-      playwright: async () => { order.push("playwright"); return "42 sold" }
+      playwright: async () => {
+        order.push("playwright")
+        return "42 sold"
+      }
     }), () => {})
-    expect(order).toEqual(["strider", "playwright", "strider", "playwright", "playwright", "strider", "strider", "playwright"])
+    expect(order).toEqual([
+      "strider",
+      "playwright",
+      "strider",
+      "playwright",
+      "playwright",
+      "strider",
+      "strider",
+      "playwright"
+    ])
     expect(results[0]!.samples.map(({ library, repetition, outcome }) => [library, repetition, outcome._tag])).toEqual([
-      ["strider", 1, "Read"], ["playwright", 1, "Read"],
-      ["playwright", 2, "Read"], ["strider", 2, "Failed"],
-      ["strider", 3, "Read"], ["playwright", 3, "Read"]
+      ["strider", 1, "Read"],
+      ["playwright", 1, "Read"],
+      ["playwright", 2, "Read"],
+      ["strider", 2, "Failed"],
+      ["strider", 3, "Read"],
+      ["playwright", 3, "Read"]
     ])
     expect(results[0]!.samples.every(({ ms }) => Number.isFinite(ms) && ms >= 0)).toBe(true)
   })
@@ -52,7 +67,9 @@ describe("scenario runner", () => {
     const measured = { ...results[0]!, times: { strider: stats([110, 220]), playwright: stats([100, 200]) } }
     expect(render([measured])).toContain("p50 gap")
     expect(render([measured])).toContain("+10.0%")
-    expect(render([{ ...measured, failures: [{ library: "strider", repetition: 1, error: "failed" }] }])).toContain("incomplete")
+    expect(render([{ ...measured, failures: [{ library: "strider", repetition: 1, error: "failed" }] }])).toContain(
+      "incomplete"
+    )
   })
 
   it.each(["strider", "playwright"] as const)("continues after a timed %s failure", async (library) => {

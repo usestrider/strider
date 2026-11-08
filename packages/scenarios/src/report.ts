@@ -11,6 +11,8 @@ export type Outcome = { readonly _tag: "Read"; readonly text: string } | {
 }
 
 export interface Measurements {
+  readonly metadata?: Record<string, unknown>
+  readonly unsupported?: ReadonlyArray<string>
   readonly date: string
   readonly machine: string
   readonly node: string
@@ -27,6 +29,14 @@ export interface Measurements {
     readonly failures: ReadonlyArray<
       { readonly library: "strider" | "playwright"; readonly repetition: number; readonly error: string }
     >
+    readonly samples: ReadonlyArray<
+      {
+        readonly library: "strider" | "playwright"
+        readonly repetition: number
+        readonly ms: number
+        readonly outcome: Outcome
+      }
+    >
     readonly times: { readonly strider: Stats; readonly playwright: Stats }
   }>
   readonly q82: ReadonlyArray<{ readonly label: string; readonly cpu: Stats }>
@@ -38,8 +48,13 @@ export interface Measurements {
   readonly source: string
 }
 
+export const gap = (strider: number, playwright: number) =>
+  !Number.isFinite(strider) || !Number.isFinite(playwright) || playwright <= 0
+    ? "–"
+    : `${strider >= playwright ? "+" : ""}${((strider / playwright - 1) * 100).toFixed(1)}%`
+
 const ms = (value: number) => (Number.isNaN(value) ? "–" : `${Math.round(value)} ms`)
-const timing = (stats: Stats) => (stats.runs === 0 ? "–" : `${ms(stats.median)} (p90 ${ms(stats.p90)})`)
+const timing = (stats: Stats) => (stats.runs === 0 ? "–" : `p50 ${ms(stats.median)} (p90 ${ms(stats.p90)})`)
 const cell = (value: unknown) => String(value ?? "–").replace(/\|/g, "\\|").replace(/\n/g, " ")
 
 const regions = (source: string) => {
@@ -66,8 +81,11 @@ export const report = (m: Measurements): string => {
   out.push("# Strider and Playwright, side by side")
   out.push("")
   out.push(
-    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`, whose own browsers are never installed; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
+    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
   )
+  out.push("")
+  if (m.metadata !== undefined) out.push("```json", JSON.stringify(m.metadata, null, 2), "```", "")
+  for (const reason of m.unsupported ?? []) out.push(`- Unsupported comparison: ${reason}`)
   out.push("")
   out.push("## Scenarios")
   out.push("")
@@ -75,23 +93,29 @@ export const report = (m: Measurements): string => {
     "Each scenario is written with each library as its own documentation would write it, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed."
   )
   out.push("")
-  out.push("| Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright |")
-  out.push("|---|---|---|---|---|---|")
-  for (const { scenario, outcome, times, attempts } of m.scenarios) {
+  out.push(
+    "| Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright | p50 gap | p90 gap |"
+  )
+  out.push("|---|---|---|---|---|---|---|---|")
+  for (const { scenario, outcome, times, attempts, failures } of m.scenarios) {
     const run = (library: "strider" | "playwright") =>
       `${timing(times[library])}; ${times[library].runs}/${attempts[library]} successful`
+    const complete = failures.length === 0 && outcome.strider._tag === "Read" && outcome.playwright?._tag === "Read"
+    const gaps = outcome.playwright === undefined ? "– | –" : complete
+      ? `${gap(times.strider.median, times.playwright.median)} | ${gap(times.strider.p90, times.playwright.p90)}`
+      : "incomplete | incomplete"
     const twin = code.get(`${scenario.name}/playwright`)
     out.push(
       `| ${scenario.title} | ${run("strider")} | ${outcome.playwright === undefined ? "–" : run("playwright")} | ${
         outcomeText(outcome.strider, scenario.expected)
       } | ${outcomeText(outcome.playwright, scenario.expected)} | ${lines(code.get(`${scenario.name}/strider`))} / ${
         twin === undefined ? "–" : lines(twin)
-      } |`
+      } | ${gaps} |`
     )
   }
   out.push("")
   out.push(
-    "Timing counts are successful/attempted repetitions; failed attempts are excluded from statistics. Initial outcomes above are retained separately."
+    "Gaps are (Strider / Playwright − 1) × 100, positive means Strider is slower. p50 uses the existing upper-median estimator and p90 the sorted sample at floor(0.9 × n). Gaps are withheld if either library failed. Timing counts are successful/attempted repetitions; failed attempts are excluded from statistics. Initial outcomes above are retained separately."
   )
   out.push("")
   for (const { scenario, failures } of m.scenarios) {
@@ -104,14 +128,17 @@ export const report = (m: Measurements): string => {
     }
   }
   out.push("")
-  out.push(
-    `**Launch:** a browser launched and a first page loaded, ${m.launch.strider.runs} times: Strider ${
-      timing(m.launch.strider)
-    }, Playwright ${timing(m.launch.playwright)}.`
-  )
-  out.push("")
+  if (!m.scenarios.some(({ scenario }) => scenario.name === "launch")) {
+    out.push(`**Launch:** Strider ${timing(m.launch.strider)}, Playwright ${timing(m.launch.playwright)}.`, "")
+  }
+  if (m.q82.length > 0 || m.q103.length > 0) {
+    out.push(
+      "Chromium diagnostics below are grouped sequential controls, not paired Firefox comparisons or performance gates.",
+      ""
+    )
+  }
   if (m.q82.length > 0) {
-    out.push("## What a waiting expectation costs the page (Q82)")
+    out.push("## Chromium only: what a waiting expectation costs the page (Q82)")
     out.push("")
     out.push(
       `Strider evaluates a waiting expectation at every animation frame (QUIRKS.md, Q82). A page animating 200 of its 3000 elements each frame shows \`#ready\` after ${m.q82WaitMs} ms; the renderers' CPU time per second is read from \`/proc\` while each library waits for it, and while each leaves the page alone for as long.`
@@ -123,10 +150,10 @@ export const report = (m: Measurements): string => {
     out.push("")
   }
   if (m.q103.length > 0) {
-    out.push("## What an interceptor installed costs a load (Q103)")
+    out.push("## Chromium only: what an interceptor installed costs a load (Q103)")
     out.push("")
     out.push(
-      "Strider keeps Chromium's `Fetch` interceptor enabled on every page, with a pattern nothing matches, so a route is in force as soon as it is declared (QUIRKS.md, Q103). A page with 300 images, each a request, loaded to its `load` event:"
+      "Strider keeps Chromium's `Fetch` interceptor enabled. The public page layer also handles authentication challenges, which pauses document requests at their request stage even without a user route; subresources are not all paused. The no-route row therefore includes that retained scheduling and interception cost. Q103's historical no-match-only description does not describe this full page workload. A page with 300 images, each a request, loaded to its `load` event:"
     )
     out.push("")
     out.push("| | Load |")
@@ -161,8 +188,11 @@ export const report = (m: Measurements): string => {
   for (const { scenario } of m.scenarios) {
     out.push(`### ${scenario.title}`)
     out.push("")
+    out.push(scenario.description, "")
     out.push("```ts")
-    out.push(code.get(`${scenario.name}/strider`) ?? "")
+    out.push(
+      code.get(`${scenario.name}/strider`) ?? "// Launch implementation: bin.ts in the retained source artifacts."
+    )
     out.push("```")
     out.push("")
     const twin = code.get(`${scenario.name}/playwright`)

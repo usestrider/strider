@@ -450,7 +450,135 @@ const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
 })
 // #endregion
 
+// #region many-pages/strider
+const manyPagesStrider = Effect.fn("many pages")(function*(origin: string) {
+  const context = yield* Browser.newContext()
+  const pages = []
+  for (let i = 0; i < 20; i++) {
+    const page = yield* context.newPage
+    yield* page.goto(`${origin}/benchmark`)
+    yield* page.getByRole("button", { name: "Increment" }).click()
+    pages.push(page)
+  }
+  const values = []
+  for (const page of pages) values.push(yield* page.locator("#count").readText)
+  return values.join(",")
+})
+// #endregion
+
+// #region many-pages/playwright
+const manyPagesPlaywright = async (browser: Playwright.Browser, origin: string) => {
+  const context = await browser.newContext()
+  try {
+    const pages = []
+    for (let i = 0; i < 20; i++) {
+      const page = await context.newPage()
+      await page.goto(`${origin}/benchmark`)
+      await page.getByRole("button", { name: "Increment" }).click()
+      pages.push(page)
+    }
+    const values = []
+    for (const page of pages) values.push(await page.locator("#count").textContent())
+    return values.join(",")
+  } finally {
+    await context.close()
+  }
+}
+// #endregion
+
+// #region long-session/strider
+const longSessionStrider = Effect.fn("long session")(function*(origin: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(`${origin}/benchmark`)
+  for (let i = 0; i < 150; i++) {
+    yield* page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+    yield* page.getByRole("button", { name: "Increment" }).click()
+  }
+  return `${yield* page.locator("#count").readText}:${yield* page.getByRole("textbox", { name: "Name" }).readValue}`
+})
+// #endregion
+
+// #region long-session/playwright
+const longSessionPlaywright = async (browser: Playwright.Browser, origin: string) => {
+  const page = await browser.newPage()
+  try {
+    await page.goto(`${origin}/benchmark`)
+    for (let i = 0; i < 150; i++) {
+      await page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+      await page.getByRole("button", { name: "Increment" }).click()
+    }
+    return `${await page.locator("#count").textContent()}:${await page.getByRole("textbox", { name: "Name" })
+      .inputValue()}`
+  } finally {
+    await page.close()
+  }
+}
+// #endregion
+
+// #region parallel-tests/strider
+const parallelTestsStrider = (origin: string) =>
+  Effect.forEach(
+    Array.from({ length: 4 }),
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.goto(`${origin}/benchmark`)
+        for (let i = 0; i < 25; i++) {
+          yield* page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+          yield* page.getByRole("button", { name: "Increment" }).click()
+        }
+        return `${yield* page.locator("#count").readText}:${yield* page.getByRole("textbox", { name: "Name" })
+          .readValue}`
+      })),
+    { concurrency: 4 }
+  ).pipe(Effect.map((values) => values.join(",")))
+// #endregion
+
+// #region parallel-tests/playwright
+const parallelTestsPlaywright = async (browser: Playwright.Browser, origin: string) =>
+  (await Promise.all(Array.from({ length: 4 }, async () => {
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${origin}/benchmark`)
+      for (let i = 0; i < 25; i++) {
+        await page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+        await page.getByRole("button", { name: "Increment" }).click()
+      }
+      return `${await page.locator("#count").textContent()}:${await page.getByRole("textbox", { name: "Name" })
+        .inputValue()}`
+    } finally {
+      await page.close()
+    }
+  }))).join(",")
+// #endregion
+
 export const scenarios: ReadonlyArray<Scenario> = [
+  {
+    name: "many-pages",
+    title: "20 pages in one context",
+    description:
+      "Keeps 20 pages open, navigating and clicking once on each, then checks every counter before closing the context.",
+    expected: "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+    strider: manyPagesStrider,
+    playwright: manyPagesPlaywright
+  },
+  {
+    name: "long-session",
+    title: "300 actions in one session",
+    description: "Runs 150 fill/click pairs in one page and context, then verifies the counter and final input value.",
+    expected: "150:value-149",
+    strider: longSessionStrider,
+    playwright: longSessionPlaywright
+  },
+  {
+    name: "parallel-tests",
+    title: "4 parallel tests sharing one browser",
+    description:
+      "Runs four isolated contexts concurrently, with 25 fill/click pairs in each, then verifies all four counters and input values.",
+    expected: "25:value-24,25:value-24,25:value-24,25:value-24",
+    strider: parallelTestsStrider,
+    playwright: parallelTestsPlaywright
+  },
   {
     name: "readme",
     title: "The README's program",
