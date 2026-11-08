@@ -925,91 +925,131 @@ describe("CDP restoration cleanup", () => {
       assert.strictEqual(warnings.length, 1)
     }))
 
-  it.effect("releases downloads cleanly when a snapshotted context is disposed concurrently", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const snapshotTaken = yield* Deferred.make<void>()
-      const continueRelease = yield* Deferred.make<void>()
-      const disposalSent = yield* Deferred.make<void>()
-      const finishDisposal = yield* Deferred.make<void>()
-      const disposed = new Set<string>()
-      const restored: Array<string> = []
-      const warnings: Array<unknown> = []
+  it.effect("restores only the affected context when local downloads release", () =>
+    Effect.gen(function*() {
+      const restored: Array<string | undefined> = []
       const mock = {
         ...session,
-        ended: Effect.void,
-        send: (command: {
-          readonly method: string
-          readonly params: { readonly browserContextId: string; readonly behavior?: string }
-        }) =>
-          Effect.suspend(() => {
-            const id = command.params.browserContextId
-            if (command.method === "Target.disposeBrowserContext") {
-              disposed.add(id)
-              return Deferred.succeed(disposalSent, undefined).pipe(
-                Effect.andThen(Deferred.await(finishDisposal)),
-                Effect.as({})
-              )
-            }
-            if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
-              if (id === undefined) {
-                return Deferred.succeed(snapshotTaken, undefined).pipe(
-                  Effect.andThen(Deferred.await(continueRelease)),
-                  Effect.as({})
-                )
-              }
-              restored.push(id)
-              if (disposed.has(id)) {
-                return Effect.fail(
-                  new Protocol.ProtocolError({
-                    reason: new Protocol.Rejected({
-                      method: command.method,
-                      reason: "Unrecognized",
-                      code: -32602,
-                      description: `Failed to find browser context for id ${id}`
-                    })
-                  })
-                )
-              }
-            }
-            return Effect.succeed({})
-          })
+        send: (command: { readonly params: { readonly behavior: string; readonly browserContextId?: string } }) => {
+          if (command.params.behavior === "default") restored.push(command.params.browserContextId)
+          return Effect.succeed({})
+        }
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(mock)
-      // The page session has ended, but another declaration's release snapshots the context before disposal.
-      const closing = { ...page.context, id: state.ids.userContext(), browserContextId: "disposing", isDefault: false }
-      state.contexts.set(closing.id, closing)
-      state.contextsByCdp.set("disposing", closing)
-      state.pages.set(page.id, { ...page, context: closing })
-      const other = { ...closing, id: state.ids.userContext(), browserContextId: "live" }
+      const other = { ...page.context, id: state.ids.userContext(), browserContextId: "unrelated" }
       state.contexts.set(other.id, other)
-      state.contextsByCdp.set("live", other)
-      const lifetime = yield* Scope.make()
-      yield* Declare.declare(state, { _tag: "UserContext", context: other.id }, {
+      yield* Effect.scoped(Declare.declare(state, { _tag: "UserContext", context: page.context.id }, {
         _tag: "Downloads",
         behavior: { _tag: "Deny" }
-      }).pipe(Scope.provide(lifetime))
-      const releasing = yield* Scope.close(lifetime, Exit.void).pipe(
-        Effect.provideService(
-          Logger.CurrentLoggers,
-          new Set([Logger.make((entry) => {
-            if (entry.logLevel === "Warn") warnings.push(entry.message)
-          })])
-        ),
-        Effect.forkScoped
-      )
-      yield* Deferred.await(snapshotTaken)
-      const removing = yield* Contexts.removeUserContext(state, closing.id).pipe(Effect.forkScoped)
-      yield* Deferred.await(disposalSent)
-      assert.isTrue(state.contexts.has(closing.id), "disposal has not yet replied")
-      yield* Deferred.succeed(continueRelease, undefined)
-      yield* Fiber.join(releasing)
-      yield* Deferred.succeed(finishDisposal, undefined)
-      yield* Fiber.join(removing)
-      yield* state.buffer.waitFor(() => state.contexts.has(closing.id) ? undefined : true)
-      assert.isFalse(state.contextsByCdp.has("disposing"))
-      assert.include(restored, "live", "the surviving context still has its download behavior restored")
-      assert.strictEqual(warnings.length, 0)
-    })))
+      }))
+      assert.deepStrictEqual(restored, [undefined])
+    }))
+
+  for (const outcome of ["success", "failure", "interruption"] as const) {
+    it.effect(`restores browser-wide downloads across concurrent disposal: ${outcome}`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const snapshotTaken = yield* Deferred.make<void>()
+        const continueRelease = yield* Deferred.make<void>()
+        const disposalSent = yield* Deferred.make<void>()
+        const finishDisposal = yield* Deferred.make<void>()
+        const disposed = new Set<string>()
+        const restored: Array<string> = []
+        const warnings: Array<unknown> = []
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: {
+            readonly method: string
+            readonly params: { readonly browserContextId: string; readonly behavior?: string }
+          }) =>
+            Effect.suspend(() => {
+              const id = command.params.browserContextId
+              if (command.method === "Target.disposeBrowserContext") {
+                if (outcome === "success") disposed.add(id)
+                return Deferred.succeed(disposalSent, undefined).pipe(
+                  Effect.andThen(Deferred.await(finishDisposal)),
+                  Effect.andThen(
+                    outcome === "failure"
+                      ? Effect.fail(
+                        new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+                      )
+                      : Effect.succeed({})
+                  )
+                )
+              }
+              if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                if (id === undefined) {
+                  return Deferred.succeed(snapshotTaken, undefined).pipe(
+                    Effect.andThen(Deferred.await(continueRelease)),
+                    Effect.as({})
+                  )
+                }
+                restored.push(id)
+                if (disposed.has(id)) {
+                  return Effect.fail(
+                    new Protocol.ProtocolError({
+                      reason: new Protocol.Rejected({
+                        method: command.method,
+                        reason: "Unrecognized",
+                        code: -32602,
+                        description: `Failed to find browser context for id ${id}`
+                      })
+                    })
+                  )
+                }
+              }
+              return Effect.succeed({})
+            })
+        } as unknown as ProtocolClient.Session
+        const { state, page } = yield* withPage(mock)
+        // The page session has ended, but another declaration's release snapshots the context before disposal.
+        const closing = {
+          ...page.context,
+          id: state.ids.userContext(),
+          browserContextId: "disposing",
+          isDefault: false
+        }
+        state.contexts.set(closing.id, closing)
+        state.contextsByCdp.set("disposing", closing)
+        state.pages.set(page.id, { ...page, context: closing })
+        const other = { ...closing, id: state.ids.userContext(), browserContextId: "live" }
+        state.contexts.set(other.id, other)
+        state.contextsByCdp.set("live", other)
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, { _tag: "Browser" }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Deny" }
+        }).pipe(Scope.provide(lifetime))
+        const releasing = yield* Scope.close(lifetime, Exit.void).pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.make((entry) => {
+              if (entry.logLevel === "Warn") warnings.push(entry.message)
+            })])
+          ),
+          Effect.forkScoped
+        )
+        yield* Deferred.await(snapshotTaken)
+        const removing = yield* Contexts.removeUserContext(state, closing.id).pipe(Effect.forkScoped)
+        yield* Deferred.await(disposalSent)
+        assert.isTrue(state.contexts.has(closing.id), "disposal has not yet replied")
+        yield* Deferred.succeed(continueRelease, undefined)
+        if (outcome === "interruption") yield* Fiber.interrupt(removing)
+        yield* Deferred.succeed(finishDisposal, undefined)
+        yield* Fiber.await(removing)
+        yield* Fiber.join(releasing)
+        if (outcome === "success") {
+          yield* state.buffer.waitFor(() => state.contexts.has(closing.id) ? undefined : true)
+          assert.isFalse(state.contextsByCdp.has("disposing"))
+          assert.notInclude(restored, "disposing")
+        } else {
+          assert.isFalse(closing.removing)
+          assert.include(restored, "disposing")
+        }
+        assert.include(restored, "live", "the surviving context still has its download behavior restored")
+        assert.strictEqual(warnings.length, 0)
+      })))
+  }
 
   it.effect("continues download cleanup after an ended context and warns for a rejected one", () =>
     Effect.gen(function*() {
@@ -1041,7 +1081,7 @@ describe("CDP restoration cleanup", () => {
             Effect.succeed({})
       } as unknown as ProtocolClient.Session
       yield* Effect.scoped(
-        Declare.declare({ ...state, root: () => mock }, { _tag: "UserContext", context: page.context.id }, {
+        Declare.declare({ ...state, root: () => mock }, { _tag: "Browser" }, {
           _tag: "Downloads",
           behavior: { _tag: "Deny" }
         })
