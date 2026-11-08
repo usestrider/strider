@@ -274,6 +274,70 @@ outcomes and continued usability; they do not count retained observers/listeners
 browser work after cancellation. Reconnect semantics, pending locator navigation, target closure, nested
 frames, very short transients and renderer CPU/wakeups remain outside these measurements.
 
+### Large-page visibility controls
+
+Use the existing scenario entry point for Q82's 3,000-span fixture without demo recordings:
+
+```sh
+clutch lock browser -- pnpm scenarios --q82 --output /absolute/path/control.json
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json heavy
+```
+
+`heavy-control` (the default `--mode`) keeps ten measured pairs after one warmup for static and animated
+pages, with zero, one and twenty independent waits for the same missing `#ready` element. The page inserts
+it after a host-armed three-second timer. Animation changes 200 of the 3,000 spans per frame, as in the original
+fixture. Library order and waiter-count order reverse each repetition; static precedes animated. `heavy`
+keeps three instrumented repetitions; `heavy-smoke` keeps one. Use instrumented runs for attribution only.
+Every batch must complete, the inserted text must be `Ready`, and the grid must retain 3,000 children.
+
+Raw JSON retains per-renderer PID, arguments and cumulative Linux CPU counters before/after each window,
+wall duration, completion count, and the page's insertion/readback timestamps. Sum matched PID deltas and
+normalize by wall duration to obtain renderer milliseconds per second. Reject process turnover rather than
+silently subtracting unrelated process totals. Counters resolve to 10 ms, approximately 3.3 ms/s over a
+three-second sample. Both browsers stay open but only the measured page exists during each window.
+Idle windows last 150 ms longer to verify timer completion without a waiting locator. Normalize their CPU
+by actual wall duration; idle latency is not wait latency. Wait latency includes scheduling the insertion
+and the entire successful batch, excludes setup/verification/cleanup, and is not pure detection latency.
+Page readback minus insertion time includes the verification round trip and only bounds detection overhead.
+Keep source snapshots, hashes, the lockfile, pins, command logs and machine metadata beside the raw JSON
+outside the worktree. The profiler records hashes, runtime versions and host details in each report.
+
+For the distinct, non-layout attribute workload, retain the visibility reports and run two generations:
+
+```sh
+clutch lock browser -- pnpm scenarios --q82 --workload attribute --order forward --output /absolute/path/attribute-forward.json
+clutch lock browser -- pnpm scenarios --q82 --workload attribute --order reverse --output /absolute/path/attribute-reverse.json
+```
+
+Each uses ten measured pairs per cell after warmup. The reverse generation runs animated before static and
+reverses each repetition's library/count order. The visibility mode remains the default. Twenty pre-existing
+spans get `data-ready="Ready"` in one timer callback; one/twenty Strider attribute expectations use distinct
+`#cell-N` locators. Playwright uses `#cell-N[data-ready="Ready"]` with `waitFor({ state: "attached" })`:
+this is the same success condition for the fixed unique elements, without layout polling, but is not a
+comparison of the libraries' assertion retry implementations. Every measured attribute is read back afterward;
+idle verifies the first attribute. Raw samples record workload and order along with the prior CPU/latency fields.
+The timer's twenty mutations are identical in idle/one/twenty controls. New IDs leave visibility behavior intact.
+
+Run the bounded correctness probes separately:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/probes.json probes
+```
+
+These install diagnostic copies of the actual engine in disposable Chromium pages: current scheduling,
+skip a frame after an intervening recheck, and suppress frame checks. A manual frame queue and round-cap
+callback make ordering deterministic; real DOM mutation delivery and CSSOM/layout/selector evaluation remain
+in Chromium. Cases put property-only checked changes, CSSOM visibility changes, attribute expectations through
+checked/role locators, and shadow-root attribute mutations after an unrelated mutation callback but before the
+next frame. Repeated probes reset the silent condition before each unrelated mutation, so a persistent change
+cannot be rescued by the next mutation callback. Positive light-DOM attribute and unchanged-state controls
+separate lost observations from genuinely identical consecutive results. Logs retain callback checkpoints and
+recheck results. These probes establish possible interleavings, not their frequency on ordinary pages, native
+frame timing, a speedup, or general scheduler correctness. Production scheduling is never patched.
+
 ### Bounded observation diagnostics
 
 After preserving an uninstrumented baseline, run the opt-in observation profiler under the browser lock:
@@ -516,3 +580,44 @@ reply parsing; it does not isolate wire latency. Instrumentation and distinct pu
 libraries differently. Warmups remain in phase logs; discard the first three samples of each library when
 summarizing. Pair order follows the uninstrumented runner. Phase durations partition one sample only where
 boundaries are nested; never add overlapping waits or interpret a host interval as removable savings.
+
+## Route-free Fetch diagnostic
+
+The opt-in `benchmark/fetch-cost-hooks.mjs` loader splits the Chromium Fetch cost on the resources case.
+It changes loaded code only and is not a supported configuration or production activation proposal.
+Run in the pinned integration environment without overlapping browser runs, checks or builds:
+
+```sh
+nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/fetch-cost-hooks.mjs packages/scenarios/src/benchmarks/bin.ts \
+  --only resources --runs 20 --warmup 3 --output /absolute/path/resources.json
+```
+
+Each measured group contains six Strider arms, each paired with a fresh pinned Playwright default control:
+
+- `disabled`: Fetch disabled, including default document-auth handling.
+- `document-auth`: explicit wildcard Document Request pattern with auth handling enabled.
+- `current`: unchanged current configuration. On owned route-free contexts this is identical to `document-auth`.
+- `route`: a real public route matching the fixture origin and continuing requests; current auth handling remains.
+- `document-no-auth`: the same Document pattern with auth handling disabled.
+- `unmatched`: only the nonempty unmatched Request pattern, with auth handling disabled.
+
+The six arm/control blocks rotate each group, with the entire sequence reversed on alternate groups. All arms use
+fresh pages, existing uncached fixtures and the same timing boundary and exact loaded-image count check (`100`).
+The real route must also receive at least the document plus all 100 images. Setup, route acquisition, result/hit
+checks and cleanup are outside timing. At least three warmup groups and twenty measured groups are required.
+The adjacent `.arms.json` records all observations, exact verified results, route hits, order, loader hash and
+original transformed-source hashes. The ordinary report contains only `current` and its adjacent Playwright
+control; require final `passed` or `over-limit` status and complete arm counts before analyzing the split.
+
+Capture actual wire configurations separately, never as timing evidence. Set `STRIDER_FETCH_CONFIG_WIRE` to an
+absolute NDJSON path in a separate run (one group, zero warmups is sufficient with this variable). Only that run
+loads command observers for both libraries; its `.arms.json` is marked `wire-diagnostic`. The log records encoded
+Fetch enable/disable and cache-disable commands, including setup and cleanup, with the active arm label. Verify
+that `current` and `document-auth` really are identical before interpreting their identity control. Non-current
+configurations deliberately change authentication or add routing work; none is an approved implementation.
+
+Report each arm's median/spread/p95, paired differences and adjacent-control drift. Compare Document/no-auth and
+unmatched controls before assigning cost to auth configuration rather than generic proxy work. A finite sample
+does not validate route activation, factory acknowledgement, authentication, or release safety. Opting out of
+default challenge handling alone still leaves the unmatched interceptor installed in production today.

@@ -309,7 +309,7 @@ export const render = (options: {
       `// The session started from session ${options.fork}'s state (start --fork), which no file holds: this test's context starts empty`
     ]),
     ...(options.userDataDir === undefined ? [] : [
-      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
+      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: profile replay is unsupported; this test's starts with an empty one`
     ])
   ]
   const body: Array<string> = options.browser._tag === "Attach" && options.browser.backend === "webkit"
@@ -430,6 +430,17 @@ export const render = (options: {
   }
   const viewports = new Map<string, string>()
   for (const step of options.steps) {
+    const input = step._tag === "Tool" ? step.params : step._tag === "NewPage" ? step.url : undefined
+    for (const diagnostic of Secrets.diagnostics(input, Object.keys(options.secrets))) {
+      body.push(
+        `// ${
+          diagnostic.replace(
+            /[\r\n\u2028\u2029]/g,
+            (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+          )
+        }`
+      )
+    }
     if (step._tag === "Viewport") {
       const page = use(step.page)
       const registration = fresh(`${page}Viewport`)

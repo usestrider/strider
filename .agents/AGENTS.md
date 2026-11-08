@@ -77,8 +77,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
-  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
-  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
+  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
@@ -190,9 +189,22 @@ Playwright and other prior art are evidence of what works, not a template.
 `docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
 later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
 for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
-edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
-the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+edit its entry instead of adding another. Measurements, benchmark tables, browser builds and test evidence go in
+the pull request, which the entry can cite by number (#83); the history of an investigation stays in its issue. A bug
 fix, a test, or a change that follows an existing decision needs no entry.
+
+## Pull requests
+
+A pull request's title and description are public, for a contributor reading the change, not for its review. The
+description opens with a sentence or two on what changes and for whom, then three sections: **Changes** (what the
+code did before and does now, with the files, and for a fix the cause), **Tests** (the tests added or changed, the
+checks run and their result, any test skipped or loosened and why, and for a performance change the figures before and
+after), and **Changeset** (the bump and its text, and whether anything breaks). Nothing else: no questions or
+decisions for the maintainer, no review rounds or who reviewed what, no account of the investigation, no first person,
+and nothing of the tools or agents that produced it, such as a private tracker's keys, an agent's name or role, local
+paths or machine names. Cite GitHub issues by number (#51). What's for the maintainer goes to them directly, in
+conversation or on the private board, before the pull request is opened or updated. Commit messages follow the same
+rule, and so do branch names: name a branch for the change.
 
 ## Issues
 

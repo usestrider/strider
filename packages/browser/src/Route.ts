@@ -7,6 +7,9 @@
  * default, `continue`, and
  * its failure is logged. A fulfilled response is an `HttpServerResponse`, and a change to a request is a function
  * of `HttpClientRequest`. The page's routes are asked before its context's, the most recent first.
+ * A route is in force for requests that start after its declaration returns. On Chromium, a request already
+ * underway without response interception may miss a later response route. Existing response pauses select
+ * the current routes by precedence.
  *
  * **Gotchas**
  *

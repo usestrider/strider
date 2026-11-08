@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite"
 import expressiveCode from "astro-expressive-code"
 import { defineConfig, fontProviders } from "astro/config"
 import { fileURLToPath } from "node:url"
+import { tableLabels } from "./src/features/docs/tableLabels.ts"
 import { sitemap } from "./src/features/sitemap.ts"
 
 const site = "https://usestrider.dev"
@@ -21,7 +22,7 @@ export default defineConfig({
   trailingSlash: "never",
   devToolbar: { enabled: false },
   markdown: {
-    processor: unified({ rehypePlugins: [rehypeHeadingIds] })
+    processor: unified({ rehypePlugins: [rehypeHeadingIds, tableLabels] })
   },
   integrations: [expressiveCode(), mdx(), sitemap(site)],
   // Self-hosted from Fontsource, as effect.website hosts its fonts: EB Garamond for titles, Source Serif 4 for reading,

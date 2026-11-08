@@ -24,6 +24,7 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
@@ -412,17 +413,19 @@ const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scop
   }, { concurrency: "unbounded", discard: true })
 
 /** A context's download behavior, as the declarations in force say. */
-export const applyDownloads = (state: State, context: ContextEntry) => {
-  const behavior = state.registry.downloads(context.id)
-  return BrowserCdp.setDownloadBehavior({
-    behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
-    ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
-    ...(context.browserContextId === undefined
-      ? {}
-      : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
-    eventsEnabled: true
-  }).pipe(Protocol.on(state.root()))
-}
+export const applyDownloads = (state: State, context: ContextEntry) =>
+  contextLock(context).withPermits(1)(Effect.suspend(() => {
+    if (context.disposed) return Effect.void
+    const behavior = state.registry.downloads(context.id)
+    return BrowserCdp.setDownloadBehavior({
+      behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
+      ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
+      ...(context.browserContextId === undefined
+        ? {}
+        : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
+      eventsEnabled: true
+    }).pipe(Protocol.on(state.root()))
+  }))
 
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
@@ -457,7 +460,9 @@ export const declare = Effect.fnUntraced(function*(
       state.registry.remove(id)
       const release = declaration._tag === "Downloads"
         ? Effect.forEach(
-          [...state.contexts.values()],
+          scope._tag === "UserContext"
+            ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+            : [...state.contexts.values()],
           (context) => applyDownloads(state, context).pipe(releaseErrors),
           { discard: true }
         )

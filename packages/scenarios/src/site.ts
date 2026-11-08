@@ -175,11 +175,11 @@ const routes: Record<
       "Heavy",
       `<div id="grid"></div><script>
 const grid = document.querySelector("#grid")
-for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; grid.append(cell) }
+for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; cell.id = "cell-" + i; grid.append(cell) }
 const cells = grid.children
 const frame = (t) => { for (let i = 0; i < 200; i++) cells[(Math.floor(t) + i * 13) % cells.length].style.opacity = String((i % 10) / 10); requestAnimationFrame(frame) }
-requestAnimationFrame(frame)
-setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
+if (new URLSearchParams(location.search).get("animation") !== "static") requestAnimationFrame(frame)
+if (!new URLSearchParams(location.search).has("armed")) setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
         Number(url.searchParams.get("after") ?? "3000")
       })
 </script>`

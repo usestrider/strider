@@ -1,5 +1,29 @@
 # @usestrider/browser
 
+## 0.6.0
+
+### Breaking changes
+
+- **Snapshot `pressed`, `expanded` and `selected` markers match role filters** (#165). Keywords are case-insensitive (`TRUE` now adds the marker), markers appear only for `true` on roles that support them, and a native `<option>`'s selection and a `<details>` element's open state take precedence over ARIA. Stored snapshot expectations may need updating.
+- **`isCapability` narrows to inspect or control capabilities** (#157). Check `capability.access === "inspect"` before passing its result to `ReadonlyPage.capability`.
+
+### Added
+
+- **Virtual passkeys** (#157): `page.capability(Capability.VirtualAuthenticator)` gives a page a native Chromium WebAuthn authenticator, for testing passkey registration and sign-in, with credential management, redacted export and import, and user-verification and presence controls. `Unsupported` on Firefox and WebKit. A second page or a popup gets its own copy of a credential.
+- **Proxies** (#158): `UserContext.Options.proxy` routes a context's HTTP and HTTPS traffic through an HTTP proxy, with bypass hosts and credentials with a `Redacted` password, on Chromium and launched Firefox. Launched WebKit supports proxies without credentials.
+
+### Fixed
+
+- **Chromium port launches wait for the complete endpoint** (#163) before connecting, instead of connecting to a half-written `DevToolsActivePort`.
+- **A browser that exits during launch reports its final stderr** (#163), collected within the launch timeout.
+- **WebKit startup reports a lost connection at once** (#161), instead of waiting for the startup deadline.
+- **Stock WebKit snapshots keep child-frame content** (#170) when the browser's two clocks read a frame's start time a millisecond apart, and can't pick a sibling frame.
+- **`strider export` explains ambiguous password fields** (#164): a named password field matching controls in different frames fails with guidance to narrow the locator, instead of crashing.
+
+### Documentation
+
+- On Chromium, a prefetch sent through a page's `<script type="speculationrules">` skips page and context routes (#168).
+
 ## 0.5.0
 
 ### Breaking changes

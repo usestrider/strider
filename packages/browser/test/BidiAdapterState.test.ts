@@ -2361,6 +2361,71 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  for (const ending of ["realm", "document", "page", "cancel", "reply"] as const) {
+    it.effect(`settles a pending evaluation on ${ending} and cleans up late replies`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+        const { page, realm, state } = yield* withPage({}, {}, client.root)
+        const handlers = Evaluation.register(Kit.handlers<State.Event>())
+        const running = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => new Promise(() => {})",
+          arguments: [],
+          awaitPromise: true,
+          result: "handle",
+          userActivation: false
+        }).pipe(Effect.result, Effect.forkChild)
+        const sent = yield* browser.next
+        // Another realm's event must neither end this call nor send it again.
+        handlers.apply("script.realmDestroyed", { realm: "UNRELATED" }, { state })
+        yield* state.buffer.flush
+        assert.isUndefined(running.pollUnsafe())
+        if (ending === "cancel") yield* Fiber.interrupt(running)
+        else if (ending !== "reply") {
+          if (ending === "realm") handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          else if (ending === "document") {
+            Tree.commit(
+              state,
+              page,
+              "http://next.example/",
+              "http://next.example",
+              { _tag: "InitialBlank" },
+              undefined,
+              "test"
+            )
+            // A commit alone can preserve the initial blank document's realm.
+            yield* state.buffer.flush
+            assert.isUndefined(running.pollUnsafe())
+            handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          } else Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+          yield* state.buffer.flush
+          const settled = yield* Fiber.join(running).pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
+          assert(Option.isSome(settled), "realm loss must end a call even without a protocol reply")
+          assert.strictEqual(settled.value._tag, "Failure")
+          if (settled.value._tag === "Failure") assert.strictEqual(settled.value.failure.reason._tag, "Gone")
+        }
+        yield* browser.receive({
+          type: "success",
+          id: sent.id,
+          result: { type: "success", realm: realm.bidi, result: { type: "object", handle: "LATE" } }
+        })
+        yield* browser.delivered
+        if (ending === "reply") {
+          const result = yield* Fiber.join(running)
+          assert.strictEqual(result._tag, "Success")
+          assert.strictEqual(state.handles.size, 1)
+          handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          yield* state.buffer.flush
+        } else {
+          assert.strictEqual(state.handles.size, 0)
+          const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
+          assert(Option.isSome(cleanup), "abandoned root handles must use protocol late-reply cleanup")
+          assert.strictEqual(cleanup.value.method, "script.disown")
+          yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+        }
+      }))
+  }
+
   it.effect("disowns a root-owned handle returned after evaluation was interrupted", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

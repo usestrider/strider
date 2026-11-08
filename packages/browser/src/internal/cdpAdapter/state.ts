@@ -9,7 +9,7 @@ import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
-import type * as Semaphore from "effect/Semaphore"
+import * as Semaphore from "effect/Semaphore"
 import type * as Input from "../../cdp/Input.ts"
 import type * as Network from "../../cdp/Network.ts"
 import type * as Dialog from "../../Dialog.ts"
@@ -34,7 +34,12 @@ export interface ContextEntry {
   browserContextId: string | undefined
   readonly isDefault: boolean
   removing: boolean
+  disposed?: boolean | undefined
+  lifecycleLock?: Semaphore.Semaphore | undefined
 }
+
+/** Serialize context commands with disposal; removal in progress alone does not prove it succeeded. */
+export const contextLock = (context: ContextEntry) => context.lifecycleLock ??= Semaphore.makeUnsafe(1)
 
 export type TargetKind = "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
 

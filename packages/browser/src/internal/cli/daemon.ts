@@ -32,6 +32,7 @@ import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcess from "effect/process/ChildProcess"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
@@ -58,6 +59,7 @@ import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as OperationImpl from "../operation.ts"
+import * as Secrets from "../secrets.ts"
 import * as Serialization from "../serialization.ts"
 import * as StorageStates from "../storageState.ts"
 import * as ToolkitImpl from "../toolkit.ts"
@@ -124,6 +126,8 @@ interface Daemon {
   readonly state: string | undefined
   /** The session whose state this one started from, which the exported test can't read. */
   readonly fork: string | undefined
+  /** Serialized before the fork context is created, never refreshed from live state. */
+  readonly forkState: string | undefined
   /** The profile directory the session's browser runs on, when it isn't the session's own. */
   readonly userDataDir: string | undefined
   readonly viewport: Viewport | undefined
@@ -609,10 +613,31 @@ export const commands = (getDaemon: () => Daemon) => {
               const { name: named, page: opened } = yield* getDaemon().session.open({
                 name: Option.getOrUndefined(name),
                 url: Option.getOrUndefined(url)
-              }).pipe(Effect.mapError((failure) => new CommandFailed(failure)))
+              }).pipe(Effect.mapError((failure) =>
+                new CommandFailed(
+                  {
+                    ...failure,
+                    message: [
+                      failure.message,
+                      ...getDaemon().session.conceal(Secrets.diagnostics(
+                        Option.getOrUndefined(url),
+                        Object.keys(getDaemon().secretVariables)
+                      ))
+                    ].join("\n")
+                  }
+                )
+              ))
               getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
+              for (
+                const diagnostic of Secrets.diagnostics(
+                  Option.getOrUndefined(url),
+                  Object.keys(getDaemon().secretVariables)
+                )
+              ) {
+                yield* Console.log(diagnostic)
+              }
             }))
       ).pipe(Command.withDescription(Tools.newPage.description!)),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>
@@ -784,23 +809,53 @@ ${expressionSource}
             Effect.mapError((failure) => new CommandFailed(failure))
           )
           const resolved = yield* resolvePath(path)
-          yield* writeUserFile(resolved, text, { mode: 0o600 })
+          yield* writeStateFile(resolved, text)
           yield* Console.log(`saved ${summary} to ${resolved}, readable by you alone`)
         })).pipe(Command.withDescription("Save storage state to a file"))
     ])
   )
   const exportCommand = Command.make("export").pipe(
     Command.withSubcommands([
-      Command.make("test", { path: Argument.String("path") }, ({ path }) =>
+      Command.make("test", {
+        path: Argument.String("path"),
+        state: Flag.String("state").pipe(
+          Flag.withDescription(
+            "Write the initial fork snapshot here for replay; only for --fork without --user-data-dir"
+          ),
+          Flag.optional
+        )
+      }, ({ path, state }) =>
         Effect.gen(function*() {
           const resolved = yield* resolvePath(path)
+          let savedState = getDaemon().state
+          if (Option.isSome(state)) {
+            const snapshot = getDaemon().forkState
+            if (snapshot === undefined || getDaemon().userDataDir !== undefined) {
+              return yield* Effect.fail(
+                new CommandFailed({
+                  error: "InvalidInput",
+                  message: "export test --state requires a session started with --fork without --user-data-dir"
+                })
+              )
+            }
+            savedState = yield* resolvePath(state.value)
+            if (yield* sameDestination(resolved, savedState)) {
+              return yield* Effect.fail(
+                new CommandFailed({
+                  error: "InvalidInput",
+                  message: "The test and state destinations must be different files"
+                })
+              )
+            }
+            yield* writeStateFile(savedState, snapshot)
+          }
           const { placeholders, text } = ExportTest.render({
             name: getDaemon().name,
             browser: getDaemon().browser,
             viewport: getDaemon().viewport,
             secrets: getDaemon().secretVariables,
-            state: getDaemon().state,
-            fork: getDaemon().fork,
+            state: savedState,
+            fork: Option.isSome(state) ? undefined : getDaemon().fork,
             userDataDir: getDaemon().userDataDir,
             steps: getDaemon().recorder.steps
           })
@@ -879,6 +934,107 @@ const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, op
   yield* fs.makeDirectory(paths.dirname(path), { recursive: true }).pipe(Effect.mapError(failedWith))
   yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
+
+/** Compare existing aliases too, before either destination can be overwritten. */
+const sameDestination = Effect.fnUntraced(function*(left: string, right: string) {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* Path.Path
+  const canonical = (path: string): Effect.Effect<string, CommandFailed> =>
+    fs.realPath(path).pipe(
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? fs.readLink(path).pipe(
+            Effect.catch((error) =>
+              error.reason._tag === "NotFound"
+                ? Effect.succeed(undefined)
+                : Effect.fail(failedWith(error))
+            ),
+            Effect.flatMap((target) =>
+              target === undefined
+                ? Effect.map(canonical(paths.dirname(path)), (parent) => paths.join(parent, paths.basename(path)))
+                : canonical(paths.resolve(paths.dirname(path), target))
+            )
+          )
+          : Effect.fail(failedWith(error))
+      )
+    )
+  if ((yield* canonical(left)) === (yield* canonical(right))) return true
+  if (
+    !(yield* fs.exists(left).pipe(Effect.mapError(failedWith))) ||
+    !(yield* fs.exists(right).pipe(Effect.mapError(failedWith)))
+  ) return false
+  const a = yield* fs.stat(left).pipe(Effect.mapError(failedWith))
+  const b = yield* fs.stat(right).pipe(Effect.mapError(failedWith))
+  return a.dev === b.dev && Option.isSome(a.ino) && Option.isSome(b.ino) && a.ino.value === b.ino.value
+})
+
+/** Both explicit credential writes share permissions and the advisory Git warning. */
+const writeStateFile = Effect.fnUntraced(function*(path: string, text: string) {
+  const fs = yield* FileSystem.FileSystem
+  if (yield* fs.exists(path).pipe(Effect.mapError(failedWith))) {
+    yield* fs.chmod(path, 0o600).pipe(Effect.mapError(failedWith))
+  }
+  yield* writeUserFile(path, text, { mode: 0o600 })
+  if (yield* stateFileCouldBeCommitted(path)) {
+    yield* Console.error(
+      `Warning: ${path} contains plaintext credentials and Git could commit it. Save outside the work tree or ensure the file is untracked and ignored.`
+    )
+  }
+})
+
+/** Repository identity must come from the saved destination, not the daemon's launching Git command. */
+const gitRepositoryEnvironment = new Set([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_PREFIX",
+  "GIT_INTERNAL_SUPER_PREFIX",
+  "GIT_GRAFT_FILE",
+  "GIT_SHALLOW_FILE",
+  "GIT_NAMESPACE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE"
+])
+
+/** Checks a file after saving; Git inspection is advisory and must never prevent a save. */
+export const stateFileCouldBeCommitted = Effect.fnUntraced(
+  function*(path: string) {
+    const fs = yield* FileSystem.FileSystem
+    const paths = yield* Path.Path
+    // Resolve symlinked directories and files to the destination Git would actually see.
+    const real = yield* fs.realPath(path)
+    const cwd = paths.dirname(real)
+    // Keep HOME, XDG_CONFIG_HOME and Git configuration, including global ignore settings.
+    const env = Object.fromEntries(
+      Object.entries(Node.process.env).filter(([key]) => !gitRepositoryEnvironment.has(key))
+    )
+    const run = (args: ReadonlyArray<string>) =>
+      Effect.scoped(Effect.gen(function*() {
+        const child = yield* ChildProcess.make("git", args, {
+          cwd,
+          env,
+          extendEnv: false,
+          // Advisory reads have no pending writes to preserve; scope cleanup must not wait for SIGTERM cooperation.
+          killSignal: "SIGKILL",
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore"
+        })
+        return yield* child.exitCode
+      }))
+    if ((yield* run(["rev-parse", "--show-toplevel"])) !== 0) return false
+    // Without --no-index, tracked files are never considered ignored.
+    return (yield* run(["check-ignore", "--quiet", "--", real])) === 1
+  },
+  Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
+  Effect.orElseSucceed(() => false)
+)
 
 /** A `--site`'s host, with or without a scheme, or nothing if it names none. */
 const siteHost = (site: string) =>
@@ -1609,6 +1765,9 @@ const serve = Effect.fnUntraced(
     // The session's own profile directory, made here: a launcher uses a directory it is given as it is
     if (Option.isNone(flags.userDataDir)) yield* fs.makeDirectory(paths.profile).pipe(Effect.mapError(failedWith))
     const userDataDir = Option.getOrElse(flags.userDataDir, () => paths.profile)
+    const forkState = Option.isSome(forkOf) && Option.isNone(stateFile) && Option.isSome(initial)
+      ? yield* Schema.encodeEffect(StorageState.Json)(initial.value).pipe(Effect.orDie)
+      : undefined
     // What the session launches and makes is in the CLI's ledger, which strider prune reads if it dies
     const os = yield* Effect.promise(() => Node.os())
     const scope = yield* Scope.fork(yield* Effect.scope)
@@ -1676,6 +1835,7 @@ const serve = Effect.fnUntraced(
       state: Option.getOrUndefined(Option.map(stateFile, (file) => file)),
       // --state wins over --fork, as the context above was made
       fork: Option.isSome(stateFile) ? undefined : Option.getOrUndefined(forkOf),
+      forkState,
       userDataDir: Option.getOrUndefined(flags.userDataDir),
       context,
       session,

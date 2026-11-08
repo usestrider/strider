@@ -325,7 +325,8 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       // A shared id names a node in every realm of its document
       node: (node) => ({ sharedId: node.binding as Script.SharedId })
     }))
-  // A call cut short when its page closes is `Gone`, not the protocol's error
+  // Firefox may never answer an awaited promise in a destroyed realm. End the call
+  // through the model lifecycle; interrupting send preserves protocol late-reply cleanup.
   const reply = yield* state.send(Script.callFunction({
     functionDeclaration: call.functionDeclaration,
     awaitPromise: call.awaitPromise,
@@ -334,7 +335,14 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     resultOwnership: keep ? "root" : "none",
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
-  })).pipe(Effect.mapError(Kit.realmFailure(id, () => realm.ended)))
+  })).pipe(
+    Effect.mapError(Kit.realmFailure(id, () => realm.ended)),
+    Effect.raceFirst(
+      state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+        Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))
+      )
+    )
+  )
   if (reply.type === "exception") {
     const details = reply.exceptionDetails
     if (keep && "handle" in details.exception && details.exception.handle !== undefined) {
