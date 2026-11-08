@@ -69,7 +69,7 @@ const browsers = [{ id: "chromium", label: "Chromium" }, { id: "firefox", label:
         row.hidden = !(row.dataset.search!.includes(search.value.toLowerCase()) && (!status.value || row.dataset.statuses!.split(" ").includes(status.value)))
         if (!row.hidden) visible++
       }
-      group.hidden = visible === 0
+      group.hidden = active && visible === 0
       if (active) group.open = visible > 0
       else if (priorOpen) group.open = priorOpen.get(group) ?? false
     }
