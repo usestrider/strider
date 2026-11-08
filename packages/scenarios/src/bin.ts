@@ -1,6 +1,6 @@
 /**
- * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, writing
- * `packages/scenarios/RESULTS.md`.
+ * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, printing
+ * a single-run report. `pnpm scenarios:report` regenerates the combined `packages/scenarios/RESULTS.md`.
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
@@ -28,7 +28,7 @@ import * as path from "node:path"
 import { chromium, firefox as playwrightFirefox } from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
 import { recordingProblems, replaying } from "./replay.ts"
-import { type Measurements, report } from "./report.ts"
+import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
 import { start } from "./site.ts"
@@ -543,20 +543,8 @@ const measurements: Measurements = {
   flags: { strider: striderArgs.slice(1), playwright: playwrightArgs.slice(1) },
   source: fs.readFileSync(path.join(import.meta.dirname, "scenarios.ts"), "utf8")
 }
-const written = report(measurements)
-if (output !== undefined) {
-  fs.writeFileSync(path.join(output, "measurements.json"), JSON.stringify(measurements, null, 2))
-  fs.writeFileSync(path.join(output, "RESULTS.md"), written)
-}
-// One scenario is a check, printed; RESULTS.md is the full run's record
-process.exitCode = publish([...launchResults, ...results], () => {
-  if (only === undefined && output === undefined) {
-    const out = path.join(import.meta.dirname, "../RESULTS.md")
-    fs.writeFileSync(out, written)
-    log(`wrote ${path.relative(root, out)}`)
-  } else {
-    process.stdout.write(written)
-  }
-})
+// A single browser run prints its report and can save an explicitly selected artifact directory.
+// Only scenarios:report writes the checked-in combined report.
+process.exitCode = publish([...launchResults, ...results], () => writeRunReport(measurements, output))
 
 if (diagnosticFailures.length > 0) process.exitCode = 1

@@ -13,8 +13,7 @@ The [investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchma
 experiments and the human review required for public API or contract changes. Findings and progress stay in issues.
 
 A private workspace package, never published. It runs the same scenarios with Strider
-and with Playwright against the same pinned stock Chromium, or pinned stock Firefox versus Playwright-patched Firefox, and writes what it
-found to [RESULTS.md](RESULTS.md). A prior full run at `c732173` (2026-11-05) recorded failures for both
+and with Playwright against the same pinned stock Chromium, or pinned stock Firefox versus Playwright-patched Firefox, and prints each run’s report. The combined [RESULTS.md](RESULTS.md) is generated explicitly from preserved measurements. A prior full run at `c732173` (2026-11-05) recorded failures for both
 libraries on The Internet's dynamic controls: the preserved `the-internet.har` lacks the
 `https://the-internet.herokuapp.com/dynamic_controls` URL, so replay aborts that navigation. In that prior run, each library failed its
 initial attempt and all ten timed repetitions. These are stale-recording failures, not established library or browser
@@ -37,7 +36,7 @@ The report contains:
 
 ```sh
 pnpm scenarios --record     # once: visits the public demo sites live and records them in .data/scenarios/
-pnpm scenarios              # Chromium scenarios and diagnostics, 10 timed pairs each, writing RESULTS.md
+pnpm scenarios              # Chromium scenarios and diagnostics, 10 timed pairs each, printed
 pnpm scenarios --runs 3     # fewer runs
 pnpm scenarios --only login # one scenario, and no measurements, printed: RESULTS.md keeps the full run
 ```
@@ -72,21 +71,43 @@ WebDriver BiDi for Strider, so it compares stock Firefox 158.0 with Playwright 1
 revision 1555. This measures the complete stacks, including different browser versions and patches, rather than
 isolating library overhead. The `scenario-firefox` Nix package downloads the fixed Debian 12 x86-64 archive,
 checks its unpacked SHA-256, and patches ELF paths using the pinned nixpkgs Firefox dependencies. It is currently
-x86-64 Linux only. Provision it before measurement:
+x86-64 Linux only. Provision it before measurement. Run browser measurements with exclusive access to the machine’s
+browsers: wait for other browser tests or benchmarks to finish, and prevent concurrent runs for the duration of each
+complete command. This also applies to recording refreshes and focused checks:
 
 ```sh
 nix build .#scenario-firefox --out-link /absolute/evidence/playwright-firefox
-clutch lock browser -- pnpm scenarios --browser chromium --output /absolute/evidence/chromium
-clutch lock browser -- pnpm scenarios --browser firefox --playwright-firefox /absolute/evidence/playwright-firefox/firefox/firefox --output /absolute/evidence/firefox
+pnpm scenarios --browser chromium --output /absolute/evidence/chromium
+pnpm scenarios --browser firefox --playwright-firefox /absolute/evidence/playwright-firefox/firefox/firefox --output /absolute/evidence/firefox
 ```
 
-To retain both full reports in the repository after running both commands:
+## Regenerating the combined report
+
+`pnpm scenarios:report` reads saved measurements without launching browsers or entering Nix. It generates the
+summary, provenance, failure limitations, and both detailed reports directly from those inputs. No separate
+artifact-local script or saved Markdown report is required. From the repository root:
 
 ```sh
-cat /absolute/evidence/chromium/RESULTS.md /absolute/evidence/firefox/RESULTS.md > packages/scenarios/RESULTS.md
+pnpm scenarios:report --output packages/scenarios/RESULTS.md --context packages/scenarios/report-context.json /absolute/evidence/chromium/measurements.json /absolute/evidence/firefox/measurements.json
 ```
 
-The checked-in report also includes a summary recomputed from the two runs' raw measurements.
+`report-context.json` preserves the reviewed correctness observations for the source commit named in that file.
+The command rejects context from a different commit. For new measurements, omit `--context` until observations
+for those measurements have been reviewed, or provide a new context file with its own source commit and observations.
+Do not attach the existing observations to new measurements.
+
+To verify regeneration, write a second copy and compare it byte for byte:
+
+```sh
+pnpm scenarios:report --output /absolute/evidence/regenerated.md --context packages/scenarios/report-context.json /absolute/evidence/chromium/measurements.json /absolute/evidence/firefox/measurements.json
+cmp packages/scenarios/RESULTS.md /absolute/evidence/regenerated.md
+```
+
+Single-browser runs print their report and save files only when `--output` explicitly names an artifact directory.
+They leave the checked-in combined report unchanged. Only the explicit `scenarios:report --output` command above
+replaces it.
+
+## Preserving measurements
 
 Each output directory must be new, absolute and outside the worktree. It preserves raw ordered attempts (including
 failed durations), complete measurements, launch results, recording validation, environment details, source snapshots,
@@ -141,11 +162,11 @@ evidence=/absolute/path/to/recording-refresh
 mkdir -p "$evidence/before" "$evidence/after"
 cp -p .data/scenarios/*.har "$evidence/before/"
 sha256sum "$evidence"/before/*.har > "$evidence/before.sha256"
-clutch lock browser -- pnpm scenarios --record > "$evidence/record.log" 2>&1
+pnpm scenarios --record > "$evidence/record.log" 2>&1
 cp -p .data/scenarios/*.har "$evidence/after/"
 sha256sum "$evidence"/after/*.har > "$evidence/after.sha256"
 sha256sum --check "$evidence/before.sha256"
-clutch lock browser -- pnpm scenarios --only controls --runs 3 > "$evidence/controls.log" 2>&1
+pnpm scenarios --only controls --runs 3 > "$evidence/controls.log" 2>&1
 ```
 
 Keep previously retained evidence unchanged. Compare both checksum manifests and retain the refresh log even if the

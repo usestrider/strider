@@ -3,21 +3,38 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, expect, it } from "vitest"
-import * as Report from "../src/report.ts"
 import { stats } from "../src/measure.ts"
+import * as Report from "../src/report.ts"
 import { runScenarios } from "../src/runner.ts"
 import type { Scenario } from "../src/scenarios.ts"
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "combined-report-"))
 afterEach(() => fs.rmSync(directory, { force: true, recursive: true }))
 const measurements = async (engine: string): Promise<Report.Measurements> => ({
-  date: "2026-11-08", browser: engine, machine: "test", node: "test", striderCommit: "abc123", playwright: "test", runs: 1,
-  metadata: { engine, sourceCommit: "abc123", fairness: "Different browser builds", launchBoundary: "Includes shutdown" },
+  date: "2026-11-08",
+  browser: engine,
+  machine: "test",
+  node: "test",
+  striderCommit: "abc123",
+  playwright: "test",
+  runs: 1,
+  metadata: {
+    engine,
+    sourceCommit: "abc123",
+    fairness: "Different browser builds",
+    launchBoundary: "Includes shutdown"
+  },
   scenarios: await runScenarios([{ name: "login", title: "Login", expected: "ok" } as Scenario], 1, () => ({
-    strider: async () => engine === "firefox" ? "wrong" : "ok", playwright: async () => "ok"
+    strider: async () => engine === "firefox" ? "wrong" : "ok",
+    playwright: async () => "ok"
   }), () => {}),
-  launch: { strider: stats([]), playwright: stats([]) }, q82: [], q82WaitMs: 3000, q103: [],
-  tells: { strider: {}, playwright: {} }, flags: { strider: [], playwright: [] }, source: ""
+  launch: { strider: stats([]), playwright: stats([]) },
+  q82: [],
+  q82WaitMs: 3000,
+  q103: [],
+  tells: { strider: {}, playwright: {} },
+  flags: { strider: [], playwright: [] },
+  source: ""
 })
 
 it("regenerates a combined report from saved measurements without running browsers", async () => {
@@ -29,7 +46,12 @@ it("regenerates a combined report from saved measurements without running browse
     return file
   })
   const output = path.join(directory, "RESULTS.md")
-  const child = spawnSync(process.execPath, [new URL("../src/report-bin.ts", import.meta.url).pathname, "--output", output, ...files], { encoding: "utf8" })
+  const child = spawnSync(process.execPath, [
+    new URL("../src/report-bin.ts", import.meta.url).pathname,
+    "--output",
+    output,
+    ...files
+  ], { encoding: "utf8" })
   expect(child.stderr).toBe("")
   expect(child.status).toBe(0)
   const written = fs.readFileSync(output, "utf8")
@@ -38,7 +60,7 @@ it("regenerates a combined report from saved measurements without running browse
   expect(written).toContain("Different browser builds")
   expect(written).toContain("Includes shutdown")
   expect(written).toContain("incomplete")
-  expect(written).toContain('Read "wrong", expected "ok"')
+  expect(written).toContain("Read \"wrong\", expected \"ok\"")
 })
 
 it("prints single-browser output without replacing the combined report", async () => {
@@ -46,7 +68,17 @@ it("prints single-browser output without replacing the combined report", async (
   const combined = path.join(directory, "RESULTS.md")
   fs.writeFileSync(combined, "combined report")
   let printed = ""
-  Report.writeRunReport(await measurements("chromium"), undefined, (text) => { printed = text })
+  Report.writeRunReport(await measurements("chromium"), undefined, (text) => {
+    printed = text
+  })
   expect(printed).toContain("chromium")
   expect(fs.readFileSync(combined, "utf8")).toBe("combined report")
+})
+
+it("keeps reviewed observations tied to their measured source commit", async () => {
+  const runs = await Promise.all([measurements("chromium"), measurements("firefox")])
+  expect(() => Report.combine(runs, { sourceCommit: "another-commit", observations: ["old observation"] }))
+    .toThrow("different source commit")
+  expect(Report.combine(runs, { sourceCommit: "abc123", observations: ["reviewed cleanup warning"] }))
+    .toContain("reviewed cleanup warning")
 })

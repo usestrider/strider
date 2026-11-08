@@ -1,7 +1,9 @@
 /**
  * RESULTS.md: what `pnpm scenarios` found, with the machine, the browser and the libraries' versions it found it
- * on. Written whole each run.
+ * on. Single runs print their report; the combined report is generated explicitly from saved measurements.
  */
+import * as fs from "node:fs"
+import * as path from "node:path"
 import type { Stats } from "./measure.ts"
 import type { Scenario } from "./scenarios.ts"
 
@@ -81,7 +83,7 @@ export const report = (m: Measurements): string => {
   out.push("# Strider and Playwright, side by side")
   out.push("")
   out.push(
-    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run \`pnpm scenarios\` again.*`
+    `*Written by \`pnpm scenarios\` on ${m.date}: ${m.browser}, the integration environment's, driven headless by Strider at \`${m.striderCommit}\` and by Playwright ${m.playwright} through \`playwright-core\`; Node ${m.node}; ${m.machine}. Timings are each scenario's wall time over ${m.runs} scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Regenerate from saved measurements with \`pnpm scenarios:report\`.*`
   )
   out.push("")
   if (m.metadata !== undefined) out.push("```json", JSON.stringify(m.metadata, null, 2), "```", "")
@@ -208,4 +210,141 @@ export const report = (m: Measurements): string => {
     }
   }
   return out.join("\n")
+}
+
+/** Observations retained with a reviewed run, separate from its timing samples. */
+export interface ReportContext {
+  readonly sourceCommit: string
+  readonly observations: ReadonlyArray<string>
+}
+
+/** Generate a combined report using saved measurements, without launching a browser. */
+export const combine = (measurements: ReadonlyArray<Measurements>, context?: ReportContext): string => {
+  if (measurements.length < 2) throw new Error("A combined report needs at least two browser runs")
+  const name = (m: Measurements) => String(m.metadata?.["engine"] ?? m.browser)
+  if (new Set(measurements.map(name)).size !== measurements.length) throw new Error("Browser runs must be distinct")
+  const source = (m: Measurements) => String(m.metadata?.["sourceCommit"] ?? m.striderCommit)
+  if (context !== undefined && measurements.some((m) => source(m) !== context.sourceCommit)) {
+    throw new Error("Report observations belong to a different source commit")
+  }
+  const out = [
+    "# Fresh performance comparison: Chromium and Firefox",
+    "",
+    "Generated from preserved measurements with `pnpm scenarios:report`. No browsers are launched by report generation. Positive gaps mean Strider is slower.",
+    "",
+    "## Provenance and timing boundaries",
+    ""
+  ]
+  for (const m of measurements) {
+    out.push(
+      `- ${cell(name(m))}: ${cell(m.browser)}; measured ${cell(m.date)} at source \`${cell(source(m))}\`; Playwright ${
+        cell(m.playwright)
+      }; Node ${cell(m.node)}; ${m.runs} scheduled repetitions after one initial verification/warmup.`,
+      `  ${cell(m.metadata?.["fairness"] ?? "See the recorded browser metadata and launch settings below.")}`,
+      `  Launch boundary: ${cell(m.metadata?.["launchBoundary"] ?? "See the run's scenario description.")}`
+    )
+  }
+  out.push(
+    "",
+    "Launch includes shutdown in these preserved runs; its figures cannot be directly compared with the older narrower launch boundary. Default launch flags, waits, scheduling and interception remain in force. This report establishes no performance cause or production fix.",
+    "",
+    "## Outcomes and limitations",
+    ""
+  )
+  for (const m of measurements) {
+    const attempts = m.scenarios.reduce((n, r) => n + r.attempts.strider + r.attempts.playwright, 0)
+    const failures = m.scenarios.reduce((n, r) => n + r.failures.length, 0)
+    const initial = m.scenarios.flatMap((r) => [r.outcome.strider, r.outcome.playwright]).filter((o) => o !== undefined)
+    out.push(
+      `- ${cell(name(m))}: ${attempts - failures}/${attempts} timed attempts passed; ${
+        initial.filter((o) => o._tag === "Read").length
+      }/${initial.length} initial checks passed.`
+    )
+    for (const r of m.scenarios) {
+      for (const library of ["strider", "playwright"] as const) {
+        const outcome = r.outcome[library]
+        if (outcome?._tag === "Failed") {
+          out.push(`  Initial failure, ${cell(r.scenario.title)}, ${library}: ${cell(outcome.error)}`)
+        }
+      }
+      if (r.failures.length > 0) {
+        out.push(
+          `  ${
+            cell(r.scenario.title)
+          }: ${r.failures.length} timed failures; no valid timing gap. Individual errors and failed durations remain in the preserved data and detailed report.`
+        )
+      }
+    }
+  }
+  out.push(
+    "",
+    "A required-page recording preflight checks GET page coverage, not complete interaction replay. A failed comparison does not establish that a browser feature is generally unsupported. Failures in one scenario do not invalidate other complete pairs.",
+    "",
+    "Times are milliseconds; each cell is **p50 / p90**. Gaps use `(Strider / Playwright - 1) × 100`. The existing estimator selects the sorted sample at `floor(q × n)`: with ten samples p50 is sample six and p90 is the maximum. A p90-only gap is a single tail observation requiring confirmation, not evidence of a sustained regression. Desktop background activity and browser build differences limit attribution. Failed durations are excluded from statistics; gaps are withheld if either library failed any initial or timed attempt.",
+    ""
+  )
+  if (context !== undefined) {
+    out.push(
+      "## Retained correctness observations",
+      "",
+      ...context.observations.map((observation) => `- ${observation}`),
+      ""
+    )
+  }
+  out.push(
+    "## Paired workflow results",
+    "",
+    "| Browser | Scenario | Strider p50 / p90 | Playwright p50 / p90 | p50 gap | p90 gap |",
+    "|---|---|---:|---:|---:|---:|"
+  )
+  const precise = (s: Stats) => s.runs === 0 ? "–" : `${s.median.toFixed(3)} / ${s.p90.toFixed(3)}`
+  for (const m of measurements) {
+    for (const r of m.scenarios) {
+      if (r.outcome.playwright === undefined) continue
+      const complete = r.failures.length === 0 && r.outcome.strider._tag === "Read" &&
+        r.outcome.playwright._tag === "Read"
+      out.push(
+        `| ${cell(name(m))} | ${cell(r.scenario.title)} | ${precise(r.times.strider)} | ${
+          precise(r.times.playwright)
+        } | ${complete ? gap(r.times.strider.median, r.times.playwright.median) : "incomplete"} | ${
+          complete ? gap(r.times.strider.p90, r.times.playwright.p90) : "incomplete"
+        } |`
+      )
+    }
+  }
+  out.push(
+    "",
+    "Video demonstrations without Playwright twins have no comparison gap. Unsupported comparisons and Chromium-only diagnostics are labeled in each run's detailed report.",
+    "",
+    "## Reproduction and evidence",
+    "",
+    "See [the scenario instructions](README.md) for the executable regeneration command, workload sizes and pinned browser provisioning. Inputs are the preserved measurements.json files; an optional source-bound context file retains reviewed correctness observations. Raw ordered attempts, recording validation, source snapshots/hashes, exact browser versions, executable hashes and launch settings remain in the external evidence directories. Detailed reports below are generated from those same measurements, including their original metadata and source.",
+    ""
+  )
+  for (const m of measurements) {
+    out.push(
+      report(m).replace(/^(#{1,5}) /gm, "#$1 ").replace(
+        "## Strider and Playwright, side by side",
+        `## ${name(m)} detailed report`
+      ),
+      ""
+    )
+  }
+  return `${out.join("\n").trimEnd()}\n`
+}
+
+/** Print a single run, saving artifacts only in an explicitly selected directory. */
+export const writeRunReport = (
+  measurements: Measurements,
+  directory?: string,
+  print: (text: string) => void = (text) => {
+    process.stdout.write(text)
+  }
+): void => {
+  const written = report(measurements)
+  if (directory !== undefined) {
+    fs.writeFileSync(path.join(directory, "measurements.json"), JSON.stringify(measurements, null, 2))
+    fs.writeFileSync(path.join(directory, "RESULTS.md"), written)
+  }
+  print(written)
 }

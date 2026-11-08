@@ -1,59 +1,76 @@
 # Fresh performance comparison: Chromium and Firefox
 
-Measured 2026-11-08 at `fca7e7c1c179d96766ba7839ae649e4f6f4bb9b1`, with Playwright 1.64.1 and Node 24.21.0 in the pinned Nix integration environment. Each case has one verification/warmup followed by ten paired repetitions, alternating which library runs first. Each complete command held exclusive browser access. Positive gaps mean Strider is slower.
+Generated from preserved measurements with `pnpm scenarios:report`. No browsers are launched by report generation. Positive gaps mean Strider is slower.
 
-Chromium uses the same stock Chromium 155.0.8059.79 executable for both libraries. Firefox compares stock Firefox 158.0 over WebDriver BiDi with Playwright-patched Firefox 157.0, revision 1555, build 20261002045257 over Juggler. Browser version, patches, default launch flags and scheduling differ between the Firefox stacks; these are complete-stack comparisons, not isolated library overhead.
+## Provenance and timing boundaries
 
-**Launch boundary:** fresh browser, one page, navigation and verified content, then page/context and browser shutdown. Shutdown is included equally. These numbers cannot be directly compared with the older report’s narrower launch boundary. Filesystem caches were not reset.
+- chromium: Chrome/155.0.8059.79 155.0.8059.79; measured 2026-11-08 at source `fca7e7c1c179d96766ba7839ae649e4f6f4bb9b1`; Playwright 1.64.1; Node v24.21.0; 10 scheduled repetitions after one initial verification/warmup.
+  Same pinned stock executable; each library retains its default launch arguments.
+  Launch boundary: Fresh browser through verified first page and shutdown, one warmup then alternating pairs; no filesystem cache reset.
+- firefox: firefox 158.0; measured 2026-11-08 at source `fca7e7c1c179d96766ba7839ae649e4f6f4bb9b1`; Playwright 1.64.1; Node v24.21.0; 10 scheduled repetitions after one initial verification/warmup.
+  Stock Firefox over BiDi versus Playwright-patched Firefox over Juggler: different versions and patches, not an isolated library comparison.
+  Launch boundary: Fresh browser through verified first page and shutdown, one warmup then alternating pairs; no filesystem cache reset.
 
-**Outcomes:** Chromium exited 0: all 300 timed attempts and all initial checks passed. Firefox exited 1: the recorded Internet login failed its initial Strider check and all ten timed Strider attempts; Playwright passed its initial check and ten attempts. The other 260 Firefox timed attempts passed. That login has no valid timing gap. The same recording passed Chromium, and the separate local HAR scenario passed Firefox; page-coverage validation does not prove complete interaction replay.
+Launch includes shutdown in these preserved runs; its figures cannot be directly compared with the older narrower launch boundary. Default launch flags, waits, scheduling and interception remain in force. This report establishes no performance cause or production fix.
 
-Chromium emitted six `Browser.setDownloadBehavior` declaration-release warnings during the concurrent workload, reporting that the context no longer existed. Outcomes still passed; the timings retain this behavior and its logging cost. This comparison changes no production scheduling or interception behavior.
+## Outcomes and limitations
+
+- chromium: 300/300 timed attempts passed; 30/30 initial checks passed.
+- firefox: 270/280 timed attempts passed; 27/28 initial checks passed.
+  Initial failure, The Internet's login, strider: Expected page.getByText("You logged into a secure area!") to be visible
+  The Internet's login: 10 timed failures; no valid timing gap. Individual errors and failed durations remain in the preserved data and detailed report.
+
+A required-page recording preflight checks GET page coverage, not complete interaction replay. A failed comparison does not establish that a browser feature is generally unsupported. Failures in one scenario do not invalidate other complete pairs.
+
+Times are milliseconds; each cell is **p50 / p90**. Gaps use `(Strider / Playwright - 1) × 100`. The existing estimator selects the sorted sample at `floor(q × n)`: with ten samples p50 is sample six and p90 is the maximum. A p90-only gap is a single tail observation requiring confirmation, not evidence of a sustained regression. Desktop background activity and browser build differences limit attribution. Failed durations are excluded from statistics; gaps are withheld if either library failed any initial or timed attempt.
+
+## Retained correctness observations
+
+- Chromium emitted six Browser.setDownloadBehavior declaration-release rejections during the concurrent workload because the context no longer existed. They fall inside Strider's timed arms; outcomes passed, and those timings include the rejected round trips and logging. This is a separate correctness observation, not a harness error.
+- The recorded Internet login failed for Strider on Firefox, while Playwright passed. The same recording passed Chromium and the separate local HAR recording/replay passed Firefox. The failure's cause is not established; its timing gap is withheld. Protocol traces were not captured by this harness.
 
 ## Paired workflow results
 
-Times are milliseconds. Each cell is **p50 / p90**. Gaps use `(Strider / Playwright - 1) × 100`. The existing estimator selects the sorted sample at `floor(q × n)`: with ten samples, p50 is the sixth sample and p90 the maximum. This small sample and desktop background activity limit conclusions about tails. Failed durations remain in the raw journal but are excluded from timing statistics; comparisons with any failed attempt are withheld.
-
 | Browser | Scenario | Strider p50 / p90 | Playwright p50 / p90 | p50 gap | p90 gap |
 |---|---|---:|---:|---:|---:|
-| Chromium | Launch, first page, and shutdown | 241.575 / 282.861 | 218.617 / 232.007 | +10.5% | +21.9% |
-| Chromium | 20 pages in one context | 1881.313 / 1925.979 | 1409.896 / 1415.484 | +33.4% | +36.1% |
-| Chromium | 300 actions in one session | 10060.742 / 10063.954 | 5066.266 / 5069.124 | +98.6% | +98.5% |
-| Chromium | 4 parallel tests sharing one browser | 1933.386 / 2421.553 | 1119.133 / 1300.736 | +72.8% | +86.2% |
-| Chromium | The README's program | 98.052 / 116.010 | 100.307 / 117.258 | -2.2% | -1.1% |
-| Chromium | A login reused through storage state | 327.546 / 342.132 | 270.759 / 288.732 | +21.0% | +18.5% |
-| Chromium | A popup with a dialog inside it | 153.832 / 167.628 | 149.768 / 151.562 | +2.7% | +10.6% |
-| Chromium | A route that blocks analytics | 73.869 / 79.174 | 71.705 / 83.672 | +3.0% | -5.4% |
-| Chromium | A file upload, from bytes | 107.866 / 133.666 | 73.515 / 80.731 | +46.7% | +65.6% |
-| Chromium | A response's body, from a click | 113.686 / 173.837 | 117.096 / 122.485 | -2.9% | +41.9% |
-| Chromium | Waiting for the navigation a click causes | 158.119 / 169.262 | 165.734 / 181.190 | -4.6% | -6.6% |
-| Chromium | A HAR recorded, then replayed | 150.120 / 156.494 | 148.153 / 162.103 | +1.3% | -3.5% |
-| Chromium | The Internet's login | 248.297 / 263.577 | 231.955 / 238.169 | +7.0% | +10.7% |
-| Chromium | The Internet's dynamic controls | 3169.554 / 3187.136 | 3397.197 / 3402.964 | -6.7% | -6.3% |
-| Firefox | Launch, first page, and shutdown | 1166.442 / 1190.372 | 863.455 / 981.699 | +35.1% | +21.3% |
-| Firefox | 20 pages in one context | 5053.176 / 5319.278 | 3616.092 / 4615.432 | +39.7% | +15.2% |
-| Firefox | 300 actions in one session | 10219.790 / 10223.636 | 7627.677 / 7849.637 | +34.0% | +30.2% |
-| Firefox | 4 parallel tests sharing one browser | 2314.355 / 2385.491 | 2154.378 / 2712.516 | +7.4% | -12.1% |
-| Firefox | The README's program | 264.024 / 270.618 | 188.703 / 576.447 | +39.9% | -53.1% |
-| Firefox | A login reused through storage state | 973.605 / 1035.142 | 548.981 / 1331.365 | +77.3% | -22.2% |
-| Firefox | A popup with a dialog inside it | 543.639 / 580.141 | 292.083 / 1035.155 | +86.1% | -44.0% |
-| Firefox | A route that blocks analytics | 317.717 / 323.695 | 135.113 / 654.066 | +135.1% | -50.5% |
-| Firefox | A file upload, from bytes | 298.140 / 386.050 | 142.069 / 695.241 | +109.9% | -44.5% |
-| Firefox | A response's body, from a click | 348.724 / 587.540 | 187.413 / 668.258 | +86.1% | -12.1% |
-| Firefox | Waiting for the navigation a click causes | 390.655 / 1262.863 | 267.316 / 808.769 | +46.1% | +56.1% |
-| Firefox | A HAR recorded, then replayed | 574.137 / 669.190 | 295.645 / 859.207 | +94.2% | -22.1% |
-| Firefox | The Internet's login | – | 323.887 / 567.621 | incomplete | incomplete |
-| Firefox | The Internet's dynamic controls | 3429.834 / 3463.719 | 3486.576 / 3808.652 | -1.6% | -9.1% |
+| chromium | Launch, first page, and shutdown | 241.575 / 282.861 | 218.617 / 232.007 | +10.5% | +21.9% |
+| chromium | 20 pages in one context | 1881.313 / 1925.979 | 1409.896 / 1415.484 | +33.4% | +36.1% |
+| chromium | 300 actions in one session | 10060.742 / 10063.954 | 5066.266 / 5069.124 | +98.6% | +98.5% |
+| chromium | 4 parallel tests sharing one browser | 1933.386 / 2421.553 | 1119.133 / 1300.736 | +72.8% | +86.2% |
+| chromium | The README's program | 98.052 / 116.010 | 100.307 / 117.258 | -2.2% | -1.1% |
+| chromium | A login reused through storage state | 327.546 / 342.132 | 270.759 / 288.732 | +21.0% | +18.5% |
+| chromium | A popup with a dialog inside it | 153.832 / 167.628 | 149.768 / 151.562 | +2.7% | +10.6% |
+| chromium | A route that blocks analytics | 73.869 / 79.174 | 71.705 / 83.672 | +3.0% | -5.4% |
+| chromium | A file upload, from bytes | 107.866 / 133.666 | 73.515 / 80.731 | +46.7% | +65.6% |
+| chromium | A response's body, from a click | 113.686 / 173.837 | 117.096 / 122.485 | -2.9% | +41.9% |
+| chromium | Waiting for the navigation a click causes | 158.119 / 169.262 | 165.734 / 181.190 | -4.6% | -6.6% |
+| chromium | A HAR recorded, then replayed | 150.120 / 156.494 | 148.153 / 162.103 | +1.3% | -3.5% |
+| chromium | The Internet's login | 248.297 / 263.577 | 231.955 / 238.169 | +7.0% | +10.7% |
+| chromium | The Internet's dynamic controls | 3169.554 / 3187.136 | 3397.197 / 3402.964 | -6.7% | -6.3% |
+| firefox | Launch, first page, and shutdown | 1166.442 / 1190.372 | 863.455 / 981.699 | +35.1% | +21.3% |
+| firefox | 20 pages in one context | 5053.176 / 5319.278 | 3616.092 / 4615.432 | +39.7% | +15.2% |
+| firefox | 300 actions in one session | 10219.790 / 10223.636 | 7627.677 / 7849.637 | +34.0% | +30.2% |
+| firefox | 4 parallel tests sharing one browser | 2314.355 / 2385.491 | 2154.378 / 2712.516 | +7.4% | -12.1% |
+| firefox | The README's program | 264.024 / 270.618 | 188.703 / 576.447 | +39.9% | -53.1% |
+| firefox | A login reused through storage state | 973.605 / 1035.142 | 548.981 / 1331.365 | +77.3% | -22.2% |
+| firefox | A popup with a dialog inside it | 543.639 / 580.141 | 292.083 / 1035.155 | +86.1% | -44.0% |
+| firefox | A route that blocks analytics | 317.717 / 323.695 | 135.113 / 654.066 | +135.1% | -50.5% |
+| firefox | A file upload, from bytes | 298.140 / 386.050 | 142.069 / 695.241 | +109.9% | -44.5% |
+| firefox | A response's body, from a click | 348.724 / 587.540 | 187.413 / 668.258 | +86.1% | -12.1% |
+| firefox | Waiting for the navigation a click causes | 390.655 / 1262.863 | 267.316 / 808.769 | +46.1% | +56.1% |
+| firefox | A HAR recorded, then replayed | 574.137 / 669.190 | 295.645 / 859.207 | +94.2% | -22.1% |
+| firefox | The Internet's login | – | 323.887 / 567.621 | incomplete | incomplete |
+| firefox | The Internet's dynamic controls | 3429.834 / 3463.719 | 3486.576 / 3808.652 | -1.6% | -9.1% |
 
-Video demonstrations have no Playwright twin and are retained only as Strider outcomes in the Chromium command’s detailed report. Firefox omits these demonstrations and the Chromium-only CPU, Fetch and automation-tell diagnostics. It does not time substitute workloads.
+Video demonstrations without Playwright twins have no comparison gap. Unsupported comparisons and Chromium-only diagnostics are labeled in each run's detailed report.
 
 ## Reproduction and evidence
 
-See [the scenario instructions](README.md) for the fixed workload sizes, pinned Firefox provisioning and commands. Each run’s external evidence directory retains `measurements.json`, ordered `attempts.jsonl`, recording validation, source snapshots and hashes, machine/environment metadata, browser versions, executable hashes and launch settings. Chromium also retains raw diagnostic samples. Earlier unsuccessful smoke checks were kept separately. The tables above are recomputed from those raw samples; the detailed reports below retain their original metadata and source.
+See [the scenario instructions](README.md) for the executable regeneration command, workload sizes and pinned browser provisioning. Inputs are the preserved measurements.json files; an optional source-bound context file retains reviewed correctness observations. Raw ordered attempts, recording validation, source snapshots/hashes, exact browser versions, executable hashes and launch settings remain in the external evidence directories. Detailed reports below are generated from those same measurements, including their original metadata and source.
 
-## Chromium detailed report
+## chromium detailed report
 
-*Written by `pnpm scenarios` on 2026-11-08: Chrome/155.0.8059.79 155.0.8059.79, the integration environment's, driven headless by Strider at `fca7e7c` and by Playwright 1.64.1 through `playwright-core`; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 2.5 3.3 3.9 at the end. Timings are each scenario's wall time over 10 scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
+*Written by `pnpm scenarios` on 2026-11-08: Chrome/155.0.8059.79 155.0.8059.79, the integration environment's, driven headless by Strider at `fca7e7c` and by Playwright 1.64.1 through `playwright-core`; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 2.5 3.3 3.9 at the end. Timings are each scenario's wall time over 10 scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Regenerate from saved measurements with `pnpm scenarios:report`.*
 
 ```json
 {
@@ -809,9 +826,9 @@ const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
 ```
 
 
-## Firefox detailed report
+## firefox detailed report
 
-*Written by `pnpm scenarios` on 2026-11-08: firefox 158.0, the integration environment's, driven headless by Strider at `fca7e7c` and by Playwright 1.64.1 through `playwright-core`; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 1.8 2.4 3.1 at the end. Timings are each scenario's wall time over 10 scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Don't edit: run `pnpm scenarios` again.*
+*Written by `pnpm scenarios` on 2026-11-08: firefox 158.0, the integration environment's, driven headless by Strider at `fca7e7c` and by Playwright 1.64.1 through `playwright-core`; Node v24.21.0; AMD Ryzen 9 9900X 12-Core Processor, 24 threads, 60 GiB, Linux 7.2.10, load 1.8 2.4 3.1 at the end. Timings are each scenario's wall time over 10 scheduled runs after one that warms it up, which libraries take turns going first in; the machine is a desktop, so they move with whatever else it runs. Regenerate from saved measurements with `pnpm scenarios:report`.*
 
 ```json
 {
