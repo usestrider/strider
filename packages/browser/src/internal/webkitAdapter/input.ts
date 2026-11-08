@@ -166,43 +166,8 @@ export const dispatchInputLaunched = Effect.fnUntraced(
 // ── Frames and nodes ──────────────────────────────────────────────────────────────────────────────────────
 
 // A frame's Automation handle: the main frame's is "", a child's found among its parent's children by its
-// document, as a page's is by its own (QUIRKS.md, Q219)
+// window mark (QUIRKS.md, Q228); page pairing remains separate (Q219)
 const mainFrameHandle = "" as Automation.FrameHandle
-const frameIdentity = "function() { return [performance.timeOrigin, location.href] }"
-
-/** What the inspector says of a frame's current document: its time origin and URL, in the page's world. */
-const identityOf = Effect.fnUntraced(function*(frame: FrameEntry) {
-  const realm = pageWorldOf(frame)
-  if (realm === undefined) return Option.none<string>()
-  return yield* Runtime.evaluate({
-    expression: `JSON.stringify((${frameIdentity})())`,
-    contextId: realm.contextId as Runtime.ExecutionContextId,
-    returnByValue: true,
-    doNotPauseOnExceptionsAndMuteConsole: true
-  }).pipe(
-    Protocol.on(realm.session),
-    Effect.map((reply) => reply.result.value as string),
-    Effect.option
-  )
-})
-
-/** What Automation says of a frame's document, by its handle. */
-const automationIdentityOf = (
-  process: WebKitAutomation.Process,
-  handle: Automation.BrowsingContextHandle,
-  frameHandle: Automation.FrameHandle
-) =>
-  Automation.evaluateJavaScriptFunction({
-    browsingContextHandle: handle,
-    frameHandle,
-    function: `function() { return JSON.stringify((${frameIdentity})()) }`,
-    arguments: []
-  }).pipe(
-    Protocol.on(process.automation),
-    Effect.map(({ result }) => resultOf(result) as Option.Option<string>),
-    Effect.orElseSucceed(() => Option.none<string>())
-  )
-
 /** The page's world of a frame's current document. */
 const pageWorldOf = (frame: FrameEntry) =>
   [...(frame.document?.realms ?? [])].find((each) =>
@@ -211,7 +176,7 @@ const pageWorldOf = (frame: FrameEntry) =>
 
 /**
  * Whether Automation's frame is `candidate`: a mark Automation leaves on the frame's window, which the inspector
- * looks for in the candidate's, removed at once. Used when document fingerprints are ambiguous or disagree.
+ * looks for in the candidate's, removed at once. Every new child-frame pairing is confirmed this way.
  */
 const isMarked = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process,
@@ -246,23 +211,14 @@ const isMarked = Effect.fnUntraced(function*(
   )
 })
 
-/** Which of `candidates` holds the document Automation's frame shows: the one alike, or the one marked. */
+/** Which of `candidates` is Automation's frame, confirmed by a temporary mark on its window. */
 export const matchFrame = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process,
   handle: Automation.BrowsingContextHandle,
   frameHandle: Automation.FrameHandle,
   candidates: ReadonlyArray<FrameEntry>
 ) {
-  const theirs = yield* automationIdentityOf(process, handle, frameHandle)
-  if (Option.isNone(theirs)) return Option.none<FrameEntry>()
-  const alike: Array<FrameEntry> = []
   for (const candidate of candidates) {
-    if (candidate.removed) continue
-    const ours = yield* identityOf(candidate)
-    if (Option.isSome(ours) && ours.value === theirs.value) alike.push(candidate)
-  }
-  if (alike.length === 1) return Option.some(alike[0]!)
-  for (const candidate of alike.length === 0 ? candidates : alike) {
     if (yield* isMarked(process, handle, frameHandle, candidate)) return Option.some(candidate)
   }
   return Option.none<FrameEntry>()
@@ -280,11 +236,8 @@ export const frameHandleOf = (
     const known = state.frameHandles.get(frame)
     if (known !== undefined) return Option.some(known)
     const parent = yield* frameHandleOf(state, frame.parent, handle, process)
-    const ours = yield* identityOf(frame)
-    if (Option.isNone(parent) || Option.isNone(ours)) return Option.none()
-    // The parent's frames, as `window.frames` orders them, whose documents are alike
-    const children: Array<Automation.FrameHandle> = []
-    const alike: Array<Automation.FrameHandle> = []
+    if (Option.isNone(parent)) return Option.none()
+    // Confirm each child window in the parent's frame order; document fingerprints are not identity.
     for (let ordinal = 0; ordinal < 1000; ordinal++) {
       const child = yield* Automation.resolveChildFrameHandle({
         browsingContextHandle: handle,
@@ -293,14 +246,9 @@ export const frameHandleOf = (
       }).pipe(Protocol.on(process.automation), Effect.map(({ result }) => result), answered)
       // Past the last frame, Automation answers with the main frame's handle (QUIRKS.md, Q227)
       if (Option.isNone(child) || child.value === mainFrameHandle) break
-      children.push(child.value)
-      const theirs = yield* automationIdentityOf(process, handle, child.value)
-      if (Option.isSome(theirs) && theirs.value === ours.value) alike.push(child.value)
-    }
-    for (const child of alike.length === 0 ? children : alike) {
-      if (alike.length === 1 || (yield* isMarked(process, handle, child, frame))) {
-        state.frameHandles.set(frame, child)
-        return Option.some(child)
+      if (yield* isMarked(process, handle, child.value, frame)) {
+        state.frameHandles.set(frame, child.value)
+        return Option.some(child.value)
       }
     }
     return Option.none()
