@@ -13,7 +13,8 @@ const childHandle = "child" as Automation.FrameHandle
 
 const fixture = (
   mode: "normal" | "replace" | "removed" | "error" | "cleanup replacement" = "normal",
-  origins: ReadonlyArray<number> = [101, 101]
+  origins: ReadonlyArray<number> = [101, 101],
+  reverseSiblings = false
 ) => {
   let marks = 0
   const windows = [{}, {}]
@@ -55,15 +56,29 @@ const fixture = (
       send: (command: Protocol.Command<string, unknown, unknown>) =>
         Effect.sync(() => {
           if (command.method === "Automation.resolveChildFrameHandle") {
-            return { result: (command.params as { ordinal: number }).ordinal === 0 ? childHandle : "" }
+            return {
+              result: (reverseSiblings ? ["sibling", childHandle] : [childHandle])[
+                (command.params as { ordinal: number }).ordinal
+              ] ?? ""
+            }
           }
           const params = command.params as Automation.EvaluateJavaScriptFunctionParams
-          if (params.function.includes("timeOrigin")) return { result: JSON.stringify("[100,\"about:srcdoc\"]") }
+          if (params.function.includes("timeOrigin")) {
+            const origin = reverseSiblings && params.frameHandle === childHandle ? 101 : 100
+            return { result: JSON.stringify(`[${origin},"about:srcdoc"]`) }
+          }
           if (params.function.includes("Object.defineProperty")) marks++
           if (params.function.includes("delete window") && mode === "cleanup replacement") {
             frames[1]!.document = { ...frames[1]!.document } as State.DocumentEntry
           }
-          return { result: JSON.stringify(vm.runInContext(`(${params.function})()`, contexts[1]!)) ?? "null" }
+          return {
+            result: JSON.stringify(
+              vm.runInContext(
+                `(${params.function})()`,
+                contexts[reverseSiblings && params.frameHandle !== childHandle ? 0 : 1]!
+              )
+            ) ?? "null"
+          }
         })
     }
   } as unknown as Parameters<typeof Input.matchFrame>[0]
@@ -102,6 +117,22 @@ describe("WebKit frame identity", () => {
       const { frames, process } = fixture("normal", [100, 101])
       const result = yield* Input.matchFrame(process, handle, childHandle, frames)
       assert.strictEqual(Option.getOrUndefined(result), frames[1], "the marked window is the target, not the sibling")
+    }))
+
+  it.effect("does not cache a reverse sibling handle whose fingerprint alone matches", () =>
+    Effect.gen(function*() {
+      const { clean, frames, process } = fixture("normal", [100, 100], true)
+      const frame = frames[1]!
+      Object.assign(frame, { parent: { parent: undefined } })
+      const state = { frameHandles: new WeakMap() } as unknown as State.State
+      const result = yield* Input.frameHandleOf(state, frame, handle, process)
+      assert.strictEqual(
+        Option.getOrUndefined(result),
+        childHandle,
+        "the sibling's matching fingerprint is not identity"
+      )
+      assert.strictEqual(state.frameHandles.get(frame), childHandle)
+      clean()
     }))
 
   for (const mode of ["normal", "replace", "removed", "error", "cleanup replacement"] as const) {
