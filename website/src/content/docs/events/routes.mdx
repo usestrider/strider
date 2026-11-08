@@ -56,6 +56,8 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - On Chromium, a route also sees a cross-origin request's CORS preflight, an `OPTIONS` request, which Firefox and
   WebKit don't show.
+- On Chromium, a prefetch sent through `<script type="speculationrules">` isn't passed to the page's or context's
+  routes and reaches the server as the page sent it.
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
 - A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
