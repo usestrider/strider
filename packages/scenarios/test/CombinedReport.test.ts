@@ -64,15 +64,14 @@ it("regenerates a combined report from saved measurements without running browse
 })
 
 it("prints single-browser output without replacing the combined report", async () => {
-  fs.mkdirSync(directory, { recursive: true })
-  const combined = path.join(directory, "RESULTS.md")
-  fs.writeFileSync(combined, "combined report")
+  const combined = new URL("../RESULTS.md", import.meta.url)
+  const before = fs.readFileSync(combined, "utf8")
   let printed = ""
   Report.writeRunReport(await measurements("chromium"), undefined, (text) => {
     printed = text
   })
   expect(printed).toContain("chromium")
-  expect(fs.readFileSync(combined, "utf8")).toBe("combined report")
+  expect(fs.readFileSync(combined, "utf8")).toBe(before)
 })
 
 it("keeps reviewed observations tied to their measured source commit", async () => {
@@ -89,4 +88,37 @@ it("describes the estimator for the runs' own sample count", async () => {
   const written = Report.combine(runs.map((run) => ({ ...run, runs: 3 })))
   expect(written).not.toContain("with ten samples")
   expect(written).toContain("3 scheduled repetitions")
+})
+
+const sampled = async (engine: string, runs: number, failLast = false): Promise<Report.Measurements> => {
+  const base = await measurements(engine)
+  let calls = 0
+  return {
+    ...base, runs,
+    scenarios: await runScenarios([base.scenarios[0]!.scenario], runs, () => ({
+      strider: async () => ++calls === runs + 1 && failLast ? "wrong" : "ok",
+      playwright: async () => "ok"
+    }), () => {})
+  }
+}
+
+it("describes mixed successful sample counts without treating a large-run p90 as the maximum", async () => {
+  const written = Report.combine(await Promise.all([sampled("chromium", 3), sampled("firefox", 100)]))
+  expect(written).toContain("3 scheduled repetitions")
+  expect(written).toContain("100 scheduled repetitions")
+  expect(written).toContain("| 3 | 2 | 3 (maximum) |")
+  expect(written).toContain("| 100 | 51 | 91 |")
+  expect(written).not.toContain("91 (maximum)")
+  expect(written).not.toContain("A p90-only gap is a single tail observation")
+})
+
+it("describes successful samples rather than scheduled attempts after a failure", async () => {
+  const written = Report.combine(await Promise.all([sampled("chromium", 100, true), sampled("firefox", 10)]))
+  expect(written).toContain("| 99 | 50 | 90 |")
+  expect(written).toContain("| 100 | 51 | 91 |")
+  expect(written).toContain("| 10 | 6 | 10 (maximum) |")
+  expect(written).toContain("incomplete")
+  const zero = Report.combine(await Promise.all([measurements("chromium"), measurements("firefox")]))
+  expect(zero).toContain("| 0 | – | – |")
+  expect(zero).not.toContain("NaN")
 })
