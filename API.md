@@ -511,6 +511,7 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   readonly isChecked: Effect<boolean, LocatorError>      // a checkbox's, a radio's or an ARIA checkable's; else WrongElement
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, LocatorError>   // pinned to the current nth matches
   readAttribute(name: string): Effect<Option<string>, LocatorError>
+  readonly boundingBox: Effect<Option<Locator.BoundingBox>, LocatorError> // main-frame viewport CSS pixels
   snapshot(options?: Snapshot.Options | undefined): Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError>   // this element's subtree
   evaluate<Args extends ReadonlyArray<unknown>, B>(      // the isolated world, with the element first; strict: exactly one match
     fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
@@ -597,6 +598,7 @@ Strider does not change design mode or synthesize input to work around this brow
 - **Strictness.** An action needs exactly one match, and ambiguity fails immediately with `StrictViolation`. There is no retry window. Strictness counts every match, hidden ones included, and the hint says when narrowing would fix it, e.g. "1 of 2 matches is visible; add `.filter({ visible: true })`". If duplicates are expected to be transient (a fading toast), say so in the code: `yield* toast.pipe(Expect.toHaveCount(0))` before acting.
 - **`has:` takes only a `RelativeLocator`.** That makes Playwright's silent "page-rooted locator inside `has`" mismatch a type error.
 - **Once only.** An action dispatches at most once per call. If a later step fails after input may have reached the page, the error carries that evidence and the action is never replayed. The one exception is a gesture the guard stopped, which the page's handlers provably never saw.
+- **Bounding boxes describe layout.** `boundingBox` reads the axis-aligned border box in main-frame viewport CSS pixels, adding child-frame content origins including borders and padding. Scrolling can make coordinates negative. It returns `None` for elements without layout boxes (`display: none`, `display: contents`), but retains hidden, transparent and zero-size boxes. It never scrolls, focuses or waits for visibility. Transforms on the target are included; scaling, rotation, perspective or zoom on ancestor frames fails with `Unsupported`.
 - **Reads are strict and immediate.** A read needs exactly one match: several fail with `StrictViolation`, as an action does, and none fails at once with `NoMatch`, since a read never waits. `readText` is the engine's text, the whitespace-collapsed text content `getByText` matches, so a locator found by a text reads that text back; `innerText` depends on layout and differs between engines. `count` and `all` take any number of matches.
 
 ## Keyboard, mouse, frames and handles

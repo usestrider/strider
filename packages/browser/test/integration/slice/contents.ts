@@ -227,6 +227,21 @@ export const contents = (
             ),
             0
           )
+          yield* page.evaluateInMainWorld(() => {
+            document.body.style.height = "3000px"
+            window.scrollTo(0, 100)
+          })
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 69, y: -21, width: 20, height: 30 }))
+          yield* page.evaluateInMainWorld(() => {
+            document.body.style.transform = "scale(2)"
+          })
+          const refused = reasonOf(yield* Effect.exit(target.boundingBox))
+          assert.strictEqual(refused?.reason?._tag, "Unsupported")
+          yield* page.evaluateInMainWorld(() => {
+            document.body.style.transform = "none"
+            document.querySelector<HTMLElement>("#outer")!.style.display = "none"
+          })
+          assert.deepStrictEqual(yield* target.boundingBox, Option.none())
         }), timeout)
 
       // ── Evaluation and handles ──

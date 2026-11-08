@@ -893,6 +893,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 
 *models*
 
+- `type BoundingBox = typeof BoundingBox.Type`
 - `interface RoleOptions`
   - `readonly level?: number | undefined`
   - `readonly checked?: boolean | undefined`
@@ -932,6 +933,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `describe(label: string): ReadonlyLocator`
   - `readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly boundingBox: Effect.Effect<Option.Option<BoundingBox>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readValue: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
@@ -1017,6 +1019,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 
 *schemas*
 
+- `const BoundingBox = Schema.Struct({ x: Schema.Number.check(Schema.isFinite()), y: Schema.Number.check(Schema.isFinite()), width: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)), height: Schema.N…`
 - `const LocatorErrorReason = Schema.Union([StrictViolation, StaleRef, NoMatch, WrongElement, StateUnchanged, NotEditable, FileUnreadable, Reason.InvalidInput, Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted,…`
 
 *constructors*

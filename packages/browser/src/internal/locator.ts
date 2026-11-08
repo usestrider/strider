@@ -321,6 +321,72 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     )
   }
 
+  get boundingBox() {
+    const operation = "Locator.boundingBox"
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
+      const record = yield* Operation.record
+      const read = (request: Engine.Request) =>
+        Runtime.sendRouted(
+          this.owner.runtime,
+          this.owner.page,
+          request,
+          record.id,
+          record.budget.at
+        ).pipe(Effect.mapError((failure) =>
+          failure._tag === "Deadline"
+            ? record.timeout(Option.fromUndefinedOr(failure.hint))
+            : this.sendFailure(operation, failure, record)
+        ))
+      const answer = yield* read({ op: "boundingBox", steps: this.steps })
+      const response = answer.response
+      const noMatch = () =>
+        Effect.fail(
+          this.error(
+            operation,
+            new Locator.NoMatch({ hint: "A read never waits; Expect waits for what it expects" }),
+            record.id
+          )
+        )
+      if (response._tag === "NoMatch") return yield* noMatch()
+      if (response._tag !== "BoundingBox") return yield* this.unmatched(operation, response, record.id)
+      if (response.box === null) return Option.none<Locator.BoundingBox>()
+      let { x, y } = response.box
+      // Read ancestors through the same routing/deadline machinery. No input permit, scroll or action checks.
+      for (let index = answer.routed.hops.length - 1; index >= 0; index--) {
+        const steps: Array<Engine.Step> = []
+        for (let parent = 0; parent < index; parent++) {
+          steps.push(...answer.routed.hops[parent]!.steps, { _tag: "Frame" })
+        }
+        steps.push(...answer.routed.hops[index]!.steps)
+        const frame = (yield* read({ op: "boundingBoxFrame", steps })).response
+        if (frame._tag === "UnsupportedGeometry") {
+          return yield* Effect.fail(
+            this.error(
+              operation,
+              new Reason.Unsupported({
+                capability: "Locator.boundingBox",
+                backend: this.owner.runtime.backend,
+                hint: "Scaling, rotation, perspective and zoom on ancestor frames cannot be mapped by frame routing"
+              }),
+              record.id
+            )
+          )
+        }
+        if (frame._tag === "NoMatch") return yield* noMatch()
+        if (frame._tag !== "BoundingBox") return yield* this.unmatched(operation, frame, record.id)
+        if (frame.box === null) return Option.none<Locator.BoundingBox>()
+        x += frame.box.x
+        y += frame.box.y
+      }
+      return Option.some({ ...response.box, x, y })
+    }).pipe(
+      Operation.named(operation, {
+        attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+      })
+    )
+  }
+
   get isVisible() {
     return this.read(
       "Locator.isVisible",

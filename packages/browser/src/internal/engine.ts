@@ -24,6 +24,7 @@
  */
 
 import * as Schema from "effect/Schema"
+import { BoundingBox } from "../Locator.ts"
 
 /** How a query matches text. */
 export type TextMatcher =
@@ -312,6 +313,7 @@ export type Request =
   | { readonly op: "explain"; readonly steps: ReadonlyArray<Step> }
   /** The one match's box in its viewport, and its document's scroll offset. */
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
+  | { readonly op: "boundingBox" | "boundingBoxFrame"; readonly steps: ReadonlyArray<Step> }
   /** The document's doctype and HTML. */
   | { readonly op: "html" }
 
@@ -400,6 +402,10 @@ export const Response = Schema.Union([
     /** How many of the steps matched. */
     prefix: Schema.Number
   }),
+  Schema.TaggedStruct("BoundingBox", {
+    box: Schema.NullOr(BoundingBox)
+  }),
+  Schema.TaggedStruct("UnsupportedGeometry", {}),
   Schema.TaggedStruct("Rect", {
     rect: Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number }),
     scroll: Point
@@ -2609,6 +2615,41 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "Explained", matched: false, nearest, suggestions, prefix }
   }
 
+  const boundingBox = (steps: ReadonlyArray<Step>, frame: boolean): Response => {
+    const found = resolve(steps)
+    if (found.length > 1) return strict(found)
+    if (found.length === 0) return { _tag: "NoMatch" }
+    const element = found[0]!
+    if (element.getClientRects().length === 0) return { _tag: "BoundingBox", box: null }
+    const rect = element.getBoundingClientRect()
+    if (!frame) return { _tag: "BoundingBox", box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }
+    // Translation is the frame-routing contract. Refuse geometry it cannot map, including transforms on hosts.
+    let ancestor: Element | null = element
+    while (ancestor !== null) {
+      const style = getComputedStyle(ancestor)
+      const matrix = style.transform === "none" ? null : new DOMMatrixReadOnly(style.transform)
+      if (
+        (matrix !== null && (!matrix.is2D || matrix.a !== 1 || matrix.b !== 0 || matrix.c !== 0 || matrix.d !== 1)) ||
+        (style.scale !== "none" && style.scale !== "1") || style.rotate !== "none" ||
+        style.perspective !== "none" || (style.zoom !== "normal" && Number(style.zoom) !== 1)
+      ) {
+        return { _tag: "UnsupportedGeometry" }
+      }
+      ancestor = ancestor.parentElement ??
+        (ancestor.getRootNode() instanceof ShadowRoot ? (ancestor.getRootNode() as ShadowRoot).host : null)
+    }
+    const style = getComputedStyle(element)
+    return {
+      _tag: "BoundingBox",
+      box: {
+        x: rect.x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+        y: rect.y + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+        width: rect.width,
+        height: rect.height
+      }
+    }
+  }
+
   const rect = (steps: ReadonlyArray<Step>): Response => {
     const found = resolve(steps)
     if (found.length > 1) return strict(found)
@@ -2795,6 +2836,9 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(snapshot(request))
         case "explain":
           return JSON.stringify(explain(request.steps))
+        case "boundingBox":
+        case "boundingBoxFrame":
+          return JSON.stringify(boundingBox(request.steps, request.op === "boundingBoxFrame"))
         case "rect":
           return JSON.stringify(rect(request.steps))
         case "html":
