@@ -292,6 +292,52 @@ describe("Chromium launcher", () => {
         assert.include(error.reason.stderrTail, "broken profile")
       }))
 
+    it.effect("reports stderr drained after process exit, including the final unterminated chunk", () =>
+      Effect.gen(function*() {
+        const exitObserved = yield* Deferred.make<void>()
+        const releaseStderr = yield* Deferred.make<void>()
+        const stderr = Stream.fromEffect(Deferred.await(releaseStderr)).pipe(
+          Stream.flatMap(() =>
+            Stream.make(
+              new TextEncoder().encode("broken profile\n"),
+              new TextEncoder().encode("final diagnostic without newline")
+            )
+          )
+        )
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000001),
+            exitCode: Deferred.succeed(exitObserved, undefined).pipe(
+              Effect.as(ChildProcessSpawner.ExitCode(3))
+            ),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr,
+            all: stderr,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const launched = yield* Launch.spawn("/fake/chromium", [], "/fake/profile", {}).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+        )
+        const failure = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip, Effect.forkChild)
+        // The exit code is observed while stderr is still blocked, as with an undrained process pipe.
+        yield* Deferred.await(exitObserved)
+        yield* Deferred.succeed(releaseStderr, undefined)
+        // splitLines emits the unterminated final line only at EOF, proving collection reached the end.
+        assert(Option.isSome(yield* launched.stderrLine(/^final diagnostic without newline$/)))
+        const expected = "broken profile\nfinal diagnostic without newline"
+        assert.strictEqual(yield* launched.stderrTail, expected)
+        const error = yield* Fiber.join(failure)
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(3))
+        assert.strictEqual(error.reason.stderrTail, expected)
+      }))
+
     it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
       Effect.gen(function*() {
         const launched = yield* Launch.spawn(
