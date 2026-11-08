@@ -38,7 +38,17 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())))
 
 for (const javaScript of ["enabled", "disabled"] as const) {
-  for (const viewport of [{ width: 375, height: 800 }, { width: 1366, height: 900 }]) {
+  // 320 is the narrowest phone in common use; 390 and 412 are common phones on both sides of the masthead's
+  // 380px breakpoint, where the name reappears.
+  for (
+    const viewport of [
+      { width: 320, height: 800 },
+      { width: 375, height: 800 },
+      { width: 390, height: 844 },
+      { width: 412, height: 915 },
+      { width: 1366, height: 900 }
+    ]
+  ) {
     for (const path of ["introduction", "playwright"]) {
       it(
         `${path} contains document, header controls and tables at ${viewport.width}×${viewport.height} (${javaScript} JavaScript)`,
