@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      macos-diagnostics:
+        description: Run only the macOS suite once and retain native crash diagnostics
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,6 +21,7 @@ concurrency:
 
 jobs:
   integration:
+    if: ${{ inputs.macos-diagnostics != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -75,15 +81,27 @@ jobs:
         run: pnpm install --frozen-lockfile
       # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
       # The entry point verifies pinned browser, ffmpeg and ffprobe downloads before running real video tests.
+      - name: Start native crash report capture
+        if: inputs.macos-diagnostics
+        run: node scripts/macos-crash-reports.mjs start
       - name: Install verified macOS browsers and video tools, then run integration tests
+        id: macos-suite
+        env:
+          STRIDER_MACOS_WORKER_DIAGNOSTICS: ${{ inputs.macos-diagnostics && '1' || '' }}
         run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
+      - name: Collect native crash reports
+        if: always() && inputs.macos-diagnostics
+        env:
+          STRIDER_MACOS_SUITE_OUTCOME: ${{ steps.macos-suite.outcome }}
+        run: node scripts/macos-crash-reports.mjs finish
       - name: Keep the macOS log
-        if: failure() || cancelled()
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-macos-log
           path: |
             integration-macos.log
+            .data/macos-crash-reports/
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14

@@ -10,6 +10,13 @@ import { install, TraceBuffer } from "./failureTrace.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
+// Opt-in for one hosted diagnostic execution; retain only the Chromium worker case and its file context.
+const workerDiagnostics = process.env.STRIDER_MACOS_WORKER_DIAGNOSTICS === "1"
+const diagnosticFile = (task: RunnerTask) =>
+  workerDiagnostics && path.basename(task.file.filepath) === "Chromium.slice.test.ts"
+const diagnosticTest = (task: RunnerTask) =>
+  diagnosticFile(task) &&
+  task.name === "hands out a page's worker, evaluates in it where the backend can, and sees it end"
 const shared = new TraceBuffer()
 let sharedTransfer = new TransferScope(() => connection("child-transfer"))
 const transfers = new Map<string, TransferScope>()
@@ -151,7 +158,7 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.get(task.id)?.close()
     transfers.delete(task.id)
     active.delete(task.id)
-    const file = task.result?.state === "fail" ? filename(task, "test") : undefined
+    const file = (task.result?.state === "fail" || diagnosticTest(task)) ? filename(task, "test") : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
     if (file !== undefined) save(file, running.trace, task.name)
     if (file !== undefined) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
@@ -161,7 +168,7 @@ export default class FailureTraceRunner extends TestRunner {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
     sharedTransfer.close()
-    if (suite.result?.state === "fail") {
+    if (suite.result?.state === "fail" || diagnosticFile(suite)) {
       save(
         filename(suite, "shared"),
         shared,
