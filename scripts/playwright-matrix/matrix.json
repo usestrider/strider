@@ -15447,7 +15447,7 @@
           "url": "/docs/api/browser/Locator#Locator.blur"
         }
       ],
-      "notes": "Removes focus from exactly one match through the page engine without keyboard or pointer input. Hidden, disabled and inert targets are accepted by default; an unfocused target is unchanged. Native blur/focusout handlers run. Stock WebKit shares the page world; Chromium and Firefox use an isolated world.",
+      "notes": "Removes focus from exactly one match through the page engine without keyboard or pointer input. Hidden, disabled and inert targets are accepted by default; an unfocused target is unchanged. Native focus events are preserved; stock WebKitGTK MiniBrowser can fire focusout without blur. Stock WebKit shares the page world; Chromium and Firefox use an isolated world.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15468,20 +15468,39 @@
         },
         "webkit.launched": {
           "status": "has",
-          "limitations": []
+          "limitations": [
+            "Stock WebKitGTK MiniBrowser can fire focusout without blur; native focus events are preserved."
+          ]
         },
         "webkit.attached": {
           "status": "has",
-          "limitations": []
+          "limitations": [
+            "Stock WebKitGTK MiniBrowser can fire focusout without blur; native focus events are preserved."
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Locator.ts"
+          "packages/browser/src/Locator.ts",
+          "packages/browser/test/integration/slice/interaction.ts"
         ],
-        "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+        "scope": "Native element blur, strict matching, ownership, deadlines and browser-native event controls inspected and tested in the interaction slice."
       },
-      "requirements": []
+      "requirements": [],
+      "browserOverrides": {
+        "webkit.launched": {
+          "status": "has",
+          "limitations": [
+            "Stock WebKitGTK MiniBrowser can fire focusout without blur; native focus events are preserved."
+          ]
+        },
+        "webkit.attached": {
+          "status": "has",
+          "limitations": [
+            "Stock WebKitGTK MiniBrowser can fire focusout without blur; native focus events are preserved."
+          ]
+        }
+      }
     },
     {
       "id": "method-locator-boundingbox",
@@ -112868,7 +112887,7 @@
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "517b1d5a1b8c4968a528b3e8055590e10cb1837368b1adbcd5471636fd6ea96f",
+    "packages/browser/src/Locator.ts": "265e426e552604c86ff60068224ce4665584267b3f353f9b70e16c395c6c9ddc",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",

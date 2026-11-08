@@ -45,7 +45,8 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
 [`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer,
-so the browser runs the field's native `blur` and `focusout` handlers. It waits for one match, accepts hidden,
+preserving the browser's native focus events. Stock WebKitGTK's MiniBrowser can fire `focusout` without `blur`.
+It waits for one match, accepts hidden,
 disabled and inert elements by default, and leaves an unfocused element unchanged.
 
 In a design-mode document, filling a paragraph blurs a previously focused input or textarea, including one

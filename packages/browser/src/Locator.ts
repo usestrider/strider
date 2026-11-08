@@ -1167,13 +1167,14 @@ export interface Locator extends ReadonlyLocator {
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
-   * Removes focus from the one match, allowing the browser to fire its native blur and focusout events.
+   * Removes focus from the one match through its native blur method.
    *
    * **Details**
    *
    * Waits for exactly one match without visibility, enabled or inert checks by default. An unfocused element
    * is unchanged. Calls the element's native blur method through Strider's engine without sending keyboard
    * or pointer input. Uses an isolated world where the backend provides one; stock WebKit shares the page world.
+   * Events follow the browser's native behavior: stock WebKitGTK's MiniBrowser can fire `focusout` without `blur`.
    * Missing matches wait until the deadline; several matches fail with `StrictViolation`.
    *
    * **Example** (Leaving an email field)
