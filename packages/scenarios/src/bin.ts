@@ -45,7 +45,14 @@ const only = option("--only")
 if (argv.includes("--q82")) {
   const output = option("--output")
   if (output === undefined || !path.isAbsolute(output)) throw new Error("--q82 requires absolute --output")
-  process.argv = [process.argv[0]!, process.argv[1]!, output, option("--mode") ?? "heavy-control"]
+  process.argv = [
+    process.argv[0]!,
+    process.argv[1]!,
+    output,
+    option("--mode") ?? "heavy-control",
+    option("--workload") ?? "visibility",
+    option("--order") ?? "forward"
+  ]
   await import("../benchmark/observation-profile.ts")
   process.exit(0)
 }
