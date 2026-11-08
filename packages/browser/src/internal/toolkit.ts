@@ -968,7 +968,17 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           register
         ))
   })
-  const handlerContext = yield* Tools.toolkit.toHandlers(handlers)
+  const diagnosed = Object.fromEntries(
+    Object.entries(handlers).map(([name, handler]) => [
+      name,
+      (params: never) =>
+        Effect.map(handler(params), (result) => ({
+          ...result,
+          sinceLast: [...result.sinceLast, ...conceal(Secrets.diagnostics(params, values.keys()))]
+        }))
+    ])
+  ) as typeof handlers
+  const handlerContext = yield* Tools.toolkit.toHandlers(diagnosed)
   const session: Session = {
     toolkit: yield* Effect.provideContext(Tools.toolkit, handlerContext),
     name: (page, given) =>

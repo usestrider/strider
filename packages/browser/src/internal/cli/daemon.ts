@@ -58,6 +58,7 @@ import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as OperationImpl from "../operation.ts"
+import * as Secrets from "../secrets.ts"
 import * as Serialization from "../serialization.ts"
 import * as StorageStates from "../storageState.ts"
 import * as ToolkitImpl from "../toolkit.ts"
@@ -613,6 +614,14 @@ export const commands = (getDaemon: () => Daemon) => {
               getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
+              for (
+                const diagnostic of Secrets.diagnostics(
+                  Option.getOrUndefined(url),
+                  Object.keys(getDaemon().secretVariables)
+                )
+              ) {
+                yield* Console.log(diagnostic)
+              }
             }))
       ).pipe(Command.withDescription(Tools.newPage.description!)),
       Command.make("name", { name: Argument.String("name") }, ({ name }) =>

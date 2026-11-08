@@ -91,7 +91,8 @@ A busy document may retain listeners until it executes the queued release or end
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a
-  URL, is sent as written, and so is a mistyped name.
+  URL, is sent as written, and so is a mistyped name. The result's `sinceLast` warns about unknown placeholder
+  names and suggests a configured name when exactly one is within one insertion, deletion or substitution.
 
 ## Capture policy
 

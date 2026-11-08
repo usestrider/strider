@@ -139,7 +139,9 @@ export interface MakeOptions {
  * **Gotchas**
  *
  * A mistyped secret name isn't an error: `%pasword%` names no secret, so it is sent as written, and a field it fills
- * gets the text `%pasword%`.
+ * gets the text `%pasword%`. The result's `sinceLast` reports unknown placeholder names and suggests a configured
+ * name when exactly one is within one insertion, deletion or substitution. Names start with an ASCII letter and
+ * continue with letters, digits, underscores or hyphens; two hexadecimal digits are treated as URL escapes.
  *
  * **Example** (Building a toolkit for a context)
  *

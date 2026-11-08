@@ -986,6 +986,7 @@ describe("strider", () => {
         const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(checked.code, 0, checked.err)
         assert.notInclude(checked.out, "hunter2")
+        assert.notInclude(checked.out, "names no secret")
         // page new puts a secret into its URL as goto does, and prints the URL with its name
         const vault = yield* run("-s", "shop", "page", "new", "--name", "vault", html(`<p id="pw">`, "</p>"))
         assert.strictEqual(vault.code, 0, vault.err)
@@ -1017,6 +1018,10 @@ describe("strider", () => {
         assert.strictEqual(warned.code, 0, warned.err)
         assert.include(warned.out, "%pasword% names no secret")
         assert.include(warned.out, "Did you mean %password%?")
+        assert.notInclude(warned.out, "hunter2")
+        const warnedJson = yield* shop("--json", "goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warnedJson.code, 0, warnedJson.err)
+        assert.include(JSON.parse(warnedJson.out).sinceLast.join("\n"), "%pasword% names no secret")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
         // State for a program, and a test of what ran, into directories that don't exist yet
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
@@ -1083,6 +1088,8 @@ describe("strider", () => {
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // A percent-escaped URL is the text the session sent
         assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
+        assert.include(exported, "// %pasword% names no secret")
+        assert.notInclude(exported, "%C3% names no secret")
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, help, p\d+/)

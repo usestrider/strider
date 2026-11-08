@@ -734,7 +734,7 @@ describe("BrowserToolkit", () => {
       const first = yield* Browser.newPage()
       const tools = yield* BrowserToolkit.make({
         context: first.context,
-        secrets: { token: Redacted.make("abc") },
+        secrets: { token: Redacted.make("abc%hidden%") },
         capture: CapturePolicy.local
       })
       const call = (name: BrowserToolkit.ToolName, params: Record<string, unknown>) =>
@@ -752,8 +752,11 @@ describe("BrowserToolkit", () => {
       assert.include(went.sinceLast.join("\n"), "%tokn% names no secret")
       assert.include(went.sinceLast.join("\n"), "Did you mean %token%?")
       assert.notInclude(went.sinceLast.join("\n"), "abc")
+      assert.notInclude(went.sinceLast.join("\n"), "%hidden% names no secret")
       const shop = (yield* first.context.pages).find((page) => page.id !== first.id)!
-      assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc&typo=%tokn%")
+      assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc%hidden%&typo=%tokn%")
+      const real = yield* call("goto", { page: "shop", url: "https://example.test/?token=%token%" })
+      assert.notInclude(real.sinceLast.join("\n"), "names no secret")
     })).pipe(Effect.provide(Browser.layerTest(""))))
 
   it.effect("tells of each page it comes to know that no tool opened: one listed in the context, and each popup", () =>

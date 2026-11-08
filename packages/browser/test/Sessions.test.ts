@@ -588,6 +588,22 @@ describe("strider export test", () => {
     assert.include(text, `yield* main.locator("#sale").pipe(Expect.toContainText("50%off%"))\n`)
   })
 
+  it("escapes configured names in diagnostic comments and deduplicates each step", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { "line\n// injected\u2028": "ENV_NAME" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: "https://example.test/?x=%typo%&y=%typo%" }
+      ]
+    })
+    assert.lengthOf(text.match(/names no secret/g) ?? [], 1)
+    assert.notInclude(text, "\n// injected")
+    assert.notInclude(text, "\u2028")
+    assert.include(text, "// %typo% names no secret")
+  })
+
   it("leaves out a check of a text with a secret in it, which a failure would print, and says so", () => {
     const expect = (text: string): ExportTest.Step => ({
       _tag: "Tool",
