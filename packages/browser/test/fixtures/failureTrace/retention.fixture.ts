@@ -7,7 +7,7 @@ if (process.env.STRIDER_TRACE_RETAIN_PASSES === "1") {
     it(`retention budget ${i}`, () => {
       expect(process.env.STRIDER_TRACE_RETAIN_PASSES).toBe("1")
       const record = connection("diagnostic-budget")
-      for (let j = 0; j < 100; j++) record("host-timeout", { operationId: i, detail: "x".repeat(30_000) })
+      for (let j = 0; j < 100; j++) record("host-timeout", { operationId: i, detail: "界".repeat(30_000) })
     })
   }
 } else it.skip("retention quota probe is opt-in", () => {})

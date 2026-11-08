@@ -199,6 +199,16 @@ describe("failure trace runner lifecycle", () => {
     const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
     expect(paths.length).toBeGreaterThan(0)
     expect(paths.reduce((bytes, file) => bytes + fs.statSync(file).size, 0)).toBeLessThanOrEqual(16 * 1024 * 1024)
+    let remaining = 16 * 1024 * 1024
+    for (const file of paths.filter((file) => file.endsWith("-test.ndjson"))) {
+      const text = fs.readFileSync(file, "utf8")
+      const header = JSON.parse(text.split("\n")[0]!)
+      expect(header.passingRetentionRemainingBytes).toBe(remaining)
+      remaining -= Buffer.byteLength(text)
+    }
+    expect(remaining).toBeLessThan(128 * 1024)
+    const artifacts = paths.map((file) => fs.readFileSync(file, "utf8"))
+    expect(artifacts.some((text) => text.includes("Passing diagnostic retention budget exhausted"))).toBe(true)
     for (const file of paths) fs.unlinkSync(file)
   }, 30_000)
 
@@ -218,6 +228,18 @@ describe("failure trace runner lifecycle", () => {
     })
     expect(run.status, run.stdout + run.stderr).toBe(1)
     const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+    const passing = paths.filter((file) => file.endsWith("-test.ndjson"))
+    expect(passing).toHaveLength(1)
+    const entries = fs.readFileSync(passing[0]!, "utf8").trimEnd().split("\n").map((line) => JSON.parse(line))
+    const diagnostic = entries.find((entry) => entry.kind === "host-timeout")
+    const ownership = entries.find((entry) => entry.kind === "connection" && entry.connection === diagnostic.connection)
+    expect(JSON.parse(ownership.payload)).toMatchObject({
+      label: "late-diagnostic",
+      owner: expect.any(String),
+      ambiguousCreator: false
+    })
+    expect(JSON.parse(ownership.payload).owner).not.toBe("shared suite context")
+    expect(entries.some((entry) => entry.payload?.includes("empty-connection"))).toBe(false)
     const kept = paths.some((file) => fs.readFileSync(file, "utf8").includes("\\\"operationId\\\":\\\"late\\\""))
     for (const file of paths) fs.unlinkSync(file)
     expect(kept, "the late test's host-timeout entry should survive the per-file passing budget").toBe(true)
