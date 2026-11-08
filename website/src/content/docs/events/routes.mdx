@@ -56,6 +56,8 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - On Chromium, a route also sees a cross-origin request's CORS preflight, an `OPTIONS` request, which Firefox and
   WebKit don't show.
+- On Chromium, a prefetch sent through `<script type="speculationrules">` isn't passed to the page's or context's
+  routes and reaches the server as the page sent it.
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
 - A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
@@ -66,9 +68,6 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 
 Each decision is an Effect, so a handler returns it directly. After other work in a generator, use
 `return yield*` to return its decision, as in the response handler below.
-
-On Chromium, requests a page sends through speculation rules can bypass both page and context routes and
-configured extra headers.
 
 A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
