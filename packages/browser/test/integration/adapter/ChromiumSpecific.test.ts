@@ -22,6 +22,7 @@ import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
@@ -186,9 +187,7 @@ describe("Chromium adapter, CDP only", () => {
                     })
                   child = launched
                   if (round === 0) {
-                    const [port, browserPath] = (yield* fs.readFileString(`${directory}/DevToolsActivePort`)).split(
-                      "\n"
-                    )
+                    const { port, browserPath } = yield* DevToolsActivePort.read(directory)
                     const peer = yield* CdpConnection.make(
                       yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`)
                     )
@@ -587,10 +586,7 @@ describe("Chromium adapter, CDP only", () => {
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
             // Probe 25: CDP takes several clients at once. Capture creation identity before navigation.
-            const active = yield* Effect.promise(() =>
-              import("node:fs/promises").then((fs) => fs.readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8"))
-            )
-            const [port, browserPath] = active.split("\n")
+            const { port, browserPath } = yield* DevToolsActivePort.read(launched.userDataDir)
             const other = yield* CdpConnection.make(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`))
             const targets = Target.getTargets({}).pipe(
               Protocol.on(other.browser),

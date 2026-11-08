@@ -17,6 +17,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Launch from "../../../src/internal/launch.ts"
 import { site } from "../adapter/harness.ts"
@@ -68,12 +69,8 @@ export const chromiumAttachable = (
       dir,
       {}
     )
-    let active = ""
-    for (let attempt = 0; attempt < 100 && !active.includes("\n"); attempt++) {
-      active = yield* fs.readFileString(`${dir}/DevToolsActivePort`).pipe(Effect.orElseSucceed(() => ""))
-      if (!active.includes("\n")) yield* Effect.sleep("100 millis")
-    }
-    const endpoint = `http://127.0.0.1:${active.split("\n")[0]}`
+    const { port } = yield* DevToolsActivePort.read(dir, { timeout: "10 seconds" })
+    const endpoint = `http://127.0.0.1:${port}`
     yield* Effect.promise(() => fetch(`${endpoint}/json/new?${encodeURIComponent(second)}`, { method: "PUT" }))
     return { endpoint, layer: layerConnect(endpoint).pipe(Layer.provide(NodeSocket.layerWebSocketConstructor)) }
   })

@@ -8,9 +8,9 @@ import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
 // The page prerenders and activates by itself, so no client needs to attach to drive it.
@@ -132,9 +132,7 @@ describe("Chromium identity by attachment", () => {
             Effect.gen(function*() {
               const { origin } = yield* serve
               const { targets, userDataDir } = yield* launch
-              const [port] = (yield* Effect.promise(() => readFile(`${userDataDir}/DevToolsActivePort`, "utf8"))).split(
-                "\n"
-              )
+              const { port } = yield* DevToolsActivePort.read(userDataDir)
               const url = yield* Effect.promise(async () => {
                 const response = await fetch(`http://127.0.0.1:${port}/json/version`)
                 return (await response.json() as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl

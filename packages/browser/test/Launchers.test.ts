@@ -26,6 +26,7 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../src/internal/devToolsActivePort.ts"
 import * as FirefoxLauncher from "../src/internal/firefoxLauncher.ts"
 import * as GVariant from "../src/internal/gvariant.ts"
 import * as Launch from "../src/internal/launch.ts"
@@ -33,6 +34,124 @@ import * as Operation from "../src/internal/operation.ts"
 import * as WebKitAutomation from "../src/internal/webkitAutomation.ts"
 import * as SocketConnector from "../src/protocol/SocketConnector.ts"
 import type * as UserContext from "../src/UserContext.ts"
+
+describe("DevToolsActivePort", () => {
+  for (const port of [1, 9222, 65535]) {
+    it.effect(`accepts port ${port} with or without a final newline`, () =>
+      Effect.sync(() => {
+        for (const ending of ["", "\n"]) {
+          assert.deepStrictEqual(
+            DevToolsActivePort.parse(`${port}\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f${ending}`),
+            {
+              port,
+              browserPath: "/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+            }
+          )
+        }
+      }))
+  }
+  for (
+    const text of [
+      "",
+      "9222",
+      "9222\n",
+      "0\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "65536\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "-1\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "+1\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "1.5\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "1e3\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      " 9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "9222 \n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "9222\n/devtools/page/test",
+      "9222\n/devtools/browser/",
+      "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f path",
+      "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\nextra"
+    ]
+  ) {
+    it.effect(`rejects ${JSON.stringify(text)}`, () =>
+      Effect.sync(() => {
+        assert.isUndefined(DevToolsActivePort.parse(text))
+      }))
+  }
+  it.effect("accepts complete UUIDs without restricting their version or hex case", () =>
+    Effect.sync(() => {
+      for (const id of ["8d0f3c2e-5b7a-7c1d-9e6f-0a1b2c3d4e5f", "8D0F3C2E-5B7A-4C1D-9E6F-0A1B2C3D4E5F"]) {
+        assert.deepStrictEqual(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`), {
+          port: 9222,
+          browserPath: `/devtools/browser/${id}`
+        })
+      }
+    }))
+  for (
+    const id of [
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5g",
+      "8d0f3c2e_5b7a-4c1d-9e6f-0a1b2c3d4e5f",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5ff",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\r",
+      "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f\u2028"
+    ]
+  ) {
+    it.effect(`rejects malformed browser identifier ${id}`, () =>
+      Effect.sync(() => {
+        assert.isUndefined(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`))
+      }))
+  }
+  // Chromium writes `port\n/devtools/browser/<lowercase v4 UUID>` with no final newline, so a read torn inside the
+  // path still has both lines; only the identifier's shape shows the write isn't finished.
+  it.effect("rejects a browser path cut short inside its identifier", () =>
+    Effect.sync(() => {
+      const id = "8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+      assert.deepStrictEqual(DevToolsActivePort.parse(`9222\n/devtools/browser/${id}`), {
+        port: 9222,
+        browserPath: `/devtools/browser/${id}`
+      })
+      for (const length of [1, 8, 20, 35]) {
+        assert.isUndefined(DevToolsActivePort.parse(`9222\n/devtools/browser/${id.slice(0, length)}`))
+      }
+    }))
+  layer(NodeServices.layer)("readiness", (it) => {
+    for (const content of ["9222\n", "65536\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f", undefined]) {
+      it.effect(`bounds waiting for ${JSON.stringify(content)} on the live clock`, () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          let reads = 0
+          const readFileString: FileSystem.FileSystem["readFileString"] = () =>
+            Effect.suspend(() => {
+              reads++
+              return content === undefined ? fs.readFileString("/missing-strider-active-port") : Effect.succeed(content)
+            })
+          const exit = yield* DevToolsActivePort.read("/profile", { timeout: "120 millis" }).pipe(
+            Effect.provideService(FileSystem.FileSystem, { ...fs, readFileString }),
+            Effect.exit
+          )
+          assert.isTrue(Exit.isFailure(exit))
+          assert.isAtLeast(reads, 2)
+        }))
+    }
+    it.effect("stops retrying when the process exits", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        let reads = 0
+        const exit = yield* DevToolsActivePort.read("/profile", {
+          timeout: "1 second",
+          until: () => Effect.succeed(true)
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            readFileString: () =>
+              Effect.sync(() => {
+                reads++
+                return "9222\n"
+              })
+          }),
+          Effect.exit
+        )
+        assert.isTrue(Exit.isFailure(exit))
+        assert.strictEqual(reads, 1)
+      }))
+  })
+})
 
 /** A scoped process-platform stub for fake launchers; no production override or public bypass. */
 const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -51,6 +170,32 @@ const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effec
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    const withStderr = (
+      stderr: ChildProcessSpawner.ChildProcessHandle["stderr"],
+      running: boolean,
+      exitCode: ChildProcessSpawner.ChildProcessHandle["exitCode"]
+    ) =>
+      Launch.spawn("/fake/chromium", [], "/fake/profile", {}).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(9000002),
+              exitCode,
+              isRunning: Effect.succeed(running),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr,
+              all: stderr,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            }))
+          )
+        )
+      )
+
     it.effect("fails with ExecutableNotFound for a path where nothing is, pointing to strider browsers", () =>
       Effect.gen(function*() {
         const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
@@ -98,16 +243,323 @@ describe("Chromium launcher", () => {
         )
       }))
 
+    it.effect("waits for the complete DevToolsActivePort endpoint before connecting", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const contents = [
+          "",
+          "9222",
+          "9222\n",
+          "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5",
+          "9222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+        ]
+        const events: Array<unknown> = []
+        let reads = 0
+        const partialWrites: FileSystem.FileSystem = {
+          ...fs,
+          exists: (path) => path === "/fake/chromium" ? Effect.succeed(true) : fs.exists(path),
+          readFileString: (path, options) =>
+            path === "/fake/profile/DevToolsActivePort"
+              ? Effect.sync(() => {
+                const text = contents[Math.min(reads++, contents.length - 1)]!
+                events.push({ read: text })
+                return text
+              })
+              : fs.readFileString(path, options)
+        }
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000001),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.never,
+            all: Stream.never,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const result = yield* ChromiumLauncher.launchWithPort({
+          executablePath: "/fake/chromium",
+          userDataDir: "/fake/profile",
+          timeout: "5 seconds"
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, partialWrites),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Socket.WebSocketConstructor, (url) => {
+            events.push({ connect: url })
+            // Stop at the connection attempt; no browser or real socket is involved.
+            throw new Error("scripted socket refusal")
+          }),
+          Effect.scoped,
+          Effect.exit
+        )
+        assert.deepStrictEqual(events, [
+          ...contents.map((read) => ({ read })),
+          { connect: "ws://127.0.0.1:9222/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f" }
+        ])
+        assert(result._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result))
+        assert(error.reason._tag === "ConnectionFailed")
+        assert.include(error.reason.hint, "scripted socket refusal")
+      }))
+
+    // A launch's `timeout` is its only bound: no outer deadline runs around it. An exited browser whose stderr a
+    // descendant (or a wrapper's detached child) still holds must fail within that bound, with what it wrote so far.
+    it.effect("reports an exited browser within the launch timeout while a descendant keeps its stderr open", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const noEndpoint: FileSystem.FileSystem = {
+          ...fs,
+          // Nothing is at /fake/profile, so DevToolsActivePort is never readable.
+          exists: (path) => path === "/fake/chromium" ? Effect.succeed(true) : fs.exists(path)
+        }
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000002),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(3)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.make(new TextEncoder().encode("early diagnostic\n")).pipe(Stream.concat(Stream.never)),
+            all: Stream.never,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const result = yield* ChromiumLauncher.launchWithPort({
+          executablePath: "/fake/chromium",
+          userDataDir: "/fake/profile",
+          timeout: "200 millis"
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, noEndpoint),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Socket.WebSocketConstructor, function() {
+            throw new Error("Unexpected WebSocket connection before the browser endpoint is ready")
+          }),
+          Effect.scoped,
+          Effect.exit,
+          Effect.timeoutOption("3 seconds"),
+          BrowserClock.onLive
+        )
+        assert(Option.isSome(result), "the launch outlived its 200 ms timeout by more than 3 seconds")
+        assert(result.value._tag === "Failure")
+        const error = Option.getOrThrow(Exit.findErrorOption(result.value))
+        assert(error.reason._tag === "ProcessExited")
+        assert.include(error.reason.stderrTail, "early diagnostic")
+      }))
+
     it.effect("reports a browser that exits before it is ready, with its exit code and stderr", () =>
       Effect.gen(function*() {
         const failing = "/bin/sh"
         const launched = yield* Launch.spawn(failing, ["-c", "echo broken profile >&2; exit 3"], "/tmp", {})
         yield* launched.handle.exitCode.pipe(Effect.ignore)
-        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(3))
         assert.include(error.reason.stderrTail, "broken profile")
       }))
+
+    it.effect("reports stderr drained after process exit, including the final unterminated chunk", () =>
+      Effect.gen(function*() {
+        const exitObserved = yield* Deferred.make<void>()
+        const releaseStderr = yield* Deferred.make<void>()
+        const stderr = Stream.fromEffect(Deferred.await(releaseStderr)).pipe(
+          Stream.flatMap(() =>
+            Stream.make(
+              new TextEncoder().encode("broken profile\n"),
+              new TextEncoder().encode("final diagnostic without newline")
+            )
+          )
+        )
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(9000001),
+            exitCode: Deferred.succeed(exitObserved, undefined).pipe(
+              Effect.as(ChildProcessSpawner.ExitCode(3))
+            ),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr,
+            all: stderr,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+        )
+        const launched = yield* Launch.spawn("/fake/chromium", [], "/fake/profile", {}).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+        )
+        const failure = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip,
+          Effect.forkChild
+        )
+        // The exit code is observed while stderr is still blocked, as with an undrained process pipe.
+        yield* Deferred.await(exitObserved)
+        yield* Deferred.succeed(releaseStderr, undefined)
+        // splitLines emits the unterminated final line only at EOF, proving collection reached the end.
+        assert(Option.isSome(yield* launched.stderrLine(/^final diagnostic without newline$/)))
+        const expected = "broken profile\nfinal diagnostic without newline"
+        assert.strictEqual(yield* launched.stderrTail, expected)
+        const error = yield* Fiber.join(failure)
+        assert(error.reason._tag === "ProcessExited")
+        assert.deepStrictEqual(error.reason.code, Option.some(3))
+        assert.strictEqual(error.reason.stderrTail, expected)
+      }))
+
+    it.effect("keeps the bounded stderr tail when draining after exit", () =>
+      Effect.gen(function*() {
+        const release = yield* Deferred.make<void>()
+        const text = "x".repeat(12 * 1024) + "final diagnostic"
+        const stderr = Stream.fromEffect(Deferred.await(release)).pipe(
+          Stream.flatMap(() => Stream.make(new TextEncoder().encode(text)))
+        )
+        const launched = yield* withStderr(
+          stderr,
+          false,
+          Deferred.succeed(release, undefined).pipe(
+            Effect.as(ChildProcessSpawner.ExitCode(3))
+          )
+        )
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
+        assert(error.reason._tag === "ProcessExited")
+        assert.strictEqual(error.reason.stderrTail, text.slice(-8 * 1024))
+      }))
+
+    it.effect("reports collected stderr when the collector and exit-code read fail", () =>
+      Effect.gen(function*() {
+        const release = yield* Deferred.make<void>()
+        const readError = PlatformError.badArgument({
+          module: "ChildProcess",
+          method: "stderr",
+          description: "scripted failure"
+        })
+        const stderr = Stream.fromEffect(Deferred.await(release)).pipe(
+          Stream.flatMap(() => Stream.make(new TextEncoder().encode("partial diagnostic"))),
+          Stream.concat(Stream.fail(readError))
+        )
+        const launched = yield* withStderr(
+          stderr,
+          false,
+          Deferred.succeed(release, undefined).pipe(
+            Effect.andThen(Effect.fail(readError))
+          )
+        )
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
+        assert(error.reason._tag === "ProcessExited")
+        assert.isTrue(Option.isNone(error.reason.code))
+        assert.strictEqual(error.reason.stderrTail, "partial diagnostic")
+        assert.isTrue(Option.isNone(yield* launched.stderrLine(/never emitted/)))
+      }))
+
+    it.effect("reports a running process promptly and closes its open stderr with the scope", () =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const stopped = yield* Deferred.make<void>()
+        const stderr = Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))).pipe(
+          Stream.ensuring(Deferred.succeed(stopped, undefined))
+        )
+        yield* Effect.scoped(Effect.gen(function*() {
+          const launched = yield* withStderr(stderr, true, Effect.never)
+          yield* Deferred.await(started)
+          const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+            Effect.flip
+          )
+          assert(error.reason._tag === "ConnectionFailed")
+          assert.isFalse(yield* Deferred.isDone(stopped))
+        }))
+        assert.isTrue(yield* Deferred.isDone(stopped))
+      }))
+
+    it.effect("interrupts an exited-process wait when inherited stderr stays open and cleans up the collector", () =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const stopped = yield* Deferred.make<void>()
+        const waitEntered = yield* Deferred.make<void>()
+        const stderr = Stream.make(new TextEncoder().encode("descendant holds the pipe\n")).pipe(
+          Stream.concat(Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))),
+          Stream.ensuring(Deferred.succeed(stopped, undefined))
+        )
+        yield* Effect.scoped(Effect.gen(function*() {
+          const launched = yield* withStderr(
+            stderr,
+            false,
+            Effect.succeed(ChildProcessSpawner.ExitCode(3))
+          )
+          yield* Deferred.await(started)
+          const waiting = yield* Launch.notReady(
+            {
+              ...launched,
+              stderrDone: Deferred.succeed(waitEntered, undefined).pipe(Effect.andThen(launched.stderrDone))
+            },
+            "connecting",
+            Launch.readinessDeadline("5 seconds")
+          ).pipe(Effect.forkChild)
+          yield* Deferred.await(waitEntered)
+          yield* Fiber.interrupt(waiting)
+          assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(waiting)))
+          // Canceling the diagnostic waiter doesn't cancel collection owned by the launch scope.
+          assert.isFalse(yield* Deferred.isDone(stopped))
+        }))
+        assert.isTrue(yield* Deferred.isDone(stopped))
+      }))
+
+    for (const budget of [0, 1000]) {
+      it.effect(
+        budget === 0
+          ? "takes the collected stderr immediately when the readiness budget is exhausted"
+          : "drains a final unterminated chunk when EOF arrives within the readiness budget",
+        () =>
+          Effect.gen(function*() {
+            const release = yield* Deferred.make<void>()
+            const stderr = Stream.make(new TextEncoder().encode("early diagnostic\n")).pipe(
+              Stream.concat(
+                Stream.fromEffect(Deferred.await(release)).pipe(
+                  Stream.flatMap(() => Stream.make(new TextEncoder().encode("final diagnostic without newline")))
+                )
+              )
+            )
+            const code = Effect.succeed(ChildProcessSpawner.ExitCode(3))
+            const launched = yield* withStderr(
+              stderr,
+              false,
+              budget === 0 ? code : Deferred.succeed(release, undefined).pipe(Effect.andThen(code))
+            )
+            assert.isTrue(Option.isSome(yield* launched.stderrLine(/early diagnostic/)))
+            let waited = false
+            const error = yield* Launch.notReady(
+              {
+                ...launched,
+                stderrDone: Effect.sync(() => {
+                  waited = true
+                }).pipe(Effect.andThen(launched.stderrDone))
+              },
+              "connecting",
+              Launch.readinessDeadline(budget)
+            ).pipe(Effect.flip)
+            assert(error.reason._tag === "ProcessExited")
+            assert.deepStrictEqual(error.reason.code, Option.some(3))
+            assert.strictEqual(waited, budget > 0)
+            assert.strictEqual(
+              error.reason.stderrTail,
+              budget === 0 ? "early diagnostic\n" : "early diagnostic\nfinal diagnostic without newline"
+            )
+          })
+      )
+    }
 
     it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
       Effect.gen(function*() {
@@ -136,6 +588,63 @@ describe("Firefox launcher", () => {
           assert(error.reason._tag === "ExecutableNotFound")
           assert.deepStrictEqual(error.reason.searched, ["/nowhere/firefox"])
         }))
+
+      for (const open of [true, false]) {
+        it.effect(
+          open
+            ? "reports an exited Firefox within the launch timeout when inherited stderr stays open"
+            : "reports an exited Firefox promptly when stderr reaches EOF before the deadline",
+          () =>
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              const stderr = Stream.make(new TextEncoder().encode("early diagnostic\nfinal diagnostic without newline"))
+                .pipe(
+                  Stream.concat(open ? Stream.never : Stream.empty)
+                )
+              const spawner = ChildProcessSpawner.make(() =>
+                Effect.succeed(ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(9000003),
+                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(3)),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  stdin: Sink.drain,
+                  stdout: Stream.empty,
+                  stderr,
+                  all: stderr,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                  unref: Effect.succeed(Effect.void)
+                }))
+              )
+              const result = yield* FirefoxLauncher.launch({
+                executablePath: "/fake/firefox",
+                userDataDir: "/fake/profile",
+                timeout: open ? "200 millis" : "5 seconds"
+              }).pipe(
+                Effect.provideService(FileSystem.FileSystem, {
+                  ...fs,
+                  exists: () => Effect.succeed(true),
+                  readFileString: () => Effect.succeed(""),
+                  writeFileString: () => Effect.void
+                }),
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+                Effect.scoped,
+                Effect.exit,
+                Effect.timeoutOption(open ? "3 seconds" : "500 millis"),
+                BrowserClock.onLive
+              )
+              assert(
+                Option.isSome(result),
+                open ? "Firefox outlived its launch deadline" : "Firefox waited despite prompt EOF"
+              )
+              assert(Exit.isFailure(result.value))
+              const error = Option.getOrThrow(Exit.findErrorOption(result.value))
+              assert(error.reason._tag === "ProcessExited")
+              assert.deepStrictEqual(error.reason.code, Option.some(3))
+              assert.strictEqual(error.reason.stderrTail, "early diagnostic\nfinal diagnostic without newline")
+            })
+        )
+      }
 
       it.effect("writes the profile's preferences", () =>
         Effect.sync(() => {
