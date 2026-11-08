@@ -76,6 +76,13 @@ assert.equal(upstream.version, matrix.upstreamVersion)
 assert.equal(members.size, upstream.members.length, "Duplicate upstream member IDs")
 assert.equal(new Set(matrix.rows.map((row) => row.id)).size, matrix.rows.length, "Duplicate row IDs")
 assertValueGaps(matrix.rows)
+for (const decision of [...matrix.scopeDecisions, ...matrix.selectorDecisions]) {
+  assert.ok(decision.rows.length > 0, `${decision.id}: scope decision needs affected rows`)
+  for (const id of decision.rows) {
+    const row = matrix.rows.find((row) => row.id === id)
+    assert.ok(row && row.status === "missing", `${decision.id}: scope must preserve a missing row: ${id}`)
+  }
+}
 for (const note of matrix.patchedBrowserNotes) {
   assert.ok(
     note.scope === "build" || note.scope === "feature" && note.rows.length > 0,

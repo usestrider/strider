@@ -1,5 +1,6 @@
 ---
 import { decisionUrl, groups, labels, matrix, members } from "../features/playwright/matrix.ts"
+const scopeByRow = new Map(matrix.scopeDecisions.flatMap((decision) => decision.rows.map((id) => [id, decision] as const)))
 const browsers = [{ id: "chromium", label: "Chromium" }, { id: "firefox", label: "Firefox" }, { id: "webkit", label: "Stock WebKitGTK" }]
 ---
 
@@ -40,6 +41,7 @@ const browsers = [{ id: "chromium", label: "Chromium" }, { id: "firefox", label:
                     </td>
                   })}
                   <td>{row.api.map((api, index) => <Fragment>{index > 0 && ", "}<a href={api.url}><code>{api.module}.{api.symbol}</code></a></Fragment>)}<p>{row.notes}</p>
+                    {scopeByRow.has(row.id) && <p><a href={`#scope-${scopeByRow.get(row.id)!.id}`}>Outside 1.0: {scopeByRow.get(row.id)!.title}</a></p>}
                     {row.parent && <p><a href={`#${row.parent}`}>Capability containing this value gap</a></p>}
                     {row.gaps && <p>Value gaps: {row.gaps.map((id, index) => <Fragment>{index > 0 && ", "}<a href={`#${id}`}>{matrix.rows.find((gap) => gap.id === id)?.value}</a></Fragment>)}</p>}
                     {row.patches?.map((id) => <p><a href={`#patch-${id}`}>{matrix.patchedBrowserNotes.find((note) => note.id === id)?.id}: patched-browser evidence</a></p>)}

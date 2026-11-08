@@ -27,6 +27,8 @@ export interface Row {
 export const matrix = data as unknown as {
   readonly rows: ReadonlyArray<Row>
   readonly patchedBrowserNotes: typeof data.patchedBrowserNotes
+  readonly scopeDecisions: typeof data.scopeDecisions
+  readonly selectorDecisions: typeof data.selectorDecisions
 }
 export const members = new Map(inventory.members.map((member) => [member.id, member]))
 export const labels: Readonly<Record<Status, string>> = {

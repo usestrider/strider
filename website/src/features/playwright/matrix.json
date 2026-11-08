@@ -3668,7 +3668,7 @@
           "url": "/docs/api/browser/UserContext#UserContext.route"
         }
       ],
-      "notes": "HAR replay uses Route.fromHar.",
+      "notes": "HAR replay uses Route.fromHar. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
       "capabilities": [
         "interception.request"
       ],
@@ -3723,7 +3723,7 @@
           "url": "/docs/api/browser/UserContext#UserContext.route"
         }
       ],
-      "notes": "HAR replay uses Route.fromHar.",
+      "notes": "HAR replay uses Route.fromHar. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
       "capabilities": [
         "interception.request"
       ],
@@ -7901,7 +7901,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -8895,7 +8895,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -9628,7 +9628,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Evaluate the frame\u2019s root locator and serialize its ownerDocument, including the doctype when needed. The read is immediate; no retained Frame object or load wait is supplied.",
+      "notes": "Evaluate the frame’s root locator and serialize its ownerDocument, including the doctype when needed. The read is immediate; no retained Frame object or load wait is supplied.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -10802,7 +10802,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -11912,7 +11912,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -11961,7 +11961,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Evaluate the frame\u2019s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
+      "notes": "Evaluate the frame’s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -13176,7 +13176,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyFrameLocator.owner"
         }
       ],
-      "notes": "The frame locator\u2019s owner is its iframe element locator; reading it does not wait for an attached document.",
+      "notes": "The frame locator’s owner is its iframe element locator; reading it does not wait for an attached document.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15185,7 +15185,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element\u2019s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15239,7 +15239,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element\u2019s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+      "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15441,7 +15441,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15484,7 +15484,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15873,7 +15873,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -15916,7 +15916,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16032,7 +16032,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16075,7 +16075,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16118,7 +16118,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16265,7 +16265,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -16308,7 +16308,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17017,7 +17017,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17060,7 +17060,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17225,7 +17225,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17420,7 +17420,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17723,7 +17723,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -17874,7 +17874,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18190,7 +18190,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18432,7 +18432,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18475,7 +18475,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18740,7 +18740,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -18783,7 +18783,7 @@
       ],
       "status": "missing",
       "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -23730,7 +23730,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -25325,7 +25325,7 @@
           "url": "/docs/api/browser/Page#Page.route"
         }
       ],
-      "notes": "HAR replay uses Route.fromHar; request-phase routes can miss service-worker-controlled WebKit traffic.",
+      "notes": "HAR replay uses Route.fromHar; request-phase routes can miss service-worker-controlled WebKit traffic. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
       "capabilities": [
         "interception.request"
       ],
@@ -25380,7 +25380,7 @@
           "url": "/docs/api/browser/Page#Page.route"
         }
       ],
-      "notes": "HAR replay uses Route.fromHar; request-phase routes can miss service-worker-controlled WebKit traffic.",
+      "notes": "HAR replay uses Route.fromHar; request-phase routes can miss service-worker-controlled WebKit traffic. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
       "capabilities": [
         "interception.request"
       ],
@@ -26191,7 +26191,7 @@
           "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
         }
       ],
-      "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+      "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -29860,7 +29860,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -29921,7 +29921,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -29982,7 +29982,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -30086,7 +30086,7 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "effectful-handler-decisions",
-        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+        "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
         "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
       },
       "browsers": {
@@ -112339,7 +112339,7 @@
       "value": "XPath and Playwright selector DSL",
       "status": "missing",
       "api": [],
-      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities.",
+      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
       "capabilities": [],
       "requirements": [],
       "browsers": {
@@ -112417,7 +112417,7 @@
       "value": "XPath and Playwright selector DSL",
       "status": "missing",
       "api": [],
-      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities.",
+      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
       "capabilities": [],
       "requirements": [],
       "browsers": {
@@ -112534,7 +112534,7 @@
       "value": "XPath and Playwright selector DSL",
       "status": "missing",
       "api": [],
-      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities.",
+      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
       "capabilities": [],
       "requirements": [],
       "browsers": {
@@ -112651,7 +112651,7 @@
       "value": "XPath and Playwright selector DSL",
       "status": "missing",
       "api": [],
-      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities.",
+      "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
       "capabilities": [],
       "requirements": [],
       "browsers": {
@@ -112823,7 +112823,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "1c8bfe96dcbfdb2d886ea661ff0910d624770cfe35cdfe9aa4f88989c7ef9c98",
+    "docs/decisions.md": "53ead4888e95ec5cd662f0887388d5a691e21574a8b62d51555b7c901cd52794",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -112845,16 +112845,16 @@
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "0e45f2c33b288408c4d305072d018202fac8380b06e6272c3afaf69a78e8cc35",
+    "packages/browser/src/Page.ts": "0eb19390aa8a8f8cbcd557df04d8a1866dc50be049ca56abd534c84024c21830",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",
-    "packages/browser/src/Route.ts": "47f6134019767fbca93a9abc758d365ef961c4b191e79301feb04066ec9803dd",
+    "packages/browser/src/Route.ts": "9c7b3a878169e6b9714aea2ab0836d378cd8181a227e7f0101ebc82079a5f7f8",
     "packages/browser/src/Snapshot.ts": "98f4dd3a3b8ade96131c090efa56e90e60c8cc4c9a1773293a42833fce04c019",
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "17a9f89ef6cbd051b3df9ba8f5cd5938856f1e876b056a7fdec22ea294db2400",
+    "packages/browser/src/UserContext.ts": "499fe81f688cf0f467f306d92463b08ab6166da2ca5f042a6549791786bffaca",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
@@ -112867,5 +112867,657 @@
     "node_modules/effect/src/Effect.ts": "9d2259cb2ad516435572df3a27f3ef6a1f4020dba5e33bd1a044a9603ac76f0d",
     "node_modules/effect/src/Fiber.ts": "4454a7ce05a176315ad0579d349ac3721b22e7d25ebcd14d6583e0ab2d501c71",
     "node_modules/effect/package.json": "2a3f954fe2937a1ece18510d103bf5448726555076bcbb75f5603dfc60aba5f7"
-  }
+  },
+  "scopeDecisions": [
+    {
+      "id": "application-platforms",
+      "title": "Android and Electron automation",
+      "milestone": "1.0",
+      "disposition": "excluded",
+      "note": "Separate device and application platforms are outside the 1.0 browser target.",
+      "rows": [
+        "method-electron-launch",
+        "event-electronapplication-close",
+        "event-electronapplication-console",
+        "event-electronapplication-window",
+        "method-electronapplication-browserwindow",
+        "method-electronapplication-close",
+        "method-electronapplication-context",
+        "method-electronapplication-evaluate",
+        "method-electronapplication-evaluatehandle",
+        "method-electronapplication-firstwindow",
+        "method-electronapplication-process",
+        "method-electronapplication-waitforevent",
+        "method-electronapplication-windows",
+        "method-android-connect",
+        "method-android-devices",
+        "method-android-launchserver",
+        "method-android-setdefaulttimeout",
+        "event-androiddevice-close",
+        "event-androiddevice-webview",
+        "method-androiddevice-close",
+        "method-androiddevice-drag",
+        "method-androiddevice-fill",
+        "method-androiddevice-fling",
+        "method-androiddevice-info",
+        "property-androiddevice-input",
+        "method-androiddevice-installapk",
+        "method-androiddevice-launchbrowser",
+        "method-androiddevice-longtap",
+        "method-androiddevice-model",
+        "method-androiddevice-open",
+        "method-androiddevice-pinchclose",
+        "method-androiddevice-pinchopen",
+        "method-androiddevice-press",
+        "method-androiddevice-push",
+        "method-androiddevice-screenshot",
+        "method-androiddevice-scroll",
+        "method-androiddevice-serial",
+        "method-androiddevice-setdefaulttimeout",
+        "method-androiddevice-shell",
+        "method-androiddevice-swipe",
+        "method-androiddevice-tap",
+        "method-androiddevice-wait",
+        "method-androiddevice-waitforevent",
+        "method-androiddevice-webview",
+        "method-androiddevice-webviews",
+        "method-androidinput-drag",
+        "method-androidinput-press",
+        "method-androidinput-swipe",
+        "method-androidinput-tap",
+        "method-androidinput-type",
+        "event-androidsocket-close",
+        "event-androidsocket-data",
+        "method-androidsocket-close",
+        "method-androidsocket-write",
+        "event-androidwebview-close",
+        "method-androidwebview-page",
+        "method-androidwebview-pid",
+        "method-androidwebview-pkg",
+        "option-electron-launch-acceptdownloads",
+        "option-electron-launch-args",
+        "option-electron-launch-artifactsdir",
+        "option-electron-launch-bypasscsp",
+        "option-electron-launch-chromiumsandbox",
+        "option-electron-launch-colorscheme",
+        "option-electron-launch-cwd",
+        "option-electron-launch-env",
+        "option-electron-launch-executablepath",
+        "option-electron-launch-extrahttpheaders",
+        "option-electron-launch-geolocation",
+        "option-electron-launch-httpcredentials",
+        "option-electron-launch-ignorehttpserrors",
+        "option-electron-launch-locale",
+        "option-electron-launch-offline",
+        "option-electron-launch-recordhar",
+        "option-electron-launch-recordvideo",
+        "option-electron-launch-timeout",
+        "option-electron-launch-timezoneid",
+        "option-electron-launch-tracesdir",
+        "option-electronapplication-firstwindow-timeout",
+        "option-android-connect-headers",
+        "option-android-connect-slowmo",
+        "option-android-connect-timeout",
+        "option-android-devices-host",
+        "option-android-devices-omitdriverinstall",
+        "option-android-devices-port",
+        "option-android-launchserver-adbhost",
+        "option-android-launchserver-adbport",
+        "option-android-launchserver-deviceserialnumber",
+        "option-android-launchserver-host",
+        "option-android-launchserver-omitdriverinstall",
+        "option-android-launchserver-port",
+        "option-android-launchserver-wspath",
+        "option-androiddevice-drag-speed",
+        "option-androiddevice-drag-timeout",
+        "option-androiddevice-fill-timeout",
+        "option-androiddevice-fling-speed",
+        "option-androiddevice-fling-timeout",
+        "option-androiddevice-installapk-args",
+        "option-androiddevice-launchbrowser-acceptdownloads",
+        "option-androiddevice-launchbrowser-args",
+        "option-androiddevice-launchbrowser-baseurl",
+        "option-androiddevice-launchbrowser-bypasscsp",
+        "option-androiddevice-launchbrowser-colorscheme",
+        "option-androiddevice-launchbrowser-contrast",
+        "option-androiddevice-launchbrowser-devicescalefactor",
+        "option-androiddevice-launchbrowser-extrahttpheaders",
+        "option-androiddevice-launchbrowser-forcedcolors",
+        "option-androiddevice-launchbrowser-geolocation",
+        "option-androiddevice-launchbrowser-hastouch",
+        "option-androiddevice-launchbrowser-httpcredentials",
+        "option-androiddevice-launchbrowser-ignorehttpserrors",
+        "option-androiddevice-launchbrowser-ismobile",
+        "option-androiddevice-launchbrowser-javascriptenabled",
+        "option-androiddevice-launchbrowser-locale",
+        "option-androiddevice-launchbrowser-logger",
+        "option-androiddevice-launchbrowser-offline",
+        "option-androiddevice-launchbrowser-permissions",
+        "option-androiddevice-launchbrowser-pkg",
+        "option-androiddevice-launchbrowser-proxy",
+        "option-androiddevice-launchbrowser-recordhar",
+        "option-androiddevice-launchbrowser-recordvideo",
+        "option-androiddevice-launchbrowser-reducedmotion",
+        "option-androiddevice-launchbrowser-screen",
+        "option-androiddevice-launchbrowser-serviceworkers",
+        "option-androiddevice-launchbrowser-strictselectors",
+        "option-androiddevice-launchbrowser-timezoneid",
+        "option-androiddevice-launchbrowser-useragent",
+        "option-androiddevice-launchbrowser-viewport",
+        "option-androiddevice-longtap-timeout",
+        "option-androiddevice-pinchclose-speed",
+        "option-androiddevice-pinchclose-timeout",
+        "option-androiddevice-pinchopen-speed",
+        "option-androiddevice-pinchopen-timeout",
+        "option-androiddevice-press-timeout",
+        "option-androiddevice-push-mode",
+        "option-androiddevice-scroll-speed",
+        "option-androiddevice-scroll-timeout",
+        "option-androiddevice-swipe-speed",
+        "option-androiddevice-swipe-timeout",
+        "option-androiddevice-tap-duration",
+        "option-androiddevice-tap-timeout",
+        "option-androiddevice-wait-state",
+        "option-androiddevice-wait-timeout",
+        "option-androiddevice-webview-timeout"
+      ]
+    },
+    {
+      "id": "playwright-server",
+      "title": "Playwright server-wire compatibility",
+      "milestone": "1.0",
+      "disposition": "excluded",
+      "note": "Strider uses browser protocols directly; compatibility with the Playwright remote-server contract is outside 1.0.",
+      "rows": [
+        "event-browserserver-close",
+        "method-browserserver-close",
+        "method-browserserver-kill",
+        "method-browserserver-process",
+        "method-browserserver-wsendpoint",
+        "method-browsertype-connect",
+        "method-browsertype-launchserver",
+        "option-browsertype-connect-exposenetwork",
+        "option-browsertype-connect-headers",
+        "option-browsertype-connect-slowmo",
+        "option-browsertype-connect-timeout",
+        "option-browsertype-launchserver-args",
+        "option-browsertype-launchserver-artifactsdir",
+        "option-browsertype-launchserver-channel",
+        "option-browsertype-launchserver-chromiumsandbox",
+        "option-browsertype-launchserver-downloadspath",
+        "option-browsertype-launchserver-env",
+        "option-browsertype-launchserver-executablepath",
+        "option-browsertype-launchserver-firefoxuserprefs",
+        "option-browsertype-launchserver-handlesighup",
+        "option-browsertype-launchserver-handlesigint",
+        "option-browsertype-launchserver-handlesigterm",
+        "option-browsertype-launchserver-headless",
+        "option-browsertype-launchserver-host",
+        "option-browsertype-launchserver-ignoredefaultargs",
+        "option-browsertype-launchserver-logger",
+        "option-browsertype-launchserver-port",
+        "option-browsertype-launchserver-proxy",
+        "option-browsertype-launchserver-timeout",
+        "option-browsertype-launchserver-tracesdir",
+        "option-browsertype-launchserver-wspath"
+      ]
+    },
+    {
+      "id": "interactive-toolchain",
+      "title": "Interactive debugger, recorder and inspection toolchain",
+      "milestone": "1.0",
+      "disposition": "excluded",
+      "note": "A new interactive debugger, recorder/code generator and inspection-overlay toolchain is outside 1.0. Useful recording and capture controls remain in scope.",
+      "rows": [
+        "event-debugger-pausedstatechanged",
+        "method-debugger-pauseddetails",
+        "method-debugger-requestpause",
+        "method-debugger-resume",
+        "method-debugger-next",
+        "method-debugger-runto",
+        "method-page-pause"
+      ]
+    },
+    {
+      "id": "webmcp",
+      "title": "WebMCP-specific APIs",
+      "milestone": "1.0",
+      "disposition": "excluded",
+      "note": "This additional API surface is deferred beyond the 1.0 browser milestone.",
+      "rows": [
+        "method-webmcp-calltool",
+        "method-webmcp-tools",
+        "option-webmcp-calltool-timeout",
+        "option-webmcp-tools-timeout"
+      ]
+    },
+    {
+      "id": "runner-framework",
+      "title": "A duplicate assertion and runner framework",
+      "milestone": "1.0",
+      "disposition": "excluded",
+      "note": "Duplicating generic assertions or an entire runner/reporter framework is outside 1.0. Optional Playwright Test integration and the existing Vitest integration remain the integration path; browser-specific assertions and visual baselines are not excluded.",
+      "rows": [
+        "property-genericassertions-not",
+        "property-genericassertions-resolves",
+        "property-genericassertions-rejects",
+        "method-genericassertions-tobe",
+        "method-genericassertions-tobecloseto",
+        "method-genericassertions-tobedefined",
+        "method-genericassertions-tobefalsy",
+        "method-genericassertions-tobegreaterthan",
+        "method-genericassertions-tobegreaterthanorequal",
+        "method-genericassertions-tobeinstanceof",
+        "method-genericassertions-tobelessthan",
+        "method-genericassertions-tobelessthanorequal",
+        "method-genericassertions-tobenan",
+        "method-genericassertions-tobenull",
+        "method-genericassertions-tobetruthy",
+        "method-genericassertions-tobeundefined",
+        "method-genericassertions-tocontain-1",
+        "method-genericassertions-tocontain-2",
+        "method-genericassertions-tocontainequal",
+        "method-genericassertions-toequal",
+        "method-genericassertions-tohavelength",
+        "method-genericassertions-tohaveproperty",
+        "method-genericassertions-tomatch",
+        "method-genericassertions-tomatchobject",
+        "method-genericassertions-tostrictequal",
+        "method-genericassertions-tothrow",
+        "method-genericassertions-tothrowerror",
+        "method-genericassertions-any",
+        "method-genericassertions-anything",
+        "method-genericassertions-arraycontaining",
+        "method-genericassertions-arrayof",
+        "method-genericassertions-closeto",
+        "method-genericassertions-objectcontaining",
+        "method-genericassertions-stringcontaining",
+        "method-genericassertions-stringmatching",
+        "property-fixtures-browser",
+        "property-fixtures-browsername",
+        "property-fixtures-context",
+        "method-fixtures-mount",
+        "property-fixtures-page",
+        "property-fixtures-request",
+        "property-fullconfig-argv",
+        "property-fullconfig-configfile",
+        "property-fullconfig-failonflakytests",
+        "property-fullconfig-filteredprojects",
+        "property-fullconfig-forbidonly",
+        "property-fullconfig-fullyparallel",
+        "property-fullconfig-globalsetup",
+        "property-fullconfig-globalteardown",
+        "property-fullconfig-globaltimeout",
+        "property-fullconfig-grep",
+        "property-fullconfig-grepinvert",
+        "property-fullconfig-maxfailures",
+        "property-fullconfig-metadata",
+        "property-fullconfig-preserveoutput",
+        "property-fullconfig-projects",
+        "property-fullconfig-quiet",
+        "property-fullconfig-reporter",
+        "property-fullconfig-reportslowtests",
+        "property-fullconfig-rootdir",
+        "property-fullconfig-shard",
+        "property-fullconfig-tags",
+        "property-fullconfig-updatesnapshots",
+        "property-fullconfig-updatesourcemethod",
+        "property-fullconfig-version",
+        "property-fullconfig-webserver",
+        "property-fullconfig-workers",
+        "property-fullproject-dependencies",
+        "property-fullproject-grep",
+        "property-fullproject-grepinvert",
+        "property-fullproject-ignoresnapshots",
+        "property-fullproject-metadata",
+        "property-fullproject-name",
+        "property-fullproject-snapshotdir",
+        "property-fullproject-outputdir",
+        "property-fullproject-repeateach",
+        "property-fullproject-retries",
+        "property-fullproject-teardown",
+        "property-fullproject-testdir",
+        "property-fullproject-testignore",
+        "property-fullproject-testmatch",
+        "property-fullproject-timeout",
+        "property-fullproject-use",
+        "property-location-file",
+        "property-location-line",
+        "property-location-column",
+        "method-test-call",
+        "method-test-afterall",
+        "method-test-aftereach",
+        "method-test-beforeall",
+        "method-test-beforeeach",
+        "method-test-describe",
+        "method-test-describe-configure",
+        "method-test-describe-fixme",
+        "method-test-describe-only",
+        "method-test-describe-parallel",
+        "method-test-describe-parallel-only",
+        "method-test-describe-serial",
+        "method-test-describe-serial-only",
+        "method-test-describe-skip",
+        "property-test-expect",
+        "method-test-extend",
+        "method-test-abort",
+        "method-test-fail",
+        "method-test-fail-only",
+        "method-test-fixme",
+        "method-test-info",
+        "method-test-only",
+        "method-test-settimeout",
+        "method-test-skip",
+        "method-test-slow",
+        "method-test-step",
+        "method-test-step-skip",
+        "method-test-use",
+        "property-testconfig-build",
+        "property-testconfig-capturegitinfo",
+        "property-testconfig-expect",
+        "property-testconfig-failonflakytests",
+        "property-testconfig-forbidonly",
+        "property-testconfig-fullyparallel",
+        "property-testconfig-globalsetup",
+        "property-testconfig-globalteardown",
+        "property-testconfig-globaltimeout",
+        "property-testconfig-grep",
+        "property-testconfig-grepinvert",
+        "property-testconfig-ignoresnapshots",
+        "property-testconfig-maxfailures",
+        "property-testconfig-metadata",
+        "property-testconfig-name",
+        "property-testconfig-outputdir",
+        "property-testconfig-snapshotdir",
+        "property-testconfig-snapshotpathtemplate",
+        "property-testconfig-preserveoutput",
+        "property-testconfig-projects",
+        "property-testconfig-quiet",
+        "property-testconfig-repeateach",
+        "property-testconfig-reporter",
+        "property-testconfig-reportslowtests",
+        "property-testconfig-respectgitignore",
+        "property-testconfig-retries",
+        "property-testconfig-retrystrategy",
+        "property-testconfig-shard",
+        "property-testconfig-tag",
+        "property-testconfig-testdir",
+        "property-testconfig-testignore",
+        "property-testconfig-testmatch",
+        "property-testconfig-timeout",
+        "property-testconfig-tsconfig",
+        "property-testconfig-updatesnapshots",
+        "property-testconfig-updatesourcemethod",
+        "property-testconfig-use",
+        "property-testconfig-webserver",
+        "property-testconfig-workers",
+        "property-testinfo-annotations",
+        "property-testinfo-attachments",
+        "method-testinfo-attach",
+        "property-testinfo-column",
+        "property-testinfo-config",
+        "property-testinfo-duration",
+        "property-testinfo-error",
+        "property-testinfo-errors",
+        "property-testinfo-expectedstatus",
+        "method-testinfo-fail-1",
+        "method-testinfo-fail-2",
+        "property-testinfo-file",
+        "method-testinfo-fixme-1",
+        "method-testinfo-fixme-2",
+        "property-testinfo-fn",
+        "property-testinfo-tags",
+        "property-testinfo-testid",
+        "property-testinfo-line",
+        "property-testinfo-snapshotdir",
+        "property-testinfo-outputdir",
+        "method-testinfo-outputpath",
+        "property-testinfo-parallelindex",
+        "property-testinfo-project",
+        "property-testinfo-repeateachindex",
+        "property-testinfo-retry",
+        "method-testinfo-settimeout",
+        "method-testinfo-skip-1",
+        "method-testinfo-skip-2",
+        "method-testinfo-slow-1",
+        "method-testinfo-slow-2",
+        "method-testinfo-snapshotpath",
+        "property-testinfo-snapshotsuffix",
+        "property-testinfo-status",
+        "property-testinfo-timeout",
+        "property-testinfo-title",
+        "property-testinfo-titlepath",
+        "property-testinfo-workerindex",
+        "property-testinfoerror-cause",
+        "property-testinfoerror-message",
+        "property-testinfoerror-stack",
+        "property-testinfoerror-errorcontext",
+        "property-testinfoerror-value",
+        "property-testoptions-acceptdownloads",
+        "property-testoptions-baseurl",
+        "property-testoptions-browsername",
+        "property-testoptions-actiontimeout",
+        "property-testoptions-bypasscsp",
+        "property-testoptions-channel",
+        "property-testoptions-clientcertificates",
+        "property-testoptions-colorscheme",
+        "property-testoptions-connectoptions",
+        "property-testoptions-contextoptions",
+        "property-testoptions-contrast",
+        "property-testoptions-devicescalefactor",
+        "property-testoptions-extrahttpheaders",
+        "property-testoptions-forcedcolors",
+        "property-testoptions-geolocation",
+        "property-testoptions-hastouch",
+        "property-testoptions-headless",
+        "property-testoptions-httpcredentials",
+        "property-testoptions-ignorehttpserrors",
+        "property-testoptions-ismobile",
+        "property-testoptions-javascriptenabled",
+        "property-testoptions-launchoptions",
+        "property-testoptions-locale",
+        "property-testoptions-navigationtimeout",
+        "property-testoptions-offline",
+        "property-testoptions-permissions",
+        "property-testoptions-proxy",
+        "property-testoptions-reducedmotion",
+        "property-testoptions-reusecontext",
+        "property-testoptions-screen",
+        "property-testoptions-screenshot",
+        "property-testoptions-storagestate",
+        "property-testoptions-testidattribute",
+        "property-testoptions-timezoneid",
+        "property-testoptions-trace",
+        "property-testoptions-useragent",
+        "property-testoptions-video",
+        "property-testoptions-viewport",
+        "property-testoptions-serviceworkers",
+        "property-testproject-dependencies",
+        "property-testproject-default",
+        "property-testproject-expect",
+        "property-testproject-fullyparallel",
+        "property-testproject-grep",
+        "property-testproject-grepinvert",
+        "property-testproject-ignoresnapshots",
+        "property-testproject-metadata",
+        "property-testproject-name",
+        "property-testproject-snapshotdir",
+        "property-testproject-snapshotpathtemplate",
+        "property-testproject-outputdir",
+        "property-testproject-repeateach",
+        "property-testproject-respectgitignore",
+        "property-testproject-retries",
+        "property-testproject-teardown",
+        "property-testproject-testdir",
+        "property-testproject-testignore",
+        "property-testproject-testmatch",
+        "property-testproject-timeout",
+        "property-testproject-use",
+        "property-testproject-workers",
+        "property-teststepinfo-annotations",
+        "method-teststepinfo-attach",
+        "method-teststepinfo-skip-1",
+        "method-teststepinfo-skip-2",
+        "property-teststepinfo-titlepath",
+        "property-workerinfo-config",
+        "property-workerinfo-parallelindex",
+        "property-workerinfo-project",
+        "property-workerinfo-workerindex",
+        "method-reporter-onbegin",
+        "method-reporter-onend",
+        "method-reporter-onerror",
+        "method-reporter-onexit",
+        "method-reporter-onstderr",
+        "method-reporter-onstdout",
+        "method-reporter-onstepbegin",
+        "method-reporter-onstepend",
+        "method-reporter-ontestbegin",
+        "method-reporter-ontestend",
+        "method-reporter-printstostdio",
+        "method-reporter-preprocess",
+        "method-suite-alltests",
+        "method-suite-entries",
+        "property-suite-location",
+        "property-suite-parent",
+        "method-suite-project",
+        "property-suite-suites",
+        "property-suite-tests",
+        "property-suite-title",
+        "method-suite-titlepath",
+        "property-suite-type",
+        "property-testcase-annotations",
+        "property-testcase-expectedstatus",
+        "property-testcase-id",
+        "property-testcase-location",
+        "method-testcase-ok",
+        "method-testcase-outcome",
+        "property-testcase-parent",
+        "property-testcase-repeateachindex",
+        "property-testcase-results",
+        "property-testcase-retries",
+        "property-testcase-tags",
+        "property-testcase-timeout",
+        "property-testcase-title",
+        "method-testcase-titlepath",
+        "property-testcase-type",
+        "property-testerror-cause",
+        "property-testerror-message",
+        "property-testerror-stack",
+        "property-testerror-value",
+        "property-testerror-location",
+        "property-testerror-snippet",
+        "property-testresult-attachments",
+        "property-testresult-annotations",
+        "property-testresult-duration",
+        "property-testresult-error",
+        "property-testresult-errors",
+        "property-testresult-retry",
+        "property-testresult-starttime",
+        "property-testresult-status",
+        "property-testresult-stderr",
+        "property-testresult-stdout",
+        "property-testresult-steps",
+        "property-testresult-workerindex",
+        "property-testresult-parallelindex",
+        "method-testrun-exclude",
+        "method-testrun-fail",
+        "method-testrun-fixme",
+        "method-testrun-skip",
+        "method-testrun-skipsharding",
+        "property-teststep-category",
+        "property-teststep-duration",
+        "property-teststep-location",
+        "property-teststep-error",
+        "property-teststep-parent",
+        "property-teststep-params",
+        "property-teststep-starttime",
+        "property-teststep-steps",
+        "property-teststep-annotations",
+        "property-teststep-attachments",
+        "property-teststep-title",
+        "property-teststep-subtitle",
+        "method-teststep-titlepath",
+        "option-test-describe-configure-lock",
+        "option-test-describe-configure-mode",
+        "option-test-describe-configure-retries",
+        "option-test-describe-configure-timeout",
+        "option-test-step-box",
+        "option-test-step-location",
+        "option-test-step-params",
+        "option-test-step-subtitle",
+        "option-test-step-timeout",
+        "option-test-step-skip-box",
+        "option-test-step-skip-location",
+        "option-test-step-skip-params",
+        "option-test-step-skip-subtitle",
+        "option-test-step-skip-timeout",
+        "option-testinfo-attach-body",
+        "option-testinfo-attach-contenttype",
+        "option-testinfo-attach-path",
+        "option-testinfo-snapshotpath-kind",
+        "option-teststepinfo-attach-body",
+        "option-teststepinfo-attach-contenttype",
+        "option-teststepinfo-attach-path"
+      ]
+    }
+  ],
+  "selectorDecisions": [
+    {
+      "id": "xpath",
+      "value": "XPath",
+      "disposition": "planned",
+      "note": "Add XPath to the locator constructor; it is not implemented yet.",
+      "rows": [
+        "method-frame-locator-value-xpath-and-playwright-selector-dsl",
+        "method-framelocator-locator-value-xpath-and-playwright-selector-dsl",
+        "method-locator-locator-value-xpath-and-playwright-selector-dsl",
+        "method-page-locator-value-xpath-and-playwright-selector-dsl"
+      ]
+    },
+    {
+      "id": "test-id-regexp",
+      "value": "RegExp test IDs",
+      "disposition": "planned",
+      "note": "Add a RegExp getByTestId form; it is not implemented yet.",
+      "rows": [
+        "method-frame-getbytestid-value-regexp-test-id",
+        "method-framelocator-getbytestid-value-regexp-test-id",
+        "method-locator-getbytestid-value-regexp-test-id",
+        "method-page-getbytestid-value-regexp-test-id"
+      ]
+    },
+    {
+      "id": "test-id-attribute",
+      "value": "Test-id attribute setting",
+      "disposition": "planned",
+      "note": "Add a context test-id attribute setting; it is not implemented yet.",
+      "rows": [
+        "method-selectors-settestidattribute"
+      ]
+    },
+    {
+      "id": "selector-dsl",
+      "value": "text=, >> and custom selector engines",
+      "disposition": "excluded",
+      "note": "Keep these selector forms outside 1.0; use dedicated text/role/filter operations. This does not exclude XPath. Other extensions such as :has-text() have no scope decision here.",
+      "rows": [
+        "method-frame-locator-value-xpath-and-playwright-selector-dsl",
+        "method-framelocator-locator-value-xpath-and-playwright-selector-dsl",
+        "method-locator-locator-value-xpath-and-playwright-selector-dsl",
+        "method-page-locator-value-xpath-and-playwright-selector-dsl",
+        "method-selectors-register",
+        "option-selectors-register-contentscript"
+      ]
+    },
+    {
+      "id": "networkidle",
+      "value": "networkidle",
+      "disposition": "excluded",
+      "note": "Keep networkidle outside 1.0; observe explicit application readiness.",
+      "rows": [
+        "navigation-networkidle",
+        "method-page-waitforloadstate-value-networkidle"
+      ]
+    }
+  ]
 }

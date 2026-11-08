@@ -17,7 +17,19 @@ The columns describe browsers Strider launches. Attached-browser differences app
 
 Rows preserve each upstream member, including deprecated and experimental members, rather than treating a class as complete because some methods exist. Separate rows retain every top-level option expanded by the upstream parser, including launch, context, screenshot, role-query, PDF, navigation, clock, route and tracing differences. Nested settings and parameter shapes remain linked to their upstream definitions; a core capability row does not claim every overload or option value behaves identically. Inherited members appear under their declaring class. Non-JavaScript language bindings are outside this JavaScript comparison.
 
-Generic assertions, the Playwright Test runner, its fixtures and reporters remain marked missing even where a test framework supplies similar functionality. [Tests with Vitest](/docs/tools/testing) describes Strider's existing integration. No missing item has been declared out of scope here.
+Generic assertions, the Playwright Test runner, its fixtures and reporters remain marked missing even where a test framework supplies similar functionality. [Tests with Vitest](/docs/tools/testing) describes Strider's existing integration. The accepted 1.0 scope below leaves excluded capabilities marked missing.
+
+## Scope for 1.0
+
+Five capability groups are outside 1.0. Their rows remain missing: an exclusion records scope, not an implemented capability or a deliberately different API.
+
+{matrix.scopeDecisions.map((decision) => (
+  <p id={`scope-${decision.id}`}><strong>{decision.title}.</strong> {decision.note}</p>
+))}
+
+XPath in the locator constructor, RegExp test IDs and a context test-id attribute setting are planned, and remain missing until implemented. The selector forms `text=`, `>>` and custom selector engines, and the `networkidle` readiness state, are outside 1.0. Dedicated text, role and filter operations remain available; see [Locators](/docs/pages/locators) for their APIs. Other unsupported selector extensions are not automatically excluded by these decisions.
+
+The downloadable inventory records these scope and selector decisions separately from implementation statuses, with links to affected row IDs. Browser-specific assertions, visual baselines and useful recording/capture controls remain in scope. Optional Playwright Test integration remains separate from duplicating its runner.
 
 ## Capabilities
 
