@@ -10,7 +10,6 @@ import type * as Access from "./access.ts"
 export const page: Access.Members = {
   observed: new Set([
     "id",
-    "pageKind",
     "status",
     "url",
     "frames",

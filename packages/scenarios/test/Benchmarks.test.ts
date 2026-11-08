@@ -405,7 +405,7 @@ it("selects a named benchmark profile without changing the default or raw argume
   ])
   expect(concurrent.striderProfile).toBe("concurrent")
   expect(concurrent.striderArgs[0]).toContain(
-    "Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,PrefetchPrerenderIntegration,Prerender2FallbackPrefetchSpecRules,CDPScreenshotNewSurface"
+    "Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface"
   )
   expect(concurrent.striderArgs[1]).toBe("--enable-features=Other")
   expect(() => options(["--strider-profile", "stock"])).toThrow("--strider-profile")

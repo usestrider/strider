@@ -52,9 +52,7 @@ export type Id = typeof Id.Type
  * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs and similar.
  * - `SameDocument`: the document stayed, through a fragment, the History API, or an intercepted navigation.
  * - `Restored`: a document came back from the back/forward cache.
- * - `Activated`: a prerendered document became the page's, retaining its document id. Transfer is supported
- *   on headless launched Chromium with automation's prefetch settings retained; attached Chromium, Firefox and WebKit
- *   do not produce it. A navigation command may instead perform ordinary navigation.
+ * - `Activated`: a prerendered document became the page's.
  * - `BecameDownload`: the response was a download, and the page stayed where it was. Only `goto` with
  *   `accept: ["download"]` returns it; otherwise it fails with the `BecameDownload` reason.
  * - `NoContent`: the server answered 204 or 205, and the page stayed where it was. Only `goto` with

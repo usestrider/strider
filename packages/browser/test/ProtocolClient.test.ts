@@ -316,35 +316,6 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(receipts, [2, 4])
     }))
 
-  it.effect("queues typed commands before waiting for either reply", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const browser = yield* makeBrowser
-      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
-      const navigation = yield* client.root.enqueue(Page.navigate({ url: "https://example.com" }))
-      const enabled = yield* client.root.enqueue(Page.enable())
-      const first = yield* browser.next
-      const second = yield* browser.next
-      assert.strictEqual(first.method, "Page.navigate")
-      assert.strictEqual(second.method, "Page.enable")
-      yield* browser.receive({ id: second.id, result: {} })
-      yield* browser.receive({ id: first.id, result: { frameId: "frame" } })
-      assert.strictEqual((yield* navigation).frameId, "frame")
-      yield* enabled
-    })))
-
-  it.effect("abandons a queued command when its scope ends before the reply", () =>
-    Effect.gen(function*() {
-      const browser = yield* makeBrowser
-      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
-      yield* client.root.enqueue(Page.enable()).pipe(Effect.asVoid, Effect.scoped)
-      const abandoned = yield* browser.next
-      yield* browser.receive({ id: abandoned.id, result: {} })
-      const next = yield* client.root.send(Page.enable()).pipe(Effect.forkChild)
-      const command = yield* browser.next
-      yield* browser.receive({ id: command.id, result: {} })
-      yield* Fiber.join(next)
-    }))
-
   it.effect("orders transport sends even when one suspends, and waits for every out-of-order reply", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

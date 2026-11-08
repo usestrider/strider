@@ -132,7 +132,7 @@ interface NavigableState {
 interface PageModel {
   readonly _tag: "Page"
   readonly id: NavigableId
-  readonly pageKind: "tab" | "popup" | "prerender"   // fixed: how the page was created
+  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: how the page was created
   readonly origin:                                      // fixed: how it came to exist
     | { _tag: "Created" }
     | { _tag: "Opened"; originalOpener: Option<NavigableId> }   // None: the backend didn't report it; kept even under noopener
@@ -159,7 +159,7 @@ interface DocumentModel {
     | { _tag: "Restored"; navigation: NavigationId; from: DocumentId }   // only with correlating evidence
     | { _tag: "Adopted" }                               // existed before we attached
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // changes when a prerender document transfers into its tab
+    navigable: NavigableId                              // fixed in current adapters
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: Url                                            // changes on same-document navigation
@@ -176,7 +176,7 @@ interface WindowRealmModel {
   readonly id: RealmId
   readonly world: { _tag: "Main" } | { _tag: "Isolated"; name: string }   // fixed: a realm never changes world
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // changes when a prerender document transfers into its tab
+    navigable: NavigableId                              // fixed in current adapters
     documents: NonEmptyReadonlyArray<DocumentId>        // usually one; two after initial-blank reuse
     lifecycle: RealmLifecycle
   }>
@@ -207,7 +207,7 @@ type NavigationOutcome =
   | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
-  | { _tag: "Activated"; document: DocumentId }       // positive Chromium tab-child promotion
+  | { _tag: "Activated"; document: DocumentId }       // prerender activation is not implemented
   | { _tag: "Download"; download: DownloadId }        // old document stays
   | { _tag: "NoContent"; status: 204 | 205; response: Option<ResponseRef> }   // old document stays
   | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }   // None: no error page correlated (yet)
@@ -265,7 +265,7 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
   | UserContextRemoved | AccessReleased
-  | PageClosed /* by: command | script | userContextRemoved */ | PageCrashed | PrerenderActivated
+  | PageClosed /* by: command | script | userContextRemoved */ | PageCrashed
   | ObligationEnded | DownloadEnded | HopEnded            // a dialog, file chooser or paused request; a download; a request hop
   | Vanished                                              // gone for a reason nothing reported
   | FrameDetached | DocumentReplaced | DocumentEvicted | DocumentDestroyed | DocumentUnloaded
@@ -386,9 +386,7 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
   - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one is `createdBy: Restored{from}`.
   - Node and handle continuity are proven separately from document continuity.
-  - Headless Chromium launched with automation/concurrent's speculative-request feature settings supports prerender transfer. A previously observed prerender target becoming primary under the same native tab is the positive correlation; detach, URL equality and a new target alone are insufficient. The speculative page ends with `PrerenderActivated`; its fixed `pageKind` remains `prerender`, while the surviving tab keeps its id and receives the existing document, realms and frame subtree. The document's `navigable` changes to the tab. The replaced document and descendants end; their handles and pending native-session work cannot address the replacement.
-  - Work bound to a surviving realm/session, including handles and evaluations already running, survives transfer. Its original access grant must remain live; release still gives `AccessReleased`. A speculative page wrapper never becomes a tab control handle. Declare scripts, overrides and handlers on the activating tab or context: native setting, script and interception declarations on a speculative page are `Unsupported`. Its own dialog handlers stay bound to the ending page and cannot decide dialogs on the surviving tab. Those tab/context declarations also cover its prospective document, before author script. Tab event streams stay open; speculative-page streams end. Starting screencast/video on the speculative page is `Unsupported`; the speculative grant does not own the tab's visible output. Native screencast/video sources bound to the replaced session finish; recordings are not silently restarted. Requests still running on the replaced session become unavailable, while response collection on the retained session survives.
-  - Activation is reported as navigation `initiatedAs: prerenderActivation` and outcome `Activated{document}`. A command navigation uses that outcome only when positively correlated; `goto` can instead make an ordinary navigation, subject to Chromium's own activation matching. Attached or headed Chromium, stock/custom launches without both required disabled features, Firefox and WebKit have no supported transfer path (`prerender.activation` is unsupported). This does not claim those engines can never prerender.
+  - Current adapters do not implement prerender activation or document and realm transfer between pages.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.

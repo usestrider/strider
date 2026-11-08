@@ -15,8 +15,7 @@ import type { TargetKind } from "./state.ts"
 export const frameUrl = (frame: Page.Frame): string => frame.url + (frame.urlFragment ?? "")
 
 export const targetKind = (type: string): TargetKind =>
-  type === "tab" || type === "page" || type === "iframe" || type === "worker" || type === "service_worker" ||
-    type === "shared_worker"
+  type === "page" || type === "iframe" || type === "worker" || type === "service_worker" || type === "shared_worker"
     ? type
     : "other"
 

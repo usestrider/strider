@@ -190,7 +190,6 @@ const delivery = <B, DE, DR>(
       ))
     }
     const end = ended.value
-    if (end._tag === "Unavailable") return yield* Effect.fail(unavailable(url, "evicted", end.why))
     if (end._tag === "Failed") {
       return yield* Effect.fail(
         unavailable(url, "failed", `The request failed after its response started: ${end.error}`)

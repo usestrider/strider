@@ -20,8 +20,7 @@ const backend: Backend = {
     const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
     const adapter = yield* CdpAdapter.connect(record(transport, CdpWire.wire, fixtures.cdp), {
       sink,
-      ownership: "launched",
-      prerender: true
+      ownership: "launched"
     })
     assertPinned("Chromium", adapter.info.version, chromium.version)
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }

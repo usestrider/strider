@@ -86,7 +86,6 @@ export interface Fold {
   // Reads
   readonly pages: Readable.Readable<ReadonlyArray<Model.PageEntry>>
   readonly page: (id: Target.NavigableId) => Option.Option<Model.PageEntry>
-  readonly realmPage: (id: Target.RealmId) => Option.Option<Model.PageEntry>
   readonly document: (id: Target.DocumentId) => Option.Option<Model.DocumentEntry>
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
@@ -484,8 +483,6 @@ export const make = Effect.fnUntraced(function*(options: {
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
             id: fact.page,
-            pageKind: fact.kind,
-            prerenderOf: fact.prerenderOf,
             context: fact.context,
             contextEntry: context,
             state: yield* cell<Model.PageState>({
@@ -580,17 +577,10 @@ export const make = Effect.fnUntraced(function*(options: {
           const page = pages.get(fact.navigable)
           const owner = frames.get(fact.navigable)
           if (page === undefined && owner === undefined) return
-          const documentState = yield* cell<Model.DocumentState>({
-            navigable: fact.navigable,
-            url: fact.url,
-            readiness: "loading"
-          })
           documents.set(fact.document, {
             id: fact.document,
-            get navigable() {
-              return documentState.getUnsafe().navigable
-            },
-            state: documentState,
+            navigable: fact.navigable,
+            state: yield* cell<Model.DocumentState>({ url: fact.url, readiness: "loading" }),
             ended: yield* Deferred.make<Target.CloseReason>()
           })
           if (page === undefined) {
@@ -614,51 +604,6 @@ export const make = Effect.fnUntraced(function*(options: {
                 undecided: state.status._tag === "Open" ? state.status.undecided : Option.none()
               }
             })
-          return
-        }
-        case "PrerenderActivated": {
-          const page = pages.get(fact.page)
-          const speculative = pages.get(fact.prerender)
-          const document = documents.get(fact.document)
-          if (page === undefined || speculative === undefined || document === undefined) return
-          if (Option.isSome(fact.replaced)) yield* endDocument(fact.replaced.value, new Target.DocumentReplaced({}))
-          const previous = page.state.getUnsafe()
-          for (const frame of previous.frames) {
-            frames.delete(frame.id)
-            if (Option.isSome(frame.document)) yield* endDocument(frame.document.value, new Target.FrameDetached({}))
-          }
-          yield* update(document.state, (state) => ({ ...state, navigable: page.id }))
-          const moving = speculative.state.getUnsafe()
-          for (const frame of moving.frames) frames.set(frame.id, page)
-          for (const [realm, owner] of realmOwners) {
-            if (Option.isSome(owner.page) && owner.page.value === speculative) {
-              realmOwners.set(realm, ownerOfPage(Option.some(page)))
-            }
-          }
-          for (const worker of workers.values()) {
-            if (Option.contains(worker.page, speculative)) {
-              worker.page = Option.some(page)
-            }
-          }
-          for (const connection of connections.values()) if (connection.page === speculative) connection.page = page
-          for (const hop of hops.values()) if (Option.contains(hop.page, speculative)) hop.page = Option.some(page)
-          yield* update(page.state, (state): Model.PageState => ({
-            ...state,
-            frames: moving.frames.map((frame) =>
-              frame.parent === speculative.id ? { ...frame, parent: page.id } : frame
-            ),
-            workers: moving.workers,
-            status: {
-              _tag: "Open",
-              url: document.state.getUnsafe().url,
-              document: { id: document.id, readiness: document.state.getUnsafe().readiness, lifecycle: "active" },
-              prompt: Option.none(),
-              undecided: Option.none()
-            }
-          }))
-          // The moved frames and workers no longer belong to the page whose streams now end.
-          yield* update(speculative.state, (state) => ({ ...state, frames: [], workers: [] }))
-          yield* endPage(speculative, new Target.PrerenderActivated({}))
           return
         }
         case "DocumentUrlChanged": {
@@ -821,10 +766,6 @@ export const make = Effect.fnUntraced(function*(options: {
           })
           return
         }
-        case "RequestUnavailable": {
-          endHop(fact.hop, { _tag: "Unavailable", why: fact.why, at: fact.at })
-          return
-        }
         case "RequestFailed": {
           endHop(fact.hop, { _tag: "Failed", error: fact.error, canceled: fact.canceled, at: fact.at })
           return
@@ -923,11 +864,10 @@ export const make = Effect.fnUntraced(function*(options: {
             const owner = ownerOfRequest(paused.request)
             const routes = [
               ...(Option.isSome(owner.page) ? [...owner.page.value.state.getUnsafe().routes].reverse() : []),
-              ...(Option.isSome(owner.page) && owner.page.value.prerenderOf !== undefined
-                ? [...(pages.get(owner.page.value.prerenderOf)?.state.getUnsafe().routes ?? [])].reverse()
-                : []),
               ...(Option.isSome(owner.context) ? [...owner.context.value.state.getUnsafe().routes].reverse() : [])
-            ].filter((route) => route.phase === paused.phase && route.matches(paused.request.url))
+            ].filter((route) =>
+              route.phase === paused.phase && route.matches(paused.request.url)
+            )
             Queue.offerUnsafe(obligations, {
               _tag: "PausedRequest",
               obligation: fact.obligation,
@@ -947,12 +887,11 @@ export const make = Effect.fnUntraced(function*(options: {
               obligation: fact.obligation,
               chooser,
               page,
-              handler: Option.flatMap(
-                page,
-                (page) => Option.fromUndefinedOr(page.state.getUnsafe().chooserHandlers.at(-1))
-              ),
+              handler: Option.flatMap(page, (page) =>
+                Option.fromUndefinedOr(page.state.getUnsafe().chooserHandlers.at(-1))),
               context,
-              owned: Option.exists(context, (context) => context.state.getUnsafe().settings.owned)
+              owned: Option.exists(context, (context) =>
+                context.state.getUnsafe().settings.owned)
             })
             return
           }
@@ -970,7 +909,8 @@ export const make = Effect.fnUntraced(function*(options: {
               prompt: Option.some({ id: prompt.prompt, kind: prompt.kind, blocking: "confirmed" })
             }))
           }
-          const context = Option.map(page, (page) => page.contextEntry)
+          const context = Option.map(page, (page) =>
+            page.contextEntry)
           Queue.offerUnsafe(obligations, {
             _tag: "Prompt",
             obligation: fact.obligation,
@@ -1032,7 +972,6 @@ export const make = Effect.fnUntraced(function*(options: {
     obligations,
     pages: pageList,
     page: (id) => Option.fromNullishOr(pages.get(id)),
-    realmPage: (id) => realmOwners.get(id)?.page ?? Option.none(),
     document: (id) => Option.fromNullishOr(documents.get(id)),
     documentOf,
     response: (hop) => responses.get(hop),

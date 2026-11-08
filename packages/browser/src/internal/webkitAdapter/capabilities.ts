@@ -26,9 +26,6 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
-      entry("prerender.activation", "unsupported", [
-        "WebKit provisional target commits do not establish prerender activation"
-      ]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"

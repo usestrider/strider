@@ -143,10 +143,6 @@ export interface Session extends Protocol.ProtocolSession {
   readonly sendSequenced: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
-  /** Writes a command now; its reply is awaited separately within the acquiring scope. */
-  readonly enqueue: <M extends string, P, A>(
-    command: Protocol.Command<M, P, A>
-  ) => Effect.Effect<Effect.Effect<A, Protocol.ProtocolError>, Protocol.ProtocolError, Scope.Scope>
   /**
    * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
    * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
@@ -703,11 +699,6 @@ export const make: (
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
-      enqueue: (command) =>
-        Effect.acquireRelease(
-          prepare(state, command).pipe(Effect.tap((prepared) => prepared.write)),
-          (prepared) => prepared.abandon
-        ).pipe(Effect.map((prepared) => prepared.traced(prepared.reply).pipe(Effect.map(({ result }) => result)))),
       sendOrdered: (commands) => sendOrdered(state, commands),
       subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),

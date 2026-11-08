@@ -23,7 +23,6 @@ import * as JSHandle from "../JSHandle.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
-import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import { isolatedWorld } from "./initScripts.ts"
@@ -91,37 +90,33 @@ export const toLocal = (
   realm: Target.RealmId,
   offset = 0
 ): Effect.Effect<ReadonlyArray<Adapter.LocalValue>, Failure> =>
-  Effect.forEach(args, (arg) => arg instanceof HandleImpl ? Access.check(arg.grant) : Effect.void, { discard: true })
-    .pipe(
-      Effect.mapError((error): Failure => ({ _tag: "Gone", error })),
-      Effect.andThen(Effect.suspend(() => {
-        const values: Array<Adapter.LocalValue> = []
-        for (const [index, arg] of args.entries()) {
-          const path = `args[${index + offset}]`
-          if (arg instanceof HandleImpl) {
-            if (arg.realm !== realm) {
-              return Effect.fail<Failure>({
-                _tag: "Reason",
-                reason: new Reason.NotSerializable({
-                  path,
-                  hint: "A handle crosses only into its own realm; read its value, or evaluate in the handle's realm"
-                })
-              })
-            }
-            if (arg.released) return Effect.die(new Error("A JSHandle was used after it was released"))
-            values.push(localOf(arg))
-            continue
-          }
-          try {
-            values.push({ _tag: "Value", value: Serialization.toRemote(arg, path) })
-          } catch (error) {
-            if (!(error instanceof Serialization.Unserializable)) throw error
-            return Effect.fail(notSerializable(error))
-          }
+  Effect.suspend(() => {
+    const values: Array<Adapter.LocalValue> = []
+    for (const [index, arg] of args.entries()) {
+      const path = `args[${index + offset}]`
+      if (arg instanceof HandleImpl) {
+        if (arg.realm !== realm) {
+          return Effect.fail<Failure>({
+            _tag: "Reason",
+            reason: new Reason.NotSerializable({
+              path,
+              hint: "A handle crosses only into its own realm; read its value, or evaluate in the handle's realm"
+            })
+          })
         }
-        return Effect.succeed(values)
-      }))
-    )
+        if (arg.released) return Effect.die(new Error("A JSHandle was used after it was released"))
+        values.push(localOf(arg))
+        continue
+      }
+      try {
+        values.push({ _tag: "Value", value: Serialization.toRemote(arg, path) })
+      } catch (error) {
+        if (!(error instanceof Serialization.Unserializable)) throw error
+        return Effect.fail(notSerializable(error))
+      }
+    }
+    return Effect.succeed(values)
+  })
 
 /** A result by value, as a JavaScript value. */
 export const fromRemote = (value: Adapter.RemoteValue): Effect.Effect<unknown, Failure> =>
@@ -271,24 +266,18 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   readonly realm: Target.RealmId
   readonly value: Adapter.RemoteValue
   readonly runtime: Runtime.Runtime
-  readonly grant: Option.Option<Access.Grant>
-  private readonly initialPage: Option.Option<Model.PageEntry>
-  get page(): Option.Option<Model.PageEntry> {
-    return Option.orElse(this.runtime.model.realmPage(this.realm), () => this.initialPage)
-  }
+  readonly page: Option.Option<Model.PageEntry>
   released = false
   constructor(
     runtime: Runtime.Runtime,
     realm: Target.RealmId,
     value: Adapter.RemoteValue,
-    page: Option.Option<Model.PageEntry>,
-    grant: Option.Option<Access.Grant> = Option.none()
+    page: Option.Option<Model.PageEntry>
   ) {
     this.runtime = runtime
     this.realm = realm
     this.value = value
-    this.initialPage = page
-    this.grant = grant
+    this.page = page
   }
 
   get remote(): Option.Option<Adapter.HandleId> {
@@ -303,7 +292,6 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     then: (value: Adapter.RemoteValue) => Effect.Effect<B, Failure, R>
   ): Effect.Effect<B, JSHandle.JSHandleError | Target.TargetGone | Deadline.Timeout, R> {
     return Effect.gen({ self: this }, function*() {
-      yield* Access.check(this.grant)
       if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
       const record = yield* Operation.record
       const id = record.id
@@ -345,7 +333,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
       fn,
       args,
       "handle",
-      (value) => own<Awaited<B>>(this.runtime, this.realm, value, this.page, this.grant)
+      (value) => own<Awaited<B>>(this.runtime, this.realm, value, this.page)
     )
   }
 
@@ -438,11 +426,10 @@ export const own = <A>(
   runtime: Runtime.Runtime,
   realm: Target.RealmId,
   value: Adapter.RemoteValue,
-  page: Option.Option<Model.PageEntry>,
-  grant: Option.Option<Access.Grant> = Option.none()
+  page: Option.Option<Model.PageEntry>
 ): Effect.Effect<JSHandle.JSHandle<A>, never, Scope.Scope> =>
   Effect.gen(function*() {
-    const handle = new HandleImpl<A>(runtime, realm, value, page, grant)
+    const handle = new HandleImpl<A>(runtime, realm, value, page)
     const group = yield* groupOf(runtime, yield* Effect.scope, realm)
     group.handles.add(handle as HandleImpl<unknown>)
     return handle

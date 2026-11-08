@@ -151,7 +151,6 @@ export type HopEnd =
     readonly canceled: boolean
     readonly at: MonotonicInstant.MonotonicInstant
   }
-  | { readonly _tag: "Unavailable"; readonly why: string; readonly at: MonotonicInstant.MonotonicInstant }
   /** Dropped from the model while still in flight, past `maxHops`. */
   | { readonly _tag: "Forgotten" }
 
@@ -174,8 +173,8 @@ export interface HopEntry {
    */
   readonly sentKnown: Deferred.Deferred<void>
   readonly end: Deferred.Deferred<HopEnd>
-  /** The current owner of a request whose document or realm can transfer on activation. */
-  page: Option.Option<PageEntry>
+  /** Fixed: a request is its initiator's from its first fact. */
+  readonly page: Option.Option<PageEntry>
   readonly context: Option.Option<ContextEntry>
 }
 
@@ -203,10 +202,10 @@ export interface DownloadEntry {
 
 export interface WorkerEntry {
   readonly realm: Target.RealmId
-  /** Kind and URL stay fixed; a prerender owner can transfer into its tab. */
+  /** Fixed: a realm never changes kind, URL or owner. */
   readonly kind: BrowserWorker.Kind
   readonly url: Url.Url
-  page: Option.Option<PageEntry>
+  readonly page: Option.Option<PageEntry>
   readonly context: Option.Option<ContextEntry>
   readonly closed: Deferred.Deferred<Target.CloseReason>
 }
@@ -217,7 +216,7 @@ export interface ConnectionEntry {
   readonly kind: NetworkConnection.Kind
   readonly url: Url.Url
   readonly openedAt: DateTime.Utc
-  page: PageEntry
+  readonly page: PageEntry
   readonly frames: Events.Channel<NetworkConnection.Frame>
   readonly closed: Deferred.Deferred<Target.CloseReason>
 }
@@ -286,8 +285,6 @@ export interface PageState {
 }
 
 export interface PageEntry {
-  readonly pageKind: "tab" | "popup" | "prerender"
-  readonly prerenderOf?: Target.NavigableId | undefined
   readonly id: Target.NavigableId
   /** Fixed: a page never changes context. */
   readonly context: UserContext.Id
@@ -349,16 +346,15 @@ export interface ContextEntry {
   readonly events: ContextEvents
 }
 
-/** A document's current owner, URL and readiness; ownership changes on prerender transfer. */
+/** What changes about a document: its URL, which a same-document navigation changes, and its readiness. */
 export interface DocumentState {
-  readonly navigable: Target.NavigableId
   readonly url: Url.Url
   readonly readiness: "loading" | "interactive" | "complete"
 }
 
 export interface DocumentEntry {
   readonly id: Target.DocumentId
-  /** Changes when a prerender document transfers into its activating tab. */
+  /** Fixed: no backend built activates a prerender, which is all that moves a document (CONCEPTS.md §4). */
   readonly navigable: Target.NavigableId
   readonly state: Readable<DocumentState>
   readonly ended: Deferred.Deferred<Target.CloseReason>
@@ -366,7 +362,7 @@ export interface DocumentEntry {
 
 /** Where an event belongs: the page and the context whose channels it is published on, whichever there are. */
 export interface Owner {
-  page: Option.Option<PageEntry>
+  readonly page: Option.Option<PageEntry>
   readonly context: Option.Option<ContextEntry>
 }
 
@@ -386,7 +382,6 @@ export interface Model {
   readonly pages: Readable<ReadonlyArray<PageEntry>>
   /** A page the model keeps, by id. */
   readonly page: (id: Target.NavigableId) => Option.Option<PageEntry>
-  readonly realmPage: (id: Target.RealmId) => Option.Option<PageEntry>
   /** A document the model keeps, by id, until it ends. */
   readonly document: (id: Target.DocumentId) => Option.Option<DocumentEntry>
   /** A page's or a frame's current document; `None` until one commits, and once it is gone. */
@@ -478,7 +473,6 @@ export const make = Effect.fnUntraced(function*() {
         adapter: bounded,
         pages: fold.pages,
         page: fold.page,
-        realmPage: fold.realmPage,
         document: fold.document,
         documentOf: fold.documentOf,
         response: fold.response,

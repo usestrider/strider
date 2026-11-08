@@ -288,7 +288,6 @@ export const attaching = (
             const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
             yield* Effect.gen(function*() {
               const browser = yield* Browser.Browser
-              assert.isFalse((yield* browser.capabilities).has("prerender.activation"))
               const first = yield* byHeading(browser, "First")
               const second = yield* byHeading(browser, "Second")
               // 7. Attach, inspect one tab, control another, leave both open

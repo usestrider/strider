@@ -54,15 +54,6 @@ export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe
   "about:blank"
 ]
 
-/** Whether this launch retains the validated prerender activation configuration. */
-export const prerenderEnabled = (options: Settings): boolean => {
-  if (options.headless === false) return false
-  const args = [...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]), ...(options.args ?? [])]
-  const featureSwitch = args.findLast((arg) => arg === "--disable-features" || arg.startsWith("--disable-features="))
-  const disabled = featureSwitch?.slice("--disable-features=".length).split(",") ?? []
-  return disabled.includes("PrefetchPrerenderIntegration") && disabled.includes("Prerender2FallbackPrefetchSpecRules")
-}
-
 /** Launches over the pipe. */
 export const launch: (
   options: Options

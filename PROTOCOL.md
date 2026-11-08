@@ -314,11 +314,11 @@ interface AdapterConnection {
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:
-  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target). For validated headless launched Chromium, attach through native tabs; correlate a known prerender child losing its subtype under the same parent, preserving its session, frame, loader and contexts. The old primary child can detach first. Only the native tab owns the public tab lifetime. Transfer the retained document/realms/subtree in one fact before ending the speculative public page; never infer activation from detach alone.
+  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), while prerender activation and its document/realm transfer are not implemented.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
   - BiDi: route events to sessions client-side, because the wire carries no subscription id.
 - **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
-  - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. Configure while paused (frame-tree snapshot, events buffered until the tree is known, required declarations), then `runIfWaitingForDebugger`, always run in a finalizer. A paused prerender cannot answer the usual serial renderer gate: enqueue all domain setup, effective overrides, ordered script bundles and interception before resume, then await replies separately while ingesting paused requests. Use the activating tab's recorded original viewport for restoration; refuse the override if that baseline is unavailable. Serialize declaration release behind initialization so it cannot confirm restoration before queued configuration. Publish Ready only after the replies and frame tree. This path requires both prefetch feature workarounds in the launch arguments; attached browsers keep their existing gate and timing refusals.
+  - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. Configure while paused (frame-tree snapshot, events buffered until the tree is known, required declarations), then `runIfWaitingForDebugger`, always run in a finalizer.
   - **WebKit:** `Target.resume`.
   - **BiDi:** native scoped declarations.
 
@@ -389,7 +389,7 @@ Adapter responsibilities:
   - the on-demand realm strategy (no `Runtime.enable`);
   - merging `ExtraInfo` headers into request snapshots (`servedBy` is built since: Who served a response, below);
   - enrichment;
-  - prerender transfer on attached Chromium, unvalidated launch settings, BiDi and WebKit; back/forward-cache restores are built and tested (History and restores, below).
+  - prerender activation and document/realm transfer, which current adapters do not implement; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
 **Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
 
@@ -454,7 +454,7 @@ Adapter responsibilities:
 
 - **CDP's `ExtraInfo` headers**, the ones the network stack adds, such as cookies. They change a request after it is reported, so they need a fact that updates it, a change to the fact contract not designed yet. (`servedBy` is on the response instead, and built: Who served a response, below.)
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
-- **Prerender transfer outside the supported headless Chromium launch configuration**, including attached Chromium, Firefox and WebKit. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
+- **Prerender activation and document/realm transfer**, which current adapters do not implement. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
 - **The rest of the CLI.** `strider browsers` is built; the session commands of CLI.md aren't.
 - **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter. (Since built: Stock WebKit, attached, below, with the patched adapter's profile and a transport rather than a wire and an adapter of its own; WPE wasn't in the pinned nixpkgs after all.)
 

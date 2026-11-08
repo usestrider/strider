@@ -92,7 +92,6 @@ The principles (docs/design.md), as they apply to this layer, written the way Ef
 // Page
 interface ObservedPage extends Pipeable, Equal.Equal, Inspectable {   // state and events only
   readonly id: Target.NavigableId
-  readonly pageKind: "tab" | "popup" | "prerender"   // fixed when the page is created
   readonly status: Watchable.Watchable<Status>          // one consistent snapshot; ends with Closed{reason}
   readonly url: Watchable.Watchable<Url.Url>            // status.map(…): derived from the same source
   readonly frames: Watchable.Watchable<FrameTree>
@@ -123,16 +122,10 @@ const PageNavigation = Schema.Union([
   Schema.TaggedStruct("SameDocument", {
     id: Id, url: Url.Url, document: Target.DocumentId, via: Schema.Literals(["fragment", "historyApi", "intercepted"]) }),
   Schema.TaggedStruct("Restored", { id: Id, url: Url.Url, document: Target.DocumentId }),    // back/forward cache
-  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),   // Chromium launched with speculative request coverage
+  Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),   // prerender activation is not implemented
   Schema.TaggedStruct("BecameDownload", { id: Id, url: Url.Url }),                          // only from goto with accept
   Schema.TaggedStruct("NoContent", { id: Id, url: Url.Url, response: Schema.Option(NetworkResponse.NetworkResponse) })   // likewise
 ])
-
-// On headless Chromium launched with automation/concurrent's prefetch feature settings, a prerender activation
-// ends only the speculative page with Target.PrerenderActivated. The tab stays open and receives the same
-// document, window realms and frame subtree. See CONCEPTS.md, Documents, realms and navigation.
-// Attached or headed browsers and launches replacing those settings report prerender.activation unsupported;
-// Firefox and WebKit have no transfer producer. Page.goto may perform ordinary navigation instead of activation.
 
 // NetworkResponse: immutable; one redirect hop. NetworkRequest is its request-side twin
 class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/browser/NetworkResponse")({

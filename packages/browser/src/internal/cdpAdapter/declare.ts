@@ -2,7 +2,6 @@
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
  * its scripts run and again to every target in scope when a registration comes or goes.
  */
-import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -17,7 +16,6 @@ import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
-import * as TargetCdp from "../../cdp/Target.ts"
 import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
@@ -28,8 +26,6 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
-type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
-
 /** A URL pattern no request matches: a scheme nothing uses. */
 const nothing = "strider-intercepts-nothing:"
 
@@ -38,8 +34,7 @@ const nothing = "strider-intercepts-nothing:"
 const network = (
   session: ProtocolClient.Session,
   offline: boolean,
-  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
-  send: Send = (command) => session.send(command).pipe(Effect.asVoid)
+  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined
 ) => {
   const state = {
     offline,
@@ -48,8 +43,10 @@ const network = (
     uploadThroughput: conditions?.upload ?? -1
   }
   return Effect.all([
-    Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(send),
-    Network.overrideNetworkState(state).pipe(send)
+    Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
+      Protocol.on(session)
+    ),
+    Network.overrideNetworkState(state).pipe(Protocol.on(session))
   ], { discard: true })
 }
 
@@ -149,11 +146,10 @@ const applyOverride = (
   state: State,
   target: TargetEntry,
   kind: Adapter.Override["_tag"],
-  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>,
-  send?: Send
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
 ): Effect.Effect<void, Protocol.ProtocolError> => {
   const session = target.session
-  const on: Send = send ?? ((command) => session.send(command).pipe(Effect.asVoid))
+  const on = Protocol.on(session)
   const override = effective.get(kind)
   if (kind === "Offline" || kind === "NetworkConditions") {
     const offline = effective.get("Offline")
@@ -161,8 +157,7 @@ const applyOverride = (
     return network(
       session,
       offline?._tag === "Offline" && offline.offline,
-      conditions?._tag === "NetworkConditions" ? conditions : undefined,
-      on
+      conditions?._tag === "NetworkConditions" ? conditions : undefined
     )
   }
   if (kind === "UserAgent" || kind === "Locale") {
@@ -272,12 +267,12 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
   }
 })
 
-const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, send?: Send) {
+const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
   const intercepts = state.registry.intercepts(placement(page))
   const challenges = state.registry.challenges(placement(page))
   const key = JSON.stringify({ intercepts, challenges })
   if (key === target.intercepts) return
-  const on: Send = send ?? ((command) => target.session.send(command).pipe(Effect.asVoid))
+  const on = Protocol.on(target.session)
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
   // the request goes on at once unless a request-phase intercept wants it. Where challenges are paused, every
   // document is, a pause a page's load hardly notices; pausing every request would cost each of them a round trip
@@ -351,123 +346,42 @@ export const configureTarget = Effect.fnUntraced(function*(state: State, target:
   }
 })
 
-/** Writes the whole initial declaration set before resuming a prerender's renderer. */
-export const initializePrerender = Effect.fnUntraced(
-  function*(state: State, target: TargetEntry, page: PageEntry, originalViewport: TargetEntry["viewport"]) {
-    const scope = yield* Effect.scope
-    const replies: Array<Effect.Effect<unknown, Protocol.ProtocolError>> = []
-    const enqueue = <M extends string, P, A>(command: Protocol.Command<M, P, A>) =>
-      target.session.enqueue(command).pipe(Effect.provideService(Scope.Scope, scope))
-    const send: Send = (command) =>
-      enqueue(command).pipe(Effect.map((reply) => {
-        replies.push(reply)
-      }))
-    yield* send(Page.enable())
-    yield* send(Page.setLifecycleEventsEnabled({ enabled: true }))
-    yield* send(Network.enable({}))
-    const effective = state.registry.overrides(placement(page))
-    for (const [kind, override] of effective) {
-      if (kind === "Viewport" && override._tag === "Viewport") {
-        if (originalViewport === undefined || originalViewport === null) {
-          return yield* Effect.fail(
-            Kit.unsupported("prerender.viewport", "The activating tab's original viewport was not recorded")
-          )
-        }
-        target.viewport = originalViewport
-        yield* send(
-          Emulation.setDeviceMetricsOverride({
-            width: override.width,
-            height: override.height,
-            deviceScaleFactor: override.deviceScaleFactor,
-            mobile: override.mobile
-          })
-        )
-      } else {
-        yield* applyOverride(state, target, kind, effective, send)
-      }
-    }
-    for (const [key, bundle] of state.registry.bundles(placement(page))) {
-      const reply = yield* enqueue(
-        Page.addScriptToEvaluateOnNewDocument({
-          source: bundle.source,
-          ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-        })
-      )
-      replies.push(reply.pipe(Effect.tap(({ identifier }) =>
-        Effect.sync(() => {
-          target.scripts.set(key, identifier)
-        })
-      )))
-    }
-    yield* applyIntercepts(state, target, page, send)
-    const limit = state.registry.bodyLimit(placement(page), "response")
-    if (Option.isSome(limit)) {
-      yield* send(
-        Network.configureDurableMessages({ maxTotalBufferSize: 10 * limit.value, maxResourceBufferSize: limit.value })
-      )
-    }
-    if (state.registry.fileChooser(placement(page))) yield* send(Page.setInterceptFileChooserDialog({ enabled: true }))
-    yield* send(
-      TargetCdp.setAutoAttach({
-        autoAttach: true,
-        waitForDebuggerOnStart: true,
-        flatten: true,
-        filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
-      })
-    )
-    yield* send(Runtime.enable())
-    yield* send(Runtime.runIfWaitingForDebugger())
-    yield* Effect.all(replies, { concurrency: "unbounded", discard: true })
-  },
-  (effect, _state, target) => {
-    const viewportLock = target.viewportLock ??= Semaphore.makeUnsafe(1)
-    return withOverrides(target, viewportLock.withPermits(1)(effect)).pipe(Effect.scoped)
-  }
-)
-
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>
     target.page !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
     Declarations.covers(scope, placement(target.page))
   )
 
-const afterInitialization = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E, R>) =>
-  (target.initialized === undefined ? Effect.void : Deferred.await(target.initialized)).pipe(Effect.andThen(effect))
-
-const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) =>
-  afterInitialization(
-    target,
-    Effect.suspend(() => {
-      const page = target.page!
-      switch (declaration._tag) {
-        case "InitScript":
-          return applyScripts(state, target, page)
-        case "Intercept":
-        case "Challenges":
-          return applyIntercepts(state, target, page)
-        case "Override":
-          if (declaration.override._tag === "Viewport") {
-            return viewport(state, target, state.registry.overrides(placement(page)))
-          }
-          return withOverrides(
-            target,
-            Effect.suspend(() =>
-              applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
-            )
-          )
-        case "FileChooser":
-          return target.kind === "page"
-            ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
-              Protocol.on(target.session)
-            ) :
-            Effect.void
-        case "BodyCollection":
-          return keepBodies(state, target, page)
-        case "Downloads":
-          return Effect.void
+const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
+  const page = target.page!
+  switch (declaration._tag) {
+    case "InitScript":
+      return applyScripts(state, target, page)
+    case "Intercept":
+    case "Challenges":
+      return applyIntercepts(state, target, page)
+    case "Override":
+      if (declaration.override._tag === "Viewport") {
+        return viewport(state, target, state.registry.overrides(placement(page)))
       }
-    })
-  )
+      return withOverrides(
+        target,
+        Effect.suspend(() =>
+          applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+        )
+      )
+    case "FileChooser":
+      return target.kind === "page"
+        ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
+          Protocol.on(target.session)
+        ) :
+        Effect.void
+    case "BodyCollection":
+      return keepBodies(state, target, page)
+    case "Downloads":
+      return Effect.void
+  }
+}
 
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
   Effect.forEach(targetsInScope(state, scope), (target) => applyToTarget(state, declaration, target), {
@@ -524,12 +438,6 @@ export const declare = Effect.fnUntraced(function*(
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ) {
-  if (scope._tag === "Page" && state.pages.get(scope.page)?.target.prerender === true) {
-    return yield* Effect.fail(Kit.unsupported(
-      "prerender.declarations",
-      "Declare settings on the activating tab or its context; a speculative page cannot own settings on the surviving tab"
-    ))
-  }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
   const registrationContext = yield* Effect.context<never>()

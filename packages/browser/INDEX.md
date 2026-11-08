@@ -1343,7 +1343,6 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 - `interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectable.Inspectable`
   - `readonly [TypeId]: typeof TypeId`
   - `readonly id: Target.NavigableId`
-  - `readonly pageKind: "tab" | "popup" | "prerender"`
   - `readonly status: Watchable.Watchable<Status>`
   - `readonly url: Watchable.Watchable<Url.Url>`
   - `readonly frames: Watchable.Watchable<FrameTree>`
@@ -1763,7 +1762,7 @@ What operations act on, how each one is identified, and how it ends.
 - `const NavigableId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/NavigableId"))`
 - `const DocumentId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/DocumentId"))`
 - `const RealmId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Target/RealmId"))`
-- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PageClosed, PrerenderActivated, ObligationEnded, DownloadEnded, HopEnded, PageCrashe…`
+- `const CloseReason = Schema.Union([BrowserClosed, BrowserCrashed, ConnectionLost, ModelUnavailable, UserContextRemoved, AccessReleased, PageClosed, ObligationEnded, DownloadEnded, HopEnded, PageCrashed, FrameDetached, Do…`
 - `const Description = Schema.Union([Schema.TaggedStruct("Page", { id: NavigableId }), Schema.TaggedStruct("Frame", { id: NavigableId }), Schema.TaggedStruct("Document", { id: DocumentId }), Schema.TaggedStruct("Realm", { …`
 - `const EventOrigin = Schema.Union([Schema.TaggedStruct("Page", { page: NavigableId }), Schema.TaggedStruct("Worker", { realm: RealmId })])`
 
@@ -1792,7 +1791,6 @@ What operations act on, how each one is identified, and how it ends.
 - `class RealmDestroyed: Schema.Error { hint }`
 - `class NetworkConnectionClosed: Schema.Error { hint }`
 - `class PageClosed: Schema.Error { by, hint }`
-- `class PrerenderActivated: Schema.Error { hint }`
 - `class ObligationEnded: Schema.Error { hint }`
 - `class DownloadEnded: Schema.Error { hint }`
 - `class HopEnded: Schema.Error { hint }`

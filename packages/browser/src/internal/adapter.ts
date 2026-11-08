@@ -214,8 +214,7 @@ export type Fact =
     readonly _tag: "PageAdded"
     readonly page: Target.NavigableId
     readonly context: UserContext.Id
-    readonly kind: "tab" | "popup" | "prerender"
-    readonly prerenderOf?: Target.NavigableId | undefined
+    readonly kind: "tab" | "popup"
     readonly origin: PageOrigin
     readonly url: Url.Url
   }
@@ -243,13 +242,6 @@ export type Fact =
     /** The document it replaced, which ended with `DocumentReplaced`. */
     readonly replaced: Option.Option<Target.DocumentId>
     readonly evidence: string
-  }
-  | {
-    readonly _tag: "PrerenderActivated"
-    readonly page: Target.NavigableId
-    readonly prerender: Target.NavigableId
-    readonly document: Target.DocumentId
-    readonly replaced: Option.Option<Target.DocumentId>
   }
   | {
     readonly _tag: "DocumentUrlChanged"
@@ -330,12 +322,6 @@ export type Fact =
     readonly hop: NetworkRequest.HopId
     readonly error: string
     readonly canceled: boolean
-    readonly at: MonotonicInstant.MonotonicInstant
-  }
-  | {
-    readonly _tag: "RequestUnavailable"
-    readonly hop: NetworkRequest.HopId
-    readonly why: string
     readonly at: MonotonicInstant.MonotonicInstant
   }
   | {
@@ -841,8 +827,6 @@ export interface ConnectOptions {
   readonly claimClient?: Effect.Effect<CdpConnection.CdpConnection, AdapterError, Scope.Scope> | undefined
   readonly browserIdentity?: string | undefined
   readonly ownership: "launched" | "attached"
-  /** Chromium launched with the validated speculative-request switches. */
-  readonly prerender?: boolean | undefined
 }
 
 /** One connected backend: what L1 asks of it. */

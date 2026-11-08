@@ -79,17 +79,6 @@ export const acquire = <H>(
         id
       ))
     }
-    if (page.pageKind === "prerender" && (capability.name === "Screencast" || capability.name === "Video")) {
-      return yield* Effect.fail(capabilityError(
-        capability.name,
-        new Reason.Unsupported({
-          capability: which.entry,
-          backend: runtime.backend,
-          hint: "Start recording on the activating tab; a speculative page does not own its visible output"
-        }),
-        id
-      ))
-    }
     const adapter = runtime.model.adapter
     const attributes = { "browser.page.id": page.id, "browser.capability": capability.name }
     switch (capability.name) {
@@ -127,18 +116,10 @@ export const acquire = <H>(
             })),
             // The stream ends with the page: its session's end, as the page's
             Stream.catch((error) =>
-              Stream.unwrap(Effect.map(Deferred.poll(page.closed), (closed) => {
-                if (Option.isSome(closed)) {
-                  return Stream.fromEffect(
-                    Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.idNow())))
-                  )
-                }
-                const reason = error.reason
-                return reason._tag === "Protocol" && reason.error.reason._tag === "SessionEnded" &&
-                    !["connectionLost", "modelUnavailable"].includes(reason.error.reason.why)
-                  ? Stream.empty
-                  : Stream.die(error)
-              }))
+              Stream.fromEffect(Effect.flatMap(Deferred.poll(page.closed), (closed) =>
+                Option.isSome(closed)
+                  ? Effect.flatMap(closed.value, (reason) => Effect.fail(gone(page, reason, Operation.idNow())))
+                  : Effect.die(error)))
             ),
             Stream.interruptWhen(Runtime.pageEnded(page))
           )

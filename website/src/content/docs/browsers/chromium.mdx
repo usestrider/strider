@@ -41,10 +41,7 @@ const LikeAUser = Chromium.layer({
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates and background networking,
   and enables `CDPScreenshotNewSurface` to request repaint on a new surface for captures. Capture can drive
-  rendering and is not guaranteed to be unobservable to the page. It disables `PrefetchPrerenderIntegration`
-  and `Prerender2FallbackPrefetchSpecRules`: prefetch ahead of prerender can bypass routes and configured headers.
-  Prerender itself stays enabled. Stock and attached browsers retain their settings and can retain this prefetch
-  bypass.
+  rendering and is not guaranteed to be unobservable to the page.
   [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) includes those settings and also stops throttling
   background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
   first-run pages, sync and updates included.
@@ -52,15 +49,6 @@ const LikeAUser = Chromium.layer({
   [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-a-contexts-life) to change it.
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
-
-Prerender activation preserves the tab and transfers the speculative document and its realms only for headless launched
-browsers retaining both disabled prefetch features above. Attached browsers and other launch settings report
-`prerender.activation` unsupported. Declare scripts, emulation and routes on the activating tab or its context;
-registering them on a speculative page is unsupported. On activation that speculative page closes with
-[`Target.PrerenderActivated`](/docs/api/browser/Target#PrerenderActivated); retained realm handles still require
-their original live grant. [`PageNavigation.next`](/docs/events/kinds)
-can report `Activated` with the retained document id; `page.goto` may instead make an ordinary navigation.
-Firefox and WebKit do not implement this transfer path.
 
 On the tested Chromium build, capturing a minimized window temporarily produced visible/hidden visibility events
 and animation-frame callbacks while the native window stayed minimized. Both the old and new capture paths did
@@ -71,9 +59,7 @@ supplying `--enable-features=X` replaces the preset's list, omits `CDPScreenshot
 capture path. To retain it, include both names in one list, such as
 `--enable-features=CDPScreenshotNewSurface,X`, where `X` is your feature. Chromium also replaces repeated
 `--disable-features` lists; a feature in the effective disabled list stays disabled even if enabled. Strider does
-not merge these lists. Your own `--disable-features` replaces the automation profile's entire list, including
-`PrefetchPrerenderIntegration` and `Prerender2FallbackPrefetchSpecRules`; include both names in your replacement
-list to retain speculative-request interception. A custom profile's own arguments replace the named preset's arguments; attached browsers
+not merge these lists. A custom profile's own arguments replace the named preset's arguments; attached browsers
 are unchanged.
 
 This capture setting has been validated on Chromium 155.0.8059.79. Other Chrome and Edge builds remain unverified.
