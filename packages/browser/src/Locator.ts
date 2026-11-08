@@ -769,7 +769,7 @@ export interface ReadonlyLocator
  *
  * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
- * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
+ * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
@@ -1166,6 +1166,31 @@ export interface Locator extends ReadonlyLocator {
    * ```
    */
   focus(options?: ActionOptions | undefined): ActionEffect
+  /**
+   * Removes focus from the one match, allowing the browser to fire its native blur and focusout events.
+   *
+   * **Details**
+   *
+   * Waits for exactly one match without visibility, enabled or inert checks by default. An unfocused element
+   * is unchanged. Calls the element's native blur method through Strider's engine without sending keyboard
+   * or pointer input. Uses an isolated world where the backend provides one; stock WebKit shares the page world.
+   * Missing matches wait until the deadline; several matches fail with `StrictViolation`.
+   *
+   * **Example** (Leaving an email field)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const leaveEmail = Effect.fn("leaveEmail")(function*(page: Page.Page) {
+   *   const email = page.getByLabel("Email")
+   *   yield* email.fill("ada@example.com")
+   *   yield* email.blur()
+   * })
+   * ```
+   */
+  blur(options?: ActionOptions | undefined): ActionEffect
+
   /**
    * Clears an input or editable element. Checks: visible, enabled, editable, notInert.
    *

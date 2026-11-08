@@ -171,6 +171,7 @@ const actions = new Set([
   "Locator.check",
   "Locator.uncheck",
   "Locator.focus",
+  "Locator.blur",
   "Locator.clear",
   "Locator.fill",
   "Locator.press",
