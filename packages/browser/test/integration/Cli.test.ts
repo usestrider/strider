@@ -1444,6 +1444,35 @@ describe("strider", () => {
               fs.readFileSync(test, "utf8"),
               `// The session started from session first's state (start --fork), which no file holds: this test's context starts empty\n        const context = yield* Browser.newContext({ focus: "emulated" })\n`
             )
+            const repo = path.join(env.XDG_RUNTIME_DIR, "export-repo")
+            fs.mkdirSync(repo)
+            yield* Effect.promise(() =>
+              new Promise<void>((resolve, reject) => {
+                execFile("git", ["init", repo], (error) => error ? reject(error) : resolve())
+              })
+            )
+            const saved = path.join(repo, "fork-state.json")
+            fs.writeFileSync(saved, "old", { mode: 0o644 })
+            yield* run("-s", "second", "-p", "home", "eval", "document.cookie = 'flavor=changed; path=/'")
+            const result = yield* run("-s", "second", "export", "test", test, "--state", saved)
+            assert.strictEqual(result.code, 0, result.err)
+            assert.include(result.err, "plaintext credentials")
+            assert.notInclude(result.out, "plaintext credentials")
+            assert.strictEqual(fs.statSync(saved).mode & 0o777, 0o600)
+            const snapshot = JSON.parse(fs.readFileSync(saved, "utf8"))
+            assert.strictEqual(
+              snapshot.cookies.find((cookie: { name: string }) => cookie.name === "flavor").value,
+              "oat"
+            )
+            assert.include(fs.readFileSync(test, "utf8"), JSON.stringify(saved))
+            assert.notInclude(fs.readFileSync(test, "utf8"), "context starts empty")
+            const collision = yield* run("-s", "second", "export", "test", saved, "--state", saved)
+            assert.notStrictEqual(collision.code, 0)
+            assert.include(collision.err, "different")
+            assert.strictEqual(JSON.parse(fs.readFileSync(saved, "utf8")).cookies[0].value, "oat")
+            const unsupported = yield* run("-s", "first", "export", "test", test, "--state", saved)
+            assert.notStrictEqual(unsupported.code, 0)
+            assert.include(unsupported.err, "--fork")
           } finally {
             const stopped = yield* run("-s", "second", "stop")
             assert.strictEqual(stopped.code, 0, stopped.err)

@@ -656,7 +656,7 @@ describe("strider export test", () => {
     )
     assert.include(
       exported({ userDataDir: "/home/ada/profiles/shop" }),
-      `        // The session's browser ran on the profile at /home/ada/profiles/shop (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one\n${context}`
+      `        // The session's browser ran on the profile at /home/ada/profiles/shop (start --user-data-dir), which that browser keeps locked: profile replay is unsupported; this test's starts with an empty one\n${context}`
     )
     const both = exported({ fork: "login", userDataDir: "/home/ada/profiles/shop" })
     assert.match(both, /\(start --fork\).*\n.*\(start --user-data-dir\).*\n.*Browser\.newContext/)
