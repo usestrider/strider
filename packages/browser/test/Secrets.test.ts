@@ -21,6 +21,13 @@ describe("secret diagnostics", () => {
     assert.include(Secrets.diagnostics("%bad%", [])[0]!, "%bad% names no secret")
   })
 
+  it("still reports a typo of a configured name whose letters and the text after it look like hex", () => {
+    // A fill value, not a URL: the typo starts with two hex letters ("ad") and digits follow it.
+    const [message] = Secrets.diagnostics("%adminpas%2024", ["adminpass"])
+    assert.include(message!, "%adminpas% names no secret")
+    assert.include(message!, "Did you mean %adminpass%?")
+  })
+
   it("quotes arbitrary configured names on one line for exported comments", () => {
     const [message] = Secrets.diagnostics("%typo%", ["name\n// injected\u2028"])
     assert.notMatch(message!, /[\n\r\u2028\u2029]/)
