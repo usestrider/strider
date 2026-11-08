@@ -75,3 +75,6 @@ export const browserArgs = (): ReadonlyArray<string> =>
     proc.args.some((arg) => arg.includes("chromium")) && !proc.args.join(" ").includes("--type=")
   )
     ?.args ?? []
+
+/** Preserve individual renderer counters so process turnover cannot silently look like negative CPU. */
+export const rendererSnapshot = () => descendants().filter(isRenderer).map(({ pid, cpu, args }) => ({ pid, cpu, args }))

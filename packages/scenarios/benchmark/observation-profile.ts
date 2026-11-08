@@ -18,17 +18,27 @@ import * as ChromiumLauncher from "../../browser/src/internal/chromiumLauncher.t
 import * as Engine from "../../browser/src/internal/engine.ts"
 import type * as Transport from "../../browser/src/protocol/Transport.ts"
 import pins from "../../browser/test/integration/browsers.json" with { type: "json" }
+import { rendererSnapshot } from "../src/measure.ts"
 import { start } from "../src/site.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 assert.equal(process.env["STRIDER_ENVIRONMENT"], "nix-integration")
 assert.ok(executablePath)
 const output = path.resolve(process.argv[2]!)
-const instrumented = process.argv[3] !== "control"
-assert.ok([undefined, "control", "smoke"].includes(process.argv[3]), "Mode must be control or smoke")
-const repeats = process.argv[3] === "smoke" ? 1 : 5
-const delays = process.argv[3] === "smoke" ? [100] : [35, 100, 160, 240]
+const heavy = process.argv[3]?.startsWith("heavy") ?? false
+const instrumented = !["control", "heavy-control"].includes(process.argv[3] ?? "")
+assert.ok(
+  [undefined, "control", "smoke", "heavy", "heavy-control", "heavy-smoke"].includes(process.argv[3]),
+  "Mode must be control or smoke"
+)
+const repeats = process.argv[3]?.includes("smoke") ? 1 : heavy ? (instrumented ? 3 : 10) : 5
+const delays = heavy ? [3000] : process.argv[3] === "smoke" ? [100] : [35, 100, 160, 240]
 type Sample = {
+  animation?: string
+  cpuBefore?: ReturnType<typeof rendererSnapshot>
+  cpuAfter?: ReturnType<typeof rendererSnapshot>
+  ready?: { readyAt: number; now: number; cells: number }
+  completed?: number
   library: string
   count: number
   delay: number
@@ -156,10 +166,16 @@ hashes["playwrightBundle"] = hash(
 const report = {
   status: "running",
   instrumented,
+  heavy,
   repeats,
   delays,
   hashes,
   environment: {
+    executablePath,
+    platform: process.platform,
+    kernel: os.release(),
+    cpu: os.cpus()[0]?.model,
+    threads: os.cpus().length,
     node: process.version,
     playwright: require("playwright-core/package.json").version,
     chromium: pins.chromium.version,
@@ -181,67 +197,109 @@ try {
       assert.equal((yield* Browser.Browser).info.version, pins.chromium.version)
       for (let index = -1; index < repeats; index++) {
         for (const delay of delays) {
-          for (const count of [1, 20]) {
-            for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
-              const sample: Sample = { library, count, delay, index, events: [], snapshots: [] }
-              if (index >= 0) samples.push(sample)
-              if (library === "strider") {
-                yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
-                  yield* page.goto(`${site.origin}/benchmark`, { waitUntil: "load" })
-                  active = sample
-                  started = performance.now()
-                  yield* page.evaluateInMainWorld((ms) => {
-                    setTimeout(() => {
-                      const p = document.createElement("p")
-                      p.id = "ready"
-                      p.textContent = "Ready"
-                      document.body.append(p)
-                    }, ms)
-                  }, delay)
-                  yield* Effect.forEach(
-                    Array.from({ length: count }),
-                    () => page.locator("#ready").pipe(Expect.toBeVisible),
-                    { concurrency: "unbounded" }
-                  )
-                  sample.ms = performance.now() - started
-                  if (instrumented) sample.snapshots.push(yield* snapshot())
-                  active = undefined
-                  assert.equal(yield* page.locator("#ready").readText, "Ready")
-                }))
-              } else {
-                const context = yield* Effect.promise(() => pw.newContext({ viewport: { width: 1280, height: 720 } }))
-                yield* Effect.promise(async () => {
-                  try {
-                    const page = await context.newPage()
-                    await page.goto(`${site.origin}/benchmark`)
+          for (const animation of heavy ? ["static", "animated"] : ["small"]) {
+            for (const count of (index % 2 === 0 ? (heavy ? [0, 1, 20] : [1, 20]) : (heavy ? [20, 1, 0] : [20, 1]))) {
+              for (const library of index % 2 === 0 ? ["strider", "playwright"] : ["playwright", "strider"]) {
+                const sample: Sample = { library, count, delay, index, animation, events: [], snapshots: [] }
+                if (index >= 0) samples.push(sample)
+                if (library === "strider") {
+                  yield* Effect.scoped(Effect.gen(function*() {
+                    const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+                    yield* page.goto(`${site.origin}${heavy ? `/heavy?armed&animation=${animation}` : "/benchmark"}`, {
+                      waitUntil: "load"
+                    })
                     active = sample
+                    sample.cpuBefore = rendererSnapshot()
                     started = performance.now()
-                    await page.evaluate((ms) => {
+                    yield* page.evaluateInMainWorld((ms) => {
                       setTimeout(() => {
                         const p = document.createElement("p")
                         p.id = "ready"
                         p.textContent = "Ready"
                         document.body.append(p)
+                        ;(window as unknown as { readyAt: number }).readyAt = performance.now()
                       }, ms)
                     }, delay)
-                    await Promise.all(
-                      Array.from({ length: count }, () => page.locator("#ready").waitFor({ state: "visible" }))
+                    if (count === 0) yield* Effect.sleep(`${delay + 150} millis`)
+                    yield* Effect.forEach(
+                      Array.from({ length: count }),
+                      () => page.locator("#ready").pipe(Expect.toBeVisible),
+                      { concurrency: "unbounded" }
                     )
                     sample.ms = performance.now() - started
+                    sample.cpuAfter = rendererSnapshot()
+                    sample.completed = count
+                    if (heavy) {
+                      sample.ready = yield* page.evaluateInMainWorld(() => ({
+                        readyAt: (window as unknown as { readyAt: number }).readyAt,
+                        now: performance.now(),
+                        cells: document.querySelector("#grid")!.children.length
+                      }))
+                      assert.equal(sample.ready.cells, 3000)
+                      assert.ok(sample.ready.now >= sample.ready.readyAt)
+                    }
+                    if (instrumented && count > 0) sample.snapshots.push(yield* snapshot())
                     active = undefined
-                    assert.equal(await page.locator("#ready").textContent(), "Ready")
-                  } finally {
-                    await context.close()
+                    assert.equal(yield* page.locator("#ready").readText, "Ready")
+                  }))
+                } else {
+                  const context = yield* Effect.promise(() => pw.newContext({ viewport: { width: 1280, height: 720 } }))
+                  yield* Effect.promise(async () => {
+                    try {
+                      const page = await context.newPage()
+                      await page.goto(`${site.origin}${heavy ? `/heavy?armed&animation=${animation}` : "/benchmark"}`)
+                      active = sample
+                      sample.cpuBefore = rendererSnapshot()
+                      started = performance.now()
+                      await page.evaluate((ms) => {
+                        setTimeout(() => {
+                          const p = document.createElement("p")
+                          p.id = "ready"
+                          p.textContent = "Ready"
+                          document.body.append(p)
+                          ;(window as unknown as { readyAt: number }).readyAt = performance.now()
+                        }, ms)
+                      }, delay)
+                      if (count === 0) await page.waitForTimeout(delay + 150)
+                      await Promise.all(
+                        Array.from({ length: count }, () => page.locator("#ready").waitFor({ state: "visible" }))
+                      )
+                      sample.ms = performance.now() - started
+                      sample.cpuAfter = rendererSnapshot()
+                      sample.completed = count
+                      if (heavy) {
+                        sample.ready = await page.evaluate(() => ({
+                          readyAt: (window as unknown as { readyAt: number }).readyAt,
+                          now: performance.now(),
+                          cells: document.querySelector("#grid")!.children.length
+                        }))
+                        assert.equal(sample.ready.cells, 3000)
+                        assert.ok(sample.ready.now >= sample.ready.readyAt)
+                      }
+                      active = undefined
+                      assert.equal(await page.locator("#ready").textContent(), "Ready")
+                    } finally {
+                      await context.close()
+                    }
+                  })
+                }
+                if (heavy) {
+                  assert.deepEqual(
+                    sample.cpuAfter!.map((p) => p.pid).sort(),
+                    sample.cpuBefore!.map((p) => p.pid).sort(),
+                    "Renderer process turnover"
+                  )
+                  for (const before of sample.cpuBefore!) {
+                    assert.ok(sample.cpuAfter!.find((p) => p.pid === before.pid)!.cpu >= before.cpu)
                   }
-                })
+                }
+                save()
               }
-              save()
             }
           }
         }
       }
-      if (instrumented) {
+      if (instrumented && !heavy) {
         for (const count of [1, 20]) {
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()

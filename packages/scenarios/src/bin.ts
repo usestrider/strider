@@ -41,6 +41,15 @@ const option = (name: string) => {
 const runs = Number(option("--runs") ?? "10")
 const only = option("--only")
 
+// The focused Q82 path uses the same fixture and profiler without requiring demo recordings.
+if (argv.includes("--q82")) {
+  const output = option("--output")
+  if (output === undefined || !path.isAbsolute(output)) throw new Error("--q82 requires absolute --output")
+  process.argv = [process.argv[0]!, process.argv[1]!, output, option("--mode") ?? "heavy-control"]
+  await import("../benchmark/observation-profile.ts")
+  process.exit(0)
+}
+
 if (process.env["STRIDER_ENVIRONMENT"] !== "nix-integration" || process.env["STRIDER_CHROMIUM"] === undefined) {
   process.stderr.write("Run the scenarios with `pnpm scenarios`, which enters the integration environment.\n")
   process.exit(1)

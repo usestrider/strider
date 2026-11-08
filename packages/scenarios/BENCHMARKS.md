@@ -274,6 +274,36 @@ outcomes and continued usability; they do not count retained observers/listeners
 browser work after cancellation. Reconnect semantics, pending locator navigation, target closure, nested
 frames, very short transients and renderer CPU/wakeups remain outside these measurements.
 
+### Large-page visibility controls
+
+Use the existing scenario entry point for Q82's 3,000-span fixture without demo recordings:
+
+```sh
+clutch lock browser -- pnpm scenarios --q82 --output /absolute/path/control.json
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+  --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
+  packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json heavy
+```
+
+`heavy-control` (the default `--mode`) keeps ten measured pairs after one warmup for static and animated
+pages, with zero, one and twenty independent waits for the same missing `#ready` element. The page inserts
+it after a host-armed three-second timer. Animation changes 200 of the 3,000 spans per frame, as in the original
+fixture. Library order and waiter-count order reverse each repetition; static precedes animated. `heavy`
+keeps three instrumented repetitions; `heavy-smoke` keeps one. Use instrumented runs for attribution only.
+Every batch must complete, the inserted text must be `Ready`, and the grid must retain 3,000 children.
+
+Raw JSON retains per-renderer PID, arguments and cumulative Linux CPU counters before/after each window,
+wall duration, completion count, and the page's insertion/readback timestamps. Sum matched PID deltas and
+normalize by wall duration to obtain renderer milliseconds per second. Reject process turnover rather than
+silently subtracting unrelated process totals. Counters resolve to 10 ms, approximately 3.3 ms/s over a
+three-second sample. Both browsers stay open but only the measured page exists during each window.
+Idle windows last 150 ms longer to verify timer completion without a waiting locator. Normalize their CPU
+by actual wall duration; idle latency is not wait latency. Wait latency includes scheduling the insertion
+and the entire successful batch, excludes setup/verification/cleanup, and is not pure detection latency.
+Page readback minus insertion time includes the verification round trip and only bounds detection overhead.
+Keep source snapshots, hashes, the lockfile, pins, command logs and machine metadata beside the raw JSON
+outside the worktree. The profiler records hashes, runtime versions and host details in each report.
+
 ### Bounded observation diagnostics
 
 After preserving an uninstrumented baseline, run the opt-in observation profiler under the browser lock:
