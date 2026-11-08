@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 import { stats } from "../src/measure.ts"
+import * as Report from "../src/report.ts"
 import { type Measurements, report } from "../src/report.ts"
 import { publish, runScenarios } from "../src/runner.ts"
 import type { Scenario } from "../src/scenarios.ts"
@@ -193,5 +194,41 @@ describe("scenario runner", () => {
     const results = await runScenarios([scenario("pass")], 10, () => ({ strider: run, playwright: run }), () => {})
     expect(results[0]!.times.strider.runs).toBe(10)
     expect(publish(results, () => {})).toBe(0)
+  })
+
+  // The checked-in RESULTS.md joins a Chromium and a Firefox run with a summary of both; the package has to be able to
+  // write it from the two runs' measurements, or the committed report can't be regenerated from the repository
+  it("writes the combined report of two browsers' runs from their measurements", async () => {
+    const run = async () => "42 sold"
+    const [result] = await runScenarios([scenario("gap")], 2, () => ({ strider: run, playwright: run }), () => {})
+    const measured = { ...result!, times: { strider: stats([110, 220]), playwright: stats([100, 200]) } }
+    const failed = { ...measured, failures: [{ library: "strider" as const, repetition: 1, error: "failed" }] }
+    const base = (browser: string, scenarios: Measurements["scenarios"]): Measurements => ({
+      date: "today",
+      machine: "test",
+      node: "test",
+      browser,
+      striderCommit: "test",
+      playwright: "test",
+      runs: 10,
+      launch: { strider: stats([]), playwright: stats([]) },
+      scenarios,
+      q82: [],
+      q82WaitMs: 3000,
+      q103: [],
+      tells: { strider: {}, playwright: {} },
+      flags: { strider: [], playwright: [] },
+      source: ""
+    })
+    const combine = (Report as Record<string, unknown>)["combine"]
+    expect(typeof combine).toBe("function")
+    const written = (combine as (runs: ReadonlyArray<Measurements>) => string)([
+      base("Chromium 155", [measured]),
+      base("Firefox 158", [failed])
+    ])
+    expect(written).toContain("Chromium 155")
+    expect(written).toContain("Firefox 158")
+    expect(written).toContain("+10.0%")
+    expect(written).toContain("incomplete")
   })
 })
