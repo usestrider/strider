@@ -626,14 +626,40 @@ export const conformance = (backend: Backend) =>
             const { page } = yield* newPage(world)
             const fixture = (origin: string, html: string) =>
               `${origin}/fixture?html=${encodeURIComponent(html)}`
-            const child =
-              `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*')</script></body>`
+            // Fixture-only capture: no protocol reads or readiness waits before input. Child records travel
+            // through postMessage; the final evaluation puts their bounded history in the wire failure trace.
+            const nativeEvents = (frame: "parent" | "child") =>
+              `<script>
+                window.inputDiagnostics = [];
+                const retain = (entry) => {
+                  if (inputDiagnostics.length < 32) inputDiagnostics.push(entry);
+                  ${frame === "child" ? "parent.postMessage({ inputDiagnostic: entry }, '*');" : ""}
+                };
+                for (const type of ['pointermove', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
+                  addEventListener(type, (event) => retain({
+                    frame: '${frame}', type, target: event.target.tagName, id: event.target.id,
+                    x: event.clientX, y: event.clientY, screenX: event.screenX, screenY: event.screenY,
+                    button: event.button, buttons: event.buttons, trusted: event.isTrusted,
+                    time: performance.now(), eventTime: event.timeStamp, readyState: document.readyState
+                  }), true);
+                }
+                requestAnimationFrame((time) => retain({ frame: '${frame}', type: 'animationFrame', time }));
+              </script>`
+            const child = `<body style="margin:0">${
+              nativeEvents("child")
+            }<button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*')</script></body>`
             yield* goto(
               world,
               page,
               fixture(
                 world.site.origin,
-                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                `<body style="margin:0">${
+                  nativeEvents("parent")
+                }<script>window.got = []; addEventListener('message', (e) => {
+                  if (e.data && e.data.inputDiagnostic) {
+                    if (inputDiagnostics.length < 32) inputDiagnostics.push(e.data.inputDiagnostic);
+                  } else got.push(e.data);
+                })</script><iframe id="cross" src="${
                   fixture(world.site.crossSite, child)
                 }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
               )
@@ -642,6 +668,19 @@ export const conformance = (backend: Backend) =>
             yield* world.facts.when("DocumentCommitted", (fact) =>
               fact.navigable === added.frame)
             const realm = yield* mainRealm(world, page)
+            const diagnostics = world.adapter.evaluate(realm, {
+              functionDeclaration:
+                "() => ({ messages: window.got, nativeEvents: window.inputDiagnostics, paint: performance.getEntriesByType('paint').map(({ name, startTime }) => ({ name, startTime })) })",
+              arguments: [],
+              awaitPromise: false,
+              result: "value",
+              userActivation: false
+            }).pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => console.log("Iframe input diagnostics", JSON.stringify(result)))
+              ),
+              Effect.ignore
+            )
             const loaded = Effect.flatMap(
               world.adapter.evaluate(realm, {
                 functionDeclaration: "() => window.got.includes('loaded')",
@@ -650,9 +689,15 @@ export const conformance = (backend: Backend) =>
                 result: "value",
                 userActivation: false
               }),
-              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+              (result) =>
+                result._tag === "Value" && json(result.value) === true
+                  ? Effect.void
+                  : Effect.fail("iframe child loaded message was not received")
             )
-            yield* loaded.pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }))
+            yield* loaded.pipe(
+              Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }),
+              Effect.onExit((exit) => Exit.isFailure(exit) ? diagnostics : Effect.void)
+            )
             const iframe = yield* world.adapter.evaluate(realm, {
               functionDeclaration: "() => document.getElementById('cross')",
               arguments: [],
@@ -705,9 +750,15 @@ export const conformance = (backend: Backend) =>
                 result: "value",
                 userActivation: false
               }),
-              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+              (result) =>
+                result._tag === "Value" && json(result.value) === true
+                  ? Effect.void
+                  : Effect.fail("iframe button clicked message was not received")
             )
-            yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            yield* clicked.pipe(
+              Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }),
+              Effect.ensuring(diagnostics)
+            )
           }), timeout)
 
         it.effect("delivers a prompt as an obligation that takes one decision", () =>
