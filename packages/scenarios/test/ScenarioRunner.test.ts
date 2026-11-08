@@ -26,6 +26,35 @@ const render = (scenarios: Measurements["scenarios"]) =>
   })
 
 describe("scenario runner", () => {
+  it("preserves ordered raw attempts, including failures, while alternating pairs", async () => {
+    const order: Array<string> = []
+    let calls = 0
+    const results = await runScenarios([scenario("paired")], 3, () => ({
+      strider: async () => {
+        order.push("strider")
+        if (++calls === 3) throw new Error("pair two failed")
+        return "42 sold"
+      },
+      playwright: async () => { order.push("playwright"); return "42 sold" }
+    }), () => {})
+    expect(order).toEqual(["strider", "playwright", "strider", "playwright", "playwright", "strider", "strider", "playwright"])
+    expect(results[0]!.samples.map(({ library, repetition, outcome }) => [library, repetition, outcome._tag])).toEqual([
+      ["strider", 1, "Read"], ["playwright", 1, "Read"],
+      ["playwright", 2, "Read"], ["strider", 2, "Failed"],
+      ["strider", 3, "Read"], ["playwright", 3, "Read"]
+    ])
+    expect(results[0]!.samples.every(({ ms }) => Number.isFinite(ms) && ms >= 0)).toBe(true)
+  })
+
+  it("reports explicit p50 and p90 percentage gaps and suppresses incomplete comparisons", async () => {
+    const run = async () => "42 sold"
+    const results = await runScenarios([scenario("gap")], 2, () => ({ strider: run, playwright: run }), () => {})
+    const measured = { ...results[0]!, times: { strider: stats([110, 220]), playwright: stats([100, 200]) } }
+    expect(render([measured])).toContain("p50 gap")
+    expect(render([measured])).toContain("+10.0%")
+    expect(render([{ ...measured, failures: [{ library: "strider", repetition: 1, error: "failed" }] }])).toContain("incomplete")
+  })
+
   it.each(["strider", "playwright"] as const)("continues after a timed %s failure", async (library) => {
     const calls = { strider: 0, playwright: 0 }
     const later = { strider: 0, playwright: 0 }
