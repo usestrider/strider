@@ -113026,8 +113026,8 @@
       "id": "playwright-server",
       "title": "Playwright server-wire compatibility",
       "milestone": "1.0",
-      "disposition": "excluded",
-      "note": "Strider uses browser protocols directly; compatibility with the Playwright remote-server contract is outside 1.0.",
+      "disposition": "never",
+      "note": "Strider speaks browser protocols directly. Playwright's server protocol is private and changes between releases, so compatibility with it isn't planned at any milestone.",
       "rows": [
         "event-browserserver-close",
         "method-browserserver-close",
@@ -113066,8 +113066,8 @@
       "id": "interactive-toolchain",
       "title": "Interactive debugger, recorder and inspection toolchain",
       "milestone": "1.0",
-      "disposition": "excluded",
-      "note": "A new interactive debugger, recorder/code generator and inspection-overlay toolchain is outside 1.0. Useful recording and capture controls remain in scope.",
+      "disposition": "never",
+      "note": "A graphical debugger, recorder and inspection overlay aren't planned. The CLI's snapshots and `strider export test` cover recording a session as a test; useful recording and capture controls remain in scope.",
       "rows": [
         "event-debugger-pausedstatechanged",
         "method-debugger-pauseddetails",
@@ -113082,8 +113082,8 @@
       "id": "webmcp",
       "title": "WebMCP-specific APIs",
       "milestone": "1.0",
-      "disposition": "excluded",
-      "note": "This additional API surface is deferred beyond the 1.0 browser milestone.",
+      "disposition": "later",
+      "note": "Reconsidered after 1.0, if the WebMCP proposal settles into a standard; it would belong with the agent toolkit.",
       "rows": [
         "method-webmcp-calltool",
         "method-webmcp-tools",

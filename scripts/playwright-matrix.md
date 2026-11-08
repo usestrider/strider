@@ -1,7 +1,7 @@
 # Updating the Playwright capability matrix
 
-The guide at `/docs/playwright-matrix` renders the committed data in
-`website/src/features/playwright/`. Its JSON download at `/docs/playwright-matrix.json` includes the same data.
+The matrix compares Playwright's JavaScript API with Strider's, row by row, to track what Strider lacks before 1.0.
+It isn't published: the data is committed in `scripts/playwright-matrix/`, and the site doesn't render it.
 
 - `upstream.json` inventories Playwright 1.64.0's JavaScript reference: 74 classes, 1,042 declared members and
   1,385 top-level options, with finite literal option values retained when the upstream parser exposes them. It contains names and provenance, not copied reference prose. Playwright's parser expands
@@ -46,7 +46,7 @@ pnpm matrix:check --upstream /tmp/playwright-matrix --built
 
 The tag is a lightweight tag: both `v1.64.0` and `v1.64.0^{commit}` resolve to
 `606ecd8b34bac100db32561b6278ffd76e5eb3cd`. The extractor checks HEAD, reference file hashes, names, options and source
-locations. The built check verifies local documentation routes and fragments, all row anchors, and the JSON download.
+locations. The built check verifies that every API reference page and anchor a row links to was rendered.
 External links are pinned GitHub source locations checked against the checkout, not HTTP availability probes.
 `pnpm all` includes the offline matrix and built-link check after building the site. Generate `pnpm reference` before
 running the matrix check independently.
@@ -55,7 +55,7 @@ running the matrix check independently.
 
 `pnpm test --run packages/browser/test/PlaywrightMatrix.test.ts` reads committed source and TypeScript declarations;
 it needs neither `website/dist` nor `.data/api-reference`. It checks the reported mapping/evidence regressions and
-negative symbol/anchor, decision-quotation and value-gap cases. Rendered anchors and downloaded JSON are additionally
+negative symbol/anchor, decision-quotation and value-gap cases. The rendered reference anchors rows link to are additionally
 checked by `pnpm matrix:check --built` after the website build; missing build output fails rather than skipping.
 
 ## Reviewing a Strider change
@@ -93,7 +93,7 @@ Resolve the new tag to a commit, review the upstream parser changes, then update
 node --input-type=module - <<'JS'
 import { writeFileSync } from "node:fs"
 import { extract } from "./scripts/playwright-reference.mjs"
-writeFileSync("website/src/features/playwright/upstream.json", JSON.stringify(extract("/tmp/playwright-matrix"), null, 2) + "\n")
+writeFileSync("scripts/playwright-matrix/upstream.json", JSON.stringify(extract("/tmp/playwright-matrix"), null, 2) + "\n")
 JS
 ```
 
