@@ -54,8 +54,9 @@ Object.assign(globalThis, {
   [Symbol.for("strider.sessionProfile")]: {
     out: (value: unknown) => event("send", value),
     parse: (text: string) => {
-      event("receive", JSON.parse(text))
-      return JSON.parse(text)
+      const value = JSON.parse(text)
+      event("receive", value)
+      return value
     }
   }
 })

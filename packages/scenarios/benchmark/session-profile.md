@@ -1,8 +1,9 @@
 # Session workload attribution
 
 Run the canonical `long-session`, `many-pages`, and `parallel-tests` workloads with optional in-memory
-instrumentation. The loader changes no files in the browser package or Playwright installation. Run each command
-under `clutch lock browser`. Create `.data/scenarios/` first in a fresh worktree; these local fixtures need no HAR.
+instrumentation. The loader changes no files in the browser package or Playwright installation. Serialize browser
+runs: wait for other browser tests or benchmarks to finish, and prevent concurrent runs for each complete command.
+Create `.data/scenarios/` first in a fresh worktree; these local fixtures need no HAR.
 
 First collect loader-free baselines with `pnpm scenarios --browser chromium --only long-session --runs 30
 --output /absolute/new-baseline`. Provision Firefox as described in `../README.md`, and repeat with `--browser
@@ -11,7 +12,7 @@ firefox --playwright-firefox /absolute/pinned/firefox`.
 For a separate diagnostic generation, from the repository root:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command env \
+nix develop .#integration --ignore-environment --keep TERM --command env \
   STRIDER_SESSION_PROFILE=/absolute/new-profile.jsonl \
   node --import ./packages/scenarios/benchmark/session-profile-loader.mjs \
   packages/scenarios/src/bin.ts --browser chromium --only long-session --runs 3 \
@@ -22,7 +23,8 @@ Repeat with `--only many-pages` and `--only parallel-tests`, and both Firefox ex
 and stderr externally, too. The JSONL path must not exist. Retain the ordinary scenario output alongside it: that
 contains alternating library order, outcomes, warnings, versions, executable paths, source snapshots and environment
 metadata. Copy and hash the loader and its two supporting files separately, because ordinary scenario snapshots do
-not include benchmark tooling. Keep raw evidence outside the repository.
+not include benchmark tooling. Record the exact tooling revision for each generation; historical samples and
+distortion estimates describe the instrumentation that collected them. Keep raw evidence outside the repository.
 
 Each JSONL line is one scenario attempt, including initial verification and launch attempts. `expected` identifies
 the workload; line order maps to the runner's fixed initial order followed by alternating timed pairs. Every event
