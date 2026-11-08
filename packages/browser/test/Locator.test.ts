@@ -196,3 +196,13 @@ describe("Locator.check refusal deadlines", () => {
     )
   }
 })
+
+describe("Locator.dispatchEvent", () => {
+  it.effect("preserves a typed refusal when the backend cannot evaluate", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#target").dispatchEvent("change").pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})

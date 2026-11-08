@@ -116,6 +116,81 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
 
+      it.effect(
+        "dispatchEvent constructs an explicit custom event on a hidden disabled target exactly once",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target" disabled hidden>Target</button>${out}
+            <script>let count = 0; document.addEventListener('sample', e => {
+              document.querySelector('#out').textContent = JSON.stringify([++count, e.detail, e.bubbles, e.cancelable, e.composed, e.isTrusted]);
+              e.preventDefault();
+            });</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#target").dispatchEvent("sample", {
+              eventClass: "CustomEvent",
+              init: { detail: { value: 42 } }
+            })
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), [
+              1,
+              { value: 42 },
+              true,
+              true,
+              true,
+              false
+            ])
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent uses a frame's constructors and explicit event flags",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const inner = `<button id="target">Target</button><p id="out"></p><script>
+            document.querySelector('button').addEventListener('click', e => document.querySelector('#out').textContent = JSON.stringify([e instanceof MouseEvent, e.clientX, e.bubbles, e.cancelable, e.composed]));</script>`
+            const { url } = yield* fixture((origin) => `<iframe src="${fixtureUrl(origin, inner)}"></iframe>`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const frame = page.frame(page.locator("iframe"))
+            yield* frame.locator("#target").dispatchEvent("click", {
+              eventClass: "MouseEvent",
+              init: { clientX: 27, bubbles: false, cancelable: false, composed: false }
+            })
+            assert.deepStrictEqual(JSON.parse(yield* frame.locator("#out").readText), [true, 27, false, false, false])
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent is strict, waits for attachment, supports trial and preserves deadlines",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div></div><div></div>${out}<script>
+            document.addEventListener('sample', () => document.querySelector('#out').textContent = 'sent');
+            setTimeout(() => { const node = document.createElement('button'); node.id = 'later'; document.body.append(node); }, 100);</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const strict = yield* page.locator("div").dispatchEvent("sample").pipe(Effect.flip)
+            assert(Locator.isLocatorError(strict))
+            assert.strictEqual(strict.reason._tag, "StrictViolation")
+            yield* page.locator("#later").dispatchEvent("sample", { trial: true })
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            yield* page.locator("#later").dispatchEvent("sample")
+            assert.strictEqual(yield* page.locator("#out").readText, "sent")
+            const missing = yield* page.locator("#missing").dispatchEvent("sample").pipe(
+              Deadline.within("50 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
       // The guard itself: each thing a case can leave in the shared context is reported, and the cases after get a
       // new context. Each is left through a scope that is never closed, as a case's own leak would be. A popup closes
       // with its opener's scope where the backend knows its opener, so it can be left only where it doesn't
