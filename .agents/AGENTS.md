@@ -189,9 +189,22 @@ Playwright and other prior art are evidence of what works, not a template.
 `docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
 later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
 for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
-edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
-the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+edit its entry instead of adding another. Measurements, benchmark tables, browser builds and test evidence go in
+the pull request, which the entry can cite by number (#83); the history of an investigation stays in its issue. A bug
 fix, a test, or a change that follows an existing decision needs no entry.
+
+## Pull requests
+
+A pull request's title and description are public, for a contributor reading the change, not for its review. The
+description opens with a sentence or two on what changes and for whom, then three sections: **Changes** (what the
+code did before and does now, with the files, and for a fix the cause), **Tests** (the tests added or changed, the
+checks run and their result, any test skipped or loosened and why, and for a performance change the figures before and
+after), and **Changeset** (the bump and its text, and whether anything breaks). Nothing else: no questions or
+decisions for the maintainer, no review rounds or who reviewed what, no account of the investigation, no first person,
+and nothing of the tools or agents that produced it, such as a private tracker's keys, an agent's name or role, local
+paths or machine names. Cite GitHub issues by number (#51). What's for the maintainer goes to them directly, in
+conversation or on the private board, before the pull request is opened or updated. Commit messages follow the same
+rule, and so do branch names: name a branch for the change.
 
 ## Issues
 
