@@ -87,4 +87,13 @@ describe("Playwright matrix", () => {
     altered.splice(altered.findIndex((row) => row.id === "navigation-networkidle"), 1)
     expect(() => assertValueGaps(altered)).toThrow(/invalid linked value gap/)
   })
+  it("rejects another chapter heading that contains separate decisions", () => {
+    expect(() => assertDecision({
+      file: "docs/decisions.md",
+      anchor: "the-protocol-layer-l0",
+      quote: "A target's initialization gate never waits on another target.",
+      revision: "1e1cc9a79b79d3add569911248c8969acb662b1e"
+    })).toThrow(/section heading/)
+  })
+
 })
