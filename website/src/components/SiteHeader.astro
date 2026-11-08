@@ -14,10 +14,10 @@ const { area } = Astro.props
 const version = await versionLabel()
 ---
 
-<header class="flex h-14 items-center gap-2.5 border-b border-ink px-6 sm:gap-11">
+<header class="flex h-14 items-center gap-1.5 border-b border-ink px-3 sm:gap-11 sm:px-6">
   <a class="masthead-home flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> <span class="max-[379px]:sr-only">Strider</span></a>
   <span class="flex-1"></span>
-  <nav class="flex items-center gap-2.5 sm:gap-6">
+  <nav class="flex items-center gap-2 sm:gap-6">
     <a class="nav-link" href="/docs" aria-current={area === "guides" ? "page" : undefined}>Guide</a>
     <a class="nav-link" href="/docs/scenarios" aria-current={area === "scenarios" ? "page" : undefined}>Scenarios</a>
     <a class="nav-link" href="/docs/api" aria-current={area === "reference" ? "page" : undefined}>API</a>

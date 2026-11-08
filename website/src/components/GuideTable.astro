@@ -1,0 +1,7 @@
+---
+// Keep the native table layout and semantics inside a keyboard-accessible scroll area.
+---
+
+<div class="overflow-x-auto" tabindex="0" role="region" aria-label="Table">
+  <table {...Astro.props}><slot /></table>
+</div>
