@@ -4,4 +4,4 @@
 
 Wait for a complete, valid DevToolsActivePort endpoint before connecting to a Chromium debugging port.
 
-Wait for stderr collection to finish before reporting an exited browser, so launch errors include its final diagnostics.
+Include an exited browser’s final stderr diagnostics when collection finishes within the remaining launch readiness timeout. If stderr stays open beyond that deadline, report the tail collected so far without extending the launch timeout.

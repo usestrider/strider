@@ -12,6 +12,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Scope from "effect/Scope"
 import * as Browser from "../Browser.ts"
 import * as Transport from "../protocol/Transport.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as DevToolsActivePort from "./devToolsActivePort.ts"
 import * as Launch from "./launch.ts"
 import * as Profiles from "./profiles.ts"
@@ -73,7 +74,7 @@ export const launch: (
 
 /**
  * Launches with a debugging port and connects over a WebSocket, for runtimes that can't pass extra file
- * descriptors. Waits up to `timeout` for the browser to write the port it picked.
+ * descriptors. Endpoint readiness and final stderr collection share the `timeout` budget.
  */
 export const launchWithPort = Effect.fnUntraced(function*(
   options: Options & { readonly timeout?: Duration.Input | undefined }
@@ -84,14 +85,16 @@ export const launchWithPort = Effect.fnUntraced(function*(
     coreDumps: options.coreDumps
   })
   const timeout = options.timeout ?? "30 seconds"
+  const deadline = Launch.readinessDeadline(timeout)
   const active = yield* DevToolsActivePort.read(userDataDir, {
-    timeout,
+    timeout: BrowserClock.millisLeft(BrowserClock.live, deadline),
     until: () => launched.handle.isRunning.pipe(Effect.map((running) => !running), Effect.orElseSucceed(() => true))
   }).pipe(Effect.asSome, Effect.catch(() => Effect.succeedNone))
   if (active._tag === "None") {
     return yield* Launch.notReady(
       launched,
-      `It didn't write DevToolsActivePort within ${Duration.format(Duration.fromInputUnsafe(timeout))}`
+      `It didn't write DevToolsActivePort within ${Duration.format(Duration.fromInputUnsafe(timeout))}`,
+      deadline
     )
   }
   const { port, browserPath } = active.value

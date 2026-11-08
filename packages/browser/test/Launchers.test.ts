@@ -339,6 +339,9 @@ describe("Chromium launcher", () => {
         }).pipe(
           Effect.provideService(FileSystem.FileSystem, noEndpoint),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Socket.WebSocketConstructor, function() {
+            throw new Error("Unexpected WebSocket connection before the browser endpoint is ready")
+          }),
           Effect.scoped,
           Effect.exit,
           Effect.timeoutOption("3 seconds"),
@@ -356,7 +359,9 @@ describe("Chromium launcher", () => {
         const failing = "/bin/sh"
         const launched = yield* Launch.spawn(failing, ["-c", "echo broken profile >&2; exit 3"], "/tmp", {})
         yield* launched.handle.exitCode.pipe(Effect.ignore)
-        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
         assert(error.reason._tag === "ProcessExited")
         assert.deepStrictEqual(error.reason.code, Option.some(3))
         assert.include(error.reason.stderrTail, "broken profile")
@@ -394,7 +399,10 @@ describe("Chromium launcher", () => {
         const launched = yield* Launch.spawn("/fake/chromium", [], "/fake/profile", {}).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
         )
-        const failure = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip, Effect.forkChild)
+        const failure = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip,
+          Effect.forkChild
+        )
         // The exit code is observed while stderr is still blocked, as with an undrained process pipe.
         yield* Deferred.await(exitObserved)
         yield* Deferred.succeed(releaseStderr, undefined)
@@ -422,7 +430,9 @@ describe("Chromium launcher", () => {
             Effect.as(ChildProcessSpawner.ExitCode(3))
           )
         )
-        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
         assert(error.reason._tag === "ProcessExited")
         assert.strictEqual(error.reason.stderrTail, text.slice(-8 * 1024))
       }))
@@ -446,7 +456,9 @@ describe("Chromium launcher", () => {
             Effect.andThen(Effect.fail(readError))
           )
         )
-        const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+        const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+          Effect.flip
+        )
         assert(error.reason._tag === "ProcessExited")
         assert.isTrue(Option.isNone(error.reason.code))
         assert.strictEqual(error.reason.stderrTail, "partial diagnostic")
@@ -463,7 +475,9 @@ describe("Chromium launcher", () => {
         yield* Effect.scoped(Effect.gen(function*() {
           const launched = yield* withStderr(stderr, true, Effect.never)
           yield* Deferred.await(started)
-          const error = yield* Launch.notReady(launched, "connecting").pipe(Effect.flip)
+          const error = yield* Launch.notReady(launched, "connecting", Launch.readinessDeadline("5 seconds")).pipe(
+            Effect.flip
+          )
           assert(error.reason._tag === "ConnectionFailed")
           assert.isFalse(yield* Deferred.isDone(stopped))
         }))
@@ -486,10 +500,14 @@ describe("Chromium launcher", () => {
             Effect.succeed(ChildProcessSpawner.ExitCode(3))
           )
           yield* Deferred.await(started)
-          const waiting = yield* Launch.notReady({
-            ...launched,
-            stderrDone: Deferred.succeed(waitEntered, undefined).pipe(Effect.andThen(launched.stderrDone))
-          }, "connecting").pipe(Effect.forkChild)
+          const waiting = yield* Launch.notReady(
+            {
+              ...launched,
+              stderrDone: Deferred.succeed(waitEntered, undefined).pipe(Effect.andThen(launched.stderrDone))
+            },
+            "connecting",
+            Launch.readinessDeadline("5 seconds")
+          ).pipe(Effect.forkChild)
           yield* Deferred.await(waitEntered)
           yield* Fiber.interrupt(waiting)
           assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(waiting)))
@@ -498,6 +516,50 @@ describe("Chromium launcher", () => {
         }))
         assert.isTrue(yield* Deferred.isDone(stopped))
       }))
+
+    for (const budget of [0, 1000]) {
+      it.effect(
+        budget === 0
+          ? "takes the collected stderr immediately when the readiness budget is exhausted"
+          : "drains a final unterminated chunk when EOF arrives within the readiness budget",
+        () =>
+          Effect.gen(function*() {
+            const release = yield* Deferred.make<void>()
+            const stderr = Stream.make(new TextEncoder().encode("early diagnostic\n")).pipe(
+              Stream.concat(
+                Stream.fromEffect(Deferred.await(release)).pipe(
+                  Stream.flatMap(() => Stream.make(new TextEncoder().encode("final diagnostic without newline")))
+                )
+              )
+            )
+            const code = Effect.succeed(ChildProcessSpawner.ExitCode(3))
+            const launched = yield* withStderr(
+              stderr,
+              false,
+              budget === 0 ? code : Deferred.succeed(release, undefined).pipe(Effect.andThen(code))
+            )
+            assert.isTrue(Option.isSome(yield* launched.stderrLine(/early diagnostic/)))
+            let waited = false
+            const error = yield* Launch.notReady(
+              {
+                ...launched,
+                stderrDone: Effect.sync(() => {
+                  waited = true
+                }).pipe(Effect.andThen(launched.stderrDone))
+              },
+              "connecting",
+              Launch.readinessDeadline(budget)
+            ).pipe(Effect.flip)
+            assert(error.reason._tag === "ProcessExited")
+            assert.deepStrictEqual(error.reason.code, Option.some(3))
+            assert.strictEqual(waited, budget > 0)
+            assert.strictEqual(
+              error.reason.stderrTail,
+              budget === 0 ? "early diagnostic\n" : "early diagnostic\nfinal diagnostic without newline"
+            )
+          })
+      )
+    }
 
     it.effect("finds a stderr line written before it looked, and none once stderr ends without one", () =>
       Effect.gen(function*() {

@@ -3,6 +3,7 @@
  * directory that lives as long as the browser, a child process whose stderr is kept for errors, and the `BrowserError`s a launch fails
  * with (API.md, Modules and backends).
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
@@ -13,8 +14,10 @@ import * as Stream from "effect/Stream"
 import * as Browser from "../Browser.ts"
 import * as Diagnostics from "../Diagnostics.ts"
 import * as Ledger from "../Ledger.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Paths from "./paths.ts"
 import * as Spans from "./spans.ts"
 
@@ -26,7 +29,7 @@ export interface Launched {
   readonly handle: ChildProcessSpawner.ChildProcessHandle
   /** The last 8 KiB the browser wrote to stderr. */
   readonly stderrTail: Effect.Effect<string>
-  /** Waits for collection to end, including failure; interruptible if a descendant keeps stderr open. */
+  /** Raw collector completion, including failure; `notReady` bounds its wait by the readiness deadline. */
   readonly stderrDone: Effect.Effect<void>
   /**
    * Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. Made once, as
@@ -259,11 +262,20 @@ export const spawn = Effect.fnUntraced(function*(
   } satisfies Launched
 })
 
+/** The live deadline shared by endpoint readiness and any final stderr collection. */
+export const readinessDeadline = (timeout: Duration.Input): MonotonicInstant.MonotonicInstant =>
+  (BrowserClock.live.now() +
+    Duration.toMillis(Duration.fromInputUnsafe(timeout)) * 1e6) as MonotonicInstant.MonotonicInstant
+
 /**
  * What a launch that couldn't connect failed with: `ProcessExited` if the browser is gone, with its exit code
- * and stderr, or `ConnectionFailed` if it is still running.
+ * and stderr collected before the readiness deadline, or `ConnectionFailed` if it is still running.
  */
-export const notReady = Effect.fnUntraced(function*(launched: Launched, description: string) {
+export const notReady = Effect.fnUntraced(function*(
+  launched: Launched,
+  description: string,
+  deadline: MonotonicInstant.MonotonicInstant
+) {
   const running = yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false))
   if (running) {
     return yield* fail(
@@ -272,9 +284,11 @@ export const notReady = Effect.fnUntraced(function*(launched: Launched, descript
     )
   }
   const code = yield* launched.handle.exitCode.pipe(Effect.option)
-  // Exit can precede pipe EOF. Wait for collection before taking its tail, including the final unterminated
-  // chunk. A descendant can hold stderr open: keep this wait interruptible, and collection owned by the scope.
-  yield* launched.stderrDone
+  // Exit can precede pipe EOF, but descendants can keep stderr open indefinitely. Drain only within the
+  // readiness budget that remains; an expired budget takes the collected tail immediately, with no grace delay.
+  // Timing out or interrupting this wait leaves collection owned by the launch scope.
+  const remaining = BrowserClock.millisLeft(BrowserClock.live, deadline)
+  if (remaining > 0) yield* launched.stderrDone.pipe(BrowserClock.timeoutOn(BrowserClock.live, remaining))
   const stderrTail = yield* launched.stderrTail
   return yield* fail(
     new Browser.ProcessExited({
