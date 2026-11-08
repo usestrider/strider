@@ -519,10 +519,9 @@ boundaries are nested; never add overlapping waits or interpret a host interval 
 
 ## Route-free Fetch diagnostic
 
-The opt-in `benchmark/fetch-cost-hooks.mjs` loader compares current Strider with a diagnostic that disables
-Chromium Fetch on route-free pages. It also removes the default document-auth interception; it therefore measures
-a broader upper bound than removing the unmatched pattern alone. It refuses user routes or proxy credentials.
-It changes loaded code only, and is not a supported configuration or a production routing proposal.
+The opt-in `benchmark/fetch-cost-hooks.mjs` loader splits the Chromium Fetch cost on the resources case.
+It changes loaded code only and is not a supported configuration or production activation proposal.
+Run in the pinned integration environment without overlapping browser runs, checks or builds:
 
 ```sh
 nix develop .#integration --ignore-environment --keep TERM --command node \
@@ -530,11 +529,31 @@ nix develop .#integration --ignore-environment --keep TERM --command node \
   --only resources --runs 20 --warmup 3 --output /absolute/path/resources.json
 ```
 
-Use `--only navigate` for the navigation control. Each pair runs current Strider, Playwright, disabled-Fetch
-Strider and Playwright, reversing all four on alternate pairs. Setup and result verification use the existing
-harness; no instrumentation runs inside the timers. The adjacent `.arms.json` retains all four observations,
-including warmups, pair order and original transformed-source hashes. The ordinary report contains only the
-current-Strider/first-Playwright comparison. Require its final `passed` or `over-limit` status and all four observations per pair
-before analyzing the diagnostic. Compare the two Playwright controls for drift and report current-minus-disabled
-paired differences, their spread, and differences after subtracting each arm's adjacent Playwright control.
-A finite sample cannot validate interception activation, route acknowledgement or auth behavior.
+Each measured group contains six Strider arms, each paired with a fresh pinned Playwright default control:
+
+- `disabled`: Fetch disabled, including default document-auth handling.
+- `document-auth`: explicit wildcard Document Request pattern with auth handling enabled.
+- `current`: unchanged current configuration. On owned route-free contexts this is identical to `document-auth`.
+- `route`: a real public route matching the fixture origin and continuing requests; current auth handling remains.
+- `document-no-auth`: the same Document pattern with auth handling disabled.
+- `unmatched`: only the nonempty unmatched Request pattern, with auth handling disabled.
+
+The six arm/control blocks rotate each group, with the entire sequence reversed on alternate groups. All arms use
+fresh pages, existing uncached fixtures and the same timing boundary and exact loaded-image count check (`100`).
+The real route must also receive at least the document plus all 100 images. Setup, route acquisition, result/hit
+checks and cleanup are outside timing. At least three warmup groups and twenty measured groups are required.
+The adjacent `.arms.json` records all observations, exact verified results, route hits, order, loader hash and
+original transformed-source hashes. The ordinary report contains only `current` and its adjacent Playwright
+control; require final `passed` or `over-limit` status and complete arm counts before analyzing the split.
+
+Capture actual wire configurations separately, never as timing evidence. Set `STRIDER_FETCH_CONFIG_WIRE` to an
+absolute NDJSON path in a separate run (one group, zero warmups is sufficient with this variable). Only that run
+loads command observers for both libraries; its `.arms.json` is marked `wire-diagnostic`. The log records encoded
+Fetch enable/disable and cache-disable commands, including setup and cleanup, with the active arm label. Verify
+that `current` and `document-auth` really are identical before interpreting their identity control. Non-current
+configurations deliberately change authentication or add routing work; none is an approved implementation.
+
+Report each arm's median/spread/p95, paired differences and adjacent-control drift. Compare Document/no-auth and
+unmatched controls before assigning cost to auth configuration rather than generic proxy work. A finite sample
+does not validate route activation, factory acknowledgement, authentication, or release safety. Opting out of
+default challenge handling alone still leaves the unmatched interceptor installed in production today.
