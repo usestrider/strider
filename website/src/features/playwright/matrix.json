@@ -30172,8 +30172,10 @@
           "url": "/docs/api/browser/Capability#Video"
         }
       ],
-      "notes": "Acquire scoped native frames through Capability.Screencast, or a file recording through Capability.Video. Frame delivery and file recording are separate acquisitions; onFrame and path options below show their browser limits.",
-      "capabilities": [],
+      "notes": "Native frame delivery uses Capability.Screencast and is Chromium-only. File recording is the separate Capability.Video acquisition; the path option below shows that supported subset on other browsers. A file recorder does not supply the full onFrame contract.",
+      "capabilities": [
+        "capability.screencast"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "has",
@@ -30184,20 +30186,28 @@
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
-          "limitations": []
+          "status": "missing",
+          "limitations": [
+            "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+          ]
         },
         "firefox.attached": {
-          "status": "has",
-          "limitations": []
+          "status": "missing",
+          "limitations": [
+            "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
+          ]
         },
         "webkit.launched": {
-          "status": "has",
-          "limitations": []
+          "status": "missing",
+          "limitations": [
+            "stock WebKit's inspector has no Screencast domain"
+          ]
         },
         "webkit.attached": {
-          "status": "has",
-          "limitations": []
+          "status": "missing",
+          "limitations": [
+            "stock WebKit's inspector has no Screencast domain"
+          ]
         }
       },
       "requirements": [],
