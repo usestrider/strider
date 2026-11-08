@@ -1341,3 +1341,12 @@ Snapshots and role filters use the same pressed, expanded and selected readers, 
 ## Route declaration boundary
 
 A route is in force for requests that start after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select the current routes by precedence. This follows the browser's selection of interception stages at request start while keeping later handler selection current. Requiring retroactive response interception was rejected because it would require pausing responses from the start even without response routes.
+
+
+## Explicit DOM event constructors
+
+DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.
+Initialization crosses by value under the existing evaluation serialization contract, and the target document
+constructs and dispatches the event. This keeps application events and native event fields explicit across
+browsers. Reject name-to-constructor inference tables and emulation of missing constructors or touch dictionaries:
+those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
