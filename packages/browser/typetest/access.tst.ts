@@ -25,6 +25,7 @@ declare const ref: Snapshot.RefId
 
 describe("access is typed", () => {
   it("a page you may only inspect offers no actions", () => {
+    expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
   })
 

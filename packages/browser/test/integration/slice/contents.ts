@@ -148,6 +148,87 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("reads bounding boxes without visibility checks, scrolling or input", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(
+            origin,
+            `<body style="margin:0;height:3000px">
+            <input id="focus"><div id="box" style="position:absolute;left:30px;top:40px;width:20px;height:10px;transform:translate(5px,7px) scale(2);transform-origin:0 0"></div>
+            <div id="hidden" style="display:none"></div>
+            <div id="contents" style="display:contents"><span>child</span></div>
+            <div id="invisible" style="visibility:hidden;width:20px;height:10px"></div>
+            <div id="transparent" style="opacity:0;width:20px;height:10px"></div>
+            <div id="zero" style="width:0;height:0"></div></body>`
+          ))
+          yield* page.evaluateInMainWorld(() =>
+            document.querySelector("input")!.focus()
+          )
+          assert.deepStrictEqual(
+            yield* page.locator("#box").boundingBox,
+            Option.some({ x: 35, y: 47, width: 40, height: 20 })
+          )
+          for (const id of ["hidden", "contents"]) {
+            assert.deepStrictEqual(yield* page.locator(`#${id}`).boundingBox, Option.none())
+          }
+          for (const id of ["invisible", "transparent", "zero"]) {
+            assert.isTrue(Option.isSome(yield* page.locator(`#${id}`).boundingBox))
+          }
+          assert.strictEqual(
+            reasonOf(yield* Effect.exit(page.locator("#missing").boundingBox))?.reason?._tag,
+            "NoMatch"
+          )
+          assert.strictEqual(
+            reasonOf(yield* Effect.exit(page.locator("div").boundingBox))?.reason?._tag,
+            "StrictViolation"
+          )
+          yield* page.evaluateInMainWorld(() =>
+            window.scrollTo(0, 200)
+          )
+          assert.deepStrictEqual(
+            yield* page.locator("#box").boundingBox,
+            Option.some({ x: 35, y: -153, width: 40, height: 20 })
+          )
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => ({ scroll: scrollY, focus: document.activeElement?.id })),
+            { scroll: 200, focus: "focus" }
+          )
+          const expired = reasonOf(yield* Effect.exit(page.locator("#box").boundingBox.pipe(Deadline.within(0))))
+          assert.strictEqual(expired?._tag, "Timeout")
+        }), timeout)
+
+      it.effect("adds nested cross-site frame content origins including borders and padding", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* Browser.newPage()
+          const child = fixtureUrl(
+            crossSite,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:11px;top:13px;width:20px;height:30px"></div></body>`
+          )
+          const middle = fixtureUrl(
+            origin,
+            `<body style="margin:0"><iframe id="inner" style="position:absolute;left:17px;top:19px;border:3px solid;padding:4px" src="${child}"></iframe></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="outer" style="position:absolute;left:23px;top:29px;border:5px solid;padding:6px" src="${
+                middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
+              }"></iframe></body>`
+            )
+          )
+          const outer = page.frame(page.locator("#outer"))
+          const target = outer.frame(outer.locator("#inner")).locator("#target")
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 69, y: 79, width: 20, height: 30 }))
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              scrollY
+            ),
+            0
+          )
+        }), timeout)
+
       // ── Evaluation and handles ──
 
       it.effect("evaluates by value in the isolated world, and in the main world when asked", () =>
@@ -188,8 +269,7 @@ export const contents = (
             assert.deepStrictEqual(value.nested, { list: [1, "two", null] })
             assert.strictEqual(
               yield* page.evaluate(
-                (a: number, b: number) =>
-                  a + b,
+                (a: number, b: number) => a + b,
                 1,
                 2
               ),
@@ -1063,9 +1143,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

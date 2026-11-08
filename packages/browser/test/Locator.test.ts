@@ -196,3 +196,14 @@ describe("Locator.check refusal deadlines", () => {
     )
   }
 })
+
+describe("Locator.boundingBox", () => {
+  it.effect("reports backend refusal through the readonly read error contract", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#box").boundingBox.pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.operation, "Locator.boundingBox")
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
