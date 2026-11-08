@@ -430,7 +430,7 @@ describe("Chromium launcher", () => {
       Effect.gen(function*() {
         const started = yield* Deferred.make<void>()
         const stopped = yield* Deferred.make<void>()
-        const exitObserved = yield* Deferred.make<void>()
+        const waitEntered = yield* Deferred.make<void>()
         const stderr = Stream.make(new TextEncoder().encode("descendant holds the pipe\n")).pipe(
           Stream.concat(Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))),
           Stream.ensuring(Deferred.succeed(stopped, undefined))
@@ -439,13 +439,14 @@ describe("Chromium launcher", () => {
           const launched = yield* withStderr(
             stderr,
             false,
-            Deferred.succeed(exitObserved, undefined).pipe(
-              Effect.as(ChildProcessSpawner.ExitCode(3))
-            )
+            Effect.succeed(ChildProcessSpawner.ExitCode(3))
           )
           yield* Deferred.await(started)
-          const waiting = yield* Launch.notReady(launched, "connecting").pipe(Effect.forkChild)
-          yield* Deferred.await(exitObserved)
+          const waiting = yield* Launch.notReady({
+            ...launched,
+            stderrDone: Deferred.succeed(waitEntered, undefined).pipe(Effect.andThen(launched.stderrDone))
+          }, "connecting").pipe(Effect.forkChild)
+          yield* Deferred.await(waitEntered)
           yield* Fiber.interrupt(waiting)
           assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(waiting)))
           // Canceling the diagnostic waiter doesn't cancel collection owned by the launch scope.

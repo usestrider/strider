@@ -4,6 +4,7 @@
  * with (API.md, Modules and backends).
  */
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -25,6 +26,8 @@ export interface Launched {
   readonly handle: ChildProcessSpawner.ChildProcessHandle
   /** The last 8 KiB the browser wrote to stderr. */
   readonly stderrTail: Effect.Effect<string>
+  /** Waits for collection to end, including failure; interruptible if a descendant keeps stderr open. */
+  readonly stderrDone: Effect.Effect<void>
   /**
    * Waits for a line of stderr that matches, and returns its match; `None` if stderr ends first. Made once, as
    * the browser starts: the first call also sees the lines before it (the newest 64 KiB of them), and a later one
@@ -205,7 +208,7 @@ export const spawn = Effect.fnUntraced(function*(
   let finished = false
   /** Each hears every line from when it is added, and `undefined` once stderr ends. */
   const waiters = new Set<(line: string | undefined) => void>()
-  yield* handle.stderr.pipe(
+  const stderrCollector = yield* handle.stderr.pipe(
     Stream.decodeText,
     Stream.tap((text) => Effect.sync(() => (tail = (tail + text).slice(-tailBytes)))),
     Stream.splitLines,
@@ -251,6 +254,7 @@ export const spawn = Effect.fnUntraced(function*(
     userDataDir,
     handle,
     stderrTail: Effect.sync(() => tail),
+    stderrDone: Fiber.await(stderrCollector).pipe(Effect.asVoid),
     stderrLine
   } satisfies Launched
 })
@@ -261,7 +265,6 @@ export const spawn = Effect.fnUntraced(function*(
  */
 export const notReady = Effect.fnUntraced(function*(launched: Launched, description: string) {
   const running = yield* launched.handle.isRunning.pipe(Effect.orElseSucceed(() => false))
-  const stderrTail = yield* launched.stderrTail
   if (running) {
     return yield* fail(
       new Browser.ConnectionFailed({ stage: "handshake", hint: `The browser didn't answer: ${description}` }),
@@ -269,6 +272,10 @@ export const notReady = Effect.fnUntraced(function*(launched: Launched, descript
     )
   }
   const code = yield* launched.handle.exitCode.pipe(Effect.option)
+  // Exit can precede pipe EOF. Wait for collection before taking its tail, including the final unterminated
+  // chunk. A descendant can hold stderr open: keep this wait interruptible, and collection owned by the scope.
+  yield* launched.stderrDone
+  const stderrTail = yield* launched.stderrTail
   return yield* fail(
     new Browser.ProcessExited({
       code: Option.map(code, (code) => code as number),
