@@ -56517,15 +56517,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-elementhandle-click-delay",
       "upstream": [
@@ -56534,30 +56528,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -57008,15 +57000,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-elementhandle-dblclick-delay",
       "upstream": [
@@ -57025,30 +57011,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -58041,15 +58025,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-elementhandle-press-delay",
       "upstream": [
@@ -58058,30 +58036,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -61431,15 +61407,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-frame-click-delay",
       "upstream": [
@@ -61448,30 +61418,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -61963,15 +61931,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-frame-dblclick-delay",
       "upstream": [
@@ -61980,30 +61942,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -65981,15 +65941,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-frame-press-delay",
       "upstream": [
@@ -65998,30 +65952,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -69689,15 +69641,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Keyboard",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Keyboard#TypeOptions"
-        }
-      ],
-      "notes": "Use the linked input options.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-keyboard-press-delay",
       "upstream": [
@@ -69706,30 +69652,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -70894,15 +70838,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-locator-click-delay",
       "upstream": [
@@ -70911,30 +70849,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -71385,15 +71321,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-locator-dblclick-delay",
       "upstream": [
@@ -71402,30 +71332,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -74485,15 +74413,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-locator-press-delay",
       "upstream": [
@@ -74502,30 +74424,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -80553,15 +80473,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-mouse-click-delay",
       "upstream": [
@@ -80570,30 +80484,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -80643,15 +80555,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-mouse-dblclick-delay",
       "upstream": [
@@ -80660,30 +80566,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -80733,15 +80637,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Mouse",
-          "symbol": "ClickOptions",
-          "url": "/docs/api/browser/Mouse#ClickOptions"
-        }
-      ],
-      "notes": "Use the linked input options.",
+      "status": "missing",
+      "api": [],
+      "notes": "Held mouse buttons do not take a clickCount option.",
       "capabilities": [],
       "id": "option-mouse-down-clickcount",
       "upstream": [
@@ -80750,30 +80648,28 @@
       "option": "clickCount",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -80868,15 +80764,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Mouse",
-          "symbol": "ClickOptions",
-          "url": "/docs/api/browser/Mouse#ClickOptions"
-        }
-      ],
-      "notes": "Use the linked input options.",
+      "status": "missing",
+      "api": [],
+      "notes": "Held mouse buttons do not take a clickCount option.",
       "capabilities": [],
       "id": "option-mouse-up-clickcount",
       "upstream": [
@@ -80885,30 +80775,28 @@
       "option": "clickCount",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -81651,15 +81539,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-page-click-delay",
       "upstream": [
@@ -81668,30 +81550,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -82257,15 +82137,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-page-dblclick-delay",
       "upstream": [
@@ -82274,30 +82148,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
@@ -86196,15 +86068,9 @@
       }
     },
     {
-      "status": "has",
-      "api": [
-        {
-          "module": "Locator",
-          "symbol": "TypeOptions",
-          "url": "/docs/api/browser/Locator#TypeOptions"
-        }
-      ],
-      "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+      "status": "missing",
+      "api": [],
+      "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
       "capabilities": [],
       "id": "option-page-press-delay",
       "upstream": [
@@ -86213,30 +86079,28 @@
       "option": "delay",
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "has",
+          "status": "missing",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": [
-            "Attached stock WebKit has no Automation session for this operation."
-          ]
+          "limitations": []
         }
       }
     },
