@@ -31,7 +31,7 @@ import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
-import { status, supports } from "./capabilities.ts"
+import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -105,74 +105,86 @@ export const declarations = (
         }), timeout)
 
       for (const transition of ["install", "replace"] as const) {
-        it.effect(`uses the current response route after ${transition} while the server holds a response`, () =>
-          Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            let arrived!: () => void
-            const arrival = new Promise<void>((resolve) => {
-              arrived = resolve
-            })
-            let release!: () => void
-            const server = yield* Effect.acquireRelease(
-              Effect.promise(() =>
-                new Promise<http.Server>((resolve, reject) => {
-                  const server = http.createServer((request, response) => {
-                    const send = () => {
-                      response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
-                      response.end("<title>network</title>")
-                    }
-                    if (request.url === "/held") {
-                      release = send
-                      arrived()
-                    } else send()
-                  })
-                  server.once("error", reject)
-                  server.listen(0, "127.0.0.1", () =>
-                    resolve(server))
-                })
-              ),
-              (server) =>
+        it.effect(
+          `respects response interception capability after ${transition} while the server holds a response`,
+          () =>
+            Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              let arrived!: () => void
+              const arrival = new Promise<void>((resolve) => {
+                arrived = resolve
+              })
+              let release!: () => void
+              let hold = true
+              const server = yield* Effect.acquireRelease(
                 Effect.promise(() =>
-                  new Promise<void>((resolve) => {
-                    server.close(() =>
-                      resolve()
-                    )
-                    server.closeAllConnections()
+                  new Promise<http.Server>((resolve, reject) => {
+                    const server = http.createServer((request, response) => {
+                      const send = () => {
+                        response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
+                        response.end("<title>network</title>")
+                      }
+                      if (request.url === "/held" && hold) {
+                        hold = false
+                        release = send
+                        arrived()
+                      } else send()
+                    })
+                    server.once("error", reject)
+                    server.listen(0, "127.0.0.1", () =>
+                      resolve(server))
                   })
-                )
-            )
-            const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
-            const seen: Array<string> = []
-            const previous = transition === "replace"
-              ? yield* page.route(`${origin}/held`, () =>
+                ),
+                (server) =>
+                  Effect.promise(() =>
+                    new Promise<void>((resolve) => {
+                      server.close(() =>
+                        resolve()
+                      )
+                      server.closeAllConnections()
+                    })
+                  )
+              )
+              const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+              const seen: Array<string> = []
+              const previous = transition === "replace"
+                ? yield* page.route(`${origin}/held`, () =>
+                  Effect.sync(() => {
+                    seen.push("previous")
+                  }).pipe(Effect.andThen(Route.continue)), { phase: "response" })
+                : undefined
+              const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
+              yield* Effect.promise(() =>
+                arrival
+              ).pipe(Effect.timeout("10 seconds"))
+              const current = yield* page.route(`${origin}/held`, () =>
                 Effect.sync(() => {
-                  seen.push("previous")
+                  seen.push("current")
                 }).pipe(Effect.andThen(Route.continue)), { phase: "response" })
-              : undefined
-            const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
-            yield* Effect.promise(() =>
-              arrival
-            ).pipe(Effect.timeout("10 seconds"))
-            const current = yield* page.route(`${origin}/held`, () =>
-              Effect.sync(() => {
-                seen.push("current")
-              }).pipe(Effect.andThen(Route.continue)), { phase: "response" })
-            if (previous) {
-              yield* previous.remove
-            }
-            release()
-            yield* Fiber.join(navigation)
-            assert.strictEqual(yield* page.title, "network")
-            assert.deepStrictEqual(seen, ["current"])
-            assert.strictEqual(yield* current.hits, 1)
-            if (previous) {
-              assert.strictEqual(yield* previous.hits, 0)
-            }
-            yield* current.remove
-            yield* page.goto(`${origin}/after`)
-            assert.strictEqual(yield* page.title, "network")
-            assert.deepStrictEqual(seen, ["current"])
-          }), timeout)
+              if (previous) {
+                yield* previous.remove
+              }
+              release()
+              yield* Fiber.join(navigation)
+              assert.strictEqual(yield* page.title, "network")
+              const intercepted = transition === "replace" || responseRouteInFlight[name]
+              assert.deepStrictEqual(seen, intercepted ? ["current"] : [])
+              assert.strictEqual(yield* current.hits, intercepted ? 1 : 0)
+              if (previous) {
+                assert.strictEqual(yield* previous.hits, 0)
+              }
+              // Requests started after declaration returns must be routed on every backend.
+              seen.length = 0
+              yield* page.goto(`${origin}/held`)
+              assert.deepStrictEqual(seen, ["current"])
+              assert.strictEqual(yield* current.hits, intercepted ? 2 : 1)
+              yield* current.remove
+              yield* page.goto(`${origin}/after`)
+              assert.strictEqual(yield* page.title, "network")
+              assert.deepStrictEqual(seen, ["current"])
+            }),
+          timeout
+        )
       }
 
       it.effect("runs call site 7's route on a page of ours: blocked calls, counted", () =>
@@ -180,8 +192,7 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () =>
-              Route.abort())
+            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
             const result = yield* run(
               page,
               origin,
