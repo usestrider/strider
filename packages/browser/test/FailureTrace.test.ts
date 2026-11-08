@@ -202,6 +202,27 @@ describe("failure trace runner lifecycle", () => {
     for (const file of paths) fs.unlinkSync(file)
   }, 30_000)
 
+  it("keeps a late passing test's diagnostics after many passes that recorded none", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "emptyPasses.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "1" }
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+    const kept = paths.some((file) => fs.readFileSync(file, "utf8").includes("\\\"operationId\\\":\\\"late\\\""))
+    for (const file of paths) fs.unlinkSync(file)
+    expect(kept, "the late test's host-timeout entry should survive the per-file passing budget").toBe(true)
+  }, 60_000)
+
   it("can retain passing diagnostic evidence for a bounded investigation", async () => {
     const { spawnSync } = await import("node:child_process")
     const run = spawnSync("pnpm", [
