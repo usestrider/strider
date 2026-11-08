@@ -1174,9 +1174,8 @@ export interface Locator extends ReadonlyLocator {
    * Waits for exactly one match without visibility, enabled or inert checks by default. An unfocused element
    * is unchanged. Calls the element's native blur method through Strider's engine without sending keyboard
    * or pointer input. Uses an isolated world where the backend provides one; stock WebKit shares the page world.
-   * Events follow the browser's native behavior. In the tested stock WebKitGTK MiniBrowser case,
-   * `document.hasFocus()` was false and the native call fired `focusout` without `blur`. Focused WebKit
-   * window behavior was not tested.
+   * Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't
+   * have focus (`document.hasFocus()` is false), the element gets `focusout` but no `blur` event.
    * Missing matches wait until the deadline; several matches fail with `StrictViolation`.
    *
    * **Example** (Leaving an email field)
