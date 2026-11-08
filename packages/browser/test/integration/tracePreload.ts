@@ -38,7 +38,8 @@ if (directory !== undefined) {
     let stopped = false
     const write = (connection: string, kind: string, value: unknown) => {
       if (stopped) return
-      const trace = new TraceBuffer(segmentBytes / 2, 8 * 1024)
+      // The serialized UTF-16 record budget is independent of the spool's UTF-8 segment sizes.
+      const trace = new TraceBuffer(64 * 1024, 8 * 1024)
       trace.record(
         connection,
         kind,
