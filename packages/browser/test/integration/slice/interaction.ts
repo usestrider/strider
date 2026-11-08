@@ -703,7 +703,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "domContentLoaded" })
               const seen = yield* page.evaluateInMainWorld(() => {
                 const go = document.querySelector("#go")!
                 const box = go.getBoundingClientRect()
@@ -2665,8 +2665,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           // Hold parsing at a real resource boundary, without a sleep or machine load.
           yield* Effect.gen(function*() {
-            yield* page.goto(url)
+            const navigation = yield* page.goto(url, { waitUntil: "domContentLoaded" }).pipe(Effect.forkScoped)
             yield* Deferred.await(requested)
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.querySelector("#target") === null))
+            yield* Deferred.succeed(release, undefined)
+            yield* Fiber.join(navigation)
             const width = yield* page.evaluateInMainWorld(() =>
               document.querySelector("#target")!.getBoundingClientRect().width
             )
@@ -2773,7 +2776,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   )
                   yield* Effect.scoped(Effect.gen(function*() {
                     const page = yield* newPage
-                    yield* page.goto(url)
+                    yield* page.goto(url, { waitUntil: "domContentLoaded" })
                     const target = page.locator("#target")
                     // CDP accepts fractional viewport input; BiDi and WebKit require integer coordinates.
                     const roundsInput = (yield* Browser.Browser).info.protocol !== "cdp"
