@@ -1402,6 +1402,41 @@ describe("strider", () => {
   }
 
   it.live(
+    "refuses fork snapshot export for profiles and sessions loaded from a state file",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const state = path.join(env.XDG_RUNTIME_DIR, "initial.json")
+        fs.writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }))
+        for (const mode of ["profile", "state"] as const) {
+          const flags = mode === "profile"
+            ? ["--user-data-dir", path.join(env.XDG_RUNTIME_DIR, "profile")]
+            : ["--state", state]
+          const started = yield* run("start", "--name", mode, "--chromium", chromium.executable, ...flags)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const test = path.join(env.XDG_RUNTIME_DIR, mode + ".test.ts")
+            const destination = path.join(env.XDG_RUNTIME_DIR, mode + ".json")
+            const refused = yield* run("-s", mode, "export", "test", test, "--state", destination)
+            assert.strictEqual(refused.code, 15, refused.err)
+            assert.include(refused.err, "--fork")
+            assert.isFalse(fs.existsSync(destination))
+            assert.isFalse(fs.existsSync(test))
+            const normal = yield* run("-s", mode, "export", "test", test)
+            assert.strictEqual(normal.code, 0, normal.err)
+            const text = fs.readFileSync(test, "utf8")
+            if (mode === "profile") assert.include(text, "profile replay is unsupported")
+            else assert.include(text, JSON.stringify(state))
+          } finally {
+            yield* run("-s", mode, "stop")
+          }
+        }
+      })),
+    timeout
+  )
+
+  it.live(
     "forks a session's state, lists and prunes one a crash left behind",
     () =>
       Effect.scoped(Effect.gen(function*() {
@@ -1444,6 +1479,72 @@ describe("strider", () => {
               fs.readFileSync(test, "utf8"),
               `// The session started from session first's state (start --fork), which no file holds: this test's context starts empty\n        const context = yield* Browser.newContext({ focus: "emulated" })\n`
             )
+            const repo = path.join(env.XDG_RUNTIME_DIR, "export-repo")
+            fs.mkdirSync(repo)
+            yield* Effect.promise(() =>
+              new Promise<void>((resolve, reject) => {
+                execFile("git", ["init", repo], (error) => error ? reject(error) : resolve())
+              })
+            )
+            const saved = path.join(repo, "fork-state.json")
+            fs.writeFileSync(saved, "old", { mode: 0o644 })
+            const changed = yield* run(
+              "-s",
+              "second",
+              "-p",
+              "home",
+              "eval",
+              "document.cookie = 'flavor=changed; path=/'"
+            )
+            assert.strictEqual(changed.code, 0, changed.err)
+            const live = path.join(env.XDG_RUNTIME_DIR, "live-state.json")
+            assert.strictEqual((yield* run("-s", "second", "state", "save", live)).code, 0)
+            assert.strictEqual(
+              JSON.parse(fs.readFileSync(live, "utf8")).cookies.find((cookie: { name: string }) =>
+                cookie.name === "flavor"
+              ).value,
+              "changed"
+            )
+            const result = yield* run("-s", "second", "export", "test", test, "--state", saved)
+            assert.strictEqual(result.code, 0, result.err)
+            assert.include(result.err, "plaintext credentials")
+            assert.notInclude(result.out, "plaintext credentials")
+            assert.strictEqual(fs.statSync(saved).mode & 0o777, 0o600)
+            const snapshot = JSON.parse(fs.readFileSync(saved, "utf8"))
+            assert.strictEqual(
+              snapshot.cookies.find((cookie: { name: string }) => cookie.name === "flavor").value,
+              "oat"
+            )
+            assert.include(fs.readFileSync(test, "utf8"), JSON.stringify(saved))
+            assert.notInclude(fs.readFileSync(test, "utf8"), "context starts empty")
+            const collision = yield* run("-s", "second", "export", "test", saved, "--state", saved)
+            assert.notStrictEqual(collision.code, 0)
+            assert.include(collision.err, "different")
+            assert.strictEqual(JSON.parse(fs.readFileSync(saved, "utf8")).cookies[0].value, "oat")
+            for (const kind of ["symlink", "hardlink"] as const) {
+              const alias = path.join(repo, kind)
+              if (kind === "symlink") fs.symlinkSync(saved, alias)
+              else fs.linkSync(saved, alias)
+              const aliased = yield* run("-s", "second", "export", "test", alias, "--state", saved)
+              assert.notStrictEqual(aliased.code, 0)
+              assert.include(aliased.err, "different")
+            }
+            const missing = path.join(repo, "missing")
+            const dangling = path.join(repo, "dangling")
+            fs.symlinkSync(missing, dangling)
+            const aliased = yield* run("-s", "second", "export", "test", missing, "--state", dangling)
+            assert.notStrictEqual(aliased.code, 0)
+            assert.include(aliased.err, "different")
+            assert.isFalse(fs.existsSync(missing))
+            fs.writeFileSync(path.join(repo, ".gitignore"), "private/")
+            const privateState = path.join(repo, "private", "initial.json")
+            const ignored = yield* run("-s", "second", "export", "test", test, "--state", privateState)
+            assert.strictEqual(ignored.code, 0, ignored.err)
+            assert.notInclude(ignored.err, "plaintext credentials")
+            assert.strictEqual(fs.statSync(privateState).mode & 0o777, 0o600)
+            const unsupported = yield* run("-s", "first", "export", "test", test, "--state", saved)
+            assert.notStrictEqual(unsupported.code, 0)
+            assert.include(unsupported.err, "--fork")
           } finally {
             const stopped = yield* run("-s", "second", "stop")
             assert.strictEqual(stopped.code, 0, stopped.err)

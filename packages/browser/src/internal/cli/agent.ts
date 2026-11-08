@@ -185,7 +185,7 @@ ${example(examples.attach)}
 \`strider --help\` lists all commands, \`strider page --help\` lists a group's subcommands, and \`strider page new --help\` gives arguments and flags. Help works without a session or browser.
 
 - \`route PATTERN abort\` installs a request handler on the selected page; \`strider route --help\` describes other decisions. \`dialog handle --help\` describes dialog policies. \`remove HANDLE\` ends a registration returned by these commands.
-- \`export test FILE\` writes the session's successful actions and expectations as a Vitest test, replacing refs with locators. Segments and controlled tabs become marked placeholders to complete.
+- \`export test FILE\` writes the session's successful actions and expectations as a Vitest test, replacing refs with locators. Segments and controlled tabs become marked placeholders to complete. For a forked session, add \`--state "$HOME/.local/state/strider/fork.state"\` to write its initial snapshot with mode 0600 and have the test read it; Git warnings apply here too. Without that flag a fork exports an empty context. Profile replay is unsupported.
 - \`run FILE --arg KEY=VALUE\` runs a TypeScript segment in the live session. The file exports a Segment, not an arbitrary script; its imports resolve from its directory. The CLI does not type-check it. See https://usestrider.dev/docs/agents/cli#segments for the contract and examples.
 
 ## MCP and capture policy

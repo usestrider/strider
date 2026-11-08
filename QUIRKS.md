@@ -1395,7 +1395,8 @@ An entry with no marker is open.
 **Q249. An exported test of a forked or profiled session starts empty** (Ours). A session started with `--fork` took its state from the other session's memory, and one started with `--user-data-dir` runs on a profile its browser keeps locked, so the test `export test` writes can start from neither, as it starts from a `--state` file.
 - *Seen:* checking what an exported test repeats of its session.
 - *We:* the test's context is made as a fresh session's, with a comment at the top of the test saying which the session started from and that the test starts empty, at the maintainer's decision.
-- *Reconsider:* writing a fork's state to a file at export, with `state save`'s mode, for the test to read as it reads `--state`'s.
+- **Resolved:** `export test <test-path> --state <state-path>` writes the initial fork snapshot with mode `0600` and makes the test read it, warning when Git could commit the credentials. Without the flag, the test still starts empty. Profile replay remains unsupported and is stated in the generated test.
+- *Reconsider:* replaying a user profile without relying on the browser's locked profile directory.
 
 **Q250. A `%name%` that names no secret is sent as written** (Ours). The agent toolkit, and so every `strider` command and `strider mcp` tool, read any `%name%` in a value or URL as a secret's placeholder and refused one that named no secret, so a URL's percent-escapes failed: `strider goto "https://shop.example.com/caf%C3%A9"` read `%C3%` as a secret and failed with "No secret named C3".
 - *Seen:* driving a page at a percent-escaped URL through the CLI.
