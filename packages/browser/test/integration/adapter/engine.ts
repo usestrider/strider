@@ -153,6 +153,44 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        for (const state of ["pressed", "expanded", "selected"] as const) {
+          it.effect(`includes ASCII case-insensitive ${state} in snapshots as in role filters`, () =>
+            Effect.gen(function*() {
+              const name = state === "selected" ? "tab" : "button"
+              const html = `<div role="${name}" aria-${state}="TRUE">State</div>`
+              const { send } = yield* open(backend, html)
+              assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role(name), [state]: true }] })), 1)
+              assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role(name), [state]: false }] })), 0)
+              const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+              assert(snapshot._tag === "Snapshot")
+              assert.include(snapshot.root.children[0]!.states, state)
+            }), timeout)
+        }
+
+        it.effect("uses native option selection before aria-selected in snapshots as in role filters", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<select multiple><option aria-selected="true">Unselected</option></select>`
+            )
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ ...role("option", null, true), selected: true }] })),
+              0
+            )
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ ...role("option", null, true), selected: false }] })),
+              1
+            )
+            const snapshot = yield* send({
+              op: "snapshot",
+              steps: [{ _tag: "Css", selector: "option" }],
+              interactivity: false,
+              depth: null
+            })
+            assert(snapshot._tag === "Snapshot")
+            assert.notInclude(snapshot.root.states, "selected")
+          }), timeout)
+
         it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
