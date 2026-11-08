@@ -527,6 +527,63 @@ describe("Firefox launcher", () => {
           assert.deepStrictEqual(error.reason.searched, ["/nowhere/firefox"])
         }))
 
+      for (const open of [true, false]) {
+        it.effect(
+          open
+            ? "reports an exited Firefox within the launch timeout when inherited stderr stays open"
+            : "reports an exited Firefox promptly when stderr reaches EOF before the deadline",
+          () =>
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              const stderr = Stream.make(new TextEncoder().encode("early diagnostic\nfinal diagnostic without newline"))
+                .pipe(
+                  Stream.concat(open ? Stream.never : Stream.empty)
+                )
+              const spawner = ChildProcessSpawner.make(() =>
+                Effect.succeed(ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(9000003),
+                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(3)),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  stdin: Sink.drain,
+                  stdout: Stream.empty,
+                  stderr,
+                  all: stderr,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                  unref: Effect.succeed(Effect.void)
+                }))
+              )
+              const result = yield* FirefoxLauncher.launch({
+                executablePath: "/fake/firefox",
+                userDataDir: "/fake/profile",
+                timeout: open ? "200 millis" : "5 seconds"
+              }).pipe(
+                Effect.provideService(FileSystem.FileSystem, {
+                  ...fs,
+                  exists: () => Effect.succeed(true),
+                  readFileString: () => Effect.succeed(""),
+                  writeFileString: () => Effect.void
+                }),
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+                Effect.scoped,
+                Effect.exit,
+                Effect.timeoutOption(open ? "3 seconds" : "500 millis"),
+                BrowserClock.onLive
+              )
+              assert(
+                Option.isSome(result),
+                open ? "Firefox outlived its launch deadline" : "Firefox waited despite prompt EOF"
+              )
+              assert(Exit.isFailure(result.value))
+              const error = Option.getOrThrow(Exit.findErrorOption(result.value))
+              assert(error.reason._tag === "ProcessExited")
+              assert.deepStrictEqual(error.reason.code, Option.some(3))
+              assert.strictEqual(error.reason.stderrTail, "early diagnostic\nfinal diagnostic without newline")
+            })
+        )
+      }
+
       it.effect("writes the profile's preferences", () =>
         Effect.sync(() => {
           assert.include(
