@@ -777,7 +777,8 @@ describe("WebKit launcher", () => {
         around: (
           start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
           progress: OwnershipProgress
-        ) => Effect.Effect<Launch.LaunchError, WebKitAutomation.Group> = (start) => start
+        ) => Effect.Effect<Launch.LaunchError, WebKitAutomation.Group> = (start) => start,
+        onSpawn: () => void = () => {}
       ) {
         const fs = yield* FileSystem.FileSystem
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-test-" })
@@ -800,6 +801,7 @@ describe("WebKit launcher", () => {
             assert(command._tag === "StandardCommand")
             port = Number(command.options.env!["WEBKIT_INSPECTOR_SERVER"]!.split(":")[1])
             spawned++
+            onSpawn()
             yield* Effect.addFinalizer(() =>
               Effect.sync(() => {
                 stopped++
@@ -987,20 +989,18 @@ describe("WebKit launcher", () => {
             const expire = yield* Deferred.make<void>()
             const armed = yield* Deferred.make<void>()
             const sleeps: Array<number> = []
+            let millis = 0
             const descriptor = Object.getOwnPropertyDescriptor(BrowserClock.live, "sleep")!
             const result = yield* Effect.acquireUseRelease(
               Effect.sync(() => {
                 const now = vi.spyOn(performance, "now")
-                const liveNow = vi.spyOn(BrowserClock.live, "now")
                 const restore = () => {
                   Object.defineProperty(BrowserClock.live, "sleep", descriptor)
-                  liveNow.mockRestore()
                   now.mockRestore()
                 }
                 try {
-                  // Create the original deadline at 50 ms, then consume a controlled amount of its budget.
-                  now.mockReturnValue(0)
-                  liveNow.mockReturnValue(elapsed * 1_000_000 as ReturnType<typeof BrowserClock.now>)
+                  // Both deadline creation and live.now read this same advancing clock.
+                  now.mockImplementation(() => millis)
                   Object.defineProperty(BrowserClock.live, "sleep", {
                     ...descriptor,
                     value: (millis: number) => {
@@ -1051,7 +1051,11 @@ describe("WebKit launcher", () => {
                       yield* Deferred.succeed(expire, undefined)
                       return yield* Fiber.join(fiber)
                     }
-                  )
+                  ),
+                  // Spawning occurs after the original deadline is created and before the ownership race.
+                  () => {
+                    millis = elapsed
+                  }
                 ),
               (restore) => Effect.sync(restore)
             )
