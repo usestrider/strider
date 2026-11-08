@@ -13,5 +13,9 @@ if (process.env.STRIDER_TRACE_RETAIN_PASSES === "1") {
 } else it.skip("retention quota probe is opt-in", () => {})
 
 afterAll(() => {
+  if (process.env.STRIDER_QUOTA_FAILED_SCOPE === "1") {
+    const record = connection("failed-after-quota")
+    for (let i = 0; i < 100; i++) record("receive", "FAILED_AFTER_QUOTA" + "界".repeat(30_000))
+  }
   throw Error("Deliberate quota probe failure to expose recorder console output")
 })

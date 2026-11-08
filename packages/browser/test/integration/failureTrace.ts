@@ -37,8 +37,14 @@
  * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine diagnostic entries (plus overflow/attribution)
  * from passing scopes for an investigation; passing raw protocol traffic is discarded. Existing per-scope memory,
  * child spool and payload bounds remain in force. Passing artifacts together consume at most 16 MiB UTF-8 per test
- * file (including a conservative 32 KiB allowance per context line); exhaustion is logged. Failed scopes retain
- * their ordinary independent budgets. Passing late cleanup is not retained. This is a per-file disk bound, so
+ * file, charging the actual serialized UTF-8 bytes of headers, entries and omission markers. Empty and
+ * connection-only passing scopes produce no artifact and cost nothing. Ownership entries accompany retained
+ * diagnostics only; ownership replayed from shared context has sequence 0 and ownershipSource with its original
+ * shared artifact/sequence (a metadata-only source context may have no artifact). Child diagnostics keep both
+ * process-local connection metadata and the parent transfer's ownership. A marker's exact bytes are reserved
+ * until exhaustion; a partially retained scope and
+ * subsequent omitted evidence scopes are counted as omissions. Exhaustion is marked in the last passing artifact
+ * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained. This is a per-file disk bound, so
  * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
  *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,

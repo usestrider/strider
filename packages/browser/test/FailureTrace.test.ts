@@ -212,6 +212,36 @@ describe("failure trace runner lifecycle", () => {
     for (const file of paths) fs.unlinkSync(file)
   }, 30_000)
 
+  it("retains failed-scope traffic independently after the passing budget is exhausted", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "retention.fixture"
+    ], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "1", STRIDER_QUOTA_FAILED_SCOPE: "1" }
+    })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    expect(run.stderr).toContain("retention budget exhausted")
+    const paths = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+    const passingBytes = paths.filter((file) => file.endsWith("-test.ndjson")).reduce(
+      (bytes, file) => bytes + fs.statSync(file).size,
+      0
+    )
+    const failed = paths.filter((file) => file.endsWith("-shared.ndjson"))
+    expect(passingBytes).toBeLessThanOrEqual(16 * 1024 * 1024)
+    expect(failed).toHaveLength(1)
+    expect(fs.readFileSync(failed[0]!, "utf8")).toContain("FAILED_AFTER_QUOTA")
+    expect(fs.statSync(failed[0]!).size).toBeGreaterThan(512 * 1024)
+    expect(passingBytes + fs.statSync(failed[0]!).size).toBeGreaterThan(16 * 1024 * 1024)
+    for (const file of paths) fs.unlinkSync(file)
+  }, 30_000)
+
   it("keeps a late passing test's diagnostics after many passes that recorded none", async () => {
     const { spawnSync } = await import("node:child_process")
     const run = spawnSync("pnpm", [
@@ -239,6 +269,34 @@ describe("failure trace runner lifecycle", () => {
       ambiguousCreator: false
     })
     expect(JSON.parse(ownership.payload).owner).not.toBe("shared suite context")
+    const sharedDiagnostic = entries.find((entry) =>
+      entry.kind === "host-timeout" && JSON.parse(entry.payload).operationId === "shared-late"
+    )
+    const sharedOwnership = entries.find((entry) =>
+      entry.kind === "connection" && entry.connection === sharedDiagnostic.connection
+    )
+    expect(JSON.parse(sharedOwnership.payload)).toMatchObject({
+      label: "shared-diagnostic",
+      owner: "shared suite context"
+    })
+    expect(sharedOwnership.ownershipSource).toMatchObject({
+      sharedArtifact: expect.any(String),
+      sequence: expect.any(Number)
+    })
+    for (const pid of [101, 102]) {
+      const child = entries.find((entry) => entry.kind === "host-timeout" && entry.origin?.pid === pid)
+      const childOwner = entries.find((entry) =>
+        entry.kind === "connection" && entry.origin?.pid === pid && entry.origin.connection === child.origin.connection
+      )
+      expect(JSON.parse(childOwner.payload).label).toBe(`child-${pid}`)
+      const transferOwner = entries.find((entry) =>
+        entry.kind === "connection" && entry.origin === undefined && entry.connection === child.connection
+      )
+      expect(JSON.parse(transferOwner.payload)).toMatchObject({
+        label: "child-transfer-probe",
+        owner: JSON.parse(ownership.payload).owner
+      })
+    }
     expect(entries.some((entry) => entry.payload?.includes("empty-connection"))).toBe(false)
     const kept = paths.some((file) => fs.readFileSync(file, "utf8").includes("\\\"operationId\\\":\\\"late\\\""))
     for (const file of paths) fs.unlinkSync(file)

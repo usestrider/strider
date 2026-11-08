@@ -4,7 +4,7 @@ import * as path from "node:path"
 import { TestRunner } from "vitest"
 import type { RunnerTask, RunnerTestCase, RunnerTestFile, RunnerTestSuite } from "vitest"
 import "./traceProcesses.ts"
-import type { Origin } from "./failureTrace.ts"
+import type { Entry, Origin } from "./failureTrace.ts"
 import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
@@ -14,6 +14,8 @@ const retainPasses = process.env.STRIDER_TRACE_RETAIN_PASSES === "1"
 // Per file, across all passing tests and shared context; failed scopes retain their ordinary budgets.
 let passScopesOmitted = 0
 let passBytes = 16 * 1024 * 1024
+let passExhausted = false
+let lastPassingFile: string | undefined
 const shared = new TraceBuffer()
 let sharedTransfer = new TransferScope(() => connection("child-transfer"))
 const transfers = new Map<string, TransferScope>()
@@ -33,50 +35,109 @@ const serialize = (value: unknown): string =>
     : JSON.stringify(value, (_, v) => typeof v === "bigint" ? `${v}n` : v) ?? String(value)
 const filename = (task: RunnerTask, suffix: string) =>
   path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-${suffix}.ndjson`)
-const save = (file: string, trace: TraceBuffer, scope: string, passing = false) => {
-  if (passing) passBytes -= 32768
+const omissionLine = JSON.stringify({
+  kind: "overflow",
+  payload: "Passing diagnostic retention budget exhausted for this file; later passing evidence omitted"
+}) + "\n"
+const omissionBytes = Buffer.byteLength(omissionLine)
+const connectionKey = (entry: Entry) =>
+  entry.origin === undefined
+    ? `parent:${entry.connection}`
+    : `child:${entry.origin.pid}:${entry.origin.connection}`
+const ownershipKeys = (entry: Entry) =>
+  entry.origin === undefined
+    ? [connectionKey(entry)]
+    : [`parent:${entry.connection}`, connectionKey(entry)]
+const exhausted = () => {
+  passScopesOmitted++
+  if (passExhausted) return
+  passExhausted = true
+  // Every passing write leaves exactly enough room for this once-per-file marker.
+  if (lastPassingFile !== undefined) {
+    fs.appendFileSync(lastPassingFile, omissionLine)
+    passBytes -= omissionBytes
+  }
+  console.error("Passing diagnostic retention budget exhausted for this file")
+}
+const save = (file: string, trace: TraceBuffer, scope: string, passing = false): string | undefined => {
+  const entries = trace.entries()
+  if (passing && file !== sharedFile) {
+    const needed = new Set(entries.filter((entry) => /^(engine-round-|host-)/.test(entry.kind)).flatMap(ownershipKeys))
+    const local = new Set(entries.filter((entry) => entry.kind === "connection").map(connectionKey))
+    const replay = shared.entries().filter((entry) =>
+      entry.kind === "connection" && needed.has(connectionKey(entry)) && !local.has(connectionKey(entry))
+    ).map((entry) => ({
+      ...entry,
+      sequence: 0,
+      ownershipSource: { sharedArtifact: path.basename(sharedFile), sequence: entry.sequence }
+    }))
+    entries.unshift(...replay)
+  }
+  const diagnostics = passing
+    ? entries.filter((entry) => /^(engine-round-|host-|overflow$|attribution$)/.test(entry.kind))
+    : entries
+  // Connection creation alone is not evidence and must not consume the passing budget.
+  if (passing && diagnostics.length === 0) return undefined
+  if (passing && passExhausted) {
+    exhausted()
+    return undefined
+  }
+  const header = JSON.stringify({
+    kind: "context",
+    scope: scope.slice(0, 4096),
+    ...(retainPasses
+      ? { passingScopeOmissions: passScopesOmitted, passingRetentionRemainingBytes: passBytes }
+      : {}),
+    ...(file === sharedFile ? {} : { sharedArtifact: path.basename(sharedFile) }),
+    note: "Independent parent/child tails; child selection uses origin timestamps, output sequence orders collection."
+  }) + "\n"
+  let selected: Set<Entry> | undefined
+  let omitted = false
+  if (passing) {
+    const kept = new Set<Entry>()
+    selected = kept
+    const ownership = new Map(
+      entries.filter((entry) => entry.kind === "connection").map((entry) => [connectionKey(entry), entry])
+    )
+    let available = passBytes - Buffer.byteLength(header) - omissionBytes
+    for (const diagnostic of diagnostics) {
+      const owners = ownershipKeys(diagnostic).flatMap((key) => {
+        const owner = ownership.get(key)
+        return owner === undefined || kept.has(owner) ? [] : [owner]
+      })
+      const group = [...owners, diagnostic]
+      const bytes = group.reduce((total, entry) => total + Buffer.byteLength(JSON.stringify(entry) + "\n"), 0)
+      if (bytes > available) {
+        omitted = true
+        break
+      }
+      for (const entry of group) kept.add(entry)
+      available -= bytes
+    }
+    if (kept.size === 0) {
+      exhausted()
+      return undefined
+    }
+  }
   fs.mkdirSync(directory, { recursive: true })
   const fd = fs.openSync(file, "w")
+  const write = (line: string) => {
+    fs.writeSync(fd, line)
+    if (passing) passBytes -= Buffer.byteLength(line)
+  }
   try {
-    fs.writeSync(
-      fd,
-      JSON.stringify({
-        kind: "context",
-        scope: scope.slice(0, 4096),
-        ...(retainPasses
-          ? { passingScopeOmissions: passScopesOmitted, passingRetentionRemainingBytes: passBytes }
-          : {}),
-        ...(file === sharedFile ? {} : { sharedArtifact: path.basename(sharedFile) }),
-        note:
-          "Independent parent/child tails; child selection uses origin timestamps, output sequence orders collection."
-      }) + "\n"
-    )
-    // Serialize one line at a time instead of constructing a second artifact-sized string.
-    for (const entry of trace.entries()) {
-      if (passing && !/^(engine-round-|host-|overflow$|attribution$)/.test(entry.kind)) continue
-      const line = JSON.stringify(entry) + "\n"
-      if (passing) {
-        const bytes = Buffer.byteLength(line)
-        if (bytes > Math.max(0, passBytes - 32768)) {
-          fs.writeSync(
-            fd,
-            JSON.stringify({
-              kind: "overflow",
-              payload: "Passing diagnostic retention budget exhausted for this file"
-            }) + "\n"
-          )
-          console.error("Passing diagnostic retention budget exhausted for this file")
-          break
-        }
-        passBytes -= bytes
-      }
-      fs.writeSync(fd, line)
-    }
+    write(header)
+    // Preserve collection order and serialize one line at a time, including ownership only for kept evidence.
+    for (const entry of entries) if (selected === undefined || selected.has(entry)) write(JSON.stringify(entry) + "\n")
   } finally {
     fs.closeSync(fd)
   }
+  if (passing) lastPassingFile = file
+  if (omitted) exhausted()
   console.error(`Integration failure trace: ${file}`)
+  return file
 }
+
 install({
   connection(label) {
     const id = `${++nextConnection}:${label}`
@@ -142,6 +203,8 @@ export default class FailureTraceRunner extends TestRunner {
     shared.clear()
     passScopesOmitted = 0
     passBytes = 16 * 1024 * 1024
+    passExhausted = false
+    lastPassingFile = undefined
     active.clear()
     completed.clear()
   }
@@ -181,10 +244,8 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
-    const file = failed || (retainPasses && passBytes > 65536) ? filename(task, "test") : undefined
-    if (retainPasses && !failed && file === undefined) passScopesOmitted++
+    const file = failed || retainPasses ? save(filename(task, "test"), running.trace, task.name, !failed) : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
-    if (file !== undefined) save(file, running.trace, task.name, !failed)
     if (file !== undefined && failed) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
     running.trace.clear()
   }
@@ -192,7 +253,7 @@ export default class FailureTraceRunner extends TestRunner {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
     sharedTransfer.close()
-    if (suite.result?.state === "fail" || (retainPasses && passBytes >= 32768)) {
+    if (suite.result?.state === "fail" || retainPasses) {
       save(
         filename(suite, "shared"),
         shared,

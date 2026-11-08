@@ -66,7 +66,9 @@ For a reviewed timing investigation, dispatch `gh workflow run integration.yml -
 This selects only the macOS job, running `STRIDER_TRACE_RETAIN_PASSES=1 pnpm test:integration:macos --no-file-parallelism`.
 The uploader runs on success, failure or cancellation and retains the log, commit/OS/Node/browser-pin metadata and
 `.data/integration-failures/` for 14 days. Passing artifacts retain host/engine diagnostics and overflow/attribution markers, rather than raw protocol traffic, with a combined 16 MiB UTF-8 budget per
-file, in addition to the recorder's existing failed-scope bounds. Budget exhaustion is logged; the retained tail
+file, in addition to the recorder's existing failed-scope bounds. Empty passing scopes cost nothing; headers,
+entries, ownership metadata and omission markers are charged their actual UTF-8 sizes. Budget exhaustion is marked
+in the last passing artifact and logged; the retained tail
 is not a complete traffic history. `packages/browser/test/integration/failureTrace.ts` documents clock domains,
 unavailable observations and supported child-process capture. This mode changes retention and observation only;
 it adds no browser waits and changes no test deadlines or assertions.
