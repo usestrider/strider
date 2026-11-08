@@ -94,7 +94,8 @@ const sampled = async (engine: string, runs: number, failLast = false): Promise<
   const base = await measurements(engine)
   let calls = 0
   return {
-    ...base, runs,
+    ...base,
+    runs,
     scenarios: await runScenarios([base.scenarios[0]!.scenario], runs, () => ({
       strider: async () => ++calls === runs + 1 && failLast ? "wrong" : "ok",
       playwright: async () => "ok"

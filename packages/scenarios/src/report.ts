@@ -280,9 +280,25 @@ export const combine = (measurements: ReadonlyArray<Measurements>, context?: Rep
     "",
     "A required-page recording preflight checks GET page coverage, not complete interaction replay. A failed comparison does not establish that a browser feature is generally unsupported. Failures in one scenario do not invalidate other complete pairs.",
     "",
-    "Times are milliseconds; each cell is **p50 / p90**. Gaps use `(Strider / Playwright - 1) × 100`. The existing estimator selects the sorted sample at `floor(q × n)`: with ten samples p50 is sample six and p90 is the maximum. A p90-only gap is a single tail observation requiring confirmation, not evidence of a sustained regression. Desktop background activity and browser build differences limit attribution. Failed durations are excluded from statistics; gaps are withheld if either library failed any initial or timed attempt.",
+    "Times are milliseconds; each cell is **p50 / p90**. Gaps use `(Strider / Playwright - 1) × 100`. For each library and workflow, n is the number of successful timed samples, which can be smaller than the scheduled repetition count after failures. The estimator selects zero-based sorted index `min(n - 1, floor(q × n))`. The table below gives one-based positions for the successful sample counts present in these workflow rows; n = 0 has no statistic. When p90 selects the maximum, a p90-only gap depends on one tail sample and requires confirmation before calling it a sustained regression. Larger sample counts can select a value below the maximum. Desktop background activity and browser build differences limit attribution. Failed durations are excluded from statistics; gaps are withheld if either library failed any initial or timed attempt.",
     ""
   )
+  const counts = [
+    ...new Set(
+      measurements.flatMap((m) =>
+        m.scenarios.flatMap((r) =>
+          r.outcome.playwright === undefined ? [r.times.strider.runs] : [r.times.strider.runs, r.times.playwright.runs]
+        )
+      )
+    )
+  ].sort((a, b) => a - b)
+  out.push("| Successful samples (n) | p50 position | p90 position |", "|---:|---:|---:|")
+  for (const n of counts) {
+    const position = (q: number) => n === 0 ? "–" : String(Math.min(n - 1, Math.floor(q * n)) + 1)
+    const maximum = n > 0 && Math.floor(0.9 * n) >= n - 1 ? " (maximum)" : ""
+    out.push(`| ${n} | ${position(0.5)} | ${position(0.9)}${maximum} |`)
+  }
+  out.push("")
   if (context !== undefined) {
     out.push(
       "## Retained correctness observations",
