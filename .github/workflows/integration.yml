@@ -7,6 +7,12 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      diagnostic:
+        description: Focused macOS Firefox print diagnostic (one probe and one conformance case)
+        type: choice
+        options: [none, firefox-print]
+        default: none
 
 permissions:
   contents: read
@@ -17,6 +23,7 @@ concurrency:
 
 jobs:
   integration:
+    if: inputs.diagnostic != 'firefox-print'
     name: integration (${{ matrix.job }})
     strategy:
       fail-fast: false
@@ -82,18 +89,33 @@ jobs:
       - name: Install TLS fixture tool
         run: brew install openssl@3
       - name: Install
+        id: install
         run: pnpm install --frozen-lockfile
       # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
       # The entry point verifies pinned browser, ffmpeg and ffprobe downloads before running real video tests.
       - name: Install verified macOS browsers and video tools, then run integration tests
+        if: inputs.diagnostic != 'firefox-print'
         run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
+      - name: Direct Firefox BiDi print with screenshot
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.diagnostic == 'firefox-print' }}
+        run: pnpm test:integration:macos --firefox-print-probe 2>&1 | tee firefox-print-probe.log
+      - name: Firefox PDF conformance case
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.diagnostic == 'firefox-print' }}
+        env:
+          STRIDER_KEEP_INTEGRATION_TRACES: '1'
+        run: >-
+          pnpm test:integration:macos packages/browser/test/integration/adapter/Firefox.adapter.test.ts
+          -t 'captures screenshots and PDFs, and reads response bodies' --no-file-parallelism
+          --retry=0 --repeats=0 2>&1 | tee firefox-print-conformance.log
       - name: Keep the macOS log
-        if: failure() || cancelled()
+        if: failure() || cancelled() || inputs.diagnostic == 'firefox-print'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-macos-log
           path: |
             integration-macos.log
+            firefox-print-probe.log
+            firefox-print-conformance.log
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14

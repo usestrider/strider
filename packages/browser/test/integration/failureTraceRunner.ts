@@ -9,6 +9,8 @@ import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
+// Focused diagnostics may retain bounded traces even when the selected case passes.
+const retainPassing = process.env.STRIDER_KEEP_INTEGRATION_TRACES === "1"
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const shared = new TraceBuffer()
 let sharedTransfer = new TransferScope(() => connection("child-transfer"))
@@ -151,7 +153,7 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.get(task.id)?.close()
     transfers.delete(task.id)
     active.delete(task.id)
-    const file = task.result?.state === "fail" ? filename(task, "test") : undefined
+    const file = (task.result?.state === "fail" || retainPassing) ? filename(task, "test") : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
     if (file !== undefined) save(file, running.trace, task.name)
     if (file !== undefined) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
@@ -161,7 +163,7 @@ export default class FailureTraceRunner extends TestRunner {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
     sharedTransfer.close()
-    if (suite.result?.state === "fail") {
+    if (suite.result?.state === "fail" || retainPassing) {
       save(
         filename(suite, "shared"),
         shared,

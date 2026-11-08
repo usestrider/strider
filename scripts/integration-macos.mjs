@@ -57,21 +57,29 @@ try {
     run("hdiutil", ["detach", mount])
   }
   // Headed Chromium uses the runner's native WindowServer, never Xvfb. Browser profiles remain scope-owned.
-  run("pnpm", ["exec", "vitest", "--run", "--config", "vitest.integration.macos.config.ts", ...process.argv.slice(2)], {
-    ...process.env,
-    STRIDER_ENVIRONMENT: "macos-integration",
-    STRIDER_CHROMIUM: path.join(
-      directory,
-      "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-    ),
-    STRIDER_FIREFOX: path.join(directory, "Firefox.app/Contents/MacOS/firefox"),
-    STRIDER_OPENSSL: openssl,
-    STRIDER_FFMPEG: path.join(directory, "ffmpeg"),
-    STRIDER_FFPROBE: path.join(directory, "ffprobe"),
-    TZ: "UTC",
-    LANG: "en_US.UTF-8",
-    LC_ALL: "en_US.UTF-8"
-  })
+  const probe = process.argv[2] === "--firefox-print-probe"
+  run(
+    probe ? process.execPath : "pnpm",
+    probe
+      ? [path.join(root, "scripts/firefox-print-probe.mjs"), "--screenshot"]
+      : ["exec", "vitest", "--run", "--config", "vitest.integration.macos.config.ts", ...process.argv.slice(2)],
+    {
+      ...process.env,
+      STRIDER_EXPECTED_FIREFOX: pins.firefox.version,
+      STRIDER_ENVIRONMENT: "macos-integration",
+      STRIDER_CHROMIUM: path.join(
+        directory,
+        "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+      ),
+      STRIDER_FIREFOX: path.join(directory, "Firefox.app/Contents/MacOS/firefox"),
+      STRIDER_OPENSSL: openssl,
+      STRIDER_FFMPEG: path.join(directory, "ffmpeg"),
+      STRIDER_FFPROBE: path.join(directory, "ffprobe"),
+      TZ: "UTC",
+      LANG: "en_US.UTF-8",
+      LC_ALL: "en_US.UTF-8"
+    }
+  )
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

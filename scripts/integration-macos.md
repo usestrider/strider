@@ -61,3 +61,22 @@ Updating these pins requires downloading and hashing both archives and validatin
 The real macOS run must verify mounting/copying the Firefox app, Gatekeeper behavior, native headed browser
 launches, TLS fixtures with Homebrew OpenSSL 3, and the full adapter/slice outcomes. Investigate failures with the
 retained traces; do not turn macOS findings into skips.
+
+## Focused Firefox print diagnostic
+
+Dispatch Integration with `diagnostic=firefox-print` to skip Linux and the full macOS suite. Two sequential steps each
+use the verified installer: the direct BiDi probe with screenshot enabled, followed by only Firefox's existing
+“captures screenshots and PDFs, and reads response bodies” conformance case. Each runs once, with no test retry.
+The second step runs even if the probe fails, provided dependency installation succeeded and the run was not cancelled.
+A failed step still fails the job.
+
+The probe imports only Node modules, sends no recovery query, checks the Firefox version against the macOS pin,
+and checks the returned PDF header. It logs timestamped BiDi commands/events and Firefox stderr, abbreviating
+base64 screenshot/PDF data, with a 30-second deadline and owned-process cleanup. It is diagnostic tooling,
+not a reproduction already confirmed on macOS.
+
+The artifact `integration-macos-log` is retained for 14 days even when both paths pass. It includes
+`firefox-print-probe.log`, `firefox-print-conformance.log` and the conformance protocol/process traces in
+`.data/integration-failures/`. For this step alone, `STRIDER_KEEP_INTEGRATION_TRACES=1` retains the existing bounded
+trace buffers for passing tests and shared setup/teardown too. Truncation and overflow limits still apply.
+Ordinary nightly and default dispatch runs retain their existing full-suite and failure-only artifact behavior.
