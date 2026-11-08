@@ -20,7 +20,7 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. Actions without a stability check still await a rendering update.
+ *   the action point. The rendered check independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -77,6 +77,7 @@ export type Step =
 
 /** Which actionability checks an action runs. */
 export interface Checks {
+  readonly rendered: boolean
   readonly visible: boolean
   readonly enabled: boolean
   readonly editable: boolean
@@ -352,7 +353,8 @@ export const Response = Schema.Union([
     scrolled: Schema.Boolean,
     /**
      * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included.
+     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
+     * wait is reported even without a frame, since no rendering hint will replace it.
      */
     checked: Schema.Boolean
   }),
@@ -1774,15 +1776,30 @@ export function engine(render: (root: SnapNode) => string) {
     const action = request.action
     while (true) {
       const left = end - now()
-      if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+      if (left <= 0) {
+        return {
+          _tag: "NotReady",
+          reason: last,
+          history,
+          scrolled,
+          checked: history.length > 0 || (!request.checks.rendered && sampled)
+        }
+      }
       // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
       // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
-      // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
-      if (sampled || !(request.checks.stable > 0)) {
+      // input permit. Without stability, only the rendered check waits before checking current layout.
+      // Retry waits remain frame-based even when rendered is disabled.
+      if (sampled || (request.checks.rendered && !(request.checks.stable > 0))) {
         if (!(await nextFrame(left))) {
           // A round the deadline cut too short for any page to render says nothing about rendering
-          if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-          return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+          if (request.checks.rendered && frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+          return {
+            _tag: "NotReady",
+            reason: last,
+            history,
+            scrolled,
+            checked: history.length > 0 || (!request.checks.rendered && sampled)
+          }
         }
         frames++
       }

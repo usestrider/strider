@@ -112823,7 +112823,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "bb884c5c2241764ce57c46b89d6b7852c7167417f2d01b5e7436174ee7256e4a",
+    "docs/decisions.md": "20399d6dc1580714b456296eb415a0f6f8ab7c94dfac20f7a216333e2b5ada37",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -112839,7 +112839,7 @@
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "82370788ef2e8562cf007a565bcb9f66ee6b84c22392e394119dc78670f62198",
+    "packages/browser/src/Locator.ts": "6d6989b1962fcb5999b8d59fc6cc7e097a82942e2b540ab9e427ec88057ae40b",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",

@@ -79,6 +79,7 @@ const role = (
   includeHidden
 })
 const all: Engine.Checks = {
+  rendered: true,
   visible: true,
   enabled: true,
   editable: false,
@@ -761,6 +762,7 @@ export const engine = (backend: Backend) =>
               ...point(0),
               cap: 100,
               checks: {
+                rendered: true,
                 visible: false,
                 enabled: false,
                 editable: false,
@@ -937,6 +939,7 @@ export const engine = (backend: Backend) =>
             const response = yield* send({ ...request, cap: 100, checks: { ...request.checks, rendered: false } })
             assert(response._tag === "NotReady", JSON.stringify(response))
             assert.strictEqual(response.reason._tag, "NotStable")
+            assert.isTrue(response.checked)
             assert(
               !response.history.some((reason) =>
                 reason._tag === "NoRenderingOpportunity"

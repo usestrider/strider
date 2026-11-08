@@ -66,6 +66,7 @@ interface Ready {
 
 /** The checks each action documents (API.md, Locators, actions and actionability). */
 const pointerChecks: CheckSet = {
+  rendered: true,
   visible: true,
   enabled: true,
   editable: false,
@@ -75,6 +76,7 @@ const pointerChecks: CheckSet = {
   receivesPointer: true
 }
 const editChecks: CheckSet = {
+  rendered: false,
   visible: true,
   enabled: true,
   editable: true,
@@ -89,6 +91,7 @@ const selectChecks: CheckSet = { ...editChecks, editable: false, notInert: false
 const noChecks: CheckSet = { ...focusChecks, visible: false, notInert: false }
 
 const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engine.Checks => ({
+  rendered: checks?.rendered ?? defaults.rendered,
   visible: checks?.visible ?? defaults.visible,
   enabled: checks?.enabled ?? defaults.enabled,
   editable: checks?.editable ?? defaults.editable,
@@ -679,7 +682,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       (state, point, targetPoint) => Input.drag(state, point, targetPoint!, steps, options?.modifiers ?? []),
       {
-        target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
+        target: Effect.suspend(() => to.pointOf(options?.targetPosition, options?.checks?.rendered)),
         draggable: (record, io) =>
           html === "native"
             // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't
@@ -991,7 +994,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
-  pointOf(position: Mouse.Point | undefined) {
+  pointOf(position: Mouse.Point | undefined, rendered?: boolean | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
       // A drag's target, found inside the drag: its record, and its deadline
@@ -1003,7 +1006,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         {
           op: "act",
           steps: this.steps,
-          checks: checksFor(pointerChecks, { stable: false, receivesPointer: false }),
+          checks: checksFor(pointerChecks, { rendered, stable: false, receivesPointer: false }),
           cap: Runtime.roundCap(record.left()),
           action: {
             _tag: "Point",

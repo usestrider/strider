@@ -942,6 +942,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
 - `interface Checks`
+  - `readonly rendered?: boolean | undefined`
   - `readonly visible?: boolean | undefined`
   - `readonly enabled?: boolean | undefined`
   - `readonly editable?: boolean | undefined`

@@ -1,0 +1,5 @@
+---
+"@usestrider/browser": minor
+---
+
+Add per-action `checks.rendered`, enabled by default for pointer actions and disabled for other actions. Ready fills and other non-pointer actions check current layout immediately, including just before input, while stability sampling and retry waits remain frame-based. Wait for application readiness when hydration could reset an early fill, or enable `rendered` for one call. Actions with rendering disabled no longer report the no-frame timeout hint.
