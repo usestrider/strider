@@ -38,14 +38,21 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())))
 
 for (const javaScript of ["enabled", "disabled"] as const) {
-  // 320 is the narrowest phone in common use; 390 and 412 are common phones on both sides of the masthead's
-  // 380px breakpoint, where the name reappears.
+  // Include the former name breakpoint and both sides of the mobile/desktop arrangement.
   for (
     const viewport of [
       { width: 320, height: 800 },
       { width: 375, height: 800 },
+      { width: 379, height: 800 },
+      { width: 380, height: 800 },
       { width: 390, height: 844 },
       { width: 412, height: 915 },
+      { width: 639, height: 800 },
+      { width: 640, height: 800 },
+      { width: 641, height: 800 },
+      { width: 767, height: 800 },
+      { width: 768, height: 800 },
+      { width: 769, height: 800 },
       { width: 1366, height: 900 }
     ]
   ) {
@@ -88,6 +95,7 @@ for (const javaScript of ["enabled", "disabled"] as const) {
                     const scrolled = container?.scrollLeft ?? 0
                     if (container) container.scrollLeft = 0
                     return {
+                      label: container?.getAttribute("aria-label"),
                       scrollWidth,
                       clientWidth,
                       scrolled,
@@ -115,7 +123,12 @@ for (const javaScript of ["enabled", "disabled"] as const) {
                 expect.soft(control.left, `${control.label} left`).toBeGreaterThanOrEqual(0)
                 expect.soft(control.right, `${control.label} right`).toBeLessThanOrEqual(measurement.width)
               }
-              if (path === "playwright") expect(measurement.tables.length).toBeGreaterThan(0)
+              if (path === "playwright") {
+                expect(measurement.tables.length).toBeGreaterThan(0)
+                const labels = measurement.tables.map((table) => table.label)
+                expect(labels.every((label) => label && label !== "Table"), "table regions have context").toBe(true)
+                expect(new Set(labels).size, "table region names are distinct").toBe(labels.length)
+              }
               for (const table of measurement.tables) {
                 if (table.scrollWidth > table.clientWidth && table.scrollable) {
                   expect.soft(table.scrolled, "wide table actually scrolls").toBeGreaterThan(0)
@@ -141,4 +154,57 @@ for (const javaScript of ["enabled", "disabled"] as const) {
       )
     }
   }
+}
+
+// Exercise every integer viewport width, rather than relying on selected phone sizes.
+for (const javaScript of ["enabled", "disabled"] as const) {
+  it(`header fits every width from 320–640px (${javaScript} JavaScript)`, async () => {
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        assertPinned("Chromium", browser.info.version, chromium.version)
+        const context = yield* Browser.newContext({ emulation: { javaScript } })
+        const page = yield* context.newPage
+        for (const path of ["", "playwright/"]) {
+          yield* page.goto(`${base}/docs/${path}`, { waitUntil: "load" })
+          yield* page.evaluateInMainWorld(() => document.fonts.ready.then(() => true))
+          for (let width = 320; width <= 640; width++) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.emulate({ viewport: { width, height: 800 } })
+              const measurement = yield* page.evaluateInMainWorld(() => {
+                const header = document.querySelector("header")!.getBoundingClientRect()
+                return {
+                  width: document.documentElement.clientWidth,
+                  scrollWidth: document.documentElement.scrollWidth,
+                  controls: [...document.querySelectorAll("header a, header button")].map((element) => {
+                    const rect = element.getBoundingClientRect()
+                    return {
+                      left: rect.left,
+                      right: rect.right,
+                      width: rect.width,
+                      height: rect.height,
+                      insideHeader: rect.top >= header.top && rect.bottom <= header.bottom
+                    }
+                  })
+                }
+              })
+              expect(measurement.scrollWidth, `${path} document at ${width}px`).toBeLessThanOrEqual(measurement.width)
+              expect(measurement.controls).toHaveLength(7)
+              for (const control of measurement.controls) {
+                expect(control.left, `${path} control left at ${width}px`).toBeGreaterThanOrEqual(0)
+                expect(control.right, `${path} control right at ${width}px`).toBeLessThanOrEqual(measurement.width)
+                expect(control.width).toBeGreaterThan(0)
+                expect(control.height).toBeGreaterThan(0)
+                expect(control.insideHeader).toBe(true)
+              }
+            }))
+          }
+        }
+        console.log(`Checked all 321 widths on both pages (${javaScript} JavaScript)`)
+      })).pipe(
+        Effect.provide(Chromium.layer({ executablePath: chromium.executable, headless: true })),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+  }, 120_000)
 }
