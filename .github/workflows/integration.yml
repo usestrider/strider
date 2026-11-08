@@ -1,5 +1,6 @@
 # The browser integration tests: every night and on demand. They run in `devShells.integration`,
-# a file at a time, as on a maintainer's machine, with the browsers the flake pins, from the Nix binary cache.
+# a file at a time, as on a maintainer's machine, with the browsers the flake pins, from the Nix binary cache. On Linux,
+# a job per browser, and one for the other files (`vitest.integration.config.ts`).
 name: Integration
 
 on:
@@ -16,6 +17,11 @@ concurrency:
 
 jobs:
   integration:
+    name: integration (${{ matrix.job }})
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [chromium, firefox, webkit, other]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -36,16 +42,20 @@ jobs:
         run: |
           sudo sysctl -w "kernel.core_pattern=$(sed 's/ 9223372036854775808 / %c /' /proc/sys/kernel/core_pattern)"
           cat /proc/sys/kernel/core_pattern
+      # The layout tests' file names no browser, so they run with the other files
       - name: Build the documentation for layout tests
+        if: matrix.job == 'other'
         run: nix develop --command pnpm website:dist
       - name: Integration tests
+        env:
+          STRIDER_INTEGRATION_JOB: ${{ matrix.job }}
         run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
       # Failure-only protocol and owned browser process traces accompany the log.
       - name: Keep the log
         if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: integration-log
+          name: integration-log-${{ matrix.job }}
           path: |
             integration.log
             .data/integration-failures/
