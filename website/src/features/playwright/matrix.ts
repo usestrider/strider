@@ -13,7 +13,12 @@ export interface Row {
   readonly status: Status
   readonly api: ReadonlyArray<{ readonly module: string; readonly symbol: string; readonly url: string }>
   readonly notes: string
-  readonly decision?: { readonly file: string; readonly anchor: string; readonly quote: string }
+  readonly decision?: {
+    readonly file: string
+    readonly anchor: string
+    readonly quote: string
+    readonly revision: string
+  }
   readonly capabilities: ReadonlyArray<string>
   readonly browsers: Readonly<Record<string, { readonly status: Status; readonly limitations: ReadonlyArray<string> }>>
 }
@@ -28,7 +33,7 @@ export const labels: Readonly<Record<Status, string>> = {
   missing: "Missing"
 }
 export const decisionUrl = (decision: NonNullable<Row["decision"]>) =>
-  `https://github.com/usestrider/strider/blob/main/${decision.file}#${decision.anchor}`
+  `https://github.com/usestrider/strider/blob/${decision.revision}/${decision.file}#${decision.anchor}`
 export const groups = inventory.classes.map((clazz) => ({
   ...clazz,
   rows: matrix.rows.filter((row) => members.get(row.upstream[0]!)?.class === clazz.name)

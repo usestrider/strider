@@ -10,7 +10,7 @@ The guide at `/docs/playwright-matrix` renders the committed data in
   excluded by the upstream JavaScript filter are not Strider capability gaps.
 - `matrix.json` is the curated comparison. Each row owns upstream member IDs and, for an option row, its option
   name. IDs are permanent links: preserve them when changing descriptions or mappings. `has` needs public API
-  evidence; `different` also needs an existing decision, a stable link to its specific paragraph and a verified quotation from that decision; `missing` does not mean out of scope.
+  evidence; `different` also needs an existing decision, a stable link to its specific paragraph and a verified quotation from that decision and its committed source revision; `missing` does not mean out of scope.
   A row compares the capability, not every overload, nested value or behavioral detail of two implementations.
   `valueCoverage` accounts for finite upstream option values. Unsupported subsets have explicit missing rows linked
   bidirectionally through `gaps`/`parent`; their `value` is included in search. Missing whole options already expose
@@ -79,7 +79,10 @@ not proof that classifications are still correct. If a newly linked module is ad
 hash to `evidence`. Browser-specific overrides, explicit access requirements and optional configuration requirements are curated
 evidence, not inferred from operation names. Review each requirement's source quotation and applicable capability
 or mode. Keep patch-note links in both directions, and audit alternative compositions for waiting, error,
-no-match, strictness, identity and atomicity differences before changing a missing row to has. Do not assign new deliberate differences without an existing decision supporting them.
+no-match, strictness, identity and atomicity differences before changing a missing row to has. Decision citations pin the commit containing their anchors so preview links work before merging. If the decisions
+file changes, commit that file first, then update each affected citation’s revision to the commit containing the
+reviewed paragraph; the quotation still has to match the current source. Do not assign new deliberate differences
+without an existing decision supporting them.
 
 ## Rolling Playwright
 

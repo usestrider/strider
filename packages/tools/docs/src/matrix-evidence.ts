@@ -13,6 +13,7 @@ export interface Decision {
   readonly file: string
   readonly anchor: string
   readonly quote: string
+  readonly revision?: string | undefined
 }
 const cache = new Map<string, Map<string, string>>()
 export const sourceSymbols = (module: string): Map<string, string> => {
@@ -85,6 +86,7 @@ export const assertDecision = (decision: Decision): void => {
   const next = rest.slice(rest.indexOf("\n") + 1).search(/^(?:<a id=|#{2,3} |\*\*)/m)
   const block = next < 0 ? rest : rest.slice(0, rest.indexOf("\n") + 1 + next)
   assert.ok(normalized(block).includes(normalized(decision.quote)), `Quotation is not in decision ${decision.anchor}`)
+  assert.match(decision.revision ?? "", /^[a-f0-9]{40}$/, "Decision link needs a committed source revision")
 }
 export interface GapRow {
   readonly id: string
