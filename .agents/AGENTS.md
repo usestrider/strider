@@ -137,11 +137,14 @@ counts may be incomplete. File errors and failed-file counts stay visible even w
 Vitest mark its cases skipped. Case outcomes are preserved; pending cases and null durations are not passes or
 zero-cost tests.
 Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
-execution and the complete hosted job duration. **1500 seconds is the agreed goal for the complete serial Linux
-hosted run, including heavy coverage, with all coverage retained.** There is no hard CI threshold until measured
-against this goal. Linux CI now splits across four machines: the serial goal requires reassessment using elapsed
-Linux job times and aggregate execution separately. The longest job alone does not demonstrate that the serial
-goal was met; report summed execution across all four jobs alongside their elapsed times.
+execution and the complete hosted job duration. The agreed operating goals for the four-job Linux workflow are
+**1200 seconds per complete Linux job** and **3300 seconds aggregate file execution**, including heavy coverage.
+These replace the earlier 1500-second serial goal; there is no hard gate until runner variation is known.
+The post-matrix Linux budget summary reports actual GitHub start-to-completion elapsed time for each job
+(including setup, tests and upload, excluding pre-start queueing), and sums file execution from all four full/job
+snapshots separately. It labels missing, partial, failed or mismatched evidence without an under-goal conclusion.
+`scripts/integration-budget.ts` writes the report to the workflow job summary on every nightly/dispatched run.
+Moving work between jobs must not conceal aggregate growth; preserve all coverage.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
