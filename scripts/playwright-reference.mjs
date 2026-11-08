@@ -56,6 +56,19 @@ export const extract = (checkout) => {
           file,
           line,
           options: options.map((option) => option.name).sort(),
+          optionValues: Object.fromEntries(options.flatMap((option) => {
+            const variants = option.type?.union ?? []
+            if (
+              !variants.length ||
+              variants.some((type) => !/^"[^"\n]*"$/.test(type.name) && !["boolean", "null"].includes(type.name))
+            ) return []
+            return [[
+              option.name,
+              variants.flatMap((type) =>
+                type.name === "boolean" ? ["false", "true"] : [type.name === "null" ? "null" : JSON.parse(type.name)]
+              ).sort()
+            ]]
+          })),
           url: `https://github.com/microsoft/playwright/blob/${commit}/${file}#L${line}`
         })
       }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
+import { assertApiLink, assertDecision, assertValueGaps } from "../../tools/docs/src/matrix-evidence.ts"
 
 const root = fileURLToPath(new URL("../../../", import.meta.url))
 const matrix = JSON.parse(readFileSync(`${root}website/src/features/playwright/matrix.json`, "utf8"))
@@ -11,7 +12,10 @@ describe("Playwright matrix", () => {
   // A deliberate difference cites the decision behind it, not a whole section of the decisions document.
   it("cites a specific decision for each deliberate difference", () => {
     const sections = ["principles", "the-public-api-l2", "the-browser-model-l1"]
-    const unspecific = rows.filter((row) => row.status === "different" && sections.includes(row.decision?.anchor) || row.status === "different" && !row.decision?.quote)
+    const unspecific = rows.filter((row) =>
+      row.status === "different" && sections.includes(row.decision?.anchor) ||
+      row.status === "different" && !row.decision?.quote
+    )
     expect(unspecific.map((row) => row.id)).toEqual([])
   })
 
@@ -31,7 +35,9 @@ describe("Playwright matrix", () => {
   it("makes unsupported option values discoverable as linked missing rows", () => {
     const parent = row("option-page-goto-waituntil")
     const gaps = (parent.gaps ?? []).map(row)
-    expect(gaps.some((gap: any) => gap?.status === "missing" && gap.value === "networkidle" && gap.option === "waitUntil")).toBe(true)
+    expect(
+      gaps.some((gap: any) => gap?.status === "missing" && gap.value === "networkidle" && gap.option === "waitUntil")
+    ).toBe(true)
   })
 
   it("connects patched protocol dependencies to affected capabilities", () => {
@@ -42,5 +48,43 @@ describe("Playwright matrix", () => {
   it("records browser access requirements on API objects as well as their methods", () => {
     expect(row("property-page-mouse").requirements?.length).toBeGreaterThan(0)
     expect(row("property-page-mouse").browsers["webkit.attached"].status).toBe("missing")
+  })
+  it("rejects a declared symbol linked to another real member anchor", () => {
+    expect(() =>
+      assertApiLink({
+        module: "Page",
+        symbol: "ReadonlyPage.pdf",
+        url: "/docs/api/browser/Page#ReadonlyPage.screenshot"
+      })
+    )
+      .toThrow(/symbol\/anchor mismatch/)
+  })
+
+  it("rejects a whole-section citation even with a quotation", () => {
+    expect(() =>
+      assertDecision({
+        file: "docs/decisions.md",
+        anchor: "principles",
+        quote: "A launch takes an executable path. There are no channels, no"
+      })
+    )
+      .toThrow(/section heading/)
+  })
+
+  it("rejects a quotation taken from a different decision", () => {
+    expect(() =>
+      assertDecision({
+        file: "docs/decisions.md",
+        anchor: "composable-operation-deadlines",
+        quote: "A launch takes an executable path. There are no channels, no"
+      })
+    )
+      .toThrow(/Quotation is not in decision/)
+  })
+
+  it("rejects an undiscoverable unsupported value", () => {
+    const altered = structuredClone(rows)
+    altered.splice(altered.findIndex((row) => row.id === "navigation-networkidle"), 1)
+    expect(() => assertValueGaps(altered)).toThrow(/invalid linked value gap/)
   })
 })

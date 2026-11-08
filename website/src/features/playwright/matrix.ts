@@ -5,11 +5,15 @@ export type Status = "has" | "different" | "missing"
 export interface Row {
   readonly id: string
   readonly upstream: ReadonlyArray<string>
+  readonly value?: string
+  readonly parent?: string
+  readonly gaps?: ReadonlyArray<string>
+  readonly patches?: ReadonlyArray<string>
   readonly option?: string
   readonly status: Status
   readonly api: ReadonlyArray<{ readonly module: string; readonly symbol: string; readonly url: string }>
   readonly notes: string
-  readonly decision?: { readonly file: string; readonly anchor: string }
+  readonly decision?: { readonly file: string; readonly anchor: string; readonly quote: string }
   readonly capabilities: ReadonlyArray<string>
   readonly browsers: Readonly<Record<string, { readonly status: Status; readonly limitations: ReadonlyArray<string> }>>
 }

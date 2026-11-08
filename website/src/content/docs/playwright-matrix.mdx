@@ -21,7 +21,7 @@ Generic assertions, the Playwright Test runner, its fixtures and reporters remai
 
 ## Capabilities
 
-Search by class, method, option or difference, or expand a class to inspect its members. Every Playwright link opens the pinned reference source; every Strider link opens its public API. The page works without JavaScript; filtering and expanding all classes use JavaScript.
+Search by class, method, option, value or difference, or expand a class to inspect its members. The classification filter matches any of the six launched/attached browser modes; clearing filters restores the sections that were open before filtering. Unsupported values have linked missing rows, so a supported parent capability does not hide them from the filter. Every Playwright link opens the pinned reference source; every Strider link opens its public API. The page works without JavaScript; filtering and expanding all classes use JavaScript.
 
 <PlaywrightMatrix />
 
@@ -30,7 +30,7 @@ Search by class, method, option or difference, or expand a class to inspect its 
 These notes describe evidenced build or protocol dependencies separately from the capability classifications. A stock-browser limitation alone does not prove that a feature requires a patch.
 
 {matrix.patchedBrowserNotes.map((note) => (
-  <p id={`patch-${note.id}`}>{note.note} {note.evidence.map((source) => <a href={source.url}>Playwright source</a>)}</p>
+  <p id={`patch-${note.id}`}>{note.note} {note.evidence.map((source) => <a href={source.url}>Playwright source</a>)} {note.rows.length > 0 && <>Affected rows: {note.rows.map((id, index) => <span>{index > 0 && ", "}<a href={`#${id}`}>{id}</a></span>)}</>}</p>
 ))}
 
 ## Reference and updates

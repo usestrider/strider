@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { assertApiLink, assertDecision, assertValueGaps } from "../packages/tools/docs/src/matrix-evidence.ts"
 import { commit, extract, hash } from "./playwright-reference.mjs"
 
 const root = "website/src/features/playwright/"
@@ -17,15 +18,28 @@ const write = (name, data) => writeFileSync(`${root}${name}.json`, `${JSON.strin
 
 // Browser statuses are derived from explicit capability requirements, with the inspector-only access boundary.
 const browserStatuses = (row) => {
-  const member = members.get(row.upstream[0])
   const result = {}
   for (const backend of currentBrowsers.backends) {
     for (const mode of ["launched", "attached"]) {
       const entries = new Map((backend[mode] ?? []).map((entry) => [entry.name, entry]))
       let status = row.status
       const limitations = []
-      for (const capability of row.capabilities) {
-        const entry = entries.get(capability)
+      const requirements = [...row.capabilities.map((capability) => ({ capability })), ...(row.requirements ?? [])]
+      for (const requirement of requirements) {
+        if (requirement.unavailable) {
+          if (requirement.unavailable.includes(`${backend.id}.${mode}`)) {
+            status = "missing"
+            limitations.push(requirement.quote)
+          }
+          continue
+        }
+        const capability = requirement.capability
+        const candidates = [capability, ...(requirement.alternatives ?? [])].map((name) => entries.get(name)).filter(
+          Boolean
+        )
+        const entry = candidates.find((entry) => entry.status === "supported") ?? candidates.find((entry) =>
+          entry.status === "partial"
+        ) ?? candidates[0]
         if (!entry) {
           limitations.push(`Capability ${capability} is not reported.`)
           status = "missing"
@@ -36,15 +50,6 @@ const browserStatuses = (row) => {
             !(capability === "capability.video" && row.configuration?.[backend.id])
           ) status = "missing"
           if (entry.status === "partial" && entry.limitations.length === 0) limitations.push("Partial adapter support.")
-        }
-      }
-      if (backend.id === "webkit" && mode === "attached" && row.status !== "missing") {
-        const writes =
-          "newPage newContext goto reload goBack goForward close click dblclick check uncheck clear fill focus hover press pressSequentially type selectOption setInputFiles tap dragTo dragAndDrop"
-            .split(" ")
-        if (["Keyboard", "Mouse", "Touchscreen"].includes(member.class) || writes.includes(member.name)) {
-          status = "missing"
-          limitations.push("Attached stock WebKit has no Automation session for this operation.")
         }
       }
       result[`${backend.id}.${mode}`] = row.browserOverrides?.[`${backend.id}.${mode}`] ??
@@ -70,6 +75,19 @@ assert.equal(upstream.commit, commit)
 assert.equal(upstream.version, matrix.upstreamVersion)
 assert.equal(members.size, upstream.members.length, "Duplicate upstream member IDs")
 assert.equal(new Set(matrix.rows.map((row) => row.id)).size, matrix.rows.length, "Duplicate row IDs")
+assertValueGaps(matrix.rows)
+for (const note of matrix.patchedBrowserNotes) {
+  assert.ok(
+    note.scope === "build" || note.scope === "feature" && note.rows.length > 0,
+    `${note.id}: feature patch needs affected rows`
+  )
+  for (const id of note.rows) {
+    assert.ok(
+      matrix.rows.some((row) => row.id === id && row.patches?.includes(note.id)),
+      `${note.id}: affected row missing reverse dependency`
+    )
+  }
+}
 const covered = new Set()
 for (const row of matrix.rows) {
   assert.match(row.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/)
@@ -78,29 +96,48 @@ for (const row of matrix.rows) {
   assert.ok(row.upstream.length > 0, `${row.id}: missing upstream ownership`)
   for (const id of row.upstream) {
     assert.ok(members.has(id), `${row.id}: unknown upstream member ${id}`)
-    if (row.option) assert.ok(members.get(id).options.includes(row.option), `${row.id}: unknown option`)
-    else covered.add(id)
+    if (row.option) {
+      assert.ok(members.get(id).options.includes(row.option), `${row.id}: unknown option`)
+      if (!row.value) {
+        for (const value of members.get(id).optionValues[row.option] ?? []) {
+          assert.ok(
+            row.valueCoverage?.some((entry) => entry.value === value),
+            `${row.id}: upstream value ${value} omitted`
+          )
+        }
+      }
+    } else if (!row.value) covered.add(id)
   }
+  assert.ok(
+    Object.values(row.browsers).every((entry) => statuses.has(entry.status)),
+    `${row.id}: invalid browser classification`
+  )
+  assert.ok(
+    (row.valueCoverage ?? []).every((entry) => statuses.has(entry.status)),
+    `${row.id}: invalid value classification`
+  )
   assert.deepEqual(row.browsers, browserStatuses(row), `${row.id}: browser statuses drifted; review and refresh`)
-  for (const api of row.api) {
-    assert.ok(api.url.startsWith(`/docs/api/browser/${api.module}#`), `${row.id}: invalid API link`)
-    const model = read(`.data/api-reference/browser/modules/${api.module}.json`).children[0].children
-    const anchor = api.url.split("#")[1]
-    const declaration = model.find((child) => child.name === anchor)
-    assert.ok(declaration, `${row.id}: API declaration ${anchor} not exported`)
+  for (const requirement of row.requirements ?? []) {
     assert.ok(
-      declaration.name === api.symbol || declaration.children?.some((child) => child.name === api.symbol),
-      `${row.id}: API symbol ${api.symbol} not declared`
+      (requirement.capability || requirement.unavailable?.length) && requirement.file && requirement.quote,
+      `${row.id}: access requirement needs evidence`
+    )
+    assert.ok(
+      readFileSync(requirement.file, "utf8").replace(/\s+/g, " ").includes(requirement.quote.replace(/\s+/g, " ")),
+      `${row.id}: access evidence missing`
     )
   }
+  for (const api of row.api) assertApiLink(api)
   if (row.status !== "missing") assert.ok(row.api.length > 0, `${row.id}: supported capability needs API evidence`)
   if (row.status === "different") {
-    assert.ok(row.decision, `${row.id}: different needs a decision`)
-    const decisions = readFileSync(row.decision.file, "utf8")
-    const headings = [...decisions.matchAll(/^## (.+)$/gm)].map((match) =>
-      match[1].toLowerCase().replace(/[^\w -]/g, "").replaceAll(" ", "-")
+    assert.ok(row.decision, `${row.id}: missing decision`)
+    assertDecision(row.decision)
+  }
+  for (const patch of row.patches ?? []) {
+    assert.ok(
+      matrix.patchedBrowserNotes.some((note) => note.id === patch && note.rows.includes(row.id)),
+      `${row.id}: patch dependency not bidirectional`
     )
-    assert.ok(headings.includes(row.decision.anchor), `${row.id}: decision anchor missing`)
   }
 }
 for (const member of members.values()) {

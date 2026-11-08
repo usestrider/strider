@@ -4,24 +4,32 @@ The guide at `/docs/playwright-matrix` renders the committed data in
 `website/src/features/playwright/`. Its JSON download at `/docs/playwright-matrix.json` includes the same data.
 
 - `upstream.json` inventories Playwright 1.64.0's JavaScript reference: 74 classes, 1,042 declared members and
-  1,385 top-level options. It contains names and provenance, not copied reference prose. Playwright's parser expands
+  1,385 top-level options, with finite literal option values retained when the upstream parser exposes them. It contains names and provenance, not copied reference prose. Playwright's parser expands
   shared templates and selects the JavaScript language variants. Inherited members belong to their declaring class.
   The API, Test, reporter, Electron and Android reference directories are all included. Language-specific bindings
   excluded by the upstream JavaScript filter are not Strider capability gaps.
 - `matrix.json` is the curated comparison. Each row owns upstream member IDs and, for an option row, its option
   name. IDs are permanent links: preserve them when changing descriptions or mappings. `has` needs public API
-  evidence; `different` also needs an existing decision and an explanation; `missing` does not mean out of scope.
+  evidence; `different` also needs an existing decision, a stable link to its specific paragraph and a verified quotation from that decision; `missing` does not mean out of scope.
   A row compares the capability, not every overload, nested value or behavioral detail of two implementations.
+  `valueCoverage` accounts for finite upstream option values. Unsupported subsets have explicit missing rows linked
+  bidirectionally through `gaps`/`parent`; their `value` is included in search. Missing whole options already expose
+  their absent values and do not need a separate row for each. Preserve existing row IDs when adding value gaps.
 - `browsers.json` snapshots the generated adapter tables. Each row's `capabilities` names requirements in these
-  tables. The validator derives six browser/mode statuses, including limitations. `configuration` describes optional
+  tables. `requirements` records explicit input/access constraints with source files and quotations; input can be
+  native or WebDriver actions. Inspector-only navigation, focus, scrolling and selection are not refused merely
+  because their operation names look like writes. The validator derives six browser/mode statuses, including limitations. `configuration` describes optional
   video services that make a default unsupported entry available. `browserOverrides` records specific API boundaries
   such as CDP-only connection and WebKit's lack of headless mode; these need review alongside adapter changes.
-- `patchedBrowserNotes` keeps upstream build/protocol evidence separate from classifications. Each note has a pinned
+- `patchedBrowserNotes` keeps upstream build/protocol evidence separate from classifications. Feature-specific notes link to affected rows in both directions; general build notes do not imply that all of
+  that browser's capabilities require patches. Each note has a pinned
   source line and an exact evidence string that the upstream validation checks. A protocol difference alone does not
   prove every feature of that browser requires patches.
 - `evidence` hashes the Strider declarations, decisions and adapter sources used in the mapping. A changed file fails
   validation until the affected classifications have been reviewed. These hashes detect review needs, not semantic
-  equivalence. Public API links point to the declaration that contains the corresponding symbol.
+  equivalence. Public API symbols name their declaring type when they are members. Link checks bind each qualified symbol to its
+  exact source-derived reference anchor (or its type anchor for undocumented fields); the built check confirms the
+  target was rendered. This detects a symbol/anchor mismatch, not whether two operations are semantically equivalent.
 
 ## Checking the current pin
 
@@ -43,6 +51,13 @@ External links are pinned GitHub source locations checked against the checkout, 
 `pnpm all` includes the offline matrix and built-link check after building the site. Generate `pnpm reference` before
 running the matrix check independently.
 
+## Clean-checkout regressions
+
+`pnpm test --run packages/browser/test/PlaywrightMatrix.test.ts` reads committed source and TypeScript declarations;
+it needs neither `website/dist` nor `.data/api-reference`. It checks the reported mapping/evidence regressions and
+negative symbol/anchor, decision-quotation and value-gap cases. Rendered anchors and downloaded JSON are additionally
+checked by `pnpm matrix:check --built` after the website build; missing build output fails rather than skipping.
+
 ## Reviewing a Strider change
 
 Review the affected mappings against public declarations and existing decisions; do not infer support from a
@@ -61,8 +76,10 @@ pnpm all
 
 Refreshes do not classify new members or options. Inspect the diff: refreshing hashes acknowledges a human review,
 not proof that classifications are still correct. If a newly linked module is added, add its source path and SHA-256
-hash to `evidence`. Browser-specific overrides and optional configuration requirements are curated evidence, not
-inferred from names. Do not assign new deliberate differences without an existing decision supporting them.
+hash to `evidence`. Browser-specific overrides, explicit access requirements and optional configuration requirements are curated
+evidence, not inferred from operation names. Review each requirement's source quotation and applicable capability
+or mode. Keep patch-note links in both directions, and audit alternative compositions for waiting, error,
+no-match, strictness, identity and atomicity differences before changing a missing row to has. Do not assign new deliberate differences without an existing decision supporting them.
 
 ## Rolling Playwright
 
