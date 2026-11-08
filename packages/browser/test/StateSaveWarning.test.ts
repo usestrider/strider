@@ -112,46 +112,55 @@ describe("state save Git warning", () => {
   }
 
   for (const configuration of ["HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_COUNT"] as const) {
-    it.effect(`preserves global ignore rules from ${configuration}`, () => Effect.gen(function*() {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), "strider-state-global-ignore-"))
-      const keys = ["HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]
-      const previous = new Map(keys.map((key) => [key, process.env[key]]))
-      try {
-        const repo = path.join(root, "repo")
-        fs.mkdirSync(repo)
-        execFileSync("git", ["init", repo], { stdio: "ignore" })
-        process.env.HOME = path.join(root, "home")
-        process.env.XDG_CONFIG_HOME = path.join(root, "xdg")
-        delete process.env.GIT_CONFIG_GLOBAL
-        process.env.GIT_CONFIG_NOSYSTEM = "1"
-        process.env.GIT_CONFIG_COUNT = "0"
-        fs.mkdirSync(process.env.HOME, { recursive: true })
-        fs.mkdirSync(path.join(process.env.XDG_CONFIG_HOME, "git"), { recursive: true })
-        const excludes = path.join(root, "global-ignore")
-        fs.writeFileSync(excludes, "*.state\n")
-        if (configuration === "HOME") {
-          fs.writeFileSync(path.join(process.env.HOME, ".gitconfig"), `[core]\nexcludesFile = ${excludes}\n`)
-        } else if (configuration === "XDG_CONFIG_HOME") {
-          fs.writeFileSync(path.join(process.env.XDG_CONFIG_HOME, "git", "ignore"), "*.state\n")
-        } else {
-          process.env.GIT_CONFIG_COUNT = "1"
-          process.env.GIT_CONFIG_KEY_0 = "core.excludesFile"
-          process.env.GIT_CONFIG_VALUE_0 = excludes
+    it.effect(`preserves global ignore rules from ${configuration}`, () =>
+      Effect.gen(function*() {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "strider-state-global-ignore-"))
+        const keys = [
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "GIT_CONFIG_GLOBAL",
+          "GIT_CONFIG_NOSYSTEM",
+          "GIT_CONFIG_COUNT",
+          "GIT_CONFIG_KEY_0",
+          "GIT_CONFIG_VALUE_0"
+        ]
+        const previous = new Map(keys.map((key) => [key, process.env[key]]))
+        try {
+          const repo = path.join(root, "repo")
+          fs.mkdirSync(repo)
+          execFileSync("git", ["init", repo], { stdio: "ignore" })
+          process.env.HOME = path.join(root, "home")
+          process.env.XDG_CONFIG_HOME = path.join(root, "xdg")
+          delete process.env.GIT_CONFIG_GLOBAL
+          process.env.GIT_CONFIG_NOSYSTEM = "1"
+          process.env.GIT_CONFIG_COUNT = "0"
+          fs.mkdirSync(process.env.HOME, { recursive: true })
+          fs.mkdirSync(path.join(process.env.XDG_CONFIG_HOME, "git"), { recursive: true })
+          const excludes = path.join(root, "global-ignore")
+          fs.writeFileSync(excludes, "*.state\n")
+          if (configuration === "HOME") {
+            fs.writeFileSync(path.join(process.env.HOME, ".gitconfig"), `[core]\nexcludesFile = ${excludes}\n`)
+          } else if (configuration === "XDG_CONFIG_HOME") {
+            fs.writeFileSync(path.join(process.env.XDG_CONFIG_HOME, "git", "ignore"), "*.state\n")
+          } else {
+            process.env.GIT_CONFIG_COUNT = "1"
+            process.env.GIT_CONFIG_KEY_0 = "core.excludesFile"
+            process.env.GIT_CONFIG_VALUE_0 = excludes
+          }
+          const ignored = path.join(repo, "auth.state")
+          const unignored = path.join(repo, "auth.json")
+          fs.writeFileSync(ignored, "{}")
+          fs.writeFileSync(unignored, "{}")
+          assert.isFalse(yield* Daemon.stateFileCouldBeCommitted(ignored))
+          assert.isTrue(yield* Daemon.stateFileCouldBeCommitted(unignored))
+        } finally {
+          for (const [key, value] of previous) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+          }
+          fs.rmSync(root, { recursive: true, force: true })
         }
-        const ignored = path.join(repo, "auth.state")
-        const unignored = path.join(repo, "auth.json")
-        fs.writeFileSync(ignored, "{}")
-        fs.writeFileSync(unignored, "{}")
-        assert.isFalse(yield* Daemon.stateFileCouldBeCommitted(ignored))
-        assert.isTrue(yield* Daemon.stateFileCouldBeCommitted(unignored))
-      } finally {
-        for (const [key, value] of previous) {
-          if (value === undefined) delete process.env[key]
-          else process.env[key] = value
-        }
-        fs.rmSync(root, { recursive: true, force: true })
-      }
-    }).pipe(Effect.provide(NodeServices.layer)))
+      }).pipe(Effect.provide(NodeServices.layer)))
   }
 
   for (const kind of ["unignored", "ignored", "tracked", "outside", "nested", "worktree", "symlink"] as const) {

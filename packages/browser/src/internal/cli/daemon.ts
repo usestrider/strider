@@ -886,6 +886,26 @@ const writeUserFile = Effect.fnUntraced(function*(path: string, text: string, op
   yield* fs.writeFileString(path, text, options).pipe(Effect.mapError(failedWith))
 })
 
+/** Repository identity must come from the saved destination, not the daemon's launching Git command. */
+const gitRepositoryEnvironment = new Set([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_PREFIX",
+  "GIT_INTERNAL_SUPER_PREFIX",
+  "GIT_GRAFT_FILE",
+  "GIT_SHALLOW_FILE",
+  "GIT_NAMESPACE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE"
+])
+
 /** Checks a file after saving; Git inspection is advisory and must never prevent a save. */
 export const stateFileCouldBeCommitted = Effect.fnUntraced(
   function*(path: string) {
@@ -894,10 +914,18 @@ export const stateFileCouldBeCommitted = Effect.fnUntraced(
     // Resolve symlinked directories and files to the destination Git would actually see.
     const real = yield* fs.realPath(path)
     const cwd = paths.dirname(real)
+    // Keep HOME, XDG_CONFIG_HOME and Git configuration, including global ignore settings.
+    const env = Object.fromEntries(
+      Object.entries(Node.process.env).filter(([key]) => !gitRepositoryEnvironment.has(key))
+    )
     const run = (args: ReadonlyArray<string>) =>
       Effect.scoped(Effect.gen(function*() {
         const child = yield* ChildProcess.make("git", args, {
           cwd,
+          env,
+          extendEnv: false,
+          // Advisory reads have no pending writes to preserve; scope cleanup must not wait for SIGTERM cooperation.
+          killSignal: "SIGKILL",
           stdin: "ignore",
           stdout: "ignore",
           stderr: "ignore"
@@ -908,6 +936,7 @@ export const stateFileCouldBeCommitted = Effect.fnUntraced(
     // Without --no-index, tracked files are never considered ignored.
     return (yield* run(["check-ignore", "--quiet", "--", real])) === 1
   },
+  Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
   Effect.orElseSucceed(() => false)
 )
 
