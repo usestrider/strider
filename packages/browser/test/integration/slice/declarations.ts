@@ -57,12 +57,31 @@ export const declarations = (
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       // ── Routes ──
 
+      it.effect("applies and releases a route immediately before navigation on a live page", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          for (let n = 0; n < 10; n++) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              const route = yield* page.route(`${origin}/hello*`, () =>
+                Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
+              yield* page.goto(`${origin}/hello?route=${n}`)
+              assert.strictEqual(yield* page.title, "routed")
+              assert.strictEqual(yield* route.hits, 1)
+            }))
+            yield* page.goto(`${origin}/hello?released=${n}`)
+            assert.notStrictEqual(yield* page.title, "routed")
+          }
+        }), timeout)
+
       it.effect("runs call site 7's route on a page of ours: blocked calls, counted", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
+            const blocked = yield* page.route(`${origin}/analytics/**`, () =>
+              Route.abort())
             const result = yield* run(
               page,
               origin,
@@ -134,7 +153,8 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(`${origin}/hello`)
-            yield* page.route(`${origin}/json*`, () => Effect.fail("no answer"))
+            yield* page.route(`${origin}/json*`, () =>
+              Effect.fail("no answer"))
             const decided = yield* AutoResolution.next(page)
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(result, { hello: "world" })
