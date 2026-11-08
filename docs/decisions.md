@@ -307,18 +307,25 @@ input permit, so a queued action never uses the preliminary check's stale geomet
   before rendering; and skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
 
-**An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
-single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
-the stability wait can be reused, and only for the same element, rectangle and requested frame count. The next
-rendering update or another action attempt invalidates the token. The engine retains at most one such record.
+**An unqueued click, check, uncheck or fill may reuse an observation within the same native rendering frame.**
+Its preliminary check returns a single-use token bound to the engine generation, resolved element, rectangle and
+requested stability frame count. Under the input permit the engine resolves the locator again and reruns every
+applicable check. Click/check/uncheck reuse stability; fill may reuse the first check's rendering opportunity even
+with stability disabled. Fill always retains its first native rendering wait. Only immediate, unqueued acquisition
+can reuse evidence, and a native update invalidates fill evidence even before its expiry callback runs. Expired,
+changed or queued evidence takes fresh rendering observations. Another action attempt consumes or supersedes the
+token; the engine retains at most one record. Focus and selection handlers are checked again before fill writes or
+inserts, with fresh rendering for a moved or replaced target. Other actions without stability still wait per round.
 
-- **Why.** Repeating the observation window for a target just observed to be stable adds two frames to an ordinary
-  click or an acting check/uncheck. Immediate revalidation retains that observation while checking the conditions
-  that could have changed. Check and uncheck still read the initial state and confirm the result after input.
-  A queued action always takes new samples; an expired token, moved target or replacement also takes new samples.
-- **Rejected:** dropping the second check, sharing evidence across rendering updates, or treating matching
-  rectangles on different elements as the same observation. Each can dispatch input using stale readiness.
-  Moving the entire wait under the input permit would also block other actions while a target isn't ready.
+- **Why.** Repeating the stability window adds two frames to an ordinary click or acting check/uncheck. Profiling
+  repeated fill/click sessions also found fill's two rendering-opportunity waits dominated the session difference,
+  even though fill disables stability by default. Bounded reuse retains an observed native rendering opportunity
+  and fresh readiness under input ownership. Check/uncheck still read the initial state and confirm after input.
+  Fill's following click is measured too, because changing frame phase can move cost rather than remove it.
+- **Rejected:** dropping the rendering wait entirely, which can send input before the browser renders and loses
+  no-rendering refusal; dropping the second readiness check; sharing evidence across native updates; or treating
+  matching rectangles on different elements as the same observation. Each can dispatch using stale readiness.
+  Moving the entire wait under the input permit would block other actions while the target is not ready.
 
 **A value means the same on every backend.** Where backends measure differently, Strider measures once itself. HAR
 timings are an example. Chromium, Firefox and WebKit each time a response on their own base, so `wait` and `receive`
