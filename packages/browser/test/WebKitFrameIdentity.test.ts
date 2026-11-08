@@ -5,13 +5,13 @@ import * as Option from "effect/Option"
 import * as vm from "node:vm"
 import * as Input from "../src/internal/webkitAdapter/input.ts"
 import type * as State from "../src/internal/webkitAdapter/state.ts"
-import type * as Protocol from "../src/protocol/Protocol.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import type * as Automation from "../src/webkit-automation-protocol/Automation.ts"
 
 const handle = "page" as Automation.BrowsingContextHandle
 const childHandle = "child" as Automation.FrameHandle
 
-const fixture = (mode: "normal" | "replace" | "removed" | "throw" = "normal") => {
+const fixture = (mode: "normal" | "replace" | "removed" | "error" = "normal") => {
   let marks = 0
   const windows = [{}, {}]
   const contexts = windows.map((window) => vm.createContext({ window }))
@@ -19,14 +19,25 @@ const fixture = (mode: "normal" | "replace" | "removed" | "throw" = "normal") =>
     const frame = { removed: false } as State.FrameEntry
     const session = {
       send: (command: Protocol.Command<string, unknown, unknown>) =>
-        Effect.sync(() => {
+        Effect.suspend(() => {
           const { expression } = command.params as { expression: string }
-          if (expression.includes("timeOrigin")) return { result: { value: "[101,\"about:srcdoc\"]" } }
-          if (mode === "throw") return { result: { value: false } }
+          if (expression.includes("timeOrigin")) return Effect.succeed({ result: { value: "[101,\"about:srcdoc\"]" } })
+          if (mode === "error") {
+            return Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.evaluate",
+                  reason: "NoSuchFrame",
+                  code: -32000,
+                  description: "context destroyed"
+                })
+              })
+            )
+          }
           const value = vm.runInContext(expression, context)
           if (mode === "replace") frame.document = { ...frame.document } as State.DocumentEntry
           if (mode === "removed") frame.removed = true
-          return { result: { value } }
+          return Effect.succeed({ result: { value } })
         })
     }
     frame.document = {
@@ -76,7 +87,19 @@ describe("WebKit frame identity", () => {
       clean()
     }))
 
-  for (const mode of ["normal", "replace", "removed", "throw"] as const) {
+  for (const mode of ["normal", "replace", "removed", "error"] as const) {
+    it.effect(`rejects reverse lookup for ${mode === "normal" ? "a sibling" : mode} and cleans the mark`, () =>
+      Effect.gen(function*() {
+        const { clean, frames, process } = fixture(mode)
+        const frame = frames[mode === "normal" ? 0 : 1]!
+        Object.assign(frame, { parent: { parent: undefined } })
+        const state = { frameHandles: new WeakMap() } as unknown as State.State
+        const result = yield* Input.frameHandleOf(state, frame, handle, process)
+        assert.isTrue(Option.isNone(result))
+        assert.isUndefined(state.frameHandles.get(frame))
+        clean()
+      }))
+
     it.effect(`rejects ${mode === "normal" ? "a sibling" : mode} without leaving a mark`, () =>
       Effect.gen(function*() {
         const { clean, frames, process } = fixture(mode)
