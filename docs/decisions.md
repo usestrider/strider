@@ -18,6 +18,8 @@ shipped, and there is no viewer of our own, since trace.playwright.dev already r
 user." There's no download default and no install command, because the tools that already install browsers remain:
 an operating system's packages, a vendor's installer, Nix.
 
+<a id="explicit-browser-path"></a>
+
 **A launch never picks a browser nobody named.** A launch takes an executable path. There are no channels, no
 default to an installed browser, and no lookup on `PATH`. Any of those would launch different programs from a
 terminal, an editor's test runner and CI. No channel table reaches NixOS, Snap, Flatpak, Guix or the open-source
@@ -26,6 +28,8 @@ Chromium ("I think that will fall apart on various flavors of linux, like NixOS"
 a program would call it at launch. On NixOS it lists the profile's link, which survives updates, not the store path.
 Any Chromium or Firefox version is accepted, because their protocols change slowly and compatibly. `Browser.Info`
 says what connected.
+
+<a id="locator-design"></a>
 
 **Playwright is evidence, not the template.** Each feature Strider shares with Playwright is there because one of our
 principles produces it:
@@ -40,6 +44,8 @@ principles produces it:
 - Snapshot text with refs: one rendering of a structured, evidence-tagged tree.
 - `Browser.newPage`: a convenience documented as its expansion.
 - Launch flags: a visible `LaunchProfile`, where Playwright adds them silently.
+
+<a id="typed-patterns-and-clock-modes"></a>
 
 Where Playwright's surface is a string DSL, or overlaps itself, ours isn't and doesn't. `toMatchAria` takes a typed
 `AriaPattern`, not a YAML template with its own matching rules to specify and parse. The page clock's modes are data
@@ -185,6 +191,8 @@ send back what they write.
 compatibility failure, not a broken invariant of the caller's program. A long-running service must be able to catch,
 report and isolate it without `catchCause` and without losing its other jobs. The error channel stays small because
 the failure is a reason, `BackendFailure{Rejected | IncompatibleResponse}`, inside the module's error.
+
+<a id="composable-operation-deadlines"></a>
 
 **An operation keeps its own deadline.** There is one deadline per operation, inherited by nested calls and only
 ever shortened. The operation reads the deadline and fails with its own evidence of how far it got, instead of being
@@ -374,6 +382,8 @@ the phases where it is valid. Contravariance allows a decision valid at more pha
 `Decision<Phase>` is assignable to `Decision<"request">`, while `Decision<"auth">` is not. With an explicit `phase`
 option, a route handler must produce a decision compatible with that phase.
 
+<a id="effectful-handler-decisions"></a>
+
 **Handlers produce decisions through Effects.** Route's constructors and the decisions on `Dialog.Pending` and
 `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept`
 directly. A generator that does other work ends with `return yield* Route.abort()` to produce the decision rather
@@ -414,7 +424,7 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
-**Checked and selected are independent states.** All supported ARIA checkable roles read `aria-checked`. Option and treeitem require a nonempty value other than the literal `"undefined"`: absent, empty or undefined means unsupported checking, while `"false"` means checkable but unchecked, following [WAI-ARIA](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). WAI-ARIA [state processing](https://www.w3.org/TR/wai-aria-1.2/#state_property_processing) treats zero-length values as absent; this does not introduce whitespace trimming or general token normalization. Checked reads and check/uncheck reject unsupported checking with `WrongElement` before input. The other supported roles retain their existing false default. Native checkbox/radio inputs keep their checked property; native options keep their selected property. Reads, expectations, actions and snapshots agree. Rejected: defaulting optional checkability to unchecked for option/treeitem, which allows a click on an ordinary native option to change selection before failing with `StateUnchanged`; matching Playwright's missing-attribute behavior does not justify that effect. Also rejected: using `aria-selected` as checked for option/treeitem, which conflates two independent states and makes check/uncheck reject or skip valid controls; suppressing checked in snapshots of selectable roles, which hides a state the other operations observe.
+**Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions and snapshots. ARIA keywords `true`, `false`, `mixed` and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio and switch; on checkbox, menuitemcheckbox, option and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states. Snapshot representation remains a positive checked marker, not a mixed-state encoding.
 
 **Checking a label prefers its own checked state and clicks the label.** `check` and `uncheck` read the
 selected element's own checked state first, preserving ARIA checkable labels even when an associated control has
@@ -1177,7 +1187,7 @@ and restarting the native stream for an idle join, which disrupts existing consu
 `VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
 the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
 Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing and never searches
-PATH. The video consumer keeps source timestamps relative to recording start and sends the last picture once more at stop time so a still ending lasts until stop. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
+PATH. The video consumer keeps source timestamps relative to recording start, prepends the first picture at zero when its normalized capture time is later, and sends the last picture once more at stop time so a still ending lasts until stop. The zero-time copy gives files a picture from recording start and avoids FFmpeg end-relative seeks adding a nonzero start offset. It belongs in the core so custom writers and polled WebKit receive the same timeline. An already-zero or cached first capture needs no additional copy. Both boundary copies reuse their image without another source acknowledgement. Shifting every capture timestamp to the first capture is rejected because it loses recording-relative trace alignment; changing only the ffmpeg writer leaves other writers with different timelines. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
 the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
 scaled to fit, centred and padded black. The writer owns pixel fitting because it has the codec; Strider owns
 that policy, timestamps, acknowledgements and lifetimes. Reusable writer conformance checks decode changing and odd-sized
@@ -1270,3 +1280,60 @@ condition descriptions remain user-authored text. User transformations, includin
 and reconstructed failures do not inherit source classification, because arbitrary transformations can change both
 type and meaning. Rejected: guessing from strings, retaining URL/title classification through arbitrary mappings,
 and parsing generic descriptions as dedicated matcher syntax. This is source metadata, not general secret tracking.
+
+
+Vitest failure tracing is opt-in on the browser layer, with recording state owned by each bound callback and its
+captured test identity. The shared backend never owns a callback's recorder, so concurrent tests and retries keep
+their own metadata and attachments. Adapter recordings default to per-action screenshots, DOM snapshots and
+network capture, with screencast off; explicit settings can reduce capture, and disabling network requires
+disabling snapshots. These defaults make failed-test traces useful without changing direct `Trace.record` calls.
+Rejected: changing the general recording defaults, which adds capture cost outside tests, and owning recordings
+in the memoized browser layer, which shares one callback's identity with later callbacks.
+
+## Operation caller stacks
+
+Capture six caller frames in the operation constructor before calling the formatting helper,
+and defer formatting until a recording or failure rendering needs the frame. This keeps construction-time source
+links for prebuilt operations while reducing work on every unrecorded successful call. When capture is enabled but
+no user caller is available, retain the operation name without a location in failures, and omit unavailable source
+locations. The informational name is an accepted trade-off for avoiding eager formatting: Effect's frame contract
+cannot lazily omit a node. Reject eager caller resolution on every success and dependency changes to remove that
+rare location-free line. Capture remains independent of recording so failures outside recordings and operations
+built before recording retain their callers.
+
+## Sent-header waits end with their owner
+
+Sent-header waits end when a hop is evicted or loses its owning frame, worker, context, page or browser connection,
+returning already-attributed sent headers or the immutable request snapshot. Removing a frame includes its
+descendants and leaves unrelated owners alone. Owner loss does not imply a network failure. Waiting until the
+deadline after the owner is gone was rejected because no further report is assured. Late attributable headers
+may still update retained data without reopening settled waits or rewriting flushed recordings; guessing across
+redirect hops was rejected because attribution must remain correct.
+
+## Context proxy routing and authentication
+
+Route a context through an HTTP proxy at its creation, leaving omitted proxy settings unchanged and keeping
+loopback destinations direct. Use native per-context proxy settings on CDP/BiDi and isolated process environment
+overrides for launched stock WebKit, whose command-line proxy setting does not apply in automation mode. Keep
+proxy credentials separate from endpoint URLs and Redacted through protocol encoding. Answer only positively
+identified proxy challenges, once per request, retaining website auth routes. Reject WebKit credentials and
+configured credentials on attached Firefox. Firefox reserves each endpoint's credential pair (including none)
+synchronously before creation and retains it for the connection lifetime after successful creation or an uncertain
+outcome, because its native proxy auth cache crosses context boundaries and survives removal. Each pending creation
+owns a share; confirmed pre-creation rejection or confirmed unused rollback releases only that share. Reject both
+permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
+preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
+shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
+unverified wildcard, CIDR, SOCKS or HTTPS-to-proxy configurations.
+
+## Native passkey testing
+
+Virtual authenticators use native Chromium WebAuthn and belong to one page's scope, with one live acquisition per page so cleanup cannot disable another caller's environment. Credentials may be explicitly exported and imported into a second page or popup; those copies keep separate signature counters. Chromium's native environment follows a frame tree rather than a browser context, so context-wide sharing is not offered. Replacing `navigator.credentials.create/get` with a shared JavaScript implementation was rejected because it would test our emulation instead of the browser's WebAuthn. Firefox's classic WebDriver commands are outside Strider's BiDi transport, and stock WebKit's declared Automation credential commands are not implemented; these backends refuse acquisition rather than substituting behavior.
+
+## Shared snapshot and role-filter states
+
+Snapshots and role filters use the same pressed, expanded and selected readers, with positive snapshot markers only for exactly true. Preserve the documented query defaults and ASCII case-insensitive keywords without trimming, rather than introducing browser-dependent accessibility error handling or new malformed-token defaults. Native option selection and details open state take precedence over ARIA; open ordinary details is a native exception to snapshot role gating, without admitting group expanded filters or adding summary semantics. Reject independent attribute-only snapshot parsing because it contradicts query results, and reject copying browser accessibility trees because their native/ARIA conflict resolution can differ from Strider's existing native-property query contract.
+
+## Route declaration boundary
+
+A route is in force for requests that start after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select the current routes by precedence. This follows the browser's selection of interception stages at request start while keeping later handler selection current. Requiring retroactive response interception was rejected because it would require pausing responses from the start even without response routes.

@@ -74,11 +74,11 @@ export interface RoleOptions {
    */
   readonly level?: number | undefined
   /**
-   * Match a native checkbox or radio, or aria-checked on checkbox, radio, switch, menuitemcheckbox,
-   * menuitemradio, option or treeitem. Mixed and indeterminate states match neither boolean.
-   * Unlike Playwright, ARIA values are case-sensitive: only "true" matches true. Absent, empty or
-   * literal "undefined" values on option and treeitem match neither boolean. On the other checkable
-   * roles they match false, as do all other values except "mixed".
+   * Match native checked state or aria-checked on checkbox, radio, switch, menuitemcheckbox,
+   * menuitemradio, option or treeitem. ARIA keywords are ASCII case-insensitive without trimming.
+   * Mixed matches false on radio, menuitemradio and switch; on the other four roles it matches
+   * neither boolean. Native indeterminate inputs match neither boolean. Absent, empty, undefined
+   * and unrecognized values match neither boolean on option/treeitem and false on the other roles.
    *
    * **Example** (Filter by checked)
    *
@@ -95,6 +95,7 @@ export interface RoleOptions {
   readonly checked?: boolean | undefined
   /**
    * Match aria-pressed on buttons. Mixed matches neither boolean; absent or invalid values match false.
+   * Keywords are ASCII case-insensitive without trimming, shared with snapshot pressed markers.
    *
    * **Example** (Filter by pressed)
    *
@@ -111,7 +112,10 @@ export interface RoleOptions {
   readonly pressed?: boolean | undefined
   /**
    * Match aria-expanded on roles that support expansion, or the open state of details with a supported role.
-   * Absent ARIA values match neither boolean; present values other than case-insensitive "true" match false.
+   * Absent ARIA values match neither boolean; present values other than ASCII case-insensitive "true" match false,
+   * without trimming. Native details.open takes precedence over aria-expanded.
+   * Snapshots share this reader and also mark ordinary open details as expanded, but its group role
+   * does not support expanded filters. No expansion state is inferred for summary.
    *
    * **Example** (Filter by expanded)
    *
@@ -129,6 +133,8 @@ export interface RoleOptions {
   /**
    * Match a native option’s selected property or aria-selected on gridcell, option, row, tab, rowheader,
    * columnheader or treeitem. Absent or invalid ARIA values match false.
+   * Keywords are ASCII case-insensitive without trimming. Native option selection takes precedence over
+   * aria-selected in filters and snapshots, even when browser accessibility state follows ARIA instead.
    *
    * **Example** (Filter by selected)
    *
@@ -668,12 +674,13 @@ export interface ReadonlyLocator
    *
    * **Details**
    *
-   * Native checkbox and radio inputs use their checked property. ARIA roles `checkbox`, `radio`, `switch`,
-   * `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked`. For `option` and `treeitem`,
-   * absent or empty `aria-checked`, or the literal value `"undefined"`, means checking is unsupported and fails with
-   * `WrongElement` before input; `"false"` means checkable but unchecked. For the other roles, absent or
-   * `"undefined"` reads false. Selection through `aria-selected` is independent. Other elements fail with
-   * `WrongElement`. See the [WAI-ARIA checked state](https://www.w3.org/TR/wai-aria-1.2/#aria-checked).
+   * Native checkbox and radio inputs use their checked property, including when indeterminate.
+   * ARIA roles checkbox, radio, switch, menuitemcheckbox, menuitemradio, option and treeitem use
+   * aria-checked keywords ASCII case-insensitively, without trimming. True reads true; false and
+   * mixed read false. Absent, empty, undefined and unrecognized values read false on the first five
+   * roles; on option/treeitem they fail with WrongElement, as do check/uncheck before input.
+   * Use explicit true, false or mixed tokens to make option/treeitem checkable.
+   * Selection through aria-selected is independent. Other elements fail with WrongElement.
    *
    * **Example** (Reading a preference)
    *

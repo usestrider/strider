@@ -5,9 +5,11 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
@@ -121,6 +123,790 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  for (const arrival of ["before", "after"] as const) {
+    it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
+      Effect.gen(function*() {
+        const url = "http://restored.example/"
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": {},
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        // Synthetic ordering, not captured Firefox traffic: no navigationStarted or commit is sent.
+        // The adapter already supports this unannounced restoration when the realm precedes the reply.
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const arrived = () =>
+          handlers.apply("script.realmCreated", {
+            realm: "R2",
+            context: page.bidi,
+            type: "window",
+            origin: "http://restored.example"
+          }, { state })
+        if (arrival === "before") arrived()
+        const navigation = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(navigation))
+        if (arrival === "after") arrived()
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() =>
+          facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value) ?
+            true :
+            undefined
+        )
+        arrived()
+        yield* state.buffer.flush
+        const started = facts.filter((fact) =>
+          fact._tag === "NavigationStarted" && fact.navigation === navigation.value
+        )
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        assert.lengthOf(started, 1, "the returned traversal must start")
+        assert.lengthOf(ended, 1, "the returned traversal must end")
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
+        assert.strictEqual(page.document!.url, url)
+        assert.lengthOf(page.pendingRealms, 0)
+      }))
+  }
+
+  for (const arrival of ["before", "after"] as const) {
+    it.effect(`ends an announced restoration exactly once with a realm ${arrival} the reply`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, realm, state, sent } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          )
+        })
+        const url = "http://past.example/"
+        const from = page.document!.id
+        page.past.set(url, from)
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "announced",
+          url,
+          timestamp: 1
+        }, { state })
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const arrived = () =>
+          handlers.apply("script.realmCreated", {
+            realm: "R2",
+            context: page.bidi,
+            type: "window",
+            origin: "http://past.example"
+          }, { state })
+        if (arrival === "before") arrived()
+        yield* Deferred.succeed(release, undefined)
+        const navigation = yield* Fiber.join(fiber)
+        assert(Option.isSome(navigation))
+        if (arrival === "after") arrived()
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() =>
+          facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value) ?
+            true :
+            undefined
+        )
+        arrived()
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        assert.lengthOf(ended, 1)
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.deepStrictEqual(ended[0]!.outcome, { _tag: "Restored", document: page.document!.id })
+        const committed = facts.filter((fact) =>
+          fact._tag === "DocumentCommitted" && fact.document === page.document!.id
+        )
+        assert.lengthOf(committed, 1)
+        assert(committed[0]!._tag === "DocumentCommitted")
+        assert.deepStrictEqual(committed[0]!.createdBy, { _tag: "Restored", navigation: navigation.value, from })
+        assert.lengthOf(
+          facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
+          1
+        )
+        assert.isFalse(sent.includes("script.evaluate"))
+      }))
+  }
+
+  for (const failure of ["failure", "interruption"] as const) {
+    it.effect(`releases a traversal reservation on command ${failure}`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const { page, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            failure === "failure" ?
+              Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    reason: "Unrecognized",
+                    code: "no such history entry",
+                    description: "no history"
+                  })
+                })
+              ) :
+              Effect.never
+          )
+        })
+        if (failure === "failure") assert(Option.isNone(yield* Navigation.traverse(state, page.id, -1)))
+        else {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(entered)
+          yield* Fiber.interrupt(fiber)
+        }
+        assert.lengthOf(page.expected.list, 0)
+        assert.strictEqual(page.restoring, undefined)
+      }))
+  }
+
+  for (const order of ["in order", "out of order"] as const) {
+    it.effect(`does not attribute an unrelated navigation to overlapping traversals replying ${order}`, () =>
+      Effect.gen(function*() {
+        // Synthetic ordering, not captured Firefox traffic: two traversals overlap, neither is announced.
+        const url = "http://restored.example/"
+        const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        const entered = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        let calls = 0
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            const call = calls++
+            return Effect.andThen(Deferred.succeed(entered[call]!, undefined), Deferred.await(gates[call]!))
+          }).pipe(Effect.as({})),
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[0])
+        const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[1])
+        const replies = order === "in order" ? [0, 1] : [1, 0]
+        yield* Deferred.succeed(gates[replies[0]!]!, undefined)
+        const one = yield* Fiber.join(replies[0] === 0 ? first : second)
+        yield* Deferred.succeed(gates[replies[1]!]!, undefined)
+        const two = yield* Fiber.join(replies[1] === 0 ? first : second)
+        assert(Option.isSome(one) && Option.isSome(two))
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://restored.example"
+        }, { state })
+        yield* state.buffer.flush
+        // A successful reply and a realm cannot identify either overlapping traversal.
+        // The next navigation must get its own facts, never a returned traversal id.
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "unrelated",
+          url: "http://unrelated.example/",
+          timestamp: 1
+        }, { state })
+        handlers.apply("browsingContext.navigationCommitted", {
+          context: page.bidi,
+          navigation: "unrelated",
+          url: "http://unrelated.example/",
+          timestamp: 2
+        }, { state })
+        yield* state.buffer.flush
+        const unrelated = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(unrelated, 1, "ambiguous replies must not invent a navigation")
+        assert(unrelated[0]!._tag === "NavigationStarted")
+        assert.notStrictEqual(unrelated[0]!.navigation, one.value)
+        assert.notStrictEqual(unrelated[0]!.navigation, two.value)
+        assert.strictEqual(unrelated[0]!.initiatedAs, "crossDocument")
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1)
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.strictEqual(ended[0]!.navigation, unrelated[0]!.navigation)
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
+        assert.strictEqual(page.restoring, undefined)
+        assert.deepStrictEqual(
+          page.expected.list.map((expected) => expected.id),
+          [],
+          "no traversal reservation may leak"
+        )
+      }))
+  }
+
+  for (const order of ["in order", "out of order"] as const) {
+    it.effect(`preserves an announced traversal commit while overlapping replies arrive ${order}`, () =>
+      Effect.gen(function*() {
+        const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        const entered = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+        let calls = 0
+        const { facts, page, state, sent } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            const call = calls++
+            return Effect.andThen(Deferred.succeed(entered[call]!, undefined), Deferred.await(gates[call]!))
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[0])
+        handlers.apply("browsingContext.navigationStarted", {
+          context: page.bidi,
+          navigation: "announced",
+          url: "http://announced.example/",
+          timestamp: 1
+        }, { state })
+        const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered[1])
+        const commit = () =>
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: page.bidi,
+            navigation: "announced",
+            url: "http://announced.example/",
+            timestamp: 2
+          }, { state })
+        commit()
+        const replies = order === "in order" ? [0, 1] : [1, 0]
+        yield* Deferred.succeed(gates[replies[0]!]!, undefined)
+        const one = yield* Fiber.join(replies[0] === 0 ? first : second)
+        yield* Deferred.succeed(gates[replies[1]!]!, undefined)
+        const two = yield* Fiber.join(replies[1] === 0 ? first : second)
+        assert(Option.isSome(one) && Option.isSome(two))
+        const firstId = order === "in order" ? one.value : two.value
+        const secondId = order === "in order" ? two.value : one.value
+        commit()
+        yield* state.buffer.flush
+        const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(starts, 1)
+        assert(starts[0]!._tag === "NavigationStarted")
+        assert.strictEqual(starts[0]!.navigation, firstId)
+        assert.strictEqual(starts[0]!.initiatedAs, "traversal")
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ended, 1, "an ambiguous second command has no outcome")
+        assert(ended[0]!._tag === "NavigationEnded")
+        assert.strictEqual(ended[0]!.navigation, firstId)
+        assert.notStrictEqual(ended[0]!.navigation, secondId)
+        assert.deepStrictEqual(ended[0]!.outcome, {
+          _tag: "Committed",
+          document: page.document!.id,
+          response: Option.none()
+        })
+        assert.isFalse(sent.includes("script.evaluate"))
+        assert.strictEqual(page.restoring, undefined)
+        assert.lengthOf(page.expected.list, 0)
+      }))
+  }
+
+  it.effect("keeps an invalidated unannounced restoration ambiguous until a document is observed", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state, sent } = yield* withPage({
+        "browsingContext.traverseHistory": {},
+        "script.evaluate": {
+          type: "success",
+          realm: "R2",
+          result: { type: "string", value: "http://ambiguous.example/" }
+        }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const first = yield* Navigation.traverse(state, page.id, -1)
+      const second = yield* Navigation.traverse(state, page.id, -1)
+      // Both replies are done. Issuing a third command does not identify a late realm from the earlier pair.
+      const third = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(first) && Option.isSome(second) && Option.isSome(third))
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://ambiguous.example"
+      }, { state })
+      yield* state.buffer.flush
+      handlers.apply("browsingContext.navigationStarted", {
+        context: page.bidi,
+        navigation: "observed",
+        url: "http://observed.example/",
+        timestamp: 1
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: page.bidi,
+        navigation: "observed",
+        url: "http://observed.example/",
+        timestamp: 2
+      }, { state })
+      yield* state.buffer.flush
+      const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+      assert.lengthOf(starts, 1)
+      assert(starts[0]!._tag === "NavigationStarted")
+      assert.strictEqual(starts[0]!.initiatedAs, "crossDocument")
+      for (const navigation of [first.value, second.value, third.value]) {
+        assert.notStrictEqual(starts[0]!.navigation, navigation)
+        assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation), 0)
+      }
+      assert.isFalse(sent.includes("script.evaluate"))
+      assert.lengthOf(page.expected.list, 0)
+      // The observed commit restores an unambiguous document boundary for the next traversal.
+      const next = yield* Navigation.traverse(state, page.id, -1)
+      handlers.apply("script.realmDestroyed", { realm: "R2" }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "R3",
+        context: page.bidi,
+        type: "window",
+        origin: "http://ambiguous.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert(Option.isSome(next))
+      yield* state.buffer.waitFor(() =>
+        facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === next.value) ? true : undefined
+      )
+      assert.strictEqual(page.document!.url, "http://ambiguous.example/")
+    }))
+
+  for (const newer of ["command", "event", "page removal"] as const) {
+    it.effect(`does not reinstall a traversal after a newer ${newer} and a late reply`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          ),
+          "browsingContext.navigate": { navigation: "newer", url: "http://newer.example/" },
+          "script.evaluate": {
+            type: "success",
+            realm: "R2",
+            result: { type: "string", value: "http://stale.example/" }
+          }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        let owned: PageNavigation.Id | undefined
+        if (newer === "command") {
+          owned = yield* Navigation.navigate(state, page.id, "http://newer.example/", { referrer: Option.none() })
+        } else if (newer === "event") {
+          // The traversal was positively announced before the subsequent navigation replaced it.
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "traversal",
+            url: "http://old.example/",
+            timestamp: 1
+          }, { state })
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 2
+          }, { state })
+        } else Tree.removeNavigable(state, page, new Target.Vanished({}), "test")
+        yield* Deferred.succeed(release, undefined)
+        const navigation = yield* Fiber.join(fiber)
+        assert(Option.isSome(navigation))
+        assert.strictEqual(page.restoring, undefined, "a stale reply must not reinstall restoration")
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://stale.example"
+        }, { state })
+        if (newer !== "page removal") {
+          handlers.apply("browsingContext.navigationStarted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 3
+          }, { state })
+          handlers.apply("browsingContext.navigationCommitted", {
+            context: page.bidi,
+            navigation: "newer",
+            url: "http://newer.example/",
+            timestamp: 4
+          }, { state })
+        }
+        yield* state.buffer.flush
+        assert.notStrictEqual(page.document?.url, "http://stale.example/")
+        const traversalEnds = facts.filter((fact) =>
+          fact._tag === "NavigationEnded" && fact.navigation === navigation.value
+        )
+        if (newer === "event") {
+          assert.lengthOf(traversalEnds, 1)
+          assert(traversalEnds[0]!._tag === "NavigationEnded")
+          assert.strictEqual(traversalEnds[0]!.outcome._tag, "Superseded")
+        } else assert.lengthOf(traversalEnds, 0, "command issuance and removal cannot invent an outcome")
+        if (owned !== undefined) {
+          const starts = facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === owned)
+          assert.lengthOf(starts, 1, "the newer command retains its own reply correlation")
+          const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === owned)
+          assert.lengthOf(ends, 1)
+          assert(ends[0]!._tag === "NavigationEnded")
+          assert.deepStrictEqual(ends[0]!.outcome, {
+            _tag: "Committed",
+            document: page.document!.id,
+            response: Option.none()
+          })
+        }
+        assert.lengthOf(page.expected.list, 0)
+      }))
+  }
+
+  for (
+    const failure of ["rejected with no history", "interrupted", "NoReply", "another rejection", "defect"] as const
+  ) {
+    it.effect(`${failure === "rejected with no history" ? "restores a single traversal" : "keeps ownership ambiguous"} after an earlier traversal was ${failure}, with no commit between`, () =>
+      Effect.gen(function*() {
+        // Synthetic ordering, not captured Firefox traffic: the second traversal is the only one outstanding
+        // when its realm arrives.
+        const url = "http://restored.example/"
+        const entered = yield* Deferred.make<void>()
+        const secondEntered = yield* Deferred.make<void>()
+        const secondReply = yield* Deferred.make<void>()
+        let calls = 0
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.suspend(() => {
+            if (calls++ > 0) {
+              return Effect.andThen(Deferred.succeed(secondEntered, undefined), Deferred.await(secondReply))
+            }
+            if (failure === "interrupted") {
+              return Effect.andThen(Deferred.succeed(entered, undefined), Effect.never)
+            }
+            if (failure === "defect") return Effect.die("uncertain transport defect")
+            return Effect.fail(
+              new Protocol.ProtocolError({
+                reason: failure === "NoReply"
+                  ? new Protocol.NoReply({ method: "browsingContext.traverseHistory", timeout: Duration.seconds(30) })
+                  : new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    reason: "Unrecognized",
+                    code: failure === "rejected with no history" ? "no such history entry" : "unknown error",
+                    description: "no history"
+                  })
+              })
+            )
+          }),
+          "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        if (failure === "interrupted") {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(entered)
+          yield* Fiber.interrupt(fiber)
+        } else assert(Option.isNone(yield* Navigation.traverse(state, page.id, 1)))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(secondEntered)
+        // Uncertain controls put the realm before the reply. Joining the command then waits for any
+        // inline lookup and its fact publication, so a removed guard cannot hide behind asynchronous work.
+        if (failure === "rejected with no history") {
+          yield* Deferred.succeed(secondReply, undefined)
+          yield* Fiber.join(second)
+        }
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://restored.example"
+        }, { state })
+        if (failure !== "rejected with no history") yield* Deferred.succeed(secondReply, undefined)
+        const navigation = yield* Fiber.join(second)
+        assert(Option.isSome(navigation))
+        yield* state.buffer.flush
+        if (failure === "rejected with no history") {
+          yield* state.buffer.waitFor(() =>
+            facts.some((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value) ?
+              true :
+              undefined
+          )
+        }
+        const started = facts.filter((fact) =>
+          fact._tag === "NavigationStarted" && fact.navigation === navigation.value
+        )
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === navigation.value)
+        if (failure !== "rejected with no history") {
+          // An interrupted command may still have reached the browser, so the realm could be its; nothing proves
+          // which traversal owns it, and neither is given facts.
+          assert.lengthOf(started, 0)
+          assert.lengthOf(ended, 0)
+          assert.lengthOf(page.expected.list, 0)
+          return
+        }
+        // A rejection is the browser's word that nothing navigated, so it leaves no ambiguity behind.
+        assert.lengthOf(started, 1, "the valid traversal must start")
+        assert.lengthOf(ended, 1, "the valid traversal must end")
+        assert.strictEqual(page.document!.url, url)
+      }))
+  }
+
+  it.effect("preserves pre-existing overlap ambiguity after a no-history rejection", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const { facts, page, realm, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.suspend(() =>
+          ++calls === 2
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "browsingContext.traverseHistory",
+                  reason: "Unrecognized",
+                  code: "no such history entry",
+                  description: "no history"
+                })
+              })
+            ) :
+            Effect.succeed({})
+        ),
+        "script.evaluate": {
+          type: "success",
+          realm: "R2",
+          result: { type: "string", value: "http://ambiguous.example/" }
+        }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      assert(Option.isSome(yield* Navigation.traverse(state, page.id, -1)))
+      assert(Option.isNone(yield* Navigation.traverse(state, page.id, 1)))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://ambiguous.example"
+      }, { state })
+      assert(Option.isSome(yield* Navigation.traverse(state, page.id, -1)))
+      yield* state.buffer.flush
+      assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationStarted" || fact._tag === "NavigationEnded"), 0)
+      assert.lengthOf(page.expected.list, 0)
+      assert.strictEqual(page.restoring, undefined)
+    }))
+
+  it.effect("leaves a newer restoration and another command's reservation intact after a stale no-history rejection", () =>
+    Effect.gen(function*() {
+      const entered = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+      const replies = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": { navigation: null, url: "http://owned.example/" },
+        "browsingContext.traverseHistory": Effect.suspend(() => {
+          const call = calls++
+          return Effect.andThen(Deferred.succeed(entered[call]!, undefined), Deferred.await(replies[call]!)).pipe(
+            Effect.andThen(
+              call === 0 ?
+                Effect.fail(
+                  new Protocol.ProtocolError({
+                    reason: new Protocol.Rejected({
+                      method: "browsingContext.traverseHistory",
+                      reason: "Unrecognized",
+                      code: "no such history entry",
+                      description: "no history"
+                    })
+                  })
+                ) :
+                Effect.succeed({})
+            )
+          )
+        })
+      })
+      const owned = yield* Navigation.navigate(state, page.id, "http://owned.example/", { referrer: Option.none() })
+      const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered[0])
+      const second = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered[1])
+      const newer = page.restoring
+      assert(newer !== undefined)
+      yield* Deferred.succeed(replies[0], undefined)
+      assert(Option.isNone(yield* Fiber.join(first)))
+      assert.strictEqual(page.restoring, newer)
+      assert.deepStrictEqual(page.expected.list.map((entry) => entry.id), [owned])
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      handlers.apply("browsingContext.navigationStarted", {
+        context: page.bidi,
+        navigation: "owned",
+        url: "http://owned.example/",
+        timestamp: 1
+      }, { state })
+      yield* Deferred.succeed(replies[1], undefined)
+      const unresolved = yield* Fiber.join(second)
+      assert(Option.isSome(unresolved))
+      handlers.apply("browsingContext.navigationCommitted", {
+        context: page.bidi,
+        navigation: "owned",
+        url: "http://owned.example/",
+        timestamp: 2
+      }, { state })
+      yield* state.buffer.flush
+      const started = facts.filter((fact) => fact._tag === "NavigationStarted")
+      const ended = facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.lengthOf(started, 1)
+      assert(started[0]!._tag === "NavigationStarted")
+      assert.strictEqual(started[0]!.navigation, owned)
+      assert.strictEqual(started[0]!.initiatedAs, "crossDocument")
+      assert.lengthOf(ended, 1)
+      assert(ended[0]!._tag === "NavigationEnded")
+      assert.strictEqual(ended[0]!.navigation, owned)
+      assert.deepStrictEqual(ended[0]!.outcome, {
+        _tag: "Committed",
+        document: page.document!.id,
+        response: Option.none()
+      })
+      assert.lengthOf(page.expected.list, 0)
+      assert.strictEqual(page.restoring, undefined)
+    }))
+
+  it.effect("keeps ownership ambiguous after a no-history rejection of a traversal the browser announced", () =>
+    Effect.gen(function*() {
+      // Synthetic ordering, not captured Firefox traffic: the browser announces the first traversal, then
+      // rejects its command. The announced navigation may still own the next realm, so the second can't claim it.
+      const url = "http://restored.example/"
+      const entered = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      let calls = 0
+      const { facts, page, realm, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.suspend(() =>
+          calls++ > 0 ? Effect.succeed({}) : Effect.andThen(
+            Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(gate)),
+            Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "browsingContext.traverseHistory",
+                  reason: "Unrecognized",
+                  code: "no such history entry",
+                  description: "no history"
+                })
+              })
+            )
+          )
+        ),
+        "script.evaluate": { type: "success", realm: "R2", result: { type: "string", value: url } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const first = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered)
+      handlers.apply("browsingContext.navigationStarted", {
+        context: page.bidi,
+        navigation: "announced",
+        url,
+        timestamp: 1
+      }, { state })
+      yield* Deferred.succeed(gate, undefined)
+      assert(Option.isNone(yield* Fiber.join(first)))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const navigation = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(navigation))
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://restored.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert.lengthOf(
+        facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
+        0,
+        "the second traversal must not claim a realm the announced one may own"
+      )
+    }))
+
+  it.effect("releases a traversal interrupted during its location lookup", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const { page, realm, state } = yield* withPage({
+        "browsingContext.traverseHistory": {},
+        "script.evaluate": Effect.andThen(Deferred.succeed(entered, undefined), Effect.never)
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "R2",
+        context: page.bidi,
+        type: "window",
+        origin: "http://restored.example"
+      }, { state })
+      const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      assert.lengthOf(page.expected.list, 0)
+      assert.strictEqual(page.restoring, undefined)
+    }))
+
+  for (
+    const boundary of [
+      "realm removed",
+      "page removed",
+      "new navigation",
+      "unsuccessful lookup",
+      "exception lookup",
+      "failed lookup"
+    ] as const
+  ) {
+    it.effect(`discards an unannounced traversal lookup after ${boundary}`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const finished = yield* Deferred.make<void>()
+        const { facts, page, realm, state } = yield* withPage({
+          "browsingContext.traverseHistory": {},
+          "script.evaluate": Effect.gen(function*() {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            if (boundary === "failed lookup") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "script.evaluate",
+                    reason: "Unrecognized",
+                    code: "no such realm",
+                    description: "gone"
+                  })
+                })
+              )
+            }
+            if (boundary === "exception lookup") return { type: "exception", realm: "R2" }
+            return boundary === "unsuccessful lookup"
+              ? { type: "success", realm: "R2", result: { type: "undefined" } }
+              : { type: "success", realm: "R2", result: { type: "string", value: "http://stale.example/" } }
+          })
+        })
+        const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        const navigation = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(navigation))
+        handlers.apply("script.realmCreated", {
+          realm: "R2",
+          context: page.bidi,
+          type: "window",
+          origin: "http://stale.example"
+        }, { state })
+        // Queue a marker behind the lookup's state update, without waiting on wall-clock time.
+        const run = state.buffer.run
+        ;(state.buffer as { run: typeof run }).run = (facts) =>
+          run(() => {
+            facts()
+            state.buffer.later(Deferred.succeed(finished, undefined))
+          })
+        yield* state.buffer.flush
+        yield* Deferred.await(entered)
+        if (boundary === "realm removed") handlers.apply("script.realmDestroyed", { realm: "R2" }, { state })
+        if (boundary === "page removed") Tree.removeNavigable(state, page, new Target.Vanished({}), "test")
+        if (boundary === "new navigation") {
+          Tree.startNavigation(state, page, "new", "http://new.example/", "crossDocument", false, null)
+        }
+        yield* Deferred.succeed(release, undefined)
+        yield* Deferred.await(finished)
+        yield* state.buffer.flush
+        assert.lengthOf(
+          facts.filter((fact) =>
+            (fact._tag === "NavigationStarted" || fact._tag === "NavigationEnded") &&
+            fact.navigation === navigation.value
+          ),
+          0
+        )
+        assert.notStrictEqual(page.document?.url, "http://stale.example/")
+        assert.strictEqual(page.restoring, undefined)
+      }))
+  }
+
   for (const ownsError of [true, false]) {
     it.effect(`preserves an immediately current error document and immutable provenance when the reply ${ownsError ? "owns" : "does not own"} it`, () =>
       Effect.gen(function*() {
@@ -1575,6 +2361,71 @@ describe("BidiAdapter state", () => {
     }
   }
 
+  for (const ending of ["realm", "document", "page", "cancel", "reply"] as const) {
+    it.effect(`settles a pending evaluation on ${ending} and cleans up late replies`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+        const { page, realm, state } = yield* withPage({}, {}, client.root)
+        const handlers = Evaluation.register(Kit.handlers<State.Event>())
+        const running = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => new Promise(() => {})",
+          arguments: [],
+          awaitPromise: true,
+          result: "handle",
+          userActivation: false
+        }).pipe(Effect.result, Effect.forkChild)
+        const sent = yield* browser.next
+        // Another realm's event must neither end this call nor send it again.
+        handlers.apply("script.realmDestroyed", { realm: "UNRELATED" }, { state })
+        yield* state.buffer.flush
+        assert.isUndefined(running.pollUnsafe())
+        if (ending === "cancel") yield* Fiber.interrupt(running)
+        else if (ending !== "reply") {
+          if (ending === "realm") handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          else if (ending === "document") {
+            Tree.commit(
+              state,
+              page,
+              "http://next.example/",
+              "http://next.example",
+              { _tag: "InitialBlank" },
+              undefined,
+              "test"
+            )
+            // A commit alone can preserve the initial blank document's realm.
+            yield* state.buffer.flush
+            assert.isUndefined(running.pollUnsafe())
+            handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          } else Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+          yield* state.buffer.flush
+          const settled = yield* Fiber.join(running).pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
+          assert(Option.isSome(settled), "realm loss must end a call even without a protocol reply")
+          assert.strictEqual(settled.value._tag, "Failure")
+          if (settled.value._tag === "Failure") assert.strictEqual(settled.value.failure.reason._tag, "Gone")
+        }
+        yield* browser.receive({
+          type: "success",
+          id: sent.id,
+          result: { type: "success", realm: realm.bidi, result: { type: "object", handle: "LATE" } }
+        })
+        yield* browser.delivered
+        if (ending === "reply") {
+          const result = yield* Fiber.join(running)
+          assert.strictEqual(result._tag, "Success")
+          assert.strictEqual(state.handles.size, 1)
+          handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+          yield* state.buffer.flush
+        } else {
+          assert.strictEqual(state.handles.size, 0)
+          const cleanup = yield* browser.next.pipe(BrowserClock.timeoutOn(BrowserClock.live, 1000))
+          assert(Option.isSome(cleanup), "abandoned root handles must use protocol late-reply cleanup")
+          assert.strictEqual(cleanup.value.method, "script.disown")
+          yield* browser.receive({ type: "success", id: cleanup.value.id, result: {} })
+        }
+      }))
+  }
+
   it.effect("disowns a root-owned handle returned after evaluation was interrupted", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
@@ -1830,3 +2681,311 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(error.reason._tag, "Protocol")
     }))
 })
+
+it.effect("removes a context's proxy auth interceptor and attempts, retaining only the browser-cache binding", () =>
+  Effect.gen(function*() {
+    const { state, commands } = yield* withPage({
+      "browser.createUserContext": { userContext: "proxy-context" },
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    const id = yield* Contexts.createUserContext(state, {
+      proxy: Option.some({
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "user", password: Redacted.make("fixture-password") }
+      }),
+      acceptInsecureCerts: false
+    })
+    const entry = state.contexts.get(id)!
+    entry.proxyAttempts!.add("request")
+    yield* Contexts.removeUserContext(state, id)
+    assert.strictEqual(entry.proxyAttempts?.size, 0)
+    assert.isUndefined(entry.proxyIntercept)
+    assert.isUndefined(entry.proxy)
+    assert.isTrue(
+      commands.some((command) =>
+        command.method === "network.removeIntercept" &&
+        (command.params as { intercept: string }).intercept === "proxy-intercept"
+      )
+    )
+    assert.isTrue(state.proxyBindings.has("proxy.test:8080"))
+    State.releaseProxy(state)
+    assert.strictEqual(state.proxyBindings.size, 0)
+  }))
+
+it.effect("releases a Firefox proxy credential binding when its context is never created", () =>
+  Effect.gen(function*() {
+    // The browser refuses the first creation, so no context ever authenticated with these credentials
+    // and Firefox's proxy authentication cache holds nothing for the endpoint.
+    let refuse = true
+    const { state } = yield* withPage({
+      "browser.createUserContext": Effect.suspend(() =>
+        refuse
+          ? Effect.fail(
+            new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "browser.createUserContext" }) })
+          )
+          : Effect.succeed({ userContext: "proxy-context" })
+      ),
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    const create = (password: string) =>
+      Contexts.createUserContext(state, {
+        proxy: Option.some({
+          server: "proxy.test:8080",
+          bypass: [],
+          credentials: { username: "user", password: Redacted.make(password) }
+        }),
+        acceptInsecureCerts: false
+      })
+    yield* create("mistyped-password").pipe(Effect.flip)
+    refuse = false
+    // Correcting the password must not be refused as a conflict with a binding nothing used.
+    yield* create("corrected-password")
+  }))
+
+it("recovers only the first website challenge, including escaped realms", () => {
+  assert.deepStrictEqual(
+    Obligations.websiteChallenge("Basic realm=\"site\\\"realm\", charset=\"UTF-8\", Digest realm=\"other\""),
+    { scheme: "Basic", realm: "site\"realm" }
+  )
+  assert.deepStrictEqual(Obligations.websiteChallenge("Negotiate token==, Basic realm=\"other\""), {
+    scheme: "Negotiate",
+    realm: ""
+  })
+  assert.isUndefined(Obligations.websiteChallenge(""))
+})
+
+for (const configured of [true, false]) {
+  it.effect(`keeps website auth routes separate with proxy credentials ${configured ? "configured" : "omitted"}`, () =>
+    Effect.gen(function*() {
+      const { state, page, commands, facts } = yield* withPage()
+      if (configured) {
+        page.context.proxy = {
+          server: "proxy.test:8080",
+          bypass: [],
+          credentials: { username: "proxy-user", password: Redacted.make("proxy-password") }
+        }
+      }
+      const registration = state.ids.registration()
+      state.intercepts.set(registration, {
+        registration,
+        bidi: "website-auth" as State.InterceptEntry["bidi"],
+        scope: { _tag: "Browser" },
+        globs: [],
+        phases: ["auth"]
+      })
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const params = {
+        context: "C1",
+        userContext: "default",
+        navigation: null,
+        timestamp: 1,
+        redirectCount: 0,
+        isBlocked: false,
+        request: {
+          request: "ambiguous",
+          url: "http://site.test/",
+          method: "GET",
+          headers: [],
+          destination: "document",
+          bodySize: 0
+        }
+      }
+      handlers.apply("network.beforeRequestSent", params, { state })
+      handlers.apply("network.authRequired", {
+        ...params,
+        isBlocked: true,
+        intercepts: ["website-auth"],
+        response: {
+          status: 407,
+          headers: [
+            { name: "Proxy-Authenticate", value: { type: "string", value: "Basic realm=\"spoofed\"" } },
+            { name: "WWW-Authenticate", value: { type: "string", value: "Basic realm=\"website\"" } }
+          ],
+          authChallenges: configured ? [{ scheme: "Basic", realm: "spoofed" }] : undefined
+        }
+      }, { state })
+      yield* state.buffer.flush
+      assert.isFalse(commands.some((command) => command.method === "network.continueWithAuth"))
+      const fact = facts.find((fact) => fact._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest")
+      assert.isDefined(fact)
+      if (fact?._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest") {
+        assert.deepStrictEqual(
+          fact.subject.challenge,
+          configured ? Option.some({ origin: "http://site.test", scheme: "Basic", realm: "website" }) : Option.none()
+        )
+      }
+      assert.isUndefined(page.context.proxyAttempts)
+    }))
+}
+
+describe("Firefox proxy reservation lifetime", () => {
+  const options = (password: string): Adapter.UserContextOptions => ({
+    proxy: Option.some({
+      server: "proxy.test:8080",
+      bypass: [],
+      credentials: { username: "user", password: Redacted.make(password) }
+    }),
+    acceptInsecureCerts: false
+  })
+  const refused = () =>
+    new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: "browser.createUserContext" }) })
+  const uncertain = () =>
+    new Protocol.ProtocolError({
+      reason: new Protocol.NoReply({ method: "browser.createUserContext", timeout: Duration.seconds(1) })
+    })
+
+  for (const otherSucceeds of [true, false]) {
+    it.effect(`releases only its own concurrent reservation when the other creation ${otherSucceeds ? "succeeds" : "fails"}`, () =>
+      Effect.gen(function*() {
+        const first = yield* Deferred.make<void>()
+        const firstEntered = yield* Deferred.make<void>()
+        const second = yield* Deferred.make<void>()
+        const entered = yield* Deferred.make<void>()
+        let calls = 0
+        const { state } = yield* withPage({
+          "browser.createUserContext": Effect.suspend(() => {
+            const call = ++calls
+            if (call === 1) {
+              return Deferred.succeed(firstEntered, undefined).pipe(
+                Effect.andThen(Deferred.await(first)),
+                Effect.andThen(Effect.fail(refused()))
+              )
+            }
+            if (call === 2) {
+              return Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(second)),
+                Effect.andThen(otherSucceeds ? Effect.succeed({ userContext: "second" }) : Effect.fail(refused()))
+              )
+            }
+            return Effect.succeed({ userContext: "corrected" })
+          }),
+          "network.addIntercept": { intercept: "auth" }
+        })
+        const a = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
+        yield* Deferred.await(firstEntered)
+        const b = yield* Effect.forkChild(Contexts.createUserContext(state, options("same")).pipe(Effect.exit))
+        yield* Deferred.await(entered)
+        yield* Deferred.succeed(first, undefined)
+        yield* Fiber.join(a)
+        const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+        assert.strictEqual(calls, 2)
+        yield* Deferred.succeed(second, undefined)
+        yield* Fiber.join(b)
+        if (otherSucceeds) {
+          const retained = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+          assert.strictEqual(retained.reason._tag, "Unsupported")
+        } else yield* Contexts.createUserContext(state, options("different"))
+      }))
+  }
+
+  it.effect("retains an earlier successful binding after another creation is rejected", () =>
+    Effect.gen(function*() {
+      let reject = false
+      const { state } = yield* withPage({
+        "browser.createUserContext": Effect.suspend(() =>
+          reject ? Effect.fail(refused()) : Effect.succeed({ userContext: "created" })
+        ),
+        "network.addIntercept": { intercept: "auth" }
+      })
+      yield* Contexts.createUserContext(state, options("same"))
+      reject = true
+      yield* Contexts.createUserContext(state, options("same")).pipe(Effect.flip)
+      const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+      assert.strictEqual(conflict.reason._tag, "Unsupported")
+    }))
+
+  for (const outcome of ["confirmed unused", "uncertain removal", "used"] as const) {
+    it.effect(`handles setup rollback with ${outcome} outcome`, () =>
+      Effect.gen(function*() {
+        let failSetup = true
+        const { state } = yield* withPage({
+          "browser.createUserContext": { userContext: "created" },
+          "network.addIntercept": Effect.suspend(() => {
+            if (!failSetup) return Effect.succeed({ intercept: "auth" })
+            if (outcome === "used") {
+              Tree.addNavigable(state, {
+                context: "during-setup" as BrowsingContext.BrowsingContext,
+                userContext: "created",
+                originalOpener: null,
+                url: "http://proxy.test/"
+              }, false)
+            }
+            return Effect.fail(refused())
+          }),
+          "browser.removeUserContext": outcome === "uncertain removal" ? Effect.fail(uncertain()) : {}
+        })
+        yield* Contexts.createUserContext(state, options("mistyped")).pipe(Effect.flip)
+        failSetup = false
+        if (outcome === "confirmed unused") yield* Contexts.createUserContext(state, options("corrected"))
+        else {
+          const conflict = yield* Contexts.createUserContext(state, options("corrected")).pipe(Effect.flip)
+          assert.strictEqual(conflict.reason._tag, "Unsupported")
+        }
+      }))
+  }
+
+  for (const interrupted of [true, false]) {
+    it.effect(`retains a binding when creation ${interrupted ? "is interrupted" : "has no reply"}`, () =>
+      Effect.gen(function*() {
+        const { state } = yield* withPage({
+          "browser.createUserContext": interrupted ? Effect.interrupt : Effect.fail(uncertain())
+        })
+        yield* Contexts.createUserContext(state, options("original")).pipe(Effect.exit)
+        const conflict = yield* Contexts.createUserContext(state, options("different")).pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+      }))
+  }
+
+  it.effect("uses the supported global proxy auth intercept parameters", () =>
+    Effect.gen(function*() {
+      const { state, commands } = yield* withPage({
+        "browser.createUserContext": { userContext: "proxy-context" },
+        "network.addIntercept": { intercept: "auth" }
+      })
+      yield* Contexts.createUserContext(state, options("secret"))
+      const intercept = commands.find((command) => command.method === "network.addIntercept")
+      assert.deepStrictEqual(intercept?.params, { phases: ["authRequired"] })
+    }))
+})
+
+for (const kind of ["InvalidArgument", "Encode", "Decode", "Unrecognized"] as const) {
+  it.effect(`handles a proxy creation ${kind} without mistaking uncertainty for rejection`, () =>
+    Effect.gen(function*() {
+      let failing = true
+      const method = "browser.createUserContext"
+      const reason = kind === "Encode" ?
+        new Protocol.Encode({ method, issue: "fixture" })
+        : kind === "Decode" ?
+        new Protocol.Decode({ method, issue: "fixture" })
+        : new Protocol.Rejected({
+          method,
+          reason: kind,
+          code: kind === "InvalidArgument" ? "invalid argument" : "unknown error",
+          description: "fixture"
+        })
+      const { state } = yield* withPage({
+        [method]: Effect.suspend(() =>
+          failing ? Effect.fail(new Protocol.ProtocolError({ reason })) : Effect.succeed({ userContext: "created" })
+        ),
+        "network.addIntercept": { intercept: "auth" }
+      })
+      const create = (password: string) =>
+        Contexts.createUserContext(state, {
+          proxy: Option.some({
+            server: "proxy.test:8080",
+            bypass: [],
+            credentials: { username: "user", password: Redacted.make(password) }
+          }),
+          acceptInsecureCerts: false
+        })
+      yield* create("original").pipe(Effect.flip)
+      failing = false
+      if (kind === "Encode" || kind === "InvalidArgument") yield* create("corrected")
+      else {
+        const conflict = yield* create("corrected").pipe(Effect.flip)
+        assert.strictEqual(conflict.reason._tag, "Unsupported")
+      }
+    }))
+}

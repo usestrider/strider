@@ -1,8 +1,8 @@
 # macOS integration
 
 CI runs it as the `integration-macos` job in `.github/workflows/integration.yml`, on GitHub's standard Apple Silicon
-`macos-15` runner ([runner image labels](https://github.com/actions/runner-images#available-images)). It runs after
-the Linux job, after Linux failures too, nightly when `main` has changed and on manual dispatch.
+`macos-15` runner ([runner image labels](https://github.com/actions/runner-images#available-images)). It runs independently
+of the Linux job, every night and on manual dispatch.
 No macOS browser execution has been validated on the Linux development machine.
 
 Run locally on Apple Silicon macOS with Node 24 and the repository's pinned pnpm:
@@ -28,6 +28,14 @@ download. Firefox's calculated SHA-512 also matches Mozilla's
 `91a4bc4a84749c0f184a1d4db691e9db17ac18035f90919fa260266ed276a4d1143e9bd3a4cbeb18e576eac9bac75fe304b38a45e3866717211e48ca40a8859f`.
 The entry point checks archive integrity on every run; adapter and slice setup separately require exact browser
 versions. Updating either macOS pin requires downloading and hashing the new archive and running this suite.
+
+The entry point also installs the Apple Silicon FFmpeg and FFprobe 9.0 static builds pinned in
+`scripts/ffmpeg.macos.json`, verifies both archives before extraction, and supplies their absolute paths as
+`STRIDER_FFMPEG` and `STRIDER_FFPROBE`. They share the browsers' temporary directory and cleanup. Real recording,
+writer conformance, probing and decoding remain enabled; the missing-writer refusal runs separately.
+Both downloaded archives' calculated SHA-256 matched the publisher's `.zip.sha256` files at
+[the versioned build page](https://ffmpeg.martin-riedl.de/info/detail/macos/arm64/1785863997_9.0).
+Updating these pins requires downloading and hashing both archives and validating the macOS recording tests.
 
 ## Scope and platform boundaries
 

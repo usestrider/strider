@@ -32,13 +32,13 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { spawn } from "node:child_process"
-import { readFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
 import { fileURLToPath } from "node:url"
 import * as Kit from "../../../src/internal/adapterKit.ts"
 import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as ClaimHooks from "../../../src/internal/claimHooks.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { handoff } from "../../../src/internal/handoff.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import { assertPinned, chromium } from "../browsers.ts"
@@ -95,9 +95,7 @@ const launch = Effect.gen(function*() {
   const observer = yield* CdpConnection.make(transport)
   const version = yield* CdpBrowser.getVersion().pipe(Protocol.on(observer.browser))
   assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
-  const [port] = (yield* Effect.promise(() => readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8"))).split(
-    "\n"
-  )
+  const { port } = yield* DevToolsActivePort.read(launched.userDataDir)
   const endpoint = `http://127.0.0.1:${port}`
   const targets = Target.getTargets({ filter: [{ exclude: false }] }).pipe(
     Protocol.on(observer.browser),
@@ -584,9 +582,24 @@ describe("Chromium claims", () => {
             Protocol.on(browser.observer.browser)
           )
           const response = yield* Deferred.await(requested)
+          const destroyed = yield* browser.observer.browser.subscribe(Target.targetDestroyed)
+          yield* Target.setDiscoverTargets({ discover: true, filter: [{ exclude: false }] }).pipe(
+            Protocol.on(browser.observer.browser)
+          )
           // Leave only the externally created target, so adoption needs no public-to-CDP ID mapping.
+          const remaining = new Set(initialPages.map((page) => page.targetId))
           for (const page of initialPages) {
             yield* Target.closeTarget({ targetId: page.targetId }).pipe(Protocol.on(browser.observer.browser))
+          }
+          // Close acknowledgements can precede removal; the subscription buffers even early destruction events.
+          if (remaining.size > 0) {
+            yield* destroyed.pipe(
+              Stream.takeUntil((event) => {
+                remaining.delete(event.targetId)
+                return remaining.size === 0
+              }),
+              Stream.runDrain
+            )
           }
           assert.deepStrictEqual(
             (yield* browser.targets).filter((info) => info.type === "page").map((info) => info.targetId),

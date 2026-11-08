@@ -1,5 +1,61 @@
 # @usestrider/browser
 
+## 0.6.0
+
+### Breaking changes
+
+- **Snapshot `pressed`, `expanded` and `selected` markers match role filters** (#165). Keywords are case-insensitive (`TRUE` now adds the marker), markers appear only for `true` on roles that support them, and a native `<option>`'s selection and a `<details>` element's open state take precedence over ARIA. Stored snapshot expectations may need updating.
+- **`isCapability` narrows to inspect or control capabilities** (#157). Check `capability.access === "inspect"` before passing its result to `ReadonlyPage.capability`.
+
+### Added
+
+- **Virtual passkeys** (#157): `page.capability(Capability.VirtualAuthenticator)` gives a page a native Chromium WebAuthn authenticator, for testing passkey registration and sign-in, with credential management, redacted export and import, and user-verification and presence controls. `Unsupported` on Firefox and WebKit. A second page or a popup gets its own copy of a credential.
+- **Proxies** (#158): `UserContext.Options.proxy` routes a context's HTTP and HTTPS traffic through an HTTP proxy, with bypass hosts and credentials with a `Redacted` password, on Chromium and launched Firefox. Launched WebKit supports proxies without credentials.
+
+### Fixed
+
+- **Chromium port launches wait for the complete endpoint** (#163) before connecting, instead of connecting to a half-written `DevToolsActivePort`.
+- **A browser that exits during launch reports its final stderr** (#163), collected within the launch timeout.
+- **WebKit startup reports a lost connection at once** (#161), instead of waiting for the startup deadline.
+- **Stock WebKit snapshots keep child-frame content** (#170) when the browser's two clocks read a frame's start time a millisecond apart, and can't pick a sibling frame.
+- **`strider export` explains ambiguous password fields** (#164): a named password field matching controls in different frames fails with guidance to narrow the locator, instead of crashing.
+
+### Documentation
+
+- On Chromium, a prefetch sent through a page's `<script type="speculationrules">` skips page and context routes (#168).
+
+## 0.5.0
+
+### Breaking changes
+
+- **`aria-checked` keywords are case-insensitive** (#141). `TRUE` now reads as checked. `mixed` counts as unchecked on `radio`, `menuitemradio` and `switch`. On `option` and `treeitem`, a malformed `aria-checked` refuses `check`/`uncheck` with `WrongElement` before any input; use explicit `true`, `false` or `mixed` tokens to make them checkable.
+- **`Target.PrerenderActivated` is removed** (#153). No backend could produce it; it returns when prerender activation is supported.
+- **Attached Chromium refuses init-script timing it can't guarantee** (#153). A context-wide script that needs `beforeAuthorScript` timing fails with `TimingUnsupported`, because attached Chromium doesn't pause new popups. Use `timing: "bestEffort"`, or register on an existing page.
+
+### Added
+
+- **Traces link steps to their source and name their test** (#136, #138): steps link to their call sites in the viewer's Source tab, with the source files in the archive, and the trace records the test and retry that produced it. `TestRun.info` gains `repeat`.
+- **`strider eval`** (#154): `strider eval <expression>` or `eval --file fn.js` runs JavaScript in a page and prints the serialized result, in an isolated world unless `--main-world`.
+- **`strider export` handles unnamed password fields in frames** (#148).
+
+### Fixed
+
+- **Video files start with a picture at time 0** (#137). ffmpeg's end-relative seeks (`-sseof`) returned no frame when the first frame arrived late.
+- **`fill` checks the field again after focus** (#132): a focus handler that makes it read-only or disabled now gets the documented wait, and one that makes it non-editable gets `NotEditable`, instead of a false success.
+- **Chromium `page.url` keeps the fragment** after navigating and when attaching (#125).
+- **Waits on a request's sent headers return** when the request is evicted or loses its frame, worker, context, page or connection, instead of hanging until the deadline (#146).
+- **Firefox history traversal completes** when its page realm arrives after the reply (#149).
+- **WebKit polled video finishes cleanly** when its page closes mid-capture (#127).
+- **`strider stop` waits for its cleanup** (#134): it returns once the browser, session directory and ledger record are gone, and a failed cleanup exits non-zero.
+- **Lower overhead on every operation** (#143): caller stacks are captured lazily, about 2 µs instead of 17 µs per call.
+
+### Diagnostics
+
+- A trace whose native video fails says why, in the viewer's Console tab (#131).
+- WebKit startup failures name the stage they reached and when (#126).
+- Chromium's empty screenshot failure says "Chromium returned an empty image" (#144).
+- `Expect.that(page.url, …)` and `Expect.that(page.title, …)` failures are redacted in strict trace exports (#133).
+
 ## 0.4.0
 
 ### Minor Changes

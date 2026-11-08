@@ -135,6 +135,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const target = state.targets.get(session)
   if (target === undefined || target.ended) return
   target.ended = true
+  target.proxyAuth?.clear()
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target === target) state.pendingAttribution.delete(key)
   }

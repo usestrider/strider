@@ -13,16 +13,21 @@ import {
   Keyboard,
   Locator,
   Mouse,
-  Operation
+  Operation,
+  type Page,
+  Route,
+  type UserContext
 } from "@usestrider/browser"
 import { Protocol } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Scope from "effect/Scope"
 import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
@@ -31,6 +36,8 @@ import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
+import { newPage } from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -96,13 +103,89 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
 
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+
+      // The guard itself: each thing a case can leave in the shared context is reported, and the cases after get a
+      // new context. Each is left through a scope that is never closed, as a case's own leak would be. A popup closes
+      // with its opener's scope where the backend knows its opener, so it can be left only where it doesn't
+      suite.effect(
+        "the shared context reports what a case leaves in it, and is replaced",
+        () =>
+          Effect.gen(function*() {
+            const shared = yield* SharedContext.Shared
+            const { url, origin } = yield* fixture(() =>
+              `<button onclick="window.open(location.href)">Open</button>${out}`
+            )
+            const inContext =
+              <A, E>(f: (context: UserContext.UserContext) => Effect.Effect<A, E, Scope.Scope>) =>
+              (leaked: Scope.Scope) => Effect.flatMap(shared.current, f).pipe(Scope.provide(leaked))
+            const inPage = (act: (page: Page.Page) => Effect.Effect<unknown, unknown>) => () =>
+              Effect.scoped(Effect.gen(function*() {
+                const page = yield* newPage
+                yield* page.goto(url)
+                yield* act(page)
+              }))
+            const leaks: ReadonlyArray<
+              readonly [
+                string | undefined,
+                (leaked: Scope.Scope) => Effect.Effect<unknown, unknown, SharedContext.Shared>
+              ]
+            > = [
+              ["page(s) open", inContext((context) => context.newPage)],
+              [
+                (yield* supports("popups.opener")) ? undefined : "page(s) open",
+                inPage((page) =>
+                  page.getByRole("button", { name: "Open" }).click().pipe(
+                    Effect.andThen(page.context.pages.waitFor((pages) => pages.length > 1))
+                  )
+                )
+              ],
+              ["route(s) on the context", inContext((context) => context.route("**/never", () => Route.fallthrough))],
+              ["InitScript declaration on the context", inContext((context) => context.addInitScript(() => {}))],
+              [
+                "a cookie left",
+                inPage((page) => page.evaluateInMainWorld(() => void (document.cookie = "left=1; path=/")))
+              ],
+              [
+                "localStorage item(s)",
+                inPage((page) => page.evaluateInMainWorld(() => localStorage.setItem("left", "1")))
+              ],
+              ...((yield* supports("permissions"))
+                ? [
+                  [
+                    "a grant of geolocation",
+                    inContext((context) => context.grant(["geolocation"], { origin }))
+                  ] as const
+                ]
+                : [])
+            ]
+            for (const [index, [expected, leak]] of leaks.entries()) {
+              const leaked = yield* Scope.make()
+              const before = yield* shared.current
+              yield* leak(leaked)
+              const left = yield* shared.settle
+              if (expected === undefined) {
+                assert.deepStrictEqual(left, [], `${index}: nothing is left`)
+                assert.strictEqual(yield* shared.current, before, `${index}: a clean context is kept`)
+              } else {
+                assert(left.some((each) => each.includes(expected)), `${index}, ${expected}: ${JSON.stringify(left)}`)
+                assert.notStrictEqual(yield* shared.current, before, `${index}, ${expected}: the context is replaced`)
+              }
+              yield* Scope.close(leaked, Exit.void)
+            }
+            const kept = yield* shared.current
+            assert.deepStrictEqual(yield* shared.settle, [], "a clean context")
+            assert.strictEqual(yield* shared.current, kept, "a clean context is kept")
+          }),
+        timeout
+      )
       it.effect(
         "reports an unsupported role filter in a nested branch beyond a missing frame",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const outer = page.frame(page.locator("#absent-frame"))
             const nested = outer.frame(outer.locator("#deeper")).locator("a")
@@ -119,7 +202,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             // Construction remains lazy, including under a scope that matches nothing.
             const invalid = page.getByRole("link", { pressed: false })
@@ -171,7 +254,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }" onclick="document.querySelector('#out').textContent='clicked'"></div><output id="out"></output>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const target = page.locator("#target")
                   assert.strictEqual(yield* target.isVisible, false)
@@ -213,7 +296,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }<div style="opacity:${ancestor ? 0 : 1}">${control}</div>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const target = page.locator("#target")
                   const within = Deadline.within("3 seconds")
@@ -261,7 +344,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             Effect.gen(function*() {
               const { url } = yield* fixture(() => `<!doctype html>${html}`)
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const control = page.locator("#target")
                 const error = yield* control.check().pipe(Deadline.within("1 second"), Effect.flip)
@@ -286,7 +369,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<!doctype html><input id="target" style="opacity:0;position:absolute;left:20px;top:20px"><div style="position:absolute;inset:0;background:white"></div>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const target = page.locator("#target")
             yield* target.fill("Ada").pipe(Deadline.within("3 seconds"))
@@ -309,7 +392,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }<output id="out"></output>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const target = page.locator("#target")
                 const error = yield* (action === "fill" ? target.fill("Ada") : target.click()).pipe(
@@ -345,7 +428,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.gen(function*() {
                 const { url } = yield* fixture(() => wrappedLinkHtml(shape, partial))
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const geometry: LinkGeometry = yield* page.evaluateInMainWorld(() => ({
                     rects: Array.from(
@@ -396,7 +479,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }</a></div><div style="position:absolute;left:0;top:0;width:400px;height:44px"></div><output id="out"></output>${recordsClick}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const centers = yield* page.evaluateInMainWorld(() =>
               Array.from(document.querySelector("#go")!.getClientRects(), (r) => (r.top + r.bottom) / 2)
@@ -415,7 +498,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<iframe srcdoc='<a id="go" href="#">Go</a><output id="out"></output>${recordsClick}'></iframe>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const locator = page.frame(page.locator("iframe")).locator("#go")
             assert(locator instanceof LocatorImpl)
@@ -480,7 +563,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }</a><output id="out"></output>${recordsClick}`
             const { url } = yield* fixture(() => `<!doctype html>${parent(`<iframe srcdoc='${inner}'></iframe>`)}`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const frame = page.frame(page.locator("iframe"))
               yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
@@ -508,7 +591,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 fixtureUrl(crossSite, middle)
               }"></iframe>${coveredIn === "outer" ? cover : ""}`
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(fixtureUrl(origin, html))
                 const outer = page.frame(page.locator("iframe"))
                 const inner = outer.frame(outer.locator("iframe"))
@@ -534,7 +617,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:150px;border:0}</style><iframe srcdoc='${inner}'></iframe><div id="cover" style="position:absolute;left:0;top:0;width:400px;height:200px"></div>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const frame = page.frame(page.locator("iframe"))
               const target = frame.locator("#go")
@@ -575,7 +658,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }</a></div><output id="out"></output>${recordsClick}<script>s.scrollTop=24</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const lines = yield* page.evaluateInMainWorld(() => {
               const rects = document.querySelector("#go")!.getClientRects()
@@ -600,7 +683,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<!doctype html><style>body{margin:0}iframe{position:absolute;left:20px;top:-24px;width:300px;height:200px;border:0}</style><iframe srcdoc='${inner}'></iframe>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const frame = page.frame(page.locator("iframe"))
               yield* frame.locator("#go").click().pipe(Deadline.within("1 second"))
@@ -618,7 +701,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<!doctype html><style>body{margin:0;width:6000px;font:16px/24px monospace}#b{width:5100px}#p{display:inline-block;width:5000px;height:1px}</style><div id="b"><span id="p"></span><a id="go" href="#go">abcdefghij abcdefghij</a></div><output id="out"></output>${recordsClick}<script>scrollTo(1000,0)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const seen = yield* page.evaluateInMainWorld(() => {
                 const go = document.querySelector("#go")!
@@ -646,7 +729,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#go{position:${position};left:300px;top:100px}</style><div id="s"><a id="go" href="#go">Go</a></div><output id="out"></output>${recordsClick}`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
               assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
@@ -663,7 +746,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 `<!doctype html><style>body{margin:0}#s{margin:100px;width:30px;height:30px;overflow:hidden}#box{position:${position};left:300px;top:100px}</style><div id="s"><span id="box"><a id="go" href="#go">Go</a></span></div><output id="out"></output>${recordsClick}`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
                 assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
@@ -690,7 +773,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }"></iframe>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const outer = page.frame(page.locator("iframe"))
             const innerFrame = outer.frame(outer.locator("iframe"))
@@ -744,7 +827,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             const { url } = yield* fixture(() => `${html}${recordsClick}`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
               assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
@@ -760,7 +843,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<!doctype html><span style="overflow:hidden"><a id="go" href="#go">Go somewhere</a></span><output id="out"></output>${recordsClick}`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#go").click({ position: { x: 2, y: 2 } }).pipe(Deadline.within("1 second"))
               assert.strictEqual(JSON.parse(yield* page.locator("#out").readText).target, "go")
@@ -775,7 +858,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<!doctype html><a id="go" style="position:fixed;left:0;top:20px;width:1px;height:10px"></a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=()=>out.dataset.clicked="go"</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
             assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 0, y: 25, target: "go" })
@@ -792,7 +875,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<!doctype html><style>body{margin:0}#go{position:absolute;left:40px;top:60px;border-style:solid;border-width:7px 11px 13px 5px;padding:19px;width:100px;height:80px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>out.textContent=JSON.stringify({x:e.clientX,y:e.clientY,target:e.target.id});go.onclick=e=>e.preventDefault()</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#go").click({ position: { x: 13, y: 9 } })
             assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 58, y: 76, target: "go" })
@@ -811,7 +894,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }${out}`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const locator = page.locator("#go")
                 assert(locator instanceof LocatorImpl)
@@ -907,7 +990,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<button id="go" onmousedown="confirm('Go?'); out.textContent += 'down '" onmouseup="out.textContent += 'up '" onclick="out.textContent += 'click'">Go</button><p id="out"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#go").click()
               assert.strictEqual(yield* page.locator("#out").readText, "down up click")
@@ -921,7 +1004,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<button id="go" onmousedown="out.textContent += 'down '" onmouseup="out.textContent += 'up '" onclick="out.textContent += 'click '">Go</button><p id="out"></p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const button = page.locator("#go")
             yield* Effect.all([button.click(), button.click()], { concurrency: "unbounded" })
@@ -937,7 +1020,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }"><label>Email <input name="email"></label><label>Password <input name="password" type="password"></label><button>Sign in</button></form>${out}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.getByLabel("Email").fill("me@example.com")
             yield* page.getByLabel("Password").fill(Redacted.make("hunter2"))
@@ -951,7 +1034,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<input id="field" type="invalid-type" value="old">`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const field = page.locator("#field")
             assert.strictEqual(
@@ -969,7 +1052,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="name" value="old"><textarea id="notes"></textarea><div id="rich" contenteditable="true">old</div><input id="day" type="date"><input id="keys"><div id="plain">plain</div>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const field = page.locator("#name")
             yield* field.fill("Ada")
@@ -1018,7 +1101,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="field" type="${type}" min="0" max="100" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#field").fill(value)
               const actual = yield* page.locator("#field").readValue
@@ -1051,7 +1134,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="field" type="${type}" min="0" max="100" value="${initial}" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const refused = yield* page.locator("#field").fill(invalid).pipe(Effect.flip)
               assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
@@ -1071,7 +1154,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="field" type="range" min="0" max="100" value="25" onfocus="this.max = '10'; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const result = yield* page.locator("#field").fill("42").pipe(Effect.result)
             const state = {
@@ -1110,7 +1193,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
                   )
                   yield* Effect.scoped(Effect.gen(function*() {
-                    const page = yield* Browser.newPage()
+                    const page = yield* newPage
                     yield* page.goto(url)
                     const result = yield* page.locator("#field").fill("2020-03-03").pipe(
                       Deadline.within("1 second"),
@@ -1176,7 +1259,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 `<input id="field" type="date" tabindex="0" value="2020-03-02" ${attribute} onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const result = yield* page.locator("#field").fill("2020-03-03", { checks: { [check]: false } }).pipe(
                   Deadline.within("1 second"),
@@ -1199,7 +1282,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="field" type="text" value="old" onfocus="this.readOnly = true; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const result = yield* page.locator("#field").fill("new").pipe(
               Deadline.within("1 second"),
@@ -1238,7 +1321,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p><p id="before"></p>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const result = yield* page.locator("#field").fill("new", {
                   checks: mode === "override" ? { [property === "readOnly" ? "editable" : "enabled"]: false } : {}
@@ -1298,7 +1381,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.gen(function*() {
                 const { url } = yield* fixture(() => html)
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const result = yield* page.locator("#field").fill("new", { checks: { editable } }).pipe(
                     Deadline.within("1 second"),
@@ -1337,7 +1420,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = '${type}'; before.textContent = this.value; events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const result = yield* page.locator("#field").fill("2020-03-03").pipe(Effect.result)
               const state = {
@@ -1368,7 +1451,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 `<input id="field" type="${type}" tabindex="0" value="${initial}" onfocus="this.type = 'number'; this.value = '7'; before.textContent = this.value; events.textContent += 'focus;'" onkeydown="events.textContent += 'keydown;'" onbeforeinput="events.textContent += 'beforeinput;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="before"></p><p id="events"></p>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const result = yield* page.locator("#field").fill(value).pipe(Effect.result)
                 const state = {
@@ -1398,7 +1481,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="field" type="date" tabindex="0" value="2020-03-02" onfocus="this.type = 'text'">`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#field").fill("2020-03-03")
             assert.strictEqual(yield* page.locator("#field").readValue, "2020-03-03")
@@ -1425,7 +1508,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="field" value="old" onfocus="events.textContent += 'focus;'" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const field = page.locator("#field")
               const result = yield* Effect.suspend(() => field.pressSequentially(value as unknown as string)).pipe(
@@ -1448,7 +1531,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<input id="field">`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const field = page.locator("#field")
             for (const value of ["123", Redacted.make("abc"), "", Redacted.make("")]) {
@@ -1485,7 +1568,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="field" type="number" value="42" oninput="events.textContent += 'input;'" onchange="events.textContent += 'change;'"><p id="events"></p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const field = page.locator("#field")
               const result = yield* field.fill(value as unknown as string).pipe(Effect.exit)
@@ -1507,7 +1590,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const field = page.locator("#field")
               for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
@@ -1525,7 +1608,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="other"><input id="field" type="number" value="42" onfocus="events.textContent += 'focus;'" onselect="events.textContent += 'select;'"><p id="events"></p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#other").focus()
             yield* page.locator("#field").fill("abc").pipe(Effect.exit)
@@ -1539,7 +1622,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const field = page.locator("#field")
             for (const value of ["5", "25", "14.5"]) {
@@ -1562,7 +1645,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }"></iframe>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#parent").fill("parent")
               const frame = page.frame(page.locator("iframe"))
@@ -1587,7 +1670,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               "<input id=\"other\"><p id=\"target\">old</p><script>document.designMode = \"on\"</script>"
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#other").fill("other")
               yield* page.locator("#target").fill("new")
@@ -1646,7 +1729,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               </script>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 yield* page.activate
                 yield* page.locator("#other").click()
@@ -1703,7 +1786,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               </script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#other").fill("other")
               yield* page.locator("#target").fill("new")
@@ -1737,7 +1820,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               </script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.activate
               yield* page.locator("#other").click()
@@ -1761,8 +1844,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   0,
                   "the asynchronous handler must run before it can block filling"
                 )
-                // Resolving means the target was never found; this target is waiting on focus preparation.
-                assert.strictEqual(error.phase, "waitingForCondition")
+                // A confirmed focus blocker was not sent. An unanswered apply call may have mutated the page,
+                // so its dispatch stays unconfirmed even when earlier rounds reported PreparingFocus.
+                assert.oneOf(JSON.stringify([error.phase, error.diagnostics.dispatch]), [
+                  JSON.stringify(["waitingForCondition", { _tag: "NotSent" }]),
+                  JSON.stringify(["dispatchedUnconfirmed", { _tag: "MayHaveBeenSent" }])
+                ])
                 // The target exists and passes every check. The focus blocker must not erase that evidence.
                 assert(
                   error.history.some((entry) => {
@@ -1785,7 +1872,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }"></iframe>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#parent").fill("parent")
             const frame = page.frame(page.locator("iframe"))
@@ -1807,7 +1894,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             Effect.gen(function*() {
               const { url } = yield* fixture(() => `<div id="target" role="${role}" ${attributes}>Item</div>`)
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const target = page.locator("#target")
                 assert.strictEqual(yield* target.isChecked, expected)
@@ -1821,7 +1908,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<div id="target" role="${role}" aria-checked="true" aria-selected="false">Item</div>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#target").pipe(Expect.toBeChecked, Deadline.within("1 second"))
             }))
@@ -1837,7 +1924,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   `<div id="target" role="${role}" aria-checked="${initial}" aria-selected="${!initial}" onclick="this.setAttribute('aria-checked', '${checked}')">Item</div>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const target = page.locator("#target")
                   yield* checked ? target.check() : target.uncheck()
@@ -1854,7 +1941,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<div role="${role}" aria-label="Checked" aria-checked="true" aria-selected="false">Checked</div><div role="${role}" aria-label="Selected" aria-checked="false" aria-selected="true">Selected</div><div role="${role}" aria-label="Both" aria-checked="true" aria-selected="true">Both</div>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const snapshot = yield* page.snapshot()
               const nodes = [...snapshot.refs.values()]
@@ -1871,10 +1958,80 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
-      // Optional checkability must be established before dispatching input.
+      for (
+        const role of [
+          "checkbox",
+          "radio",
+          "switch",
+          "menuitemcheckbox",
+          "menuitemradio",
+          "option",
+          "treeitem"
+        ] as const
+      ) {
+        it.effect(`interprets checked keywords consistently for ${role}`, () =>
+          Effect.gen(function*() {
+            const tokens = ["true", "TRUE", "True", "false", "FALSE", "False", "mixed", "MIXED", "Mixed"]
+            const { url } = yield* fixture(() =>
+              tokens.map((token, i) =>
+                `<div id="token${i}" role="${role}" aria-label="Token${i}" aria-checked="${token}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked').toLowerCase() === 'true' ? 'false' : 'true')">Token${i}</div>`
+              ).join("")
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const snapshot = yield* page.snapshot()
+              for (const [i, token] of tokens.entries()) {
+                const target = page.locator(`#token${i}`)
+                const checked = i < 3
+                const mixed = i >= 6 && ["checkbox", "menuitemcheckbox", "option", "treeitem"].includes(role)
+                assert.strictEqual(yield* target.isChecked, checked, token)
+                for (const value of [true, false]) {
+                  assert.strictEqual(
+                    yield* page.getByRole(role, { name: `Token${i}`, exact: true, checked: value }).count,
+                    !mixed && checked === value ? 1 : 0,
+                    token
+                  )
+                }
+                const node = [...snapshot.refs.values()].find((node) =>
+                  node.name._tag === "Accessible" && node.name.value === `Token${i}`
+                )!
+                assert.strictEqual(node.states.has("checked"), checked, token)
+                // Exercise actual clicks and their postconditions, including the boolean view of mixed.
+                if (checked) {
+                  yield* target.check()
+                  yield* target.uncheck()
+                  assert.isFalse(yield* target.isChecked)
+                } else {
+                  yield* target.uncheck()
+                  yield* target.check()
+                  assert.isTrue(yield* target.isChecked)
+                }
+              }
+            }))
+          }), timeout)
+      }
+
+      // Optional checkability must be established before dispatching input. Check and uncheck read it the same way
       for (const kind of ["option", "treeitem", "native option"] as const) {
-        for (const state of ["absent", "undefined", "empty"] as const) {
-          for (const operation of ["read", "check", "uncheck"] as const) {
+        for (
+          const state of [
+            "absent",
+            "undefined",
+            "empty",
+            "UNDEFINED",
+            "Undefined",
+            " ",
+            "\t\n",
+            " true ",
+            " false ",
+            " mixed ",
+            " undefined ",
+            "yes",
+            "bogus"
+          ] as const
+        ) {
+          for (const operation of ["read", "check"] as const) {
             it.effect(
               `rejects ${kind} checked ${operation} before input when aria-checked is ${state}`,
               () =>
@@ -1883,7 +2040,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     ? ""
                     : state === "empty"
                     ? "aria-checked=\"\""
-                    : "aria-checked=\"undefined\""
+                    : `aria-checked="${state}"`
                   const { url } = yield* fixture(() =>
                     `${
                       kind === "native option"
@@ -1895,20 +2052,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }</script>`
                   )
                   yield* Effect.scoped(Effect.gen(function*() {
-                    const page = yield* Browser.newPage()
+                    const page = yield* newPage
                     yield* page.goto(url)
                     const target = page.locator("#target")
-                    const failure = yield* (operation === "read"
-                      ? target.isChecked
-                      : operation === "check"
-                      ? target.check()
-                      : target.uncheck()).pipe(
-                        Deadline.within("1 second"),
-                        Effect.match({
-                          onFailure: (error) => error,
-                          onSuccess: () => undefined
-                        })
-                      )
+                    if (operation === "read") {
+                      for (const checked of [true, false]) {
+                        assert.strictEqual(
+                          yield* page.getByRole(kind === "native option" ? "option" : kind, { checked }).count,
+                          0
+                        )
+                      }
+                      const snapshot = yield* page.snapshot()
+                      assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")))
+                    }
+                    const failure = yield* (operation === "read" ? target.isChecked : target.check()).pipe(
+                      Effect.match({
+                        onFailure: (error) => error,
+                        onSuccess: () => undefined
+                      })
+                    )
                     assert.deepStrictEqual(yield* page.locator("body").readAttribute("data-events"), Option.some("0"))
                     if (kind === "native option") {
                       assert.strictEqual(yield* page.locator("#selection").readValue, "a")
@@ -1929,11 +2091,36 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<div id="target" role="${role}" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true')">Item</div><div id="undefined" role="${role}" aria-checked="undefined">Undefined</div>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#target")
               assert.isFalse(yield* target.isChecked)
               assert.isFalse(yield* page.locator("#undefined").isChecked)
+              for (
+                const token of [
+                  "",
+                  "undefined",
+                  "UNDEFINED",
+                  "Undefined",
+                  " ",
+                  "\t\n",
+                  " true ",
+                  " false ",
+                  " mixed ",
+                  " undefined ",
+                  "yes",
+                  "bogus"
+                ]
+              ) {
+                yield* page.evaluateInMainWorld(
+                  (token) => document.getElementById("undefined")!.setAttribute("aria-checked", token),
+                  token
+                )
+                assert.isFalse(yield* page.locator("#undefined").isChecked, token)
+                assert.strictEqual(yield* page.getByRole(role, { name: "Undefined", checked: false }).count, 1, token)
+                const snapshot = yield* page.snapshot()
+                assert.isFalse([...snapshot.refs.values()].some((node) => node.states.has("checked")), token)
+              }
               yield* target.check()
               assert.isTrue(yield* target.isChecked)
               yield* target.uncheck()
@@ -1950,7 +2137,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="checkbox" type="checkbox" role="option" aria-checked="undefined"><input id="radio" type="radio" role="treeitem" aria-checked="false"><input id="checked" type="checkbox" checked aria-checked="false">`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               for (const id of ["checkbox", "radio"]) {
                 const target = page.locator(`#${id}`)
@@ -1977,7 +2164,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }</label></div><div id="cover"></div><output id="out" style="position:absolute;top:260px"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               assert.isAbove(
                 yield* page.evaluateInMainWorld(() => document.getElementById("label")!.getClientRects().length),
@@ -2000,7 +2187,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   } onchange="out.textContent += event.isTrusted + ' '"><output id="out"></output>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const box = page.locator("#box")
                   assert(box instanceof LocatorImpl)
@@ -2036,7 +2223,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 } onclick="out.textContent += 'click '"><output id="out"></output>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const box = page.locator("#box")
                 assert(box instanceof LocatorImpl)
@@ -2057,7 +2244,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } onclick="out.textContent += 'click '"><output id="out"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const box = page.locator("#box")
               assert(box instanceof LocatorImpl)
@@ -2085,7 +2272,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } onchange="out.textContent += event.isTrusted + ' '"><output id="out"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const box = page.locator("#box")
               assert(box instanceof LocatorImpl)
@@ -2130,7 +2317,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } onchange="out.textContent += this.id + ':' + event.isTrusted + ' '"><output id="out"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* Effect.all([page.locator("#a")[action](), page.locator("#b")[action]()], {
                 concurrency: "unbounded"
@@ -2152,7 +2339,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } onclick="out.textContent += 'click '"><output id="out"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const box = page.locator("#box")
               assert(box instanceof LocatorImpl)
@@ -2209,7 +2396,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } onclick="event.preventDefault(); out.textContent += event.isTrusted + ' '"><output id="out"></output>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const box = page.locator("#box")
               const error = yield* box[action]().pipe(Effect.flip)
@@ -2225,7 +2412,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<button id="button">Press</button>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const button = page.locator("#button")
             assert(button instanceof LocatorImpl)
@@ -2263,7 +2450,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             const { url } = yield* fixture(() => `<input id="field">`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const field = page.locator("#field")
               assert(field instanceof LocatorImpl)
@@ -2332,7 +2519,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }"><button id="go">Go</button><script>setTimeout(() => document.getElementById('s').add(new Option('Late', 'l')), 300)</script>${out}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#s").selectOption({ label: "Bee" })
             yield* page.getByText("chose b").pipe(Expect.toBeVisible)
@@ -2377,7 +2564,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }><label id="label" for="radio"><span id="descendant">Choice</span></label><p id="clicks">0</p><script>["pointerdown", "mousedown", "mouseup", "click"].forEach(type => document.addEventListener(type, () => document.getElementById("clicks").textContent = String(Number(document.getElementById("clicks").textContent) + 1)))</script>`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const result = yield* page.locator(selector).uncheck({ trial }).pipe(Effect.exit)
                   assert.strictEqual(yield* page.locator("#radio").isChecked, checked)
@@ -2410,7 +2597,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="radio" type="radio" checked><label id="label" for="radio" role="checkbox" aria-checked="false"><span id="descendant" role="checkbox" aria-checked="false">Choice</span></label>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator(selector).uncheck()
               yield* page.locator(selector).uncheck({ trial: true })
@@ -2428,7 +2615,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="box" type="checkbox" checked onclick="this.type = 'radio'; this.checked = true; document.getElementById('clicks').textContent = '1'"><p id="clicks">0</p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const result = yield* page.locator("#box").uncheck().pipe(Effect.exit)
               assert.strictEqual(yield* page.locator("#clicks").readText, "1")
@@ -2451,7 +2638,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<div id="radio" role="radio" aria-checked="true" onclick="this.setAttribute('aria-checked', 'false'); document.getElementById('clicks').textContent = '1'">Choice</div><p id="clicks">0</p>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#radio").uncheck()
               assert.isFalse(yield* page.locator("#radio").isChecked)
@@ -2461,45 +2648,39 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
-      for (const checked of [true, false]) {
-        for (const association of ["explicit", "wrapping"] as const) {
-          for (
-            const kind of [
-              "ordinary",
-              "inert-link",
-              "inert-media",
-              "image",
-              "nearest",
-              "own-ancestor",
-              "prevented",
-              "own",
-              "native",
-              "missing",
-              "text",
-              "plain",
-              "button",
-              "a",
-              "area",
-              "input",
-              "select",
-              "textarea",
-              "summary",
-              "audio",
-              "video",
-              "iframe",
-              "embed",
-              "object",
-              "details",
-              "img",
-              "role-link",
-              "editable",
-              "role",
-              "ancestor",
-              "link-ancestor",
-              "editable-false",
-              "editable-ancestor"
-            ] as const
-          ) {
+      // A label acts for its control, or the target is checkable itself, both ways. Every other kind is refused before
+      // any input, the same way for check and uncheck, so each is one of the engine's rules, checked once: `button`
+      // stands for the elements interactive by their tag, and `a`, `video` and `img` are interactive by an attribute,
+      // without which (`inert-link`, `inert-media`, `image`) the label acts
+      for (const association of ["explicit", "wrapping"] as const) {
+        for (
+          const kind of [
+            "ordinary",
+            "inert-link",
+            "inert-media",
+            "image",
+            "prevented",
+            "own",
+            "own-ancestor",
+            "native",
+            "nearest",
+            "missing",
+            "plain",
+            "text",
+            "button",
+            "a",
+            "video",
+            "img",
+            "role",
+            "editable",
+            "editable-false",
+            "editable-ancestor",
+            "ancestor"
+          ] as const
+        ) {
+          const acts = ["ordinary", "inert-link", "inert-media", "image", "prevented", "own", "own-ancestor", "native"]
+            .includes(kind)
+          for (const checked of acts ? [true, false] : [true]) {
             it.effect(
               `label descendant ${association} ${kind} ${checked ? "check" : "uncheck"}`,
               () =>
@@ -2507,39 +2688,20 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   const ordinary = kind === "ordinary" || kind === "prevented" || kind === "inert-link" ||
                     kind === "inert-media" || kind === "image"
                   const own = kind === "own" || kind === "own-ancestor" || kind === "native"
-                  const attrs = kind === "a" || kind === "area" ?
+                  const attrs = kind === "a" ?
                     "href=\"#away\"" :
-                    kind === "audio" || kind === "video" ?
+                    kind === "video" ?
                     "controls" :
                     kind === "editable" ?
                     "contenteditable=\"true\"" :
                     kind === "role"
                     ? "role=\"button\""
-                    : kind === "role-link"
-                    ? "role=\"link\""
                     : kind === "editable-false" ?
                     "contenteditable=\"false\""
                     : kind === "img"
                     ? "usemap=\"#map\""
                     : ""
-                  const tag = [
-                      "button",
-                      "a",
-                      "area",
-                      "input",
-                      "select",
-                      "textarea",
-                      "summary",
-                      "audio",
-                      "video",
-                      "iframe",
-                      "embed",
-                      "object",
-                      "details",
-                      "img"
-                    ].includes(kind) ?
-                    kind :
-                    "span"
+                  const tag = kind === "button" || kind === "a" || kind === "video" || kind === "img" ? kind : "span"
                   const targetTag = kind === "inert-link"
                     ? "a"
                     : kind === "inert-media"
@@ -2553,11 +2715,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       (kind === "own" || kind === "own-ancestor")
                         ? `role="checkbox" aria-checked="${!checked}" onclick="event.preventDefault();this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"`
                         : ""
-                    } style="display:inline-block;width:100px;height:30px">Toggle</${targetTag}>`
+                    } style="display:inline-block;position:relative;left:0.4px;top:0.4px;width:100px;height:30px">Toggle</${targetTag}>`
                   const wrapped = kind === "ancestor" || kind === "own-ancestor" ?
                     `<button>${target}</button>` :
-                    kind === "link-ancestor" ?
-                    `<a href="#away">${target}</a>` :
                     kind === "editable-ancestor" || kind === "editable-false"
                     ? `<div contenteditable="true">${target}</div>`
                     : target
@@ -2584,9 +2744,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   </script>`
                   )
                   yield* Effect.scoped(Effect.gen(function*() {
-                    const page = yield* Browser.newPage()
+                    const page = yield* newPage
                     yield* page.goto(url)
                     const target = page.locator("#target")
+                    // CDP accepts fractional viewport input; BiDi and WebKit require integer coordinates.
+                    const roundsInput = (yield* Browser.Browser).info.protocol !== "cdp"
+                    const expectedPoint = yield* page.evaluateInMainWorld((roundsInput) => {
+                      const element = document.querySelector("#target")!
+                      const rect = element.getBoundingClientRect()
+                      const style = getComputedStyle(element)
+                      const viewportX = rect.left + parseFloat(style.borderLeftWidth) + 7
+                      const viewportY = rect.top + parseFloat(style.borderTopWidth) + 9
+                      const x = (roundsInput ? Math.round(viewportX) : viewportX) - rect.left
+                      const y = (roundsInput ? Math.round(viewportY) : viewportY) - rect.top
+                      return `target:${x}:${y}`
+                    }, roundsInput)
                     const action = () =>
                       checked
                         ? target.check({ position: { x: 7, y: 9 } })
@@ -2596,11 +2768,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                         const error = yield* action().pipe(Effect.flip)
                         assert(Locator.isLocatorError(error) && error.reason._tag === "StateUnchanged", String(error))
                         assert.strictEqual(yield* page.locator("#box").isChecked, !checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                       } else {
                         yield* action()
                         assert.strictEqual(yield* (own ? target : page.locator("#box")).isChecked, checked)
-                        assert.strictEqual(yield* page.locator("#out").readText, "target:7:9")
+                        assert.strictEqual(yield* page.locator("#out").readText, expectedPoint)
                         yield* page.evaluateInMainWorld(() => {
                           document.querySelector("#out")!.textContent = "reset"
                         })
@@ -2674,7 +2846,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }${out}<script>document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} })</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             for (const role of roles) {
               const target = page.locator(`#${role}`)
@@ -2711,7 +2883,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} }, true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#target")
               for (const state of [false, true]) {
@@ -2740,7 +2912,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#target").check()
               assert.strictEqual(yield* page.locator("#box").isChecked, true)
@@ -2759,7 +2931,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               } }, true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#target")
               for (const checked of [true, false]) {
@@ -2801,7 +2973,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }document.addEventListener('pointerdown', () => { ${say("'pointer sent'")} }, true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#target")
               for (const state of [false, true]) {
@@ -2833,7 +3005,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }document.addEventListener('pointerdown', e => { ${say("e.target.id")} }, true)</script>`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const target = page.locator("#target")
                 yield* target.check()
@@ -2858,7 +3030,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }document.addEventListener('pointerdown', e => { ${say("e.target.id")} }, true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#target")
               yield* target.check()
@@ -2902,7 +3074,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   }<a href="#wrong" style="display:inline-block;width:240px">A long link</a> Toggle</label>${out}`
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage()
+                  const page = yield* newPage
                   yield* page.goto(url)
                   const initialUrl = yield* page.url
                   const label = page.locator("#label")
@@ -2937,7 +3109,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }">Toggle</label>${out}`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const label = page.locator("#label")
                 const error = yield* (checked ? label.check() : label.uncheck()).pipe(Effect.flip)
@@ -2963,7 +3135,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             } })</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             for (const id of ["missing", "text", "plain"]) {
               const label = page.locator(`#${id}`)
@@ -2983,7 +3155,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<label id="switch" role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))">Toggle</label>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const label = page.locator("#switch")
             yield* label.check()
@@ -3006,7 +3178,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }">Toggle</label>${out}`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const label = page.locator("#label")
                 // The associated control disagrees even when the requested state already holds.
@@ -3036,7 +3208,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 `<input id="c" type="checkbox" ${checked ? "checked" : ""} onclick="${say("'clicked'")}">${out}`
               )
               yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const box = page.locator("#c")
                 assert.strictEqual(yield* box.isChecked, checked)
@@ -3058,7 +3230,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="c" type="checkbox" disabled ${checked ? "checked" : ""} onclick="${say("'clicked'")}">${out}`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const box = page.locator("#c")
               const failure = yield* box[action]({ trial: true }).pipe(
@@ -3084,7 +3256,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             } })</script><button id="m" onclick="${say("'shift ' + event.shiftKey")}">Modified</button>${out}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#d").dblclick()
             yield* page.getByText("double").pipe(Expect.toBeVisible)
@@ -3121,7 +3293,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }">B</div>${out}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             // The knob's pointerup lands on the end box, which doesn't stop it: pointer events go where the pointer is
             yield* page.locator("#knob").dragTo(page.locator("#end"), { steps: 5, checks: { receivesPointer: false } })
@@ -3203,7 +3375,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }" style="position:absolute;left:300px;top:200px;width:40px;height:40px;background:black">W</div><p id="dropped">nothing yet</p><p id="ended">nothing yet</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#card").dragTo(page.locator("#bin"), { html: "synthetic", modifiers: ["Shift"] })
             yield* page.locator("#dropped").pipe(Expect.toHaveText("binned card-7 false yes true"))
@@ -3229,7 +3401,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }" style="display:none;position:absolute;inset:0;background:white">Saving</div></div>${out}`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.locator("#b").click()
               yield* page.getByText("clicked 1").pipe(Expect.toBeVisible)
@@ -3244,7 +3416,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<input id="i"><p id="ups"></p><script>const ups = document.getElementById('ups'); addEventListener('keyup', (e) => ups.textContent += e.key + ' '); addEventListener('mouseup', () => ups.textContent += 'mouse ')</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#i").focus()
             yield* Effect.scoped(Effect.gen(function*() {
@@ -3273,7 +3445,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<p id="p" data-state="ready">Hello <b>there</b></p><input id="v" value="typed" disabled><input id="c" type="checkbox" checked><p class="two">a</p><p class="two">b</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const p = page.locator("#p")
             assert.strictEqual(yield* p.readText, "Hello there")
@@ -3298,7 +3470,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             const { url, origin } = yield* fixture(() => `<p id="ready" hidden>Old</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const expired = yield* page.locator("#ready").pipe(
                 Expect.toBeVisible,
@@ -3329,7 +3501,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<title>Waiting</title><p id="status">Working</p><button id="b" disabled>Go</button><input id="c" type="checkbox"><input id="v"><ul><li>a</li></ul><p id="tag">Tag</p><script>setTimeout(() => { document.getElementById('status').textContent = 'Done for now'; document.getElementById('b').disabled = false; document.getElementById('c').checked = true; document.getElementById('v').value = 'set by script'; document.getElementById('v').focus(); document.getElementById('tag').dataset.state = 'ready'; document.querySelector('ul').innerHTML = '<li>a</li><li>b</li><li>c</li>'; document.title = 'Finished' }, 300)</script>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             const status = page.locator("#status")
             yield* status.pipe(Expect.toHaveText("Done for now"))
@@ -3364,7 +3536,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             const { origin, url } = yield* fixture(() => `<a href="/orders">Orders</a>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               yield* page.getByRole("link", { name: "Orders" }).click()
               yield* page.pipe(Expect.toHaveURL(`${origin}/orders`))
@@ -3408,7 +3580,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }">Spot</button><div style="height:3000px"></div>${out}<script>addEventListener('scroll', () => document.getElementById('scrolled').textContent = 'scrolled', { once: true })</script><p id="scrolled" style="position:fixed;top:0">not scrolled</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#a").focus()
             yield* page.keyboard.insertText("inserted")
@@ -3435,7 +3607,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<button onclick="${say("'clicked'")}">Click me</button>${out}`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const first = yield* Browser.newPage()
+            const first = yield* newPage
             yield* first.goto(url)
             const second = yield* first.context.newPage
             yield* second.goto(url)

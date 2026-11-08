@@ -21,6 +21,7 @@ import type * as Equal from "effect/Equal"
 import type * as Inspectable from "effect/Inspectable"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
+import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as BrowserWorker from "./BrowserWorker.ts"
@@ -250,6 +251,10 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Details**
    *
+   * The route is in force for requests that start after this declaration returns. On Chromium, a request
+   * already underway without response interception may miss a later response route. Existing response pauses
+   * select the current routes by precedence.
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.
@@ -384,6 +389,52 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  * @since 0.1.0
  */
 export interface Options {
+  /**
+   * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
+   * `host:port`, without credentials, path, query or fragment. An omitted port is 80.
+   *
+   * **Details**
+   *
+   * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards or CIDR.
+   * Host matching follows the browser's native proxy rules, which may also exclude subdomains. Loopback
+   * destinations (`localhost`, `127.0.0.1` and `::1`) remain direct on every backend.
+   * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
+   * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
+   * Firefox credentials require a freshly launched browser. Firefox shares its proxy authentication cache:
+   * each successfully created context binds its endpoint's credential pair (or no credentials) for the connection's
+   * life. Conflicting pending creations are refused. A confirmed creation rejection or unused setup
+   * rollback releases only that creation's reservation; an uncertain outcome keeps it. Conflicting settings fail
+   * with `Unsupported`, even after a successfully created context closes.
+   * SOCKS and HTTPS proxy endpoints are refused with `Unsupported`.
+   *
+   * **Example** (An authenticated proxy)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Config, Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const password = yield* Config.Redacted("PROXY_PASSWORD")
+   *   return yield* Browser.newContext({
+   *     proxy: {
+   *       server: "http://proxy.example.com:8080",
+   *       credentials: { username: "automation", password }
+   *     }
+   *   })
+   * })
+   * ```
+   *
+   * @default existing browser proxy settings; bypass defaults to [], credentials to none
+   */
+  readonly proxy?: {
+    readonly server: string
+    readonly bypass?: ReadonlyArray<string> | undefined
+    readonly credentials?: {
+      readonly username: string
+      readonly password: Redacted.Redacted<string>
+    } | undefined
+  } | undefined
+
   /**
    * Storage to start from, such as a saved login.
    *

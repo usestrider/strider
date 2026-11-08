@@ -1,26 +1,26 @@
 ---
 // The masthead: the mark and the name, then two groups set apart by space alone: the sections, and the night toggle
 // beside the version, which links to the repository with GitHub's mark. It's the same bar on every page, the cover
-// included, so moving between pages never moves it. On a phone the version shows only the mark, and under 380px the
-// name is hidden, kept for screen readers.
+// included. On a phone the name sits above the wrapping navigation and controls; the version shows only its mark.
 import { versionLabel } from "../features/site.ts"
 import Mark from "./Mark.astro"
 
 interface Props {
-  readonly area?: "guides" | "scenarios" | "reference" | undefined
+  readonly area?: "guides" | "scenarios" | "reference" | "changelog" | undefined
 }
 
 const { area } = Astro.props
 const version = await versionLabel()
 ---
 
-<header class="flex h-14 items-center gap-2.5 border-b border-ink px-6 sm:gap-11">
-  <a class="masthead-home flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> <span class="max-[379px]:sr-only">Strider</span></a>
-  <span class="flex-1"></span>
-  <nav class="flex items-center gap-2.5 sm:gap-6">
+<header class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 border-b border-ink px-6 py-3 md:flex md:h-14 md:gap-11 md:py-0">
+  <a class="masthead-home col-span-2 flex items-center gap-2.5 text-[1.05rem]" href="/"><Mark size={22} /> <span>Strider</span></a>
+  <span class="hidden flex-1 md:block"></span>
+  <nav class="flex flex-wrap items-center gap-x-6 gap-y-3 md:flex-nowrap">
     <a class="nav-link" href="/docs" aria-current={area === "guides" ? "page" : undefined}>Guide</a>
     <a class="nav-link" href="/docs/scenarios" aria-current={area === "scenarios" ? "page" : undefined}>Scenarios</a>
     <a class="nav-link" href="/docs/api" aria-current={area === "reference" ? "page" : undefined}>API</a>
+    <a class="nav-link" href="/changelog" aria-current={area === "changelog" ? "page" : undefined}>Changelog</a>
   </nav>
   <div class="flex items-center gap-2 sm:gap-4">
     <button class="icon-link" type="button" aria-label="Dark mode" aria-pressed="false" title="Dark mode" data-theme-toggle>

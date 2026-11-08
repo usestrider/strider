@@ -20,9 +20,12 @@ import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Fold from "../src/internal/fold.ts"
+import * as Handles from "../src/internal/handles.ts"
 import * as Har from "../src/internal/har.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Readable from "../src/internal/readable.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
@@ -1134,6 +1137,103 @@ const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
   )
 
 describe("Chromium public sent-header waiting", () => {
+  it.effect("returns the snapshot for a new lookup after eviction while releasing an existing waiter", () =>
+    Effect.gen(function*() {
+      const { browser, page, request, barrier } = yield* sentHeaders()
+      const waiting = yield* Effect.forkScoped(NetworkRequest.headersSent(page, request))
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(waiting.pollUnsafe())
+      for (let i = 0; i < Fold.maxHops; i++) {
+        yield* browser.receive({
+          ...captured[0]!,
+          sessionId: "S1",
+          params: { ...captured[0]!.params, requestId: `evict-${i}` }
+        })
+      }
+      yield* barrier
+      assert.deepStrictEqual(yield* NetworkRequest.headersSent(page, request), request.headers)
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(waiting.pollUnsafe(), "existing waiter must settle as well as the new snapshot lookup")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+    }).pipe(onTestClock))
+
+  it.effect("publishes late request ExtraInfo after loadingFailed without reopening settled waits", () =>
+    Effect.gen(function*() {
+      const { browser, page, request, send, barrier, facts } = yield* sentHeaders()
+      const waiting = yield* Effect.forkScoped(NetworkRequest.headersSent(page, request))
+      yield* TestClock.adjust("0 millis")
+      yield* browser.receive({
+        method: "Network.loadingFailed",
+        sessionId: "S1",
+        params: {
+          requestId: captured[0]!.params.requestId,
+          timestamp: 772297,
+          type: "Fetch",
+          errorText: "net::ERR_FAILED"
+        }
+      })
+      yield* barrier
+      yield* TestClock.adjust("0 millis")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+      yield* send(captured[1]!)
+      yield* barrier
+      // HopHeaders is the adapter feed shared by the model and recording consumers.
+      const late = facts.filter((fact) =>
+        fact._tag === "HopHeaders" && fact.phase === "request" && fact.hop === request.hop
+      )
+      const hop = Handles.target(page).behind.runtime.model.hop(request.hop)
+      const { entry } = Har.entryOf(
+        {
+          request,
+          hop,
+          end: Option.none(),
+          body: Option.none(),
+          requestBody: Option.none(),
+          frames: [],
+          done: Deferred.makeUnsafe()
+        },
+        { wall: 0, monotonic: request.at },
+        { detail: "full", include: new Set(), bodies: { _tag: "Embed" } }
+      )
+      const retained = Option.getOrThrow(hop)
+      assert.strictEqual(Option.getOrThrow(retained.state.getUnsafe().sent).cookie, "flavor=oat")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+      const recorded = entry.request
+      assert.deepStrictEqual({
+        published: late.length,
+        recordedCookie: recorded.headers.find((header) => header.name.toLowerCase() === "cookie")?.value
+      }, { published: 1, recordedCookie: "flavor=REDACTED" })
+    }).pipe(onTestClock))
+
+  it.effect("gives late failure headers to earlier redirect obligations first", () =>
+    Effect.gen(function*() {
+      const { browser, request, send, barrier, facts } = yield* sentHeaders()
+      yield* send(captured[3]!)
+      yield* barrier
+      const requests = facts.filter((fact) => fact._tag === "RequestSent")
+      const last = requests[requests.length - 1]!.request
+      yield* browser.receive({
+        method: "Network.loadingFailed",
+        sessionId: "S1",
+        params: {
+          requestId: captured[0]!.params.requestId,
+          timestamp: 772297,
+          type: "Fetch",
+          errorText: "net::ERR_FAILED"
+        }
+      })
+      yield* send(captured[1]!)
+      yield* barrier
+      const headers = () =>
+        facts.filter((fact): fact is Extract<Adapter.Fact, { _tag: "HopHeaders" }> =>
+          fact._tag === "HopHeaders" && fact.phase === "request"
+        )
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop])
+      yield* send(captured[4]!)
+      yield* barrier
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop, last.hop])
+    }).pipe(onTestClock))
+
   it.effect("waits for attribution, then returns the network headers", () =>
     Effect.gen(function*() {
       const { page, request, send, barrier } = yield* sentHeaders()
@@ -1169,7 +1269,7 @@ describe("Chromium public sent-header waiting", () => {
       assert.strictEqual(timeout.phase, "waitingForEvent")
     }).pipe(onTestClock))
 
-  for (const terminal of ["fails", "is canceled", "loses its page"] as const) {
+  for (const terminal of ["fails", "is canceled", "loses its page", "disconnects"] as const) {
     it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
       Effect.gen(function*() {
         const { browser, page, request, send, barrier } = yield* sentHeaders()
@@ -1181,7 +1281,10 @@ describe("Chromium public sent-header waiting", () => {
         )
         yield* TestClock.adjust("0 millis")
         assert.isUndefined(waiting.pollUnsafe())
-        if (terminal === "loses its page") {
+        if (terminal === "disconnects") {
+          yield* browser.lose("test disconnect")
+          yield* page.closed
+        } else if (terminal === "loses its page") {
           yield* browser.receive({
             method: "Target.detachedFromTarget",
             params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
@@ -1455,6 +1558,59 @@ describe("Chromium capture document replacement", () => {
       yield* replyCapture(h.browser, yield* Queue.take(h.captures))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
+})
+
+describe("Chromium empty screenshot errors", () => {
+  for (
+    const variant of ["empty", "otherCode", "otherMessage", "metrics", "replacementBefore", "replacementAfter"] as const
+  ) {
+    it.effect(`preserves native cause and ordering for ${variant}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(variant === "metrics")
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const command = yield* Queue.take(variant === "metrics" ? h.preparation : h.captures)
+        const code = variant === "otherCode" ? -32001 : -32000
+        const description = variant === "otherMessage" ? "capture failed" : "Unable to capture screenshot"
+        if (variant === "replacementBefore") yield* h.browser.receive(replacementEvent())
+        yield* h.browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          error: { code, message: description }
+        })
+        if (variant === "replacementAfter") yield* h.browser.receive(replacementEvent())
+        const error = yield* Fiber.join(pending)
+        assert.strictEqual(error._tag, "PageError")
+        if (error._tag !== "PageError") return
+        if (variant === "replacementBefore") {
+          assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+          return
+        }
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+        if (error.reason._tag !== "BackendFailure") return
+        assert.strictEqual(error.operation, "Page.screenshot")
+        assert.strictEqual(error.reason.kind, "Rejected")
+        assert.strictEqual(error.reason.method, command.method)
+        const nativeMessage = `${command.method} rejected: Unrecognized (${description})`
+        const expected = variant === "empty" || variant === "replacementAfter"
+          ? "Chromium returned an empty image"
+          : nativeMessage
+        assert.strictEqual(error.reason.hint, expected)
+        assert.include(error.message, expected)
+        assert.instanceOf(error.reason.cause, Protocol.ProtocolError)
+        if (error.reason.cause instanceof Protocol.ProtocolError) {
+          assert.deepStrictEqual(
+            error.reason.cause.reason,
+            new Protocol.Rejected({
+              method: command.method,
+              reason: "Unrecognized",
+              code,
+              description
+            })
+          )
+        }
+      }).pipe(onTestClock))
+  }
 })
 
 describe("Chromium screenshot renderer readiness", () => {

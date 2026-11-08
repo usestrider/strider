@@ -153,6 +153,175 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        for (const state of ["pressed", "expanded", "selected"] as const) {
+          it.effect(`includes ASCII case-insensitive ${state} in snapshots as in role filters`, () =>
+            Effect.gen(function*() {
+              const name = state === "selected" ? "tab" : "button"
+              const html = `<div role="${name}" aria-${state}="TRUE">State</div>`
+              const { send } = yield* open(backend, html)
+              assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role(name), [state]: true }] })), 1)
+              assert.strictEqual(count(yield* send({ op: "count", steps: [{ ...role(name), [state]: false }] })), 0)
+              const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+              assert(snapshot._tag === "Snapshot")
+              assert.include(snapshot.root.children[0]!.states, state)
+            }), timeout)
+        }
+
+        it.effect("uses native option selection before aria-selected in snapshots as in role filters", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<select multiple><option aria-selected="true">Unselected</option></select>`
+            )
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ ...role("option", null, true), selected: true }] })),
+              0
+            )
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ ...role("option", null, true), selected: false }] })),
+              1
+            )
+            const snapshot = yield* send({
+              op: "snapshot",
+              steps: [{ _tag: "Css", selector: "option" }],
+              interactivity: false,
+              depth: null
+            })
+            assert(snapshot._tag === "Snapshot")
+            assert.notInclude(snapshot.root.states, "selected")
+          }), timeout)
+
+        it.effect("shares state role gating and native details precedence with snapshots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<article aria-pressed="true" aria-expanded="true" aria-selected="true">Article</article>
+              <details open aria-expanded="false"><summary>Open</summary></details>
+              <details aria-expanded="true"><summary>Closed</summary></details>
+              <details role="button" open aria-expanded="false"><summary>Button open</summary></details>
+              <details role="button" aria-expanded="true"><summary>Button closed</summary></details>
+              <select multiple><option selected aria-selected="false">Selected</option></select>`
+            )
+            for (const state of ["pressed", "expanded", "selected"] as const) {
+              for (const value of [true, false]) {
+                assert.strictEqual(
+                  (yield* send({
+                    op: "count",
+                    steps: [{ ...role("article"), [state]: value }]
+                  }))._tag,
+                  "InvalidSelector"
+                )
+              }
+            }
+            for (const value of [true, false]) {
+              assert.strictEqual(
+                (yield* send({
+                  op: "count",
+                  steps: [{ ...role("group"), expanded: value }]
+                }))._tag,
+                "InvalidSelector"
+              )
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ ...role("button"), expanded: value }]
+                  })
+                ),
+                1
+              )
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ ...role("option", null, true), selected: value }]
+                  })
+                ),
+                value ? 1 : 0
+              )
+            }
+            for (
+              const [selector, expected] of [
+                ["article", []],
+                ["details:nth-of-type(1)", ["expanded"]],
+                ["details:nth-of-type(2)", []],
+                ["details:nth-of-type(3)", ["expanded"]],
+                ["details:nth-of-type(4)", []],
+                ["option", ["selected"]]
+              ] as const
+            ) {
+              const snapshot = yield* send({
+                op: "snapshot",
+                steps: [{ _tag: "Css", selector }],
+                interactivity: false,
+                depth: 0
+              })
+              assert(snapshot._tag === "Snapshot")
+              assert.deepEqual(snapshot.root.states, expected, selector)
+            }
+          }), timeout)
+
+        it.effect("preserves state token defaults without trimming in filters and snapshots", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend, "<div id=\"state\">State</div>")
+            for (const state of ["pressed", "expanded", "selected"] as const) {
+              const name = state === "selected" ? "tab" : "button"
+              for (
+                const token of [
+                  null,
+                  "",
+                  "true",
+                  "True",
+                  "FALSE",
+                  "mixed",
+                  "MIXED",
+                  "undefined",
+                  "UNDEFINED",
+                  " true ",
+                  " false ",
+                  " mixed ",
+                  "\t",
+                  "bogus",
+                  "1"
+                ]
+              ) {
+                yield* call(
+                  `(state, name, encoded) => {
+                  const token = JSON.parse(encoded)
+                  const element = document.getElementById("state")
+                  for (const key of ["pressed", "expanded", "selected"]) element.removeAttribute("aria-" + key)
+                  element.setAttribute("role", name)
+                  if (token !== null) element.setAttribute("aria-" + state, token)
+                }`,
+                  [string(state), string(name), string(JSON.stringify(token))]
+                )
+                const positive = token === "true" || token === "True"
+                const neither = state === "expanded" && token === null ||
+                  state === "pressed" && (token === "mixed" || token === "MIXED")
+                for (const value of [true, false]) {
+                  assert.strictEqual(
+                    count(
+                      yield* send({
+                        op: "count",
+                        steps: [{ ...role(name), [state]: value }]
+                      })
+                    ),
+                    (value ? positive : !positive && !neither) ? 1 : 0,
+                    JSON.stringify({ state, token, value })
+                  )
+                }
+                const snapshot = yield* send({
+                  op: "snapshot",
+                  steps: [{ _tag: "Css", selector: "#state" }],
+                  interactivity: false,
+                  depth: 0
+                })
+                assert(snapshot._tag === "Snapshot")
+                assert.strictEqual(snapshot.root.states.includes(state), positive, JSON.stringify({ state, token }))
+              }
+            }
+          }), timeout)
+
         it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
@@ -584,7 +753,9 @@ export const engine = (backend: Backend) =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
-              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`
+              `<a id="go" style="position:fixed;left:-100px;top:20px;width:10px;height:10px">Go</a>`,
+              // Supply the rendering opportunity this geometry case requires, independently of frame scheduling.
+              "() => { globalThis.requestAnimationFrame = callback => { queueMicrotask(() => callback(performance.now())); return 0 } }"
             )
             const response = yield* send({
               ...point(0),
@@ -786,6 +957,17 @@ export const engine = (backend: Backend) =>
             yield* check("button", { pressed: false, disabled: false, name: text("Toggle", true) }, 2)
           }), timeout)
 
+        for (const name of ["radio", "menuitemradio", "switch"]) {
+          it.effect(`treats mixed as false for the two-state ${name} role`, () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(backend, `<div role="${name}" aria-checked="mixed"></div>`)
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [{ ...role(name), checked: false }] })),
+                1
+              )
+            }), timeout)
+        }
+
         it.effect("distinguishes mixed, absent and malformed checked role states", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -812,10 +994,10 @@ export const engine = (backend: Backend) =>
                 expected
               )
             })
-            yield* check("checkbox", true, 0)
-            yield* check("checkbox", false, 4)
+            yield* check("checkbox", true, 1)
+            yield* check("checkbox", false, 3)
             yield* check("option", true, 0)
-            yield* check("option", false, 1)
+            yield* check("option", false, 0)
             yield* check("treeitem", false, 0)
             const read = yield* send({
               op: "read",

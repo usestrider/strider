@@ -125,6 +125,28 @@ const silentListenerCases = [
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "keeps child snapshot text when time origin reads differ by one millisecond",
+      () =>
+        launched(Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          // Model the two adjacent time-origin values observed for one loaded srcdoc document.
+          // Every Automation/inspector pair differs, without a navigation or a timing dependency.
+          const child = `<h2>child heading</h2><script>
+          let reads = 0;
+          const origin = performance.timeOrigin;
+          Object.defineProperty(performance, "timeOrigin", {
+            get() { return origin + (reads++ % 2); }
+          });
+        </script>`
+          yield* page.goto(fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`))
+          const snapshot = yield* page.snapshot()
+          assert.include(snapshot.text, "child heading")
+        })),
+      timeout
+    )
+
     for (const { after, before, collisions, name, repeat } of silentListenerCases) {
       it.effect(
         `${name}, and starts the real MiniBrowser owned on another port`,
@@ -234,6 +256,9 @@ describe("Stock WebKit, launched in automation mode", () => {
         Effect.gen(function*() {
           yield* useXvfb()
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const occupiedPort = yield* silentListener(() => {})
+          const random = yield* Random.Random
+          let firstChoice = true
           const children: Array<
             {
               readonly pid: number
@@ -259,10 +284,21 @@ describe("Stock WebKit, launched in automation mode", () => {
           }))
           yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provideService(Random.Random, {
+              nextIntUnsafe: () => random.nextIntUnsafe(),
+              nextDoubleUnsafe: () => {
+                if (!firstChoice) return random.nextDoubleUnsafe()
+                firstChoice = false
+                // Force the first child to collide with the scoped listener.
+                return (occupiedPort - 49152 + 0.5) / 16384
+              }
+            }),
             Effect.provide(socketConnector)
           )
-          assert.strictEqual(children.length, 1)
-          const child = children[0]!
+          assert.strictEqual(children[0]?.port, occupiedPort)
+          assert.isAtLeast(children.length, 2, "the forced collision must replace the first child")
+          // Successful startup leaves the last spawned child owning the inspector listener.
+          const child = children[children.length - 1]!
           const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
           assert.strictEqual(child.executable, executable)
           assert.deepStrictEqual(child.args, args)

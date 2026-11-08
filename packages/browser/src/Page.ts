@@ -704,6 +704,15 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
  * @since 0.1.0
  */
 export interface Page extends ReadonlyPage {
+  /**
+   * Acquires a specialized feature for the caller's scope, including features that change native page behavior.
+   */
+  capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect<
+    H,
+    Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+
   getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator
   getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByLabel(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
@@ -865,6 +874,7 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
+   * - The route is in force for requests that start after this declaration returns.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"` or `"auth"`) decides what the handler is given and may decide.
@@ -872,6 +882,9 @@ export interface Page extends ReadonlyPage {
    *   effect where `route` was called.
    *
    * **Gotchas**
+   *
+   * On Chromium, a request already underway without response interception may not pick up a later response
+   * route, even before its headers arrive. A response that does pause selects the current routes by precedence.
    *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.

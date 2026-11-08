@@ -343,3 +343,296 @@ describe("native video failure artifacts", () => {
     expect(content).not.toContain("user:pass")
   })
 })
+
+it("transfers bounded child and detached daemon records with process-local ordering", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "child.fixture"
+  ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  const paths = [...run.stderr.matchAll(/Integration failure trace: (.+child\.fixture.+-test\.ndjson)/g)]
+  expect(paths).toHaveLength(1)
+  const text = fs.readFileSync(paths[0]![1]!, "utf8")
+  expect(text).toContain("DAEMON_FAIL")
+  expect(text).toContain("DAEMON_ORDER_ONE")
+  expect(text).toContain("DAEMON_ORDER_TWO")
+  expect(text).toContain("DAEMON_OWN_STDERR")
+  expect(text).toContain("BYTE_STDERR_é")
+  expect(text).toContain("node-stderr")
+  expect(text).toContain("FLOOD_TAIL")
+  expect(text).toContain("overflow")
+  expect(text).not.toContain("CHILD_PASS")
+  expect(text).not.toContain("LATE_CHILD_PASS")
+  const entries = text.trimEnd().split("\n").map((line) => JSON.parse(line))
+  const children = entries.filter((entry) => entry.kind === "send" || entry.kind === "receive").map((entry) => ({
+    ...entry.origin,
+    payload: entry.payload
+  }))
+  const first = children.find((entry) => entry.payload === "DAEMON_ORDER_ONE")!
+  const second = children.find((entry) => entry.payload === "DAEMON_ORDER_TWO")!
+  expect(first.pid).toBe(second.pid)
+  expect(first.sequence).toBeLessThan(second.sequence)
+  expect(first.connection).toBe(second.connection)
+  expect(Buffer.byteLength(text)).toBeLessThan(3 * 1024 * 1024)
+  for (const match of run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)) fs.unlinkSync(match[1]!)
+}, 30_000)
+
+it("caps process slots, reports exhaustion and removes the transfer spool", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { processSlots, TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  for (let slot = 0; slot < processSlots; slot++) fs.unlinkSync(path.join(directory, `${slot}.claim`))
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    ""
+  ], {
+    env: { ...process.env, [transferVariable]: directory }
+  })
+  expect(fs.readdirSync(directory)).toHaveLength(processSlots * 3 + 1)
+  scope.close()
+  expect(records).toContainEqual(["overflow", "Child process slot budget exhausted"])
+  expect(fs.existsSync(directory)).toBe(false)
+})
+
+it("keeps the test's own records when replayed child records exceed the artifact buffer", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TraceBuffer } = await import("./integration/failureTrace.ts")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer()
+  trace.record("client", "receive", "PARENT_FAILURE_EVIDENCE")
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child-transfer", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  // Eight ordinary children, each within its own 256 KiB spool bound, still add more than the 2 MiB buffer.
+  for (let child = 0; child < 8; child++) {
+    execFileSync(process.execPath, [
+      `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+      "-e",
+      "for (let i = 0; i < 40; i++) process.stderr.write('x'.repeat(8000))"
+    ], { env: { ...process.env, [transferVariable]: directory }, stdio: "ignore" })
+  }
+  scope.close()
+  expect(trace.entries().some((entry) => entry.kind === "node-stderr")).toBe(true)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+}, 30_000)
+
+it("retains recent early-slot daemon evidence independently of parent history and slot replay order", () => {
+  const trace = new TraceBuffer()
+  trace.record("parent", "receive", "PARENT_FAILURE_EVIDENCE")
+  trace.record("child-transfer", "receive", "RECENT_EARLY_DAEMON", {
+    pid: 1,
+    connection: "daemon",
+    sequence: 1,
+    timestamp: "2026-11-07T12:00:00.000Z"
+  })
+  // Later slots replay old traffic after the daemon. Their combined volume exceeds the child budget.
+  for (let pid = 2; pid <= 9; pid++) {
+    for (let sequence = 1; sequence <= 40; sequence++) {
+      trace.record("child-transfer", "node-stderr", "x".repeat(8000), {
+        pid,
+        connection: `client:${pid}`,
+        sequence,
+        timestamp: "2026-11-07T11:00:00.000Z"
+      })
+    }
+  }
+  expect(trace.entries().map((entry) => entry.payload)).toContain("RECENT_EARLY_DAEMON")
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_FAILURE_EVIDENCE")
+  expect(trace.entries().some((entry) => entry.kind === "overflow")).toBe(true)
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+})
+
+it("retires the writer-visible path before collecting and removing a live child's spool", async () => {
+  const { spawn } = await import("node:child_process")
+  const { once } = await import("node:events")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  let directory = ""
+  let observations = 0
+  const scope = new TransferScope(() => () => {
+    observations++
+    expect(fs.existsSync(directory)).toBe(false)
+  })
+  directory = scope.open()
+  const child = spawn(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "process.stdout.write('ready'); setInterval(() => process.stderr.write('x'.repeat(8000)), 1)"
+  ], { env: { ...process.env, [transferVariable]: directory }, stdio: ["ignore", "pipe", "ignore"] })
+  try {
+    await once(child.stdout!, "data")
+    scope.close()
+    expect(observations).toBeGreaterThan(0)
+    expect(fs.existsSync(directory)).toBe(false)
+    expect(fs.existsSync(`${directory}.closed`)).toBe(false)
+  } finally {
+    child.kill()
+    await once(child, "close")
+  }
+}, 30_000)
+
+it("bounds parent and chronological child tails separately and clears both", () => {
+  const trace = new TraceBuffer()
+  for (let sequence = 1; sequence <= 300; sequence++) {
+    trace.record("parent", "receive", `${sequence}:` + "p".repeat(8000))
+    trace.record("child", "receive", `${sequence}:` + "c".repeat(8000), {
+      pid: 1,
+      connection: "daemon",
+      sequence,
+      timestamp: new Date(sequence).toISOString()
+    })
+  }
+  const entries = trace.entries().filter((entry) => entry.kind !== "overflow")
+  for (const child of [false, true]) {
+    const selected = entries.filter((entry) => (entry.origin !== undefined) === child)
+    const bytes = selected.reduce((sum, entry) => sum + JSON.stringify(entry).length * 2, 0)
+    expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(bytes).toBeGreaterThan(2 * 1024 * 1024 - 20 * 1024)
+    expect(selected.at(-1)?.payload).toMatch(/^300:/)
+    expect(selected.map((entry) => entry.sequence)).toEqual(
+      selected.map((entry) => entry.sequence).sort((a, b) => a - b)
+    )
+  }
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+  trace.clear()
+  expect(trace.bytes).toBe(0)
+  expect(trace.entries()).toEqual([])
+})
+
+it("records a byte-array stderr view as text while preserving the actual bytes written", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const { stderrText } = await import("./integration/traceStderr.ts")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const data = new TextEncoder().encode("beforeBYTE_STDERR_éafter")
+  const view = data.subarray(6, data.length - 5)
+  expect(stderrText(view)).toBe("BYTE_STDERR_é")
+  expect(stderrText(Buffer.from(view))).toBe("BYTE_STDERR_é")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  const child = spawnSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "const data = new TextEncoder().encode('beforeBYTE_STDERR_éafter'); process.stderr.write(data.subarray(6, data.length - 5))"
+  ], { env: { ...process.env, [transferVariable]: directory } })
+  scope.close()
+  expect(child.status).toBe(0)
+  expect(child.stderr).toEqual(Buffer.from(view))
+  expect(records).toContainEqual(["node-stderr", "BYTE_STDERR_é"])
+})
+
+it("keeps child transfer overflow markers out of the parent history budget", async () => {
+  const { TransferScope } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer(512)
+  trace.record("parent", "receive", "PARENT_NEAR_FULL")
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child-transfer", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  fs.writeFileSync(
+    path.join(directory, "0-0"),
+    JSON.stringify({
+      sequence: 2,
+      timestamp: "2026-11-07T12:00:00.000Z",
+      connection: "daemon",
+      kind: "receive",
+      payload: "tail",
+      pid: 1
+    }) + "\n"
+  )
+  scope.close()
+  expect(trace.entries().map((entry) => entry.payload)).toContain("PARENT_NEAR_FULL")
+  expect(trace.entries().some((entry) => entry.kind === "overflow" && entry.origin !== undefined)).toBe(true)
+})
+
+it("protects startup through spool rotation and aggregate child pressure", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const trace = new TraceBuffer()
+  const scope = new TransferScope(() => (kind, payload, origin) =>
+    trace.record("child", kind, typeof payload === "string" ? payload : JSON.stringify(payload), origin)
+  )
+  const directory = scope.open()
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    "process.stderr.write('LAUNCH_HANDSHAKE'); for(let i=0;i<200;i++) process.stderr.write('x'.repeat(8000)); process.stderr.write('RECENT_PROTOCOL')"
+  ], { env: { ...process.env, [transferVariable]: directory }, stdio: "ignore" })
+  expect(
+    fs.readdirSync(directory).filter((name) => !name.endsWith(".claim"))
+      .reduce((sum, name) => sum + fs.statSync(path.join(directory, name)).size, 0)
+  ).toBeLessThanOrEqual(256 * 1024)
+  scope.close()
+  const gap = trace.entries().find((entry) => entry.kind === "overflow" && entry.origin?.pid === 0)!
+  const omitted = JSON.parse(gap.payload)
+  expect(omitted.from).toBeGreaterThan(1)
+  expect(omitted.to).toBeGreaterThan(omitted.from)
+  expect(trace.entries().map((entry) => entry.payload)).toContain("RECENT_PROTOCOL")
+  expect(trace.entries().some((entry) => entry.kind === "node-exit")).toBe(true)
+  for (let sequence = 1; sequence <= 300; sequence++) {
+    trace.record("child", "receive", "new".repeat(2600), {
+      pid: 999,
+      sequence,
+      connection: "other",
+      timestamp: "2099-01-01T00:00:00.000Z"
+    })
+  }
+  const entries = trace.entries()
+  expect(entries.some((entry) => entry.kind === "node-start")).toBe(true)
+  expect(entries.map((entry) => entry.payload)).toContain("LAUNCH_HANDSHAKE")
+  expect(entries.some((entry) => entry.kind === "overflow")).toBe(true)
+  expect(trace.bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+  expect(fs.existsSync(directory)).toBe(false)
+})
+
+it("caps protected startup allocation while retaining the newest child tail", () => {
+  const trace = new TraceBuffer()
+  for (let sequence = 1; sequence <= 400; sequence++) {
+    trace.record("child", "receive", String(sequence) + "s".repeat(8000), {
+      pid: 1,
+      sequence,
+      startup: true,
+      connection: "daemon",
+      timestamp: new Date(sequence).toISOString()
+    })
+  }
+  const entries = trace.entries().filter((entry) => entry.origin !== undefined)
+  expect(entries[0]?.origin?.sequence).toBe(1)
+  expect(entries.at(-1)?.origin?.sequence).toBe(400)
+  const prefix = entries.filter((entry) => entry.origin!.sequence < 100)
+  expect(prefix.reduce((sum, entry) => sum + JSON.stringify(entry).length * 2, 0)).toBeLessThanOrEqual(512 * 1024)
+  expect(entries.some((entry) => entry.origin!.sequence === 100)).toBe(false)
+  expect(trace.bytes).toBeLessThanOrEqual(trace.childLimit)
+  trace.clear()
+  expect(trace.entries()).toEqual([])
+  expect(trace.bytes).toBe(0)
+})
+
+it("retains a child record up to the documented 64 KiB serialized bound", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { TransferScope, transferVariable } = await import("./integration/traceTransfer.ts")
+  const records: Array<[string, unknown]> = []
+  const scope = new TransferScope(() => (kind, payload) => records.push([kind, payload]))
+  const directory = scope.open()
+  // 8 Ki characters, within the child payload limit; JSON escaping makes the record about 56 KiB in UTF-16.
+  const text = "\u0001".repeat(4000) + "a".repeat(4192)
+  execFileSync(process.execPath, [
+    `--import=${new URL("./integration/tracePreload.ts", import.meta.url).href}`,
+    "-e",
+    `process.stderr.write(${JSON.stringify(text)})`
+  ], {
+    env: { ...process.env, [transferVariable]: directory },
+    stdio: "ignore"
+  })
+  scope.close()
+  expect(records.filter(([kind]) => kind === "node-stderr")).toHaveLength(1)
+  expect(records.map(([kind]) => kind)).not.toContain("overflow")
+})

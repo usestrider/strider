@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
@@ -20,6 +21,7 @@ import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Capture from "../src/internal/cdpAdapter/capture.ts"
+import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
@@ -923,6 +925,190 @@ describe("CDP restoration cleanup", () => {
       assert.strictEqual(warnings.length, 1)
     }))
 
+  it.effect("restores only the affected context when local downloads release", () =>
+    Effect.gen(function*() {
+      const restored: Array<string | undefined> = []
+      const mock = {
+        ...session,
+        send: (command: { readonly params: { readonly behavior: string; readonly browserContextId?: string } }) => {
+          if (command.params.behavior === "default") restored.push(command.params.browserContextId)
+          return Effect.succeed({})
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const other = { ...page.context, id: state.ids.userContext(), browserContextId: "unrelated" }
+      state.contexts.set(other.id, other)
+      yield* Effect.scoped(Declare.declare(state, { _tag: "UserContext", context: page.context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Deny" }
+      }))
+      assert.deepStrictEqual(restored, [undefined])
+    }))
+
+  for (const outcome of ["success", "failure", "interruption"] as const) {
+    it.effect(`restores browser-wide downloads across concurrent disposal: ${outcome}`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const snapshotTaken = yield* Deferred.make<void>()
+        const continueRelease = yield* Deferred.make<void>()
+        const disposalSent = yield* Deferred.make<void>()
+        const finishDisposal = yield* Deferred.make<void>()
+        const disposed = new Set<string>()
+        const restored: Array<string> = []
+        const warnings: Array<unknown> = []
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: {
+            readonly method: string
+            readonly params: { readonly browserContextId: string; readonly behavior?: string }
+          }) =>
+            Effect.suspend(() => {
+              const id = command.params.browserContextId
+              if (command.method === "Target.disposeBrowserContext") {
+                if (outcome === "success") disposed.add(id)
+                return Deferred.succeed(disposalSent, undefined).pipe(
+                  Effect.andThen(Deferred.await(finishDisposal)),
+                  Effect.andThen(
+                    outcome === "failure"
+                      ? Effect.fail(
+                        new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "targetDestroyed" }) })
+                      )
+                      : Effect.succeed({})
+                  )
+                )
+              }
+              if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                if (id === undefined) {
+                  return Deferred.succeed(snapshotTaken, undefined).pipe(
+                    Effect.andThen(Deferred.await(continueRelease)),
+                    Effect.as({})
+                  )
+                }
+                restored.push(id)
+                if (disposed.has(id)) {
+                  return Effect.fail(
+                    new Protocol.ProtocolError({
+                      reason: new Protocol.Rejected({
+                        method: command.method,
+                        reason: "Unrecognized",
+                        code: -32602,
+                        description: `Failed to find browser context for id ${id}`
+                      })
+                    })
+                  )
+                }
+              }
+              return Effect.succeed({})
+            })
+        } as unknown as ProtocolClient.Session
+        const { state, page } = yield* withPage(mock)
+        // The page session has ended, but another declaration's release snapshots the context before disposal.
+        const closing = {
+          ...page.context,
+          id: state.ids.userContext(),
+          browserContextId: "disposing",
+          isDefault: false
+        }
+        state.contexts.set(closing.id, closing)
+        state.contextsByCdp.set("disposing", closing)
+        state.pages.set(page.id, { ...page, context: closing })
+        const other = { ...closing, id: state.ids.userContext(), browserContextId: "live" }
+        state.contexts.set(other.id, other)
+        state.contextsByCdp.set("live", other)
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, { _tag: "Browser" }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Deny" }
+        }).pipe(Scope.provide(lifetime))
+        const releasing = yield* Scope.close(lifetime, Exit.void).pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.make((entry) => {
+              if (entry.logLevel === "Warn") warnings.push(entry.message)
+            })])
+          ),
+          Effect.forkScoped
+        )
+        yield* Deferred.await(snapshotTaken)
+        const removing = yield* Contexts.removeUserContext(state, closing.id).pipe(Effect.forkScoped)
+        yield* Deferred.await(disposalSent)
+        assert.isTrue(state.contexts.has(closing.id), "disposal has not yet replied")
+        yield* Deferred.succeed(continueRelease, undefined)
+        if (outcome === "interruption") yield* Fiber.interrupt(removing)
+        yield* Deferred.succeed(finishDisposal, undefined)
+        yield* Fiber.await(removing)
+        yield* Fiber.join(releasing)
+        if (outcome === "success") {
+          yield* state.buffer.waitFor(() => state.contexts.has(closing.id) ? undefined : true)
+          assert.isFalse(state.contextsByCdp.has("disposing"))
+          assert.notInclude(restored, "disposing")
+        } else {
+          assert.isFalse(closing.removing)
+          assert.include(restored, "disposing")
+        }
+        assert.include(restored, "live", "the surviving context still has its download behavior restored")
+        assert.strictEqual(warnings.length, 0)
+      })))
+  }
+
+  it.effect("holds disposal until a download restore already sent to the context has replied", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const restoreSent = yield* Deferred.make<void>()
+      const finishRestore = yield* Deferred.make<void>()
+      const order: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+        }) =>
+          Effect.suspend(() => {
+            if (command.method === "Target.disposeBrowserContext") {
+              order.push("dispose")
+              return Effect.succeed({})
+            }
+            if (
+              command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default" &&
+              command.params.browserContextId === "disposing"
+            ) {
+              order.push("restore sent")
+              return Deferred.succeed(restoreSent, undefined).pipe(
+                Effect.andThen(Deferred.await(finishRestore)),
+                Effect.andThen(Effect.sync(() => order.push("restore replied"))),
+                Effect.as({})
+              )
+            }
+            return Effect.succeed({})
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const closing = {
+        id: state.ids.userContext(),
+        browserContextId: "disposing",
+        isDefault: false,
+        removing: false
+      }
+      state.contexts.set(closing.id, closing)
+      state.contextsByCdp.set("disposing", closing)
+      state.pages.set(page.id, { ...page, context: closing })
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "Browser" }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Deny" }
+      }).pipe(Scope.provide(lifetime))
+      const releasing = yield* Scope.close(lifetime, Exit.void).pipe(Effect.forkScoped)
+      yield* Deferred.await(restoreSent)
+      const removing = yield* Contexts.removeUserContext(state, closing.id).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(order, ["restore sent"], "disposal waits for the restore in flight")
+      yield* Deferred.succeed(finishRestore, undefined)
+      yield* Fiber.join(releasing)
+      yield* Fiber.join(removing)
+      assert.deepStrictEqual(order, ["restore sent", "restore replied", "dispose"])
+    })))
+
   it.effect("continues download cleanup after an ended context and warns for a rejected one", () =>
     Effect.gen(function*() {
       const { state, page } = yield* withPage()
@@ -953,7 +1139,7 @@ describe("CDP restoration cleanup", () => {
             Effect.succeed({})
       } as unknown as ProtocolClient.Session
       yield* Effect.scoped(
-        Declare.declare({ ...state, root: () => mock }, { _tag: "UserContext", context: page.context.id }, {
+        Declare.declare({ ...state, root: () => mock }, { _tag: "Browser" }, {
           _tag: "Downloads",
           behavior: { _tag: "Deny" }
         })
@@ -1281,3 +1467,99 @@ describe("CDP declaration cleanup lifetime", () => {
     )
   }
 })
+
+describe("CDP proxy and website challenge separation", () => {
+  for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
+    it.effect(`preserves website challenge coverage: ${coverage}`, () =>
+      Effect.gen(function*() {
+        const calls: Array<{ method: string; params: unknown }> = []
+        const wrote = yield* Deferred.make<void>()
+        const mock = {
+          ...session,
+          send: (command: { method: string; params: unknown }) =>
+            Effect.andThen(
+              Effect.sync(() => calls.push({ method: command.method, params: command.params })),
+              Deferred.succeed(wrote, undefined)
+            )
+        } as unknown as ProtocolClient.Session
+        const { state, page, target: original } = yield* withPage(mock)
+        const target = {
+          ...original,
+          page: {
+            ...page,
+            context: {
+              ...page.context,
+              proxy: {
+                server: "proxy.test:8080",
+                bypass: [],
+                credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+              }
+            }
+          }
+        }
+        if (coverage !== "none") {
+          state.registry.add(
+            { _tag: "Page", page: page.id },
+            coverage === "document policy"
+              ? { _tag: "Challenges" }
+              : { _tag: "Intercept", patterns: ["*"], phases: [coverage === "auth route" ? "auth" : "request"] },
+            state.ids.registration()
+          )
+        }
+        const handlers = Obligations.register(Kit.handlers<State.Event>())
+        handlers.apply("Fetch.authRequired", {
+          requestId: "F1",
+          frameId: "T1",
+          resourceType: coverage === "document policy" ? "Document" : "Fetch",
+          request: sent(`${origin}/auth`).request,
+          authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+        }, { state, target })
+        assert.strictEqual(state.obligations.size, coverage === "none" ? 0 : 1)
+        yield* state.buffer.flush
+        if (coverage === "none") {
+          yield* Deferred.await(wrote)
+          assert.deepStrictEqual(calls, [{
+            method: "Fetch.continueWithAuth",
+            params: { requestId: "F1", authChallengeResponse: { response: "Default" } }
+          }])
+        } else assert.deepStrictEqual(calls, [])
+      }))
+  }
+})
+
+for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
+  it.effect(`cleans up a worker's proxy authentication attempt on ${terminal}`, () =>
+    Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      page.context.proxy = {
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
+      }
+      const worker: State.TargetEntry = { ...target, kind: "worker", page: undefined }
+      state.workerContexts.set(worker, page.context)
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const request = sent(`${origin}/worker`).request
+      handlers.apply("Fetch.requestPaused", {
+        requestId: "F1",
+        networkId: "R1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request
+      }, { state, target: worker })
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request,
+        authChallenge: { source: "Proxy", origin: "http://proxy.test:8080", scheme: "basic", realm: "proxy" }
+      }, { state, target: worker })
+      assert.strictEqual(worker.proxyAuth?.size, 1)
+      handlers.apply(terminal, { requestId: "R1", encodedDataLength: 0, errorText: "canceled" }, {
+        state,
+        target: worker
+      })
+      assert.strictEqual(worker.proxyAuth?.size, 0)
+      yield* state.buffer.flush
+    }))
+}

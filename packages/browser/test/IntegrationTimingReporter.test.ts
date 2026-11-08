@@ -14,13 +14,13 @@ afterEach(() => {
   for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true })
 })
 
-const fixture = () => {
+const fixture = (options: { group?: string; job?: string } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-timings-"))
   directories.push(directory)
   const output = vi.spyOn(console, "log").mockImplementation(() => {})
   let now = 100
   vi.spyOn(performance, "now").mockImplementation(() => now)
-  const reporter = new TimingReporter({ directory })
+  const reporter = new TimingReporter({ directory, ...options })
   return {
     reporter,
     directory,
@@ -251,7 +251,7 @@ describe("Linux integration timing reporter", () => {
   }, 30_000)
 
   it("keeps a gracefully interrupted file incomplete and preserves received case timings", () => {
-    const f = fixture()
+    const f = fixture({ group: "heavy", job: "firefox" })
     const m = moduleFixture("partial", 9999)
     const test = m.test("finished", "passed", 25)
     m.test("still pending", "pending")
@@ -262,6 +262,8 @@ describe("Linux integration timing reporter", () => {
     f.reporter.onTestRunEnd([m.module], [], "interrupted")
     const report = f.read()
     assert.strictEqual(report.reason, "interrupted")
+    assert.deepStrictEqual(report.selection, { group: "heavy", job: "firefox" })
+    assert.deepStrictEqual(f.events().at(-1).selection, report.selection)
     assert.strictEqual(report.completedFiles, 0)
     assert.strictEqual(report.summedFileExecutionMs, 0)
     assert.strictEqual(report.files[0].executionMs, null)

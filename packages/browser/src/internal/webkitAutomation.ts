@@ -36,11 +36,13 @@ import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
+import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Link from "./link.ts"
 import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Proxy from "./proxy.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
 import * as WebKitWire from "./webkitWire.ts"
@@ -80,6 +82,7 @@ export interface Settings {
 
 /** What a context's process is started with. */
 export interface ProcessOptions {
+  readonly proxy?: Adapter.ProxyOptions | undefined
   /** The time zone, which a WebKitGTK browser takes at launch (`--time-zone`). */
   readonly timeZone?: string | undefined
   /** Whether the session accepts certificates it can't verify, a capability of the session. */
@@ -296,6 +299,16 @@ const spawnProcess = Effect.fnUntraced(function*(
         coreDumps: settings.coreDumps,
         env: {
           WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
+          ...(options.proxy === undefined ? {} : {
+            http_proxy: `http://${options.proxy.server}`,
+            https_proxy: `http://${options.proxy.server}`,
+            HTTP_PROXY: `http://${options.proxy.server}`,
+            HTTPS_PROXY: `http://${options.proxy.server}`,
+            all_proxy: "",
+            ALL_PROXY: "",
+            no_proxy: [...Proxy.loopback, ...options.proxy.bypass].join(","),
+            NO_PROXY: [...Proxy.loopback, ...options.proxy.bypass].join(",")
+          }),
           XDG_DATA_HOME: `${directory}/data`,
           XDG_CACHE_HOME: `${directory}/cache`,
           XDG_CONFIG_HOME: `${directory}/config`
@@ -424,13 +437,6 @@ const startProcess = Effect.fnUntraced(function*(
   const timeout = Duration.fromInputUnsafe(settings.timeout ?? "30 seconds")
   const deadline = (BrowserClock.now() + Duration.toMillis(timeout) * 1e6) as MonotonicInstant.MonotonicInstant
   const within = `within ${Duration.format(timeout)}`
-  const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
-    Deferred.await(deferred).pipe(
-      byDeadline(deadline),
-      Effect.flatMap((value) =>
-        Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
-      )
-    )
   const { connection, launched } = yield* spawnProcess(settings, index, options, deadline, startup)
   const socket = yield* InspectorSocket.connect(connection)
   startup.mark("inspector")
@@ -438,6 +444,14 @@ const startProcess = Effect.fnUntraced(function*(
   const automationReady = yield* Deferred.make<bigint>()
   const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
   const ended = yield* Deferred.make<Transport.ConnectionLost>()
+  const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
+    Deferred.await(deferred).pipe(
+      Effect.raceFirst(Deferred.await(ended).pipe(Effect.flatMap((reason) => Launch.refused(reason.description)))),
+      byDeadline(deadline),
+      Effect.flatMap((value) =>
+        Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
+      )
+    )
   const automationLink = yield* Link.make()
   let connectionId = 0n
   let automationTarget: bigint | undefined
@@ -462,6 +476,10 @@ const startProcess = Effect.fnUntraced(function*(
       yield* Deferred.succeed(firstList, pagesListed)
       return
     }
+    // The anchor is open for as long as the process runs, so a list without it isn't the process's pages: stock
+    // WebKit sends one with no targets at all as a context's page opens after another closed. Taken as the pages,
+    // it would end the new one, and the next list would announce it again after its target had already arrived
+    if (anchors.size > 0 && !pagesListed.some((listed) => anchors.has(listed.id))) return
     for (const target of pagesListed) {
       if (announced.has(target.id) || anchors.has(target.id) || initial.has(target.id)) continue
       if (holdNext !== undefined) {

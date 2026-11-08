@@ -29,6 +29,11 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  /** A navigable has existed, so setup rollback cannot establish that the proxy cache stayed unused. */
+  proxyUsed?: boolean | undefined
+  proxy?: Adapter.ProxyOptions | undefined
+  proxyIntercept?: Network.Intercept | undefined
+  proxyAttempts?: Set<string> | undefined
   readonly id: UserContext.Id
   /** BiDi's id: `"default"` for the default context. */
   readonly bidi: BrowserBidi.UserContext
@@ -44,11 +49,15 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   document: DocumentEntry | undefined
   /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
-  /**
-   * A traversal that replied before its restored document's realm arrived, waiting for it: under load, Firefox
-   * can reply first.
-   */
-  restoring: ((realm: RealmEntry) => void) | undefined
+  /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
+  restoring: {
+    readonly navigation: PageNavigation.Id
+    readonly arrived: (realm: RealmEntry) => void
+  } | undefined
+  /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
+  restorationAmbiguous: boolean
+  /** Traversal commands still awaiting replies, including ones whose restoration ownership was invalidated. */
+  readonly traversalCommands: Set<PageNavigation.Id>
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
   /** Commands awaiting replies; unknown error commits wait for their navigation identities. */
@@ -160,6 +169,11 @@ export interface HandleEntry {
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface State {
+  readonly proxyBindings: Map<string, {
+    readonly credentials: Adapter.ProxyOptions["credentials"]
+    pending: number
+    retained: boolean
+  }>
   /** Connection-owned declaration cleanup can finish after its caller stops waiting. */
   readonly cleanupScope: Scope.Scope
   readonly options: Adapter.ConnectOptions
@@ -224,6 +238,7 @@ export const make = (options: {
     removing: false
   }
   const state: State = {
+    proxyBindings: new Map(),
     cleanupScope: options.cleanupScope,
     options: options.connect,
     ids: options.ids,
@@ -345,3 +360,12 @@ export const realmOf = (state: State, id: L1Target.RealmId): Effect.Effect<Realm
     () => Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({})),
     (realm) => !realm.ended
   )
+
+/** Forget credentials when the connection ends; Firefox's cache binding is not a context-scoped resource. */
+export const releaseProxy = (state: State): void => {
+  state.proxyBindings.clear()
+  for (const context of state.contexts.values()) {
+    context.proxy = undefined
+    context.proxyAttempts?.clear()
+  }
+}

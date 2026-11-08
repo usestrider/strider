@@ -68,7 +68,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 - **A step never waits.** No step waits on the browser or on a caller, so the stream never stalls: deciding an obligation, releasing a page and installing the engine happen apart, and what they write comes back as a command (a policy's `AutoResolution`, a dialog nothing will decide, a stay).
 - **Two exceptions, each with a single writer of its own.** A page's input state (§5) is written by the gesture that holds the page's input permit, at the rate of input events. Where the engine is installed (§8, Queries) is the runtime's `Cache` of its own work, which dedupes concurrent installs; it is no fact about the browser and no caller's setting.
 
-**Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (prerender activation moves both into the existing tab), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
+**Identity fields must be fixed for the entity's lifetime, and say why.** Each plain field carries a one-line justification. Ids, `closed` and streams are exempt by construction. A field that can't be justified moves into `state`. Applying this rule moved three fields: a document's and a window realm's navigable (state can represent transfer between pages, which current adapters do not implement), `isInitialAboutBlank` (cleared by `document.open()`), and a navigation's kind (the Navigation API can intercept a cross-document navigation into a same-document one).
 
 **Unions of valid models, not optional fields.** When fields only make sense together, the model is a tagged union of its valid shapes, so impossible combinations can't be built: a page with a parent, a worker realm attached to a tab, a left-open page with a cleanup scope. A value that is genuinely optional, such as an opener the backend didn't report, is an `Option`, never `?:`, `undefined` or `null`. Generated L0 wire types mirror the protocol's optional keys, and adapters convert them at the L0→L1 boundary.
 
@@ -132,7 +132,7 @@ interface NavigableState {
 interface PageModel {
   readonly _tag: "Page"
   readonly id: NavigableId
-  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: an activated prerender page ends (PrerenderActivated)
+  readonly pageKind: "tab" | "popup" | "prerender" | "fenced"   // fixed: how the page was created
   readonly origin:                                      // fixed: how it came to exist
     | { _tag: "Created" }
     | { _tag: "Opened"; originalOpener: Option<NavigableId> }   // None: the backend didn't report it; kept even under noopener
@@ -159,7 +159,7 @@ interface DocumentModel {
     | { _tag: "Restored"; navigation: NavigationId; from: DocumentId }   // only with correlating evidence
     | { _tag: "Adopted" }                               // existed before we attached
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // changes only on prerender activation
+    navigable: NavigableId                              // fixed in current adapters
     isInitialAboutBlank: boolean                        // cleared by document.open()
     generation: DocumentGeneration                      // bumped by document.open()
     url: Url                                            // changes on same-document navigation
@@ -176,7 +176,7 @@ interface WindowRealmModel {
   readonly id: RealmId
   readonly world: { _tag: "Main" } | { _tag: "Isolated"; name: string }   // fixed: a realm never changes world
   readonly state: SubscriptionRef<{
-    navigable: NavigableId                              // moves with its document on prerender activation
+    navigable: NavigableId                              // fixed in current adapters
     documents: NonEmptyReadonlyArray<DocumentId>        // usually one; two after initial-blank reuse
     lifecycle: RealmLifecycle
   }>
@@ -207,7 +207,7 @@ type NavigationOutcome =
   | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
-  | { _tag: "Activated"; document: DocumentId }       // prerender
+  | { _tag: "Activated"; document: DocumentId }       // prerender activation is not implemented
   | { _tag: "Download"; download: DownloadId }        // old document stays
   | { _tag: "NoContent"; status: 204 | 205; response: Option<ResponseRef> }   // old document stays
   | { _tag: "Failed"; error: NetError; errorDocument: Option<DocumentId> }   // None: no error page correlated (yet)
@@ -264,7 +264,7 @@ type Readiness = { _tag: "Ready" } | { _tag: "NotReady"; predicate: Predicate; r
 
 type CloseReason =
   | BrowserClosed | BrowserCrashed | ConnectionLost | ModelUnavailable
-  | UserContextRemoved | AccessReleased | PrerenderActivated
+  | UserContextRemoved | AccessReleased
   | PageClosed /* by: command | script | userContextRemoved */ | PageCrashed
   | ObligationEnded | DownloadEnded | HopEnded            // a dialog, file chooser or paused request; a download; a request hop
   | Vanished                                              // gone for a reason nothing reported
@@ -323,6 +323,10 @@ Cleanup groups can span sibling pages, independently of this graph.
 - **Remote facts and model loss.** A remote close invalidates local bindings without sending another close. Permanent loss of observation ends lifetimes with `ConnectionLost` or `ModelUnavailable` without asserting remote destruction. A temporary quarantine fails current operations without completing `closed`, and resumes only after a verified resynchronization.
 - **Suspension** (back/forward cache) is a domain state, not a scope operation. Explicit-ref operations fail fast; waits may opt in to resume within their deadline. Resuming never revives invalid handles.
 - **Cleanup order.** Transport, ingestion and obligation resolvers stay alive while owned resources tear down. The order is: stop new work, drain obligations within the cleanup budget, release declarations and owned resources in dependency order, then disconnect or close the owned process. Finalizers are bounded.
+
+### Native virtual authenticators
+
+Native virtual WebAuthn authenticators are acquired by a controlled page's `capability(Capability.VirtualAuthenticator)` into the caller's scope. Chromium's virtual environment belongs to the page's frame tree, survives navigation and does not cover sibling pages or popups. L1 checks scope and access lifetime on every handle call; the adapter reserves one owner per page, releases a late creation, removes the authenticator and disables the environment before allowing reacquisition. An overlapping acquisition fails rather than allowing one scope's cleanup to remove another's authenticator. Credential listing exports redacted private-key bytes; importing provisions a separate native store with its own counter. Firefox's current BiDi transport and stock WebKit refuse acquisition.
 
 ### Experimental claims and handoff
 
@@ -386,8 +390,9 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - `document.open()` keeps the epoch, starts a new generation, and returns readiness to `loading`.
   - A restored document gets the same id only when the adapter can correlate it; otherwise the old epoch ends with `DocumentUnloaded` and the new one is `createdBy: Restored{from}`.
   - Node and handle continuity are proven separately from document continuity.
-  - On prerender activation the prerender page ends with `PrerenderActivated`. Its document and realms move into the activating tab, and their `navigable` changes in state.
+  - Current adapters do not implement prerender activation or document and realm transfer between pages.
 - **Frames.** A frame is created synchronously, before any protocol notification arrives. It ends on container removal, or when its parent's document permanently ends; the adapter closes orphans itself because HTML never fires an event for them. A frame keeps its identity across process swaps; only its adapter session changes.
+  Stock WebKit confirms every newly established pairing between an Automation child-frame handle and an inspector frame with a temporary window mark (QUIRKS.md, Q228). Time-origin and URL fingerprints cannot prove identity or exclude a candidate: even a unique match can belong to a sibling. Both lookup directions continue past a candidate whose mark does not match, and reject a removed frame or a document replaced during confirmation or cleanup. Established handle caching is retained. Each new pairing requires extra protocol commands, and page scripts can briefly see the mark even when fingerprints would have matched uniquely. The mark is removed after the check, including a failed or interrupted check.
 - **Realms and worlds.**
   - **Kinds:** window (main or isolated world), dedicated, shared and service workers, and worklets. The kind is an open union.
   - **The library's own code** runs in a utility isolated world wherever one exists. Stock WebKit has none, and says so as a capability: there the engine, the trace capture and the library's own reads run in the page's world, and a caller's `evaluate` is refused rather than moved there (QUIRKS.md, Q194).
@@ -459,10 +464,30 @@ contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 6. Network
 
+A new context may carry a normalized HTTP proxy endpoint, a bypass host list (default empty), and optional
+credentials with a Redacted password. An omitted proxy leaves browser settings untouched. CDP and BiDi set the
+endpoint per user context; launched stock WebKit sets HTTP/HTTPS proxy environment variables on that context's
+process, overriding inherited proxy variables without changing the parent environment. Localhost, 127.0.0.1 and
+::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
+Unsupported endpoint schemes, WebKit credentials and settings for an existing WebKit process are explicit refusals.
+
+Automatic proxy authentication participates in native interception without replacing route declarations. CDP
+requires a Proxy source and matching endpoint origin; BiDi requires Proxy-Authenticate in the observed response.
+Configured credentials are submitted at most once per request, then canceled if challenged again. Website
+challenges continue through the ordinary obligations and auth routes; Firefox's missing challenge fields are read
+from WWW-Authenticate, never inferred from its potentially stale 407 status. Attempt state is removed when requests
+finish or their owner ends. Firefox's native proxy auth cache spans user contexts: a connection reserves each proxy
+endpoint's credentials (including none) before yielding. Each creation owns a share: a confirmed pre-creation
+rejection or confirmed unused rollback releases only its share. Another pending creation, prior successful context,
+observed navigable or uncertain remote outcome retains the binding. Conflicting configurations are refused. Configured
+credentials on an attached Firefox are refused because the pre-existing cache is unowned. Retained bindings survive
+later context cleanup; interceptor and request state do not.
+
+
 - **Requests and hops.** A request id spans the redirect chain. Each hop has its own identity, snapshot, response and body access, so a held 302 never becomes the next hop's 200. Snapshots record explicitly when information (such as CDP's extra-info events) is missing.
   Built: a hop also keeps the headers as the network sent and received them where the backend reports them apart (CDP's `ExtraInfo`, with `Cookie` and `Set-Cookie`), and the time its end was reported; recordings read them, and the request and response events keep the headers their own events gave (QUIRKS.md, Q158).
-  A hop knows when its headers as sent are settled, with its first attributable report, its end (including failure or cancellation), or its page's removal. `NetworkRequest.headersSent` waits within the operation's deadline for that settlement, then returns the available sent headers or the request event's headers when none were reported. Page removal settles the header wait without fabricating a network failure for a detached request.
-  CDP queues early `ExtraInfo` in a request's `ahead` list and records outstanding expectations by hop and phase in `owed`. An arriving header report satisfies the earliest expectation for its phase, or waits in `ahead` until its hop is known. `redirectHasExtraInfo` determines whether the hop ending in a redirect expects both phases; when it expects none, the request event's headers are used without consuming the queued reports. For a final network response, `hasExtraInfo: true` registers both expectations and holds the response until its extra headers arrive. A final response from a cache, service worker or route does not wait, even if `hasExtraInfo` is true; it uses the request event's headers if sent headers have not already been reported. A final failure assigns already-queued headers to the last hop before ending it. BiDi reports sent headers from the request event; WebKit with the response (Q181).
+  A hop knows when its headers as sent are settled, with its first attributable report, its end (including failure or cancellation), eviction, or loss of its owning frame (including removal of an ancestor), worker, context, page or browser connection. `NetworkRequest.headersSent` waits within the operation's deadline for that settlement, then returns the available sent headers or the request event's headers when none were reported. Owner removal settles only the affected header waits without fabricating a network failure for detached requests. Eviction releases existing waiters; new lookups use the immutable snapshot.
+  CDP queues early `ExtraInfo` in a request's `ahead` list and records outstanding expectations by hop and phase in `owed`. An arriving header report satisfies the earliest expectation for its phase, or waits in `ahead` until its hop is known. `redirectHasExtraInfo` determines whether the hop ending in a redirect expects both phases; when it expects none, the request event's headers are used without consuming the queued reports. For a final network response, `hasExtraInfo: true` registers both expectations and holds the response until its extra headers arrive. A final response from a cache, service worker or route does not wait, even if `hasExtraInfo` is true; it uses the request event's headers if sent headers have not already been reported. A final failure leaves the last hop eligible for late request headers, with earlier redirect expectations taking precedence. Attributable late headers update the retained model and adapter feed without reopening settled waits or promising to rewrite flushed recordings. Retention remains bounded. BiDi reports sent headers from the request event; WebKit with the response (Q181).
   On Chromium, awaiting definitive headers before allowing the same response to proceed waits until the deadline; the immediate request snapshot remains available with possible omissions such as `Cookie`. A hop's request body is read by hop, kept where a body collection for requests covers the page.
 - **Request lifecycle.** `Sent → ResponseStarted → Completed | Failed`.
   - A service-worker response can start without `Sent`.
@@ -477,7 +502,8 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - Defaults are continue for request and response, and `DefaultAuth` for auth.
   - BiDi cannot scope intercepts to a user context, so emulating that needs browser-wide access (§3).
   - **Built.** A route is a handler of paused requests at one phase, registered as a dialog's handler is (§5), and asked in precedence order: the page's routes, then its context's, the most recent first, until one decides; `fallthrough` asks the next. A route declares an intercept wide enough for its pattern and matches the pattern itself. The default is continue, and at an authentication challenge `CancelAuth`, the challenge's response, not `DefaultAuth`, the browser's prompt, which waits forever headless on Firefox. Every context the library creates declares `Challenges` where the backend can pause one (`network.challenges`), so a challenge no route matches is paused too and gets `CancelAuth`: on Chromium a document's, on Firefox every one, on stock WebKit none (QUIRKS.md, Q252). A challenge in a context the library didn't create is left as the browser has it, as a file chooser there is. When every matching route fell through or failed, or the backend refused a decision, the default is published as an automatic decision. A refused decision never leaves the request paused. Each paused request's body is readable on every backend (BiDi needs a request data collector, declared with each request-phase intercept); a paused response's only on CDP.
-  - **Chromium's interceptor is kept installed** (QUIRKS.md Q46). The CDP adapter enables `Fetch` for every page from its start, with a pattern no request matches while nothing intercepts, and never disables it; an intercept declared on a live page changes patterns only, which takes effect at once.
+  - **Route activation.** A route is in force for requests that start after its declaration returns. On Chromium, a request already underway without response interception may not pick up a later response route, even before its headers arrive: interception stages are selected when the request starts. An existing response pause selects the current routes by precedence.
+  - **Chromium's interceptor is kept installed** (QUIRKS.md Q46). The CDP adapter enables `Fetch` for every page from its start and never disables it. In contexts the library creates, default challenge handling installs a wildcard Document Request pattern with `handleAuthRequests: true`, even without user routes. Proxy credentials and routes add their required patterns. Only when there are no interception consumers does it use a nonempty pattern no request matches, including in contexts the library did not create without routes or proxy credentials. Declaring an intercept on a live page updates the installed patterns; it does not add response interception retroactively to requests already underway. A Document-only pattern still installs Chromium's proxy for subresource factories; the unmatched fallback also retains that proxy.
 - **Bodies.** A body may be unavailable for a stated reason: not collected, evicted, a redirect, streaming, over a limit, or a request that failed after its response started.
   - **A collection names its bodies**: requests', responses', or both. A HAR collects requests' always, and responses' unless it omits content; a response subscription collects responses'.
   - **Collected for a subscription**: up to `NetworkResponse.BodyLimit`, declared in its scope. A body is read once its hop has ended; a redirect hop has none, without asking the browser.
@@ -535,7 +561,8 @@ A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) 
 
 - **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.
 - **Frames.** A frame locator is a boundary in the steps. L1 splits them at each boundary; the engine of each document on the way finds its iframe, which must be one match and an iframe, and the adapter names the frame the iframe holds (`contentFrame`: CDP's `DOM.describeNode`, a window proxy's `context` on BiDi, WebKit's `contentFrameId`). The last part goes to the engine of the frame's current document. A frame not there yet is a request that matches nothing, in a round of at most 100 ms, so the next round looks for the frame again. Same-origin and cross-site frames go the same way. Role/filter combinations are validated from the whole query at the first frame lookup, so a missing frame cannot hide an invalid combination.
-- **Checked state** uses the native checked property for checkbox and radio inputs. The ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option` and `treeitem` use `aria-checked === "true"`. For option/treeitem, absent or empty `aria-checked`, or the literal value `"undefined"`, means unsupported checking, so checked reads and check/uncheck fail with `WrongElement` before input; explicit `"false"` is checkable but unchecked ([WAI-ARIA](https://www.w3.org/TR/wai-aria-1.2/#aria-checked)). This also rejects ordinary native options before input can change selection. The other supported roles keep false for absent or `"undefined"` values. Reads, expectations, check/uncheck and snapshots share this state. Selection is independent, from `aria-selected` or a native option's selected property, so a snapshot can report both checked and selected.
+- **Pressed, expanded and selected** share readers between role filters and snapshots. ARIA keywords are ASCII case-insensitive, without trimming. Pressed is supported on buttons: absent or invalid values match false, and mixed matches neither boolean. Selected is supported on gridcell, option, row, tab, rowheader, columnheader and treeitem: absent or invalid values match false. Expanded is supported only on expansion roles: absent matches neither boolean, and every present value other than true matches false. Native option.selected takes precedence over aria-selected; native details.open takes precedence over aria-expanded. Snapshots emit these positive markers only for exactly true, ignoring attributes on unsupported roles. Native details is an exception: open details emits expanded even with its ordinary group role, but group expanded filters still fail as invalid selectors. No expansion state is inferred for summary. These are Strider query and snapshot policies, not promises to reproduce browser accessibility trees; native precedence can differ from browser accessibility state.
+- **Checked state** uses native checked for checkbox/radio inputs, with indeterminate matching neither boolean role filter. The seven ARIA checkable roles use `aria-checked`. ARIA keywords `true`, `false`, `mixed` and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio and switch; on checkbox, menuitemcheckbox, option and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Selection remains independent through `aria-selected` or native option selection.
 - **Snapshots** walk the same tree with the same roles and names, from the document or one element: an element with no role gives its children to its parent, unless inferred interactivity makes it a node; hidden elements are left out; adjacent text is one `text` node, dropped when it only repeats its parent's name. Every element node gets a ref from a table the engine keeps for its document, so the same node keeps its ref while the document lives; a ref locator names its document, the table and the ref, and resolves to that node or fails with `StaleRef`. L1 stitches each iframe's frame tree under it. Password inputs without an explicit ARIA role appear as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. Their accessible names, including labels, titles and placeholders, are retained; controls with no accessible name stay unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Explicit ARIA roles are preserved. Password values do not contribute to snapshot names or find data, including when another element references the input for its name.
 - **Text** is an element's text content in the flat tree, skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed. It isn't `innerText`, which depends on layout, differs between engines, and forces layout for every candidate.
 - **`getByText`** matches the smallest element whose text matches: one whose text matches while no child element's does, so `<p>1 <b>item</b></p>` is found by "1 item". The document's `head` isn't searched. A string is a case-insensitive substring, `exact` is equality, case-sensitive, and a `RegExp` is tested as given.
@@ -628,6 +655,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
   - Explicit refs never rebind.
   - Nothing that may have dispatched is repeated automatically, except a gesture the guard stopped (§8, ReceivesPointer), which proves the page's handlers never saw it.
 - **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs, and for gaps: a member the interfaces declare that isn't built yet fails as the defect `NotBuilt{member}`, loud and never a no-op, because no caller could handle it as a condition of the browser. A module-level function that isn't built stays a declaration, absent at run time, unless its module needs the binding to load: `Route.continue` is a decision nothing reads yet. `SessionSwapped` is internal.
+- **Caller locations.** Operations capture their caller stacks when constructed, including operations built before recording starts. Formatting and filtering wait until a recording or failure rendering consumes the frame. Library frames from both source and compiled modules are excluded. When capture is enabled but no user caller is available, failure rendering retains the operation name without a location; source exports omit unavailable locations.
 - **State and event streams have different contracts.**
   - **State** (`Watchable`) is a read-only view of an entity's state ref:
     - reading it is an `Effect`;

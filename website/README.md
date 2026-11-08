@@ -20,6 +20,10 @@ pnpm website:check    # type-checks the site
 pnpm website:build    # the static site, in website/dist/
 ```
 
+The built-site browser layout tests need the static site first. From a clean checkout, run
+`pnpm reference && pnpm website:build`, then
+`pnpm test:integration packages/browser/test/integration/WebsiteLayout.test.ts`.
+
 ## The design
 
 After O'Reilly's engineering books: an inked animal, paper and ink, and one band color per page; the only other fills

@@ -9,7 +9,7 @@
  * @since 0.1.0
  */
 import * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as FilePath from "../FilePath.ts"
 
@@ -28,6 +28,16 @@ export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/T
    */
   id: Schema.String,
   attempt: Schema.Int,
+  /**
+   * Zero-based repetition within the test run, separate from its retry attempt. Optional for older
+   * identity objects; construction and decoding supply zero when omitted.
+   *
+   * @default 0
+   */
+  repeat: Schema.optionalKey(Schema.Int).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0))
+  ),
   worker: Schema.String,
   shard: Schema.String
 }) {}
@@ -63,9 +73,9 @@ export type TestArtifact = typeof TestArtifact.Type
  */
 export interface TestRun {
   /**
-   * The test identity supplied by the adapter. Explicit callback bindings retain the identity and attempt
-   * captured for that invocation. Vitest’s unbound layer uses a global lookup, which supports sequential tests
-   * only; without a current test its project, file and id are empty and its attempt is zero.
+   * The test identity supplied by the adapter. Explicit callback bindings retain the identity, retry attempt and
+   * repeat captured for that invocation. Vitest’s unbound layer uses a global lookup, which supports sequential tests
+   * only; without a current test its project, file and id are empty and its attempt and repeat are zero.
    */
   readonly info: TestInfo
   /**

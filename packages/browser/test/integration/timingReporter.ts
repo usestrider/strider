@@ -51,9 +51,11 @@ export default class TimingReporter implements Reporter {
   private started = 0
   private startedAt = ""
   private readonly directory: string
+  private readonly selection: { readonly group: string; readonly job: string }
 
-  constructor(options: { readonly directory?: string } = {}) {
+  constructor(options: { readonly directory?: string; readonly group?: string; readonly job?: string } = {}) {
     this.directory = options.directory ?? ".data/integration-timings"
+    this.selection = { group: options.group ?? "full", job: options.job ?? "all" }
   }
 
   private event(value: object) {
@@ -76,6 +78,7 @@ export default class TimingReporter implements Reporter {
     }
     const report = {
       schemaVersion: 1,
+      selection: this.selection,
       startedAt: this.startedAt,
       updatedAt: new Date().toISOString(),
       reason,
@@ -175,9 +178,9 @@ export default class TimingReporter implements Reporter {
     this.event({ event: "end", ...report })
     const seconds = (ms: number) => `${(ms / 1000).toFixed(3)} s`
     console.log(
-      `\nIntegration timings (${reason}): ${seconds(report.wallMs)} reporter wall; ${
-        seconds(report.summedFileExecutionMs)
-      } summed file execution`
+      `\nIntegration timings (${this.selection.group}/${this.selection.job}, ${reason}): ${
+        seconds(report.wallMs)
+      } reporter wall; ${seconds(report.summedFileExecutionMs)} summed file execution`
     )
     console.log(
       `Cases known: ${report.knownCases}; ${

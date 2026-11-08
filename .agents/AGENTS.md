@@ -30,6 +30,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
     display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). The Linux
     entry point rejects other environments; a browser of another version fails the tests too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
+    `STRIDER_INTEGRATION_JOB=chromium` (or `firefox`, `webkit`, `other`) runs the files of one of CI's Linux jobs
+    (`vitest.integration.config.ts`).
     On Apple Silicon macOS, `pnpm test:integration:macos --no-file-parallelism` downloads the separately pinned
     Chrome for Testing and Firefox builds in `test/integration/browsers.macos.json`, verifies their SHA-256 hashes,
     and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
@@ -77,8 +79,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
-  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
-  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand from `main`; `release.yml`, run by hand, publishes to npm
+  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand, a Linux job per browser and one for the other files, and one on macOS, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
@@ -118,15 +119,17 @@ Use the narrowest check that covers the change:
 Linux commands are serial: `pnpm test:integration` excludes the twelve large local-file upload cases;
 `pnpm test:integration:heavy` opts into all twelve (32/256/600 MiB on four backends), and
 `pnpm test:integration:full` runs the complete suite in one invocation. Nightly and dispatched Linux CI use the
-full command. macOS keeps its existing full selection. Default, heavy and full reports use separate directories;
-the full report also splits measured case time/counts by group, while shared hooks/startup remain in the complete
+full command for each of the four `STRIDER_INTEGRATION_JOB` selections; unset the variable for a local full-suite
+run. Files run serially within each job and in local runs. macOS keeps its full selection. Timing directories identify
+both command group and job (`all` locally), and snapshots record both, so combined artifacts do not overwrite.
+The full report also splits measured case time/counts by group, while shared hooks/startup remain in the complete
 run totals. Moving cases out of the default command does not reduce the full nightly cost.
 
 Keep integration tests cheap: share setup only where cases do not need isolated contexts, keep a fresh scoped page
 and explicit cleanup, and add cases for distinct behavior rather than needless combinations. Preserve assertions,
 deadlines and normal failure tracing when measuring changes. The Linux reporter in
 `packages/browser/test/integration/timingReporter.ts` prints the slowest files and cases and writes
-`.data/integration-timings/<group>/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
+`.data/integration-timings/<group>/<job>/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
 `integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
 if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
 Files that fail collection or are never collected have null case totals and execution durations; observed case
@@ -136,10 +139,17 @@ zero-cost tests.
 Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
 execution and the complete hosted job duration. **1500 seconds is the agreed goal for the complete serial Linux
 hosted run, including heavy coverage, with all coverage retained.** There is no hard CI threshold until measured
-against this goal. If the workflow splits across machines, reassess the goal using elapsed-job and total-execution
-figures separately.
+against this goal. Linux CI now splits across four machines: the serial goal requires reassessment using elapsed
+Linux job times and aggregate execution separately. The longest job alone does not demonstrate that the serial
+goal was met; report summed execution across all four jobs alongside their elapsed times.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
+
+An integration case costs a page, and on stock WebKit a context costs a browser process, so the suites grow by
+rules, not combinations. Write a case for each rule the code has, run on every backend, and a cross-product of
+variants only where the browsers handle them differently. What the code decides in one place, such as a selector or a
+set of roles, is one rule: sample it, don't enumerate it. A suite whose cases keep nothing in their context opens its
+pages in one, which checks after each case that it still holds nothing (`slice/sharedContext.ts`).
 
 Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
 `integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
@@ -215,9 +225,22 @@ Playwright and other prior art are evidence of what works, not a template.
 `docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
 later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
 for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
-edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
-the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+edit its entry instead of adding another. Measurements, benchmark tables, browser builds and test evidence go in
+the pull request, which the entry can cite by number (#83); the history of an investigation stays in its issue. A bug
 fix, a test, or a change that follows an existing decision needs no entry.
+
+## Pull requests
+
+A pull request's title and description are public, for a contributor reading the change, not for its review. The
+description opens with a sentence or two on what changes and for whom, then three sections: **Changes** (what the
+code did before and does now, with the files, and for a fix the cause), **Tests** (the tests added or changed, the
+checks run and their result, any test skipped or loosened and why, and for a performance change the figures before and
+after), and **Changeset** (the bump and its text, and whether anything breaks). Nothing else: no questions or
+decisions for the maintainer, no review rounds or who reviewed what, no account of the investigation, no first person,
+and nothing of the tools or agents that produced it, such as a private tracker's keys, an agent's name or role, local
+paths or machine names. Cite GitHub issues by number (#51). What's for the maintainer goes to them directly, in
+conversation or on the private board, before the pull request is opened or updated. Commit messages follow the same
+rule, and so do branch names: name a branch for the change.
 
 ## Issues
 

@@ -4,10 +4,21 @@ import * as path from "node:path"
 import { TestRunner } from "vitest"
 import type { RunnerTask, RunnerTestCase, RunnerTestFile, RunnerTestSuite } from "vitest"
 import "./traceProcesses.ts"
+import type { Origin } from "./failureTrace.ts"
+import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
+import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const shared = new TraceBuffer()
+let sharedTransfer = new TransferScope(() => connection("child-transfer"))
+const transfers = new Map<string, TransferScope>()
+installTransfer(() => {
+  const id = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+  return id !== undefined && active.size === 1 && active.get(id)?.inBody === true
+    ? transfers.get(id) ?? sharedTransfer
+    : sharedTransfer
+})
 const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
 let sharedFile = ""
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
@@ -20,19 +31,23 @@ const filename = (task: RunnerTask, suffix: string) =>
   path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-${suffix}.ndjson`)
 const save = (file: string, trace: TraceBuffer, scope: string) => {
   fs.mkdirSync(directory, { recursive: true })
-  fs.writeFileSync(
-    file,
-    [
+  const fd = fs.openSync(file, "w")
+  try {
+    fs.writeSync(
+      fd,
       JSON.stringify({
         kind: "context",
-        scope,
+        scope: scope.slice(0, 4096),
         ...(file === sharedFile ? {} : { sharedArtifact: path.basename(sharedFile) }),
         note:
-          "Bounded tail; send records attempted writes. Shared connections can deliver background events during a test."
-      }),
-      ...trace.entries().map((entry) => JSON.stringify(entry))
-    ].join("\n") + "\n"
-  )
+          "Independent parent/child tails; child selection uses origin timestamps, output sequence orders collection."
+      }) + "\n"
+    )
+    // Serialize one line at a time instead of constructing a second artifact-sized string.
+    for (const entry of trace.entries()) fs.writeSync(fd, JSON.stringify(entry) + "\n")
+  } finally {
+    fs.closeSync(fd)
+  }
   console.error(`Integration failure trace: ${file}`)
 }
 install({
@@ -44,17 +59,17 @@ install({
     // Anonymous Effect layers acquire once in beforeEach, then keep their resources until afterAll.
     // Setup acquisitions follow the observing test rather than becoming owned by the first test.
     const owner = !ambiguous && current !== undefined && active.get(current)?.inBody === true ? current : undefined
-    const record = (kind: string, value: unknown) => {
+    const record = (kind: string, value: unknown, origin?: Origin) => {
       const payload = serialize(value)
       // A connection created by a test remains that test's, even after its completion.
       if (owner !== undefined) {
         const running = active.get(owner)
-        if (running !== undefined) running.trace.record(id, kind, payload)
+        if (running !== undefined) running.trace.record(id, kind, payload, origin)
         else {
           const done = completed.get(owner)
           if (done?.file !== undefined && !done.overflow) {
             const tail = new TraceBuffer()
-            tail.record(id, kind, payload)
+            tail.record(id, kind, payload, origin)
             const entry = tail.entries()[0]
             const line = JSON.stringify({ ...entry, sequence: ++done.sequence }) + "\n"
             // Keep late cleanup events too, without allowing a failed shared scope to fill the disk.
@@ -65,7 +80,8 @@ install({
               fs.appendFileSync(
                 done.file,
                 JSON.stringify({
-                  ...entry,
+                  timestamp: new Date().toISOString(),
+                  connection: "recorder",
                   kind: "overflow",
                   payload: "Late cleanup budget exhausted; subsequent entries omitted",
                   sequence: done.sequence
@@ -78,9 +94,9 @@ install({
         return
       }
       if (active.size === 1 && !ambiguous && active.values().next().value!.inBody) {
-        active.values().next().value!.trace.record(id, kind, payload)
+        active.values().next().value!.trace.record(id, kind, payload, origin)
       } else {
-        shared.record(id, kind, payload)
+        shared.record(id, kind, payload, origin)
         if (active.size > 1) {
           shared.record(id, "attribution", `Shared connection; concurrent tests: ${[...active.keys()].join(", ")}`)
         }
@@ -95,6 +111,7 @@ export default class FailureTraceRunner extends TestRunner {
   override onCollectStart(file: RunnerTestFile) {
     super.onCollectStart(file)
     sharedFile = filename(file, "shared")
+    sharedTransfer = new TransferScope(() => connection("child-transfer"))
     shared.clear()
     active.clear()
     completed.clear()
@@ -104,6 +121,7 @@ export default class FailureTraceRunner extends TestRunner {
     // Vitest returns early for skipped/todo tasks without calling onAfterRunTask.
     if (task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
       active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+      transfers.set(task.id, new TransferScope(() => connection("child-transfer")))
     }
   }
   async runTask(task: RunnerTestCase) {
@@ -120,6 +138,8 @@ export default class FailureTraceRunner extends TestRunner {
   onAfterRetryTask(task: RunnerTestCase) {
     // Runtime skip returns before onAfterRunTask; this hook still runs after per-test cleanup.
     if ((task.result && "pending" in task.result && task.result.pending) || task.result?.state === "skip") {
+      transfers.get(task.id)?.close()
+      transfers.delete(task.id)
       active.get(task.id)?.trace.clear()
       active.delete(task.id)
     }
@@ -128,6 +148,8 @@ export default class FailureTraceRunner extends TestRunner {
     super.onAfterRunTask(task)
     const running = active.get(task.id)
     if (running === undefined) return
+    transfers.get(task.id)?.close()
+    transfers.delete(task.id)
     active.delete(task.id)
     const file = task.result?.state === "fail" ? filename(task, "test") : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
@@ -138,6 +160,7 @@ export default class FailureTraceRunner extends TestRunner {
   override async onAfterRunSuite(suite: RunnerTestSuite) {
     await super.onAfterRunSuite(suite)
     if (suite.file !== suite) return
+    sharedTransfer.close()
     if (suite.result?.state === "fail") {
       save(
         filename(suite, "shared"),

@@ -16,7 +16,9 @@ import {
   Route,
   UncaughtException
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
@@ -24,10 +26,12 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as fs from "node:fs"
+import * as http from "node:http"
+import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
-import { status, supports } from "./capabilities.ts"
+import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -56,6 +60,132 @@ export const declarations = (
   describe(`${name} declarations`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
       // ── Routes ──
+
+      it.effect("applies and releases a route immediately before navigation on a live page", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          for (let n = 0; n < 10; n++) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              const route = yield* page.route(`${origin}/hello*`, () =>
+                Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
+              yield* page.goto(`${origin}/hello?route=${n}`)
+              assert.strictEqual(yield* page.title, "routed")
+              assert.strictEqual(yield* route.hits, 1)
+            }))
+            yield* page.goto(`${origin}/hello?released=${n}`)
+            assert.notStrictEqual(yield* page.title, "routed")
+          }
+        }), timeout)
+
+      it.effect("continues a paused request when its last route is removed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const entered = yield* Deferred.make<void>()
+          const interrupted = yield* Deferred.make<void>()
+          const route = yield* page.route(`${origin}/json*`, () =>
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Deferred.succeed(interrupted, undefined))
+            ))
+          const decided = yield* AutoResolution.next(page)
+          const fetching = yield* run(page, origin, `return fetch('/json').then(r => r.json())`).pipe(Effect.forkChild)
+          yield* Deferred.await(entered).pipe(Effect.timeout("10 seconds"))
+          yield* route.remove
+          yield* Deferred.await(interrupted).pipe(Effect.timeout("10 seconds"))
+          assert.deepStrictEqual(yield* Fiber.join(fetching), { hello: "world" })
+          assert.strictEqual((yield* decided).decision, "continue")
+          yield* route.remove
+          assert.deepStrictEqual(yield* run(page, origin, `return fetch('/json').then(r => r.json())`), {
+            hello: "world"
+          })
+          assert.strictEqual(yield* route.hits, 1)
+        }), timeout)
+
+      for (const transition of ["install", "replace"] as const) {
+        it.effect(
+          `respects response interception capability after ${transition} while the server holds a response`,
+          () =>
+            Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              let arrived!: () => void
+              const arrival = new Promise<void>((resolve) => {
+                arrived = resolve
+              })
+              let release!: () => void
+              let hold = true
+              const server = yield* Effect.acquireRelease(
+                Effect.promise(() =>
+                  new Promise<http.Server>((resolve, reject) => {
+                    const server = http.createServer((request, response) => {
+                      const send = () => {
+                        response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
+                        response.end("<title>network</title>")
+                      }
+                      if (request.url === "/held" && hold) {
+                        hold = false
+                        release = send
+                        arrived()
+                      } else send()
+                    })
+                    server.once("error", reject)
+                    server.listen(0, "127.0.0.1", () =>
+                      resolve(server))
+                  })
+                ),
+                (server) =>
+                  Effect.promise(() =>
+                    new Promise<void>((resolve) => {
+                      server.close(() =>
+                        resolve()
+                      )
+                      server.closeAllConnections()
+                    })
+                  )
+              )
+              const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+              const seen: Array<string> = []
+              const previous = transition === "replace"
+                ? yield* page.route(`${origin}/held`, () =>
+                  Effect.sync(() => {
+                    seen.push("previous")
+                  }).pipe(Effect.andThen(Route.continue)), { phase: "response" })
+                : undefined
+              const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
+              yield* Effect.promise(() =>
+                arrival
+              ).pipe(Effect.timeout("10 seconds"))
+              const current = yield* page.route(`${origin}/held`, () =>
+                Effect.sync(() => {
+                  seen.push("current")
+                }).pipe(Effect.andThen(Route.continue)), { phase: "response" })
+              if (previous) {
+                yield* previous.remove
+              }
+              release()
+              yield* Fiber.join(navigation)
+              assert.strictEqual(yield* page.title, "network")
+              const intercepted = transition === "replace" || responseRouteInFlight[name]
+              assert.deepStrictEqual(seen, intercepted ? ["current"] : [])
+              assert.strictEqual(yield* current.hits, intercepted ? 1 : 0)
+              if (previous) {
+                assert.strictEqual(yield* previous.hits, 0)
+              }
+              // Requests started after declaration returns must be routed on every backend.
+              seen.length = 0
+              yield* page.goto(`${origin}/held`)
+              assert.deepStrictEqual(seen, ["current"])
+              assert.strictEqual(yield* current.hits, intercepted ? 2 : 1)
+              yield* current.remove
+              yield* page.goto(`${origin}/after`)
+              assert.strictEqual(yield* page.title, "network")
+              assert.deepStrictEqual(seen, ["current"])
+            }),
+          timeout
+        )
+      }
 
       it.effect("runs call site 7's route on a page of ours: blocked calls, counted", () =>
         Effect.gen(function*() {
@@ -134,7 +264,8 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(`${origin}/hello`)
-            yield* page.route(`${origin}/json*`, () => Effect.fail("no answer"))
+            yield* page.route(`${origin}/json*`, () =>
+              Effect.fail("no answer"))
             const decided = yield* AutoResolution.next(page)
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(result, { hello: "world" })
@@ -299,6 +430,21 @@ export const declarations = (
         }), timeout)
 
       // ── Init scripts ──
+
+      for (const timing of [undefined, "beforeAuthorScript"] as const) {
+        it.effect(`runs launched context init scripts before author scripts with ${timing ?? "default"} timing`, () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.context.addInitScript({ source: "window.__launchedTiming = 'before'" }, { timing })
+              yield* page.goto(
+                fixtureUrl(origin, "<h1><script>document.write(window.__launchedTiming ?? 'missing')</script></h1>")
+              )
+              yield* page.getByRole("heading").pipe(Expect.toHaveText("before"))
+            }))
+          }), timeout)
+      }
 
       it.effect("runs call site 11: scripts in order, after their dependencies, in every frame", () =>
         Effect.gen(function*() {

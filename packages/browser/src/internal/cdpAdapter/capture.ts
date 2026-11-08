@@ -21,6 +21,7 @@ import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as L1Page from "../../Page.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
+import * as Reason from "../../Reason.ts"
 import type * as L1Target from "../../Target.ts"
 import type * as VideoWriter from "../../VideoWriter.ts"
 import * as Adapter from "../adapter.ts"
@@ -168,6 +169,24 @@ export const screenshot = Effect.fnUntraced(
           Effect.andThen(guard.check),
           Effect.andThen(Effect.fail(error))
         )
+      }),
+      Effect.mapError((error) => {
+        const reason = error.reason
+        if (
+          reason._tag === "Protocol" && reason.error.reason._tag === "Rejected" &&
+          reason.error.reason.method === "Page.captureScreenshot" && reason.error.reason.code === -32000 &&
+          reason.error.reason.description === "Unable to capture screenshot"
+        ) {
+          return new Adapter.AdapterError({
+            reason: new Reason.BackendFailure({
+              kind: "Rejected",
+              method: "Page.captureScreenshot",
+              hint: "Chromium returned an empty image",
+              cause: reason.error
+            })
+          })
+        }
+        return error
       }),
       Effect.ensuring(
         options.omitBackground ? Emulation.setDefaultBackgroundColorOverride({}).pipe(on, Effect.ignore) : Effect.void

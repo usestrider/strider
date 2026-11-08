@@ -61,6 +61,7 @@ export type Step =
     /** The pages it gave the session, by the names they had after it: opened, returned, kept or popups. */
     readonly pages?: ReadonlyArray<string> | undefined
   }
+  | { readonly _tag: "Eval"; readonly pages?: ReadonlyArray<string> | undefined }
   | ToolStep
   /** A popup that opened while a popup wait the session had started on its opener was pending: the wait gives it. */
   | { readonly _tag: "Popup"; readonly page: string; readonly wait: string }
@@ -142,7 +143,7 @@ const isRef = Schema.is(Tools.Ref)
 
 /**
  * A target as a query on its page, such as `getByRole("button")`; a ref as its snapshot named it. The test puts the
- * page's variable before it, which a page renamed later changes. A named password query waits for a matching
+ * page's variable before it, which a page renamed later changes. A framed unnamed or named password query waits for a matching
  * snapshot, so its pipe expression returns an effect of the locator.
  */
 export const queryOf = (
@@ -151,10 +152,10 @@ export const queryOf = (
 ): string => {
   const recorded = snapshot === undefined ? undefined : [...snapshot.refs.keys()].find((ref) => ref === target)
   const node = recorded === undefined ? undefined : snapshot?.refs.get(recorded)
-  // Only named password exports resolve framed refs through a fresh snapshot.
+  // Password refs in frames need snapshot locators to retain their document.
   if (
     isRef(target) ||
-    (node?.role._tag === "Inferred" && node.role.evidence.includes("password") && node.name._tag !== "None")
+    (node?.role._tag === "Inferred" && node.role.evidence.includes("password"))
   ) {
     if (node === undefined) return `locator("*") /* ${target}: no snapshot named it */`
     const name = node.name._tag === "None" ? undefined : node.name.value
@@ -164,22 +165,38 @@ export const queryOf = (
         : `getByRole(${quote(node.role.role)}, { name: ${quote(name)}, exact: true })`
     }
     if (node.role.evidence.includes("password")) {
-      if (name === undefined) return "locator(\"input[type=password]\")"
-      // Match computed names, not overridden label/title/placeholder strings.
+      if (name === undefined && isRef(target)) return "locator(\"input[type=password]\")"
+      // Match computed names, or unnamed framed controls, without choosing a first match.
       return `pipe((page) => Effect.gen(function*() {
           let matches = page.locator(":not(*)")
-          yield* Expect.that(page.snapshot().pipe(Effect.map((snapshot) => {
+          yield* Expect.that(page.snapshot().pipe(Effect.flatMap((snapshot) => Effect.gen(function*() {
             let found = false
+            let documentPrefix
             for (const [ref, node] of snapshot.refs) {
               if (node.role._tag === "Inferred" && node.role.evidence.includes("password") &&
-                node.name._tag !== "None" && node.name.value === ${quote(name)}) {
+                ${
+        name === undefined
+          ? `node.name._tag === "None" && ref.startsWith(${quote(target.slice(0, target.indexOf("e")) + "e")})`
+          : `node.name._tag !== "None" && node.name.value === ${quote(name)}`
+      }) {
+                const prefix = ref.slice(0, ref.indexOf("e"))
+                if (found && prefix !== documentPrefix) {
+                  return yield* Effect.fail(new Error("Ambiguous password matches across documents: narrow the exported locator manually to one frame or document."))
+                }
+                documentPrefix = prefix
                 const current = snapshot.ref(ref)
                 matches = found ? matches.or(current) : current
                 found = true
               }
             }
             return found
-          })), Condition.make("a password control with the recorded accessible name", (found) => found))
+          }))), Condition.make(${
+        quote(
+          name === undefined
+            ? `an unnamed password control in recorded snapshot frame ${target.slice(0, target.indexOf("e"))}`
+            : "a password control with the recorded accessible name"
+        )
+      }, (found) => found))
           return matches
         }))`
     }
@@ -212,7 +229,7 @@ export const queryOf = (
   }
 }
 
-/** A named password query waits for its computed name before returning the ref locators. */
+/** Snapshot-based password queries wait for matching controls before returning their ref locators. */
 const queryOn = (page: string, query: string): string =>
   query.startsWith("pipe(") ? `(yield* ${page}.${query})` : `${page}.${query}`
 
@@ -292,7 +309,7 @@ export const render = (options: {
       `// The session started from session ${options.fork}'s state (start --fork), which no file holds: this test's context starts empty`
     ]),
     ...(options.userDataDir === undefined ? [] : [
-      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one`
+      `// The session's browser ran on the profile at ${options.userDataDir} (start --user-data-dir), which that browser keeps locked: profile replay is unsupported; this test's starts with an empty one`
     ])
   ]
   const body: Array<string> = options.browser._tag === "Attach" && options.browser.backend === "webkit"
@@ -413,6 +430,17 @@ export const render = (options: {
   }
   const viewports = new Map<string, string>()
   for (const step of options.steps) {
+    const input = step._tag === "Tool" ? step.params : step._tag === "NewPage" ? step.url : undefined
+    for (const diagnostic of Secrets.diagnostics(input, Object.keys(options.secrets))) {
+      body.push(
+        `// ${
+          diagnostic.replace(
+            /[\r\n\u2028\u2029]/g,
+            (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+          )
+        }`
+      )
+    }
     if (step._tag === "Viewport") {
       const page = use(step.page)
       const registration = fresh(`${page}Viewport`)
@@ -422,6 +450,15 @@ export const render = (options: {
       const previous = viewports.get(page)
       if (previous !== undefined) body.push(`yield* ${previous}.remove`)
       viewports.set(page, registration)
+      continue
+    }
+    if (step._tag === "Eval") {
+      const pages = (step.pages ?? []).filter((page) => named.has(page) && !variables.has(page)).map(declare)
+      const declaring = pages.length === 0 ? "" : `, declaring ${listed(pages)}`
+      placeholders.push(`strider eval: restore browser evaluation and its side effects${declaring}`)
+      body.push(
+        `// TODO strider eval: restore browser evaluation and its side effects; source omitted for capture${declaring}`
+      )
       continue
     }
     if (step._tag === "Segment") {

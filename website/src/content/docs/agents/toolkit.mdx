@@ -82,14 +82,23 @@ A busy document may retain listeners until it executes the queued release or end
   name) or when first seen, as a popup is.
 - **A target is a ref or a locator:** `e12` from the page's latest snapshot, or `role=button[name="Save"]`,
   `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
-- **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
+- **Waits for later events are explicit.** `next` subscribes and `await` collects; `expect` waits for a condition.
+  Action tools do not add a wait for later page events, but they await browser/protocol completion, which can
+  include navigation or a busy page responding. Input completion is not guaranteed to be immediate.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
   decided them, file choosers the policy canceled, closed pages, downloads, uncaught exceptions, failed requests,
   validation observed during clicks, and console errors where the [capture policy](#capture-policy) allows them.
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a
-  URL, is sent as written, and so is a mistyped name.
+  URL, is sent as written, and so is a mistyped name. Successful results warn about unknown placeholder names in
+  `sinceLast`; typed failures append the hints to their message while keeping the original error and reason. A
+  configured name is suggested when exactly one is within one insertion, deletion or substitution. Hints describe
+  the input, without claiming that it reached the browser. Diagnostic names start with an ASCII letter and continue
+  with ASCII letters, digits, underscores or hyphens. Two hexadecimal digits are always URL escapes. A longer
+  candidate starting with a hex pair, whose closing `%` starts another hex escape, is exempt unless any configured
+  name is within one edit. The syntax is ambiguous: `%ACtext%20` normally stays quiet, but `%adminpas%2024` warns
+  when `adminpass` is configured. Escaped URL text close to a configured name can therefore warn too.
 
 ## Capture policy
 

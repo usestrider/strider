@@ -13,6 +13,7 @@ import * as path from "node:path"
 import { deflateSync } from "node:zlib"
 import * as BrowserClock from "../../src/internal/browserClock.ts"
 import * as Video from "../../src/internal/video.ts"
+import { lastVideoFrame } from "./videoFrames.ts"
 
 const png = (width: number, height: number, color: readonly number[]) => {
   const chunk = (kind: string, data: Buffer) => {
@@ -47,6 +48,132 @@ export const writerConformance = (
   writer: Layer.Layer<VideoWriter.VideoWriter, never, ChildProcessSpawner.ChildProcessSpawner>
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
+    it.effect(
+      `${name} validates the final picture after a delayed first frame`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-delayed-first-frame-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const earlier = png(2, 2, [255, 0, 0])
+          const final = png(2, 2, [0, 0, 255])
+          const file = yield* encoder.write(
+            Stream.fromIterable([127, 237, 391, 412]).pipe(Stream.map((at) => ({
+              at: at * 1e6,
+              format: "png" as const,
+              width: 2,
+              height: 2,
+              data: at === 412 ? final : earlier
+            }))),
+            { path: path.join(directory, "delayed-first-frame.webm"), width: 2, height: 2 }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0.127, 0.237, 0.391, 0.412]
+          )
+          assert.strictEqual(Number(probe.format.start_time), 0.127)
+          assert.strictEqual(Number(probe.format.duration), 0.413)
+          const pixels = lastVideoFrame(file, probe.frames.length)
+          assert.strictEqual(pixels.length, 2 * 2 * 3)
+          for (let offset = 0; offset < pixels.length; offset += 3) {
+            assert.isBelow(pixels[offset]!, 20, "final frame is not an earlier red picture")
+            assert.isAbove(pixels[offset + 2]!, 200, "final frame is blue")
+          }
+        }),
+      60_000
+    )
+
+    it.effect(
+      `${name} starts core recordings at zero without shifting delayed capture times`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-zero-start-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          let now = 0
+          const file = yield* Video.record(
+            Effect.succeed({
+              frames: Stream.fromIterable([127, 237, 391, 412]).pipe(Stream.map((at) => ({
+                frame: {
+                  at: at * 1e6,
+                  format: "png" as const,
+                  width: 2,
+                  height: 2,
+                  data: png(2, 2, at < 391 ? [255, 0, 0] : [0, 0, 255])
+                },
+                take: Effect.sync(() => {
+                  now = at * 1e6
+                })
+              }))),
+              ended: Effect.never
+            }),
+            encoder,
+            directory
+          ).pipe(Effect.provideService(BrowserClock.CurrentClock, {
+            now: () => now as ReturnType<BrowserClock.BrowserClock["now"]>,
+            sleep: () => Effect.never
+          }))
+          const output = yield* file
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            output
+          ], { encoding: "utf8" }))
+          // Check seeking first so the pre-fix failure demonstrates the reported empty output.
+          const final = lastVideoFrame(output, probe.frames.length)
+          for (const distance of ["-0.1", "-0.01"]) {
+            const pixels = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+              "-v",
+              "error",
+              "-sseof",
+              distance,
+              "-i",
+              output,
+              "-frames:v",
+              "1",
+              "-fps_mode",
+              "passthrough",
+              "-f",
+              "rawvideo",
+              "-pix_fmt",
+              "rgb24",
+              "pipe:1"
+            ])
+            assert.strictEqual(pixels.length, 12, `end seek ${distance} returns a picture`)
+            for (let offset = 0; offset < pixels.length; offset += 3) {
+              assert.isAbove(pixels[offset + 2]!, 200, "end seek returns the final blue picture")
+              assert.isBelow(pixels[offset]!, 20, "end seek does not return an earlier red picture")
+            }
+          }
+          assert.deepStrictEqual(
+            probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+              Number(frame.best_effort_timestamp_time)
+            ),
+            [0, 0.127, 0.237, 0.391, 0.412, 0.412]
+          )
+          assert.strictEqual(Number(probe.format.start_time), 0)
+          assert.strictEqual(Number(probe.format.duration), 0.413)
+          assert.isAbove(final[2]!, 200, "final picture is blue")
+          assert.isBelow(final[0]!, 20, "final picture is not red")
+        }),
+      60_000
+    )
+
     it.effect(
       `${name} preserves the later four-second frame after normalizing a backward source time`,
       () =>

@@ -24,6 +24,7 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
@@ -269,8 +270,9 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
 
 const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
   const intercepts = state.registry.intercepts(placement(page))
+  const proxyAuth = page.context.proxy?.credentials !== undefined
   const challenges = state.registry.challenges(placement(page))
-  const key = JSON.stringify({ intercepts, challenges })
+  const key = JSON.stringify({ intercepts, challenges, proxyAuth })
   if (key === target.intercepts) return
   const on = Protocol.on(target.session)
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
@@ -282,6 +284,7 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
       urlPattern,
       requestStage: "Request" as const
     })),
+    ...(proxyAuth ? [{ urlPattern: "*", requestStage: "Request" as const }] : []),
     ...(challenges
       ? [{ urlPattern: "*", resourceType: "Document" as const, requestStage: "Request" as const }]
       : []),
@@ -292,7 +295,10 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
   // past the route, about once in forty under load, apparently while the interceptor was installed again; with
   // the pattern kept, never in 160 (QUIRKS.md, Q46 and Q103). A request paused still has its decision to come.
   const effective = patterns.length > 0 ? patterns : [{ urlPattern: nothing, requestStage: "Request" as const }]
-  yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 || challenges }).pipe(on)
+  yield* Fetch.enable({
+    patterns: effective,
+    handleAuthRequests: intercepts.auth.length > 0 || challenges || proxyAuth
+  }).pipe(on)
   target.intercepts = key
 })
 
@@ -407,17 +413,19 @@ const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scop
   }, { concurrency: "unbounded", discard: true })
 
 /** A context's download behavior, as the declarations in force say. */
-export const applyDownloads = (state: State, context: ContextEntry) => {
-  const behavior = state.registry.downloads(context.id)
-  return BrowserCdp.setDownloadBehavior({
-    behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
-    ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
-    ...(context.browserContextId === undefined
-      ? {}
-      : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
-    eventsEnabled: true
-  }).pipe(Protocol.on(state.root()))
-}
+export const applyDownloads = (state: State, context: ContextEntry) =>
+  contextLock(context).withPermits(1)(Effect.suspend(() => {
+    if (context.disposed) return Effect.void
+    const behavior = state.registry.downloads(context.id)
+    return BrowserCdp.setDownloadBehavior({
+      behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
+      ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
+      ...(context.browserContextId === undefined
+        ? {}
+        : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
+      eventsEnabled: true
+    }).pipe(Protocol.on(state.root()))
+  }))
 
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
@@ -452,7 +460,9 @@ export const declare = Effect.fnUntraced(function*(
       state.registry.remove(id)
       const release = declaration._tag === "Downloads"
         ? Effect.forEach(
-          [...state.contexts.values()],
+          scope._tag === "UserContext"
+            ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+            : [...state.contexts.values()],
           (context) => applyDownloads(state, context).pipe(releaseErrors),
           { discard: true }
         )

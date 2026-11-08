@@ -116,8 +116,10 @@ export interface Options {
   readonly after?: ReadonlyArray<InitScript> | undefined
   /**
    * Whether the script must run before the page's own scripts. A backend that can't guarantee it fails with
-   * `TimingUnsupported`, unless you choose `"bestEffort"`. Every backend guarantees it for the pages Strider
-   * creates.
+   * `DeclarationError` with `TimingUnsupported`, unless you choose `"bestEffort"`. Attached Chromium refuses
+   * required timing for context-wide scripts because new popups are not paused at creation. Page-scoped scripts
+   * still run before author scripts in later documents. Launched Chromium and Firefox support required timing
+   * for context-wide scripts. `"bestEffort"` permits a new target's first author scripts to run before this script.
    *
    * @default "beforeAuthorScript"
    */

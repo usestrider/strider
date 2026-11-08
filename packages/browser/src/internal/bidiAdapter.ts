@@ -60,6 +60,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("userContexts.proxy", "supported", [
+        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
+        "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+      ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
         "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new document itself"
@@ -158,6 +164,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("pdf.preferCssPageSize", "unsupported", ["WebDriver BiDi prints at the size it is given"]),
       entry("cookies.partitioned", "unsupported", ["Firefox doesn't say which partition a cookie is in"]),
       entry("snapshot.clickListeners", "unsupported", ["WebDriver BiDi can't list event listeners"]),
+      entry("capability.virtualAuthenticator", "unsupported", [
+        "Firefox implements authenticators through classic WebDriver, not this BiDi transport"
+      ]),
       entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
       entry("capability.screencast", "unsupported", [
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
@@ -221,6 +230,7 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
     }),
   ended: (_session, reason) =>
     Effect.suspend(() => {
+      if (reason.why === "connectionLost") State.releaseProxy(state)
       if (reason.why === "connectionLost" || reason.why === "modelUnavailable") {
         const why: L1Target.CloseReason = reason.why === "connectionLost"
           ? Kit.closed()
@@ -257,6 +267,7 @@ export const connect: (
       }
     })
     root = client.root
+    yield* Effect.addFinalizer(() => Effect.sync(() => State.releaseProxy(state)))
     const on = Protocol.on(root)
 
     const failConnect = (error: Protocol.ProtocolError) =>
@@ -344,6 +355,19 @@ export const connect: (
           )
         ),
       video: (page) => Capture.video(state, page),
+      createAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      releaseAuthenticator: () => Effect.void,
+      authenticatorCredentials: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
+      updateAuthenticator: () =>
+        Effect.fail(
+          Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
+        ),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),

@@ -34,28 +34,36 @@ export type StriderNeeds =
   | FileSystem.FileSystem
   | ChildProcessSpawner.ChildProcessSpawner
 
-export interface Scenario {
-  readonly name: string
-  readonly title: string
-  /** What the Strider program shows, for its page on the documentation site. */
-  readonly description: string
-  /** The value both implementations must return. */
-  readonly expected: string
-  /** A public demo site, replayed from `.data/scenarios/<recording>.har` by the runner; none for the local site. */
-  readonly recording?: string
-  /** What writing it found, shown under its code. */
-  readonly note?: string
-  /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
-  readonly video?: string
-  /** The browser the Strider program runs on: Chromium unless it says Firefox */
-  readonly browser?: "firefox"
-  /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
-  readonly compare?: string
-  /** The Strider program: given the local site's address, and needing nothing of the runner's */
-  readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
-  /** Its twin, for the comparison; none for a scenario that only shows Strider */
-  readonly playwright?: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
-}
+export type Scenario =
+  & {
+    readonly name: string
+    readonly title: string
+    /** What the Strider program shows, for its page on the documentation site. */
+    readonly description: string
+    /** The value both implementations must return. */
+    readonly expected: string
+    /** What writing it found, shown under its code. */
+    readonly note?: string
+    /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
+    readonly video?: string
+    /** The browser the Strider program runs on: Chromium unless it says Firefox */
+    readonly browser?: "firefox"
+    /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
+    readonly compare?: string
+    /** The Strider program: given the local site's address, and needing nothing of the runner's */
+    readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
+    /** Its twin, for the comparison; none for a scenario that only shows Strider */
+    readonly playwright?: (browser: Playwright.Browser, origin: string, files: Files) => Promise<string>
+  }
+  & (
+    | { readonly recording?: undefined; readonly requiredPages?: undefined }
+    | {
+      /** A public demo site, replayed from `.data/scenarios/<recording>.har`. */
+      readonly recording: keyof typeof recordings
+      /** Exact GET page URLs needed by this scenario, including navigation destinations. */
+      readonly requiredPages: ReadonlyArray<string>
+    }
+  )
 
 /** Where a Playwright twin may write a file, and where the recordings are; a Strider program names its own. */
 export interface Files {
@@ -442,7 +450,135 @@ const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
 })
 // #endregion
 
+// #region many-pages/strider
+const manyPagesStrider = Effect.fn("many pages")(function*(origin: string) {
+  const context = yield* Browser.newContext()
+  const pages = []
+  for (let i = 0; i < 20; i++) {
+    const page = yield* context.newPage
+    yield* page.goto(`${origin}/benchmark`)
+    yield* page.getByRole("button", { name: "Increment" }).click()
+    pages.push(page)
+  }
+  const values = []
+  for (const page of pages) values.push(yield* page.locator("#count").readText)
+  return values.join(",")
+})
+// #endregion
+
+// #region many-pages/playwright
+const manyPagesPlaywright = async (browser: Playwright.Browser, origin: string) => {
+  const context = await browser.newContext()
+  try {
+    const pages = []
+    for (let i = 0; i < 20; i++) {
+      const page = await context.newPage()
+      await page.goto(`${origin}/benchmark`)
+      await page.getByRole("button", { name: "Increment" }).click()
+      pages.push(page)
+    }
+    const values = []
+    for (const page of pages) values.push(await page.locator("#count").textContent())
+    return values.join(",")
+  } finally {
+    await context.close()
+  }
+}
+// #endregion
+
+// #region long-session/strider
+const longSessionStrider = Effect.fn("long session")(function*(origin: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(`${origin}/benchmark`)
+  for (let i = 0; i < 150; i++) {
+    yield* page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+    yield* page.getByRole("button", { name: "Increment" }).click()
+  }
+  return `${yield* page.locator("#count").readText}:${yield* page.getByRole("textbox", { name: "Name" }).readValue}`
+})
+// #endregion
+
+// #region long-session/playwright
+const longSessionPlaywright = async (browser: Playwright.Browser, origin: string) => {
+  const page = await browser.newPage()
+  try {
+    await page.goto(`${origin}/benchmark`)
+    for (let i = 0; i < 150; i++) {
+      await page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+      await page.getByRole("button", { name: "Increment" }).click()
+    }
+    return `${await page.locator("#count").textContent()}:${await page.getByRole("textbox", { name: "Name" })
+      .inputValue()}`
+  } finally {
+    await page.close()
+  }
+}
+// #endregion
+
+// #region parallel-tests/strider
+const parallelTestsStrider = (origin: string) =>
+  Effect.forEach(
+    Array.from({ length: 4 }),
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.goto(`${origin}/benchmark`)
+        for (let i = 0; i < 25; i++) {
+          yield* page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+          yield* page.getByRole("button", { name: "Increment" }).click()
+        }
+        return `${yield* page.locator("#count").readText}:${yield* page.getByRole("textbox", { name: "Name" })
+          .readValue}`
+      })),
+    { concurrency: 4 }
+  ).pipe(Effect.map((values) => values.join(",")))
+// #endregion
+
+// #region parallel-tests/playwright
+const parallelTestsPlaywright = async (browser: Playwright.Browser, origin: string) =>
+  (await Promise.all(Array.from({ length: 4 }, async () => {
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${origin}/benchmark`)
+      for (let i = 0; i < 25; i++) {
+        await page.getByRole("textbox", { name: "Name" }).fill(`value-${i}`)
+        await page.getByRole("button", { name: "Increment" }).click()
+      }
+      return `${await page.locator("#count").textContent()}:${await page.getByRole("textbox", { name: "Name" })
+        .inputValue()}`
+    } finally {
+      await page.close()
+    }
+  }))).join(",")
+// #endregion
+
 export const scenarios: ReadonlyArray<Scenario> = [
+  {
+    name: "many-pages",
+    title: "20 pages in one context",
+    description:
+      "Keeps 20 pages open, navigating and clicking once on each, then checks every counter before closing the context.",
+    expected: "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+    strider: manyPagesStrider,
+    playwright: manyPagesPlaywright
+  },
+  {
+    name: "long-session",
+    title: "300 actions in one session",
+    description: "Runs 150 fill/click pairs in one page and context, then verifies the counter and final input value.",
+    expected: "150:value-149",
+    strider: longSessionStrider,
+    playwright: longSessionPlaywright
+  },
+  {
+    name: "parallel-tests",
+    title: "4 parallel tests sharing one browser",
+    description:
+      "Runs four isolated contexts concurrently, with 25 fill/click pairs in each, then verifies all four counters and input values.",
+    expected: "25:value-24,25:value-24,25:value-24,25:value-24",
+    strider: parallelTestsStrider,
+    playwright: parallelTestsPlaywright
+  },
   {
     name: "readme",
     title: "The README's program",
@@ -515,6 +651,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
     description: "Logs in on The Internet's demo login page.",
     expected: "Secure Area",
     recording: "the-internet",
+    requiredPages: [`${theInternet}/login`, `${theInternet}/secure`],
     strider: theInternetStrider,
     playwright: theInternetPlaywright
   },
@@ -524,6 +661,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
     description: "Enables a text box that a script enables three seconds later, and fills it as soon as it can.",
     expected: "Strider",
     recording: "the-internet",
+    requiredPages: [controls],
     strider: controlsStrider,
     playwright: controlsPlaywright
   },
@@ -534,6 +672,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
       "Records a page to a WebM while it fills The Internet's dynamic controls: on Chromium from its screencast, with ffmpeg, and on Firefox with its own video.",
     expected: "Strider, recorded",
     recording: "the-internet",
+    requiredPages: [controls],
     video: "dynamic-controls.webm",
     compare: "video-firefox",
     strider: videoStrider
@@ -545,6 +684,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
       "Firefox records the video itself: no recorder and no ffmpeg, only the capability, for as long as its scope lives.",
     expected: "Strider, recorded",
     recording: "the-internet",
+    requiredPages: [controls],
     video: "dynamic-controls-firefox.webm",
     browser: "firefox",
     strider: videoFirefoxStrider

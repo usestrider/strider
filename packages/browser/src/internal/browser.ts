@@ -59,6 +59,7 @@ import * as Model from "./model.ts"
 import * as Navigation from "./navigation.ts"
 import * as Operation from "./operation.ts"
 import * as PageImpl from "./page.ts"
+import * as Proxy from "./proxy.ts"
 import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Storage from "./storage.ts"
@@ -506,6 +507,24 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     Effect.gen(function*() {
       const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
+      const proxy = options?.proxy === undefined ? Option.none<Adapter.ProxyOptions>() : Option.some(
+        yield* Proxy.normalize(options.proxy, adapter.info.product).pipe(
+          Effect.mapError((reason) => contextError(operation, reason, id))
+        )
+      )
+      if (Option.isSome(proxy) && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(
+          contextError(
+            operation,
+            new Reason.Unsupported({
+              capability: "userContexts.proxy",
+              backend: adapter.info.product,
+              hint: "A proxy can only be set when creating a context"
+            }),
+            id
+          )
+        )
+      }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
       const adopt = mode !== undefined && "context" in mode && mode.adopt === true
@@ -593,7 +612,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
-          : adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false, reclaimable })).pipe(
+          : adapter.createUserContext({ proxy, acceptInsecureCerts: false, reclaimable })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)
           ),

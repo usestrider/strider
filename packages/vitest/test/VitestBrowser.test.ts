@@ -288,3 +288,14 @@ it("uses the test prefix when sanitizing punctuation-only IDs leaves no name", (
     assert.match(name, /^test-retry-0-[a-f0-9]{64}\.zip$/)
   }
 })
+
+it("preserves legacy filenames at repeat zero and separates repeats from retries", () => {
+  const fields = { project: "chrome", file: "../../a.test.ts", id: "../a/b", attempt: 0, worker: "1", shard: "" }
+  const original = VitestBrowser.traceFileName(new TestRun.TestInfo(fields))
+  assert.strictEqual(original, "a-b-retry-0-948448d42fd4084e9bbba2928281cd80a1362536b1ad7e562cddde1c84347425.zip")
+  assert.strictEqual(VitestBrowser.traceFileName(new TestRun.TestInfo({ ...fields, repeat: 0 })), original)
+  const repeated = VitestBrowser.traceFileName(new TestRun.TestInfo({ ...fields, repeat: 1 }))
+  assert.notStrictEqual(repeated, original)
+  assert.match(repeated, /^a-b-repeat-1-retry-0-[a-f0-9]{64}\.zip$/)
+  assert.notStrictEqual(repeated, VitestBrowser.traceFileName(new TestRun.TestInfo({ ...fields, attempt: 1 })))
+})
