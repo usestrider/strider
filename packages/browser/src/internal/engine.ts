@@ -20,8 +20,7 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. The first check without stability still awaits a rendering update; an immediate fill
- *   may reuse that same-frame observation once while rerunning the checks under the input permit.
+ *   the action point. Actions without a stability check still await a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -271,7 +270,7 @@ export type Request =
      * round only checks, and answers the point and what it read.
      */
     readonly apply: boolean
-    /** Capture stability or fill rendering for immediate revalidation, or consume the returned token. Expires at the next frame. */
+    /** Capture stability for immediate revalidation, or consume the returned token. Expires at the next frame. */
     readonly stability?: string
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
@@ -333,7 +332,7 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Ready", {
     element: Schema.String,
     scrolled: Schema.Boolean,
-    /** Rendering evidence for an immediate check of the same element and rectangle. */
+    /** Stability evidence for an immediate check of the same element and rectangle. */
     stability: Schema.optionalKey(Schema.String),
     /** Locally reachable default candidates for parent hit tests. */
     candidates: Schema.optionalKey(Schema.Array(Point)),
@@ -1748,17 +1747,11 @@ export function engine(render: (root: SnapNode) => string) {
     readonly element: Element
     readonly rect: DOMRect
     readonly frames: number
-    readonly fill: boolean
-    readonly frame: number | null
   } | null = null
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
     // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
-    let previous = stability !== null && request.stability === stability.token &&
-        stability.fill === (request.action._tag === "Fill") &&
-        (!stability.fill || stability.frame !== null && stability.frame === document.timeline.currentTime)
-      ? stability
-      : null
+    let previous = stability !== null && request.stability === stability.token ? stability : null
     stability = null
     const end = now() + request.cap
     const history: Array<NotReady> = []
@@ -1785,19 +1778,13 @@ export function engine(render: (root: SnapNode) => string) {
       // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
       // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
       // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
-      // A fill can consume the first round's rendering opportunity once. The timeline check above also
-      // expires it in an earlier callback of the next update, before the expiry callback itself can run.
-      if (
-        (sampled || !(request.checks.stable > 0)) &&
-        !(previous?.fill === true && previous.frames === request.checks.stable)
-      ) {
+      if (sampled || !(request.checks.stable > 0)) {
         if (!(await nextFrame(left))) {
           // A round the deadline cut too short for any page to render says nothing about rendering
           if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
           return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
         }
         frames++
-        previous = null
       }
       sampled = true
       clearTreeCaches()
@@ -1836,14 +1823,6 @@ export function engine(render: (root: SnapNode) => string) {
       const checks = request.checks
       const evidence = previous
       previous = null
-      if (
-        evidence?.fill && checks.stable === 0 &&
-        (element === undefined || evidence.element !== element ||
-          !sameRect(evidence.rect, element.getBoundingClientRect()))
-      ) {
-        // Matching a selector is insufficient: changed geometry or identity needs a fresh native update.
-        continue
-      }
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
@@ -1902,49 +1881,7 @@ export function engine(render: (root: SnapNode) => string) {
             continue
           }
         }
-        const beforeFocus = request.apply && action._tag === "Fill"
-          ? { rect: element.getBoundingClientRect(), frame: document.timeline.currentTime }
-          : undefined
-        const recheckFill = beforeFocus === undefined ? undefined : (): Response | {
-          readonly _tag: "Retry"
-          readonly reason: NotReady
-        } | undefined => {
-          // Focus and selection handlers run synchronously. Do not insert into a detached/replaced target,
-          // or use rendering evidence for geometry changed by those handlers. Every enabled check is fresh.
-          clearTreeCaches()
-          const resolved = resolve(request.steps)
-          if (resolved.length > 1) return strict(resolved)
-          if (
-            resolved[0] !== element || !sameRect(beforeFocus.rect, element.getBoundingClientRect()) ||
-            beforeFocus.frame !== document.timeline.currentTime
-          ) {
-            return { _tag: "Retry", reason: { _tag: "PreparingFocus", from: describe(element) } }
-          }
-          if (checks.editable && !editableKind(element)) {
-            return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
-          }
-          let reason: NotReady | null = null
-          if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-          else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
-          else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-          else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-          else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
-            reason = { _tag: "OutsideViewport" }
-          }
-          if (reason !== null) return { _tag: "Retry", reason }
-          if (checks.receivesPointer) {
-            const at = actionPoints(element, null, request.clip, true)[0]
-            if (at === undefined) return { _tag: "Retry", reason: { _tag: "OutsideViewport" } }
-            const hit = hitTarget(at.x, at.y)
-            if (hit === null || !composedContains(element, hit)) {
-              return {
-                _tag: "Retry",
-                reason: { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
-              }
-            }
-          }
-        }
-        let response = ready(element, action, request.apply, scrolled, point, checks, recheckFill)
+        let response = ready(element, action, request.apply, scrolled, point, checks)
         if (response._tag === "Retry") {
           reason = response.reason
         } else {
@@ -1954,19 +1891,12 @@ export function engine(render: (root: SnapNode) => string) {
           ) {
             response = { ...response, candidates: points }
           }
-          const fill = action._tag === "Fill"
-          const frame = fill ? document.timeline.currentTime : null
-          if (
-            request.stability === "capture" && !request.apply && response._tag === "Ready" &&
-            (checks.stable > 0 || fill && typeof frame === "number")
-          ) {
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
             const captured = {
               token: `${generation}:${++stabilitySequence}`,
               element,
-              rect: rects[rects.length - 1] ?? element.getBoundingClientRect(),
-              frames: checks.stable,
-              fill,
-              frame: typeof frame === "number" ? frame : null
+              rect: rects[rects.length - 1]!,
+              frames: checks.stable
             }
             stability = captured
             const token = captured.token
@@ -1992,8 +1922,7 @@ export function engine(render: (root: SnapNode) => string) {
     apply: boolean,
     scrolled: boolean,
     point: { x: number; y: number } | null,
-    checks: Checks,
-    recheckFill?: () => Response | { readonly _tag: "Retry"; readonly reason: NotReady } | undefined
+    checks: Checks
   ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
@@ -2043,16 +1972,12 @@ export function engine(render: (root: SnapNode) => string) {
               return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
             }
             selectContents(element)
-            const changed = recheckFill?.()
-            if (changed !== undefined) return changed
             return { ...answer, fill: "type" }
           }
           const candidate = fillCandidate(element, action.value)
           if (candidate === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
-          const changed = recheckFill?.()
-          if (changed !== undefined) return changed
           element.value = candidate.value
           fire(element, "input")
           fire(element, "change")
@@ -2065,8 +1990,6 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
         if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
-        const changed = recheckFill?.()
-        if (changed !== undefined) return changed
         return { ...answer, fill: "type" }
       }
       case "Select": {

@@ -49,7 +49,7 @@ const recordsClick =
   `<script>document.addEventListener("pointerdown",e=>document.getElementById("out").textContent=JSON.stringify({target:e.target.id,x:e.clientX,y:e.clientY}));document.addEventListener("click",e=>e.preventDefault())</script>`
 
 /** Observe the real engine boundary, counting rendering callbacks only while a check is in progress. */
-const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl, notifyFocus = false) {
+const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
   const adapter = locator.owner.runtime.model.adapter
   const original = adapter.evaluate
   const rounds: Array<{
@@ -60,22 +60,13 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl, notifyFo
   const measured = `async function(request) {
     let frames = 0;
     let handle;
-    const focus = HTMLElement.prototype.focus;
-    // Inject missing focus notifications after native focus; insertion remains native.
-    if (${notifyFocus}) HTMLElement.prototype.focus = function(options) {
-      focus.call(this, options);
-      if (this.hasAttribute("onfocus")) this.dispatchEvent(new FocusEvent("focus"));
-    };
     const tick = () => { frames++; handle = requestAnimationFrame(tick); };
     handle = requestAnimationFrame(tick);
     try {
       const result = JSON.parse(await (${Engine.run})(request));
       result.__testFrames = frames;
       return JSON.stringify(result);
-    } finally {
-      cancelAnimationFrame(handle);
-      HTMLElement.prototype.focus = focus;
-    }
+    } finally { cancelAnimationFrame(handle); }
   }`
   const evaluate: typeof original = (realm, call) =>
     Effect.suspend(() => {
@@ -2082,203 +2073,6 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }),
         timeout
       )
-
-      for (const stable of [false, 2] as const) {
-        for (const trial of [false, true]) {
-          it.effect(
-            `offers immediate fill rendering evidence with ${stable} stability and trial ${trial}`,
-            () =>
-              Effect.scoped(Effect.gen(function*() {
-                const { url } = yield* fixture(() =>
-                  `<input id="go" value="old" oninput="out.textContent = String(event.isTrusted)"><output id="out"></output>`
-                )
-                const page = yield* Browser.newPage()
-                yield* page.goto(url)
-                const target = page.locator("#go")
-                assert(target instanceof LocatorImpl)
-                const rounds = yield* observeChecks(target)
-                yield* target.fill("new", { trial, checks: { stable: stable === false ? false : { frames: stable } } })
-                assert.strictEqual(rounds.length, 2)
-                assert.strictEqual(rounds[0]!.request.stability, "capture")
-                const first = rounds[0]!.response
-                assert(first._tag === "Ready" && typeof first.stability === "string")
-                assert.strictEqual(rounds[1]!.request.stability, first.stability)
-                assert.strictEqual(rounds[0]!.frames, stable === false ? 1 : stable)
-                assert.strictEqual(yield* target.readValue, trial ? "old" : "new")
-                assert.strictEqual(yield* page.locator("#out").readText, trial ? "" : "true")
-                // Trials and successful fills both release the input permit and consume their evidence.
-                yield* target.fill("again")
-                assert.strictEqual(yield* target.readValue, "again")
-              })),
-            timeout
-          )
-        }
-      }
-
-      it.effect(
-        "releases immediate fill rendering evidence on interruption before revalidation",
-        () =>
-          Effect.scoped(Effect.gen(function*() {
-            const { url } = yield* fixture(() => `<input id="go" value="old">`)
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
-            const target = page.locator("#go")
-            assert(target instanceof LocatorImpl)
-            const input = target.owner.page.input
-            const original = input.withPermitsIfAvailable
-            const available = original.bind(input)
-            const held = yield* Deferred.make<void>()
-            yield* Effect.acquireRelease(
-              Effect.sync(() => {
-                input.withPermitsIfAvailable = (permits) => () =>
-                  available(permits)(
-                    Effect.andThen(Deferred.succeed(held, undefined), Effect.never)
-                  )
-              }),
-              () =>
-                Effect.sync(() => {
-                  input.withPermitsIfAvailable = original
-                })
-            )
-            const filling = yield* target.fill("cancelled").pipe(Effect.forkScoped)
-            const boundary = yield* Effect.raceFirst(
-              Deferred.await(held).pipe(Effect.as("held")),
-              Fiber.join(filling).pipe(Effect.as("completed"))
-            )
-            assert.strictEqual(boundary, "held")
-            yield* Fiber.interrupt(filling)
-            input.withPermitsIfAvailable = original
-            assert.strictEqual(yield* target.readValue, "old")
-            yield* target.fill("after")
-            assert.strictEqual(yield* target.readValue, "after")
-          })),
-        timeout
-      )
-
-      for (
-        const [change, handler, reason] of [
-          ["movement", `this.style.marginLeft='40px'`, ""],
-          ["replacement", `window.oldFillTarget=this;this.replaceWith(this.cloneNode(true))`, ""],
-          ["hidden target", `this.style.visibility='hidden'`, "NotVisible"],
-          ["inert target", `this.inert=true`, "Inert"]
-        ] as const
-      ) {
-        it.effect(
-          `checks fill rendering after focus-time ${change} before native insertion`,
-          () =>
-            Effect.scoped(Effect.gen(function*() {
-              const { url } = yield* fixture(() =>
-                `<input id="go" value="old" onfocus="this.removeAttribute('onfocus');${handler}" oninput="out.textContent=this.value+':'+event.isTrusted"><output id="out">untouched</output>`
-              )
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
-              const target = page.locator("#go")
-              assert(target instanceof LocatorImpl)
-              yield* observeChecks(target, true)
-              if (reason !== "") {
-                const error = yield* target.fill("filled").pipe(Deadline.within("1 second"), Effect.flip)
-                assert(Deadline.isTimeout(error), String(error))
-                assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === reason))
-                assert.strictEqual(yield* target.readValue, "old")
-                assert.strictEqual(yield* page.locator("#out").readText, "untouched")
-              } else {
-                yield* target.fill("filled").pipe(Deadline.within("1 second"))
-                assert.strictEqual(yield* target.readValue, "filled")
-                assert.strictEqual(yield* page.locator("#out").readText, "filled:true")
-                if (change === "replacement") {
-                  assert.strictEqual(
-                    yield* page.evaluateInMainWorld(() =>
-                      (globalThis as unknown as { oldFillTarget: HTMLInputElement }).oldFillTarget.value
-                    ),
-                    "old"
-                  )
-                }
-              }
-            })),
-          timeout
-        )
-      }
-
-      it.effect("does not offer fill rendering reuse to clear or focus", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const { url } = yield* fixture(() => `<input id="go" value="old">`)
-          const page = yield* Browser.newPage()
-          yield* page.goto(url)
-          const target = page.locator("#go")
-          assert(target instanceof LocatorImpl)
-          const rounds = yield* observeChecks(target)
-          yield* target.clear()
-          yield* target.focus()
-          assert(rounds.every((round) => round.request.stability === undefined))
-          assert(rounds.every((round) => round.frames >= 1))
-        })), timeout)
-
-      for (const change of ["replaced", "moved", "disabled", "interrupted", "expired"] as const) {
-        it.effect(`handles queued fill rendering evidence when ${change}`, () =>
-          Effect.scoped(Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              `<input id="go" data-name="old" value="original" oninput="out.textContent=this.dataset.name+':'+this.value+':'+event.isTrusted"><output id="out">untouched</output>`
-            )
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
-            const target = page.locator("#go")
-            assert(target instanceof LocatorImpl)
-            assert.strictEqual(yield* target.readValue, "original")
-            const rounds = yield* observeChecks(target)
-            const input = target.owner.page.input
-            const original = input.withPermit
-            const waiting = yield* Deferred.make<void>()
-            yield* Effect.acquireRelease(
-              Effect.sync(() => {
-                input.withPermit = (effect) => Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
-              }),
-              () =>
-                Effect.sync(() => {
-                  input.withPermit = original
-                })
-            )
-            const filling = yield* original(Effect.gen(function*() {
-              const fiber = yield* target.fill("filled").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
-              yield* Deferred.await(waiting).pipe(Effect.timeout("3 seconds"))
-              assert.strictEqual(yield* page.locator("#out").readText, "untouched")
-              if (change === "interrupted") yield* Fiber.interrupt(fiber)
-              else if (change === "expired") {
-                const error = yield* Fiber.join(fiber).pipe(Effect.flip)
-                assert(Deadline.isTimeout(error), String(error))
-              } else {yield* page.evaluateInMainWorld((change: string) => {
-                  const target = document.getElementById("go") as HTMLInputElement
-                  if (change === "replaced") {
-                    const next = target.cloneNode(true) as HTMLInputElement
-                    next.dataset["name"] = "new"
-                    target.replaceWith(next)
-                  } else if (change === "moved") target.style.marginLeft = "100px"
-                  else target.disabled = true
-                }, change)}
-              return fiber
-            }))
-            if (change === "disabled") {
-              const error = yield* Fiber.join(filling).pipe(Effect.flip)
-              assert(Deadline.isTimeout(error), String(error))
-              assert.strictEqual(yield* page.locator("#out").readText, "untouched")
-            } else {
-              if (change === "interrupted" || change === "expired") {
-                assert.strictEqual(yield* page.locator("#out").readText, "untouched")
-                rounds.length = 0
-                yield* target.fill("filled")
-              } else yield* Fiber.join(filling)
-              assert.strictEqual(yield* target.readValue, "filled")
-              assert.strictEqual(
-                yield* page.locator("#out").readText,
-                `${change === "replaced" ? "new" : "old"}:filled:true`
-              )
-            }
-            if (change !== "interrupted" && change !== "expired") {
-              const applied = rounds.filter((round) => round.request.apply)
-              assert(applied.every((round) => round.request.stability === undefined))
-              assert(applied.every((round) => round.frames >= 1))
-            }
-          })), timeout)
-      }
 
       for (const action of ["check", "uncheck"] as const) {
         it.effect(`chooses a reachable label fragment while performing ${action}`, () =>

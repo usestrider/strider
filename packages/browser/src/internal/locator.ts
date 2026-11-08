@@ -1267,8 +1267,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       const id = record.id
       const budget = record.budget
       const checks = checksFor(defaults, options?.checks)
-      const reuseRendering = operation === "Locator.fill" || checks.stable > 0 &&
-          (operation === "Locator.click" || operation === "Locator.check" || operation === "Locator.uncheck")
+      const reuseStability = checks.stable > 0 &&
+        (operation === "Locator.click" || operation === "Locator.check" || operation === "Locator.uncheck")
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
@@ -1438,7 +1438,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
-          const first = yield* round(Runtime.roundCap(left), false, reuseRendering ? "capture" : undefined).pipe(
+          const first = yield* round(Runtime.roundCap(left), false, reuseStability ? "capture" : undefined).pipe(
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue
@@ -1466,13 +1466,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             return "again" as const
           }).bind(this)
           const permitted = Effect.gen(function*() {
-            if (reuseRendering) {
+            if (reuseStability) {
               const immediate = yield* owner.page.input.withPermitsIfAvailable(1)(
                 underPermit(first.value.response.stability)
               )
               if (Option.isSome(immediate)) return immediate.value
             }
-            // Queued input always takes new rendering observations, even if the page hasn't rendered while waiting.
+            // Queued input always takes new stability samples, even if the page hasn't rendered while waiting.
             return yield* owner.page.input.withPermit(underPermit())
           })
           const outcome = yield* record.bound(permitted, () => hint())
