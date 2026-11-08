@@ -246,7 +246,7 @@ const isMarked = Effect.fnUntraced(function*(
 })
 
 /** Which of `candidates` holds the document Automation's frame shows: the one alike, or the one marked. */
-const matchFrame = Effect.fnUntraced(function*(
+export const matchFrame = Effect.fnUntraced(function*(
   process: WebKitAutomation.Process,
   handle: Automation.BrowsingContextHandle,
   frameHandle: Automation.FrameHandle,
@@ -268,7 +268,7 @@ const matchFrame = Effect.fnUntraced(function*(
 })
 
 /** A frame's Automation handle, found by its parent's, from the main frame down. */
-const frameHandleOf = (
+export const frameHandleOf = (
   state: State,
   frame: FrameEntry,
   handle: Automation.BrowsingContextHandle,
