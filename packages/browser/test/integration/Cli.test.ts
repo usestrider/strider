@@ -995,18 +995,38 @@ describe("strider", () => {
         const unlocked = yield* run("-s", "shop", "-p", "vault", "expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(unlocked.code, 0, unlocked.err)
         // A navigation that fails doesn't print the secret either
-        const unsafe = "http://127.0.0.1:9/?pw=%password%"
+        const unsafe = "http://127.0.0.1:9/?pw=%password%&typo=%pasword%"
         const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
         assert.strictEqual(refused.code, 11, refused.err)
         assert.notInclude(refused.err, "hunter2")
+        assert.include(refused.err, "%pasword% names no secret")
+        assert.include(refused.err, "Did you mean %password%?")
+        assert.notInclude(refused.err, "was sent")
+        const plainFailure = yield* shop("--json", "goto", "http://127.0.0.1:9/?pw=%password%")
+        const typoFailure = yield* shop("--json", "goto", unsafe)
+        assert.strictEqual(plainFailure.code, 11, plainFailure.err)
+        assert.strictEqual(typoFailure.code, plainFailure.code, typoFailure.err)
+        const originalError = JSON.parse(plainFailure.out).outcome
+        const hintedError = JSON.parse(typoFailure.out).outcome
+        assert.strictEqual(hintedError._tag, "Failed")
+        assert.strictEqual(hintedError.error, originalError.error)
+        assert.strictEqual(hintedError.reason, originalError.reason)
+        assert.isString(hintedError.reason)
+        assert.include(hintedError.message, "%pasword% names no secret")
+        assert.include(typoFailure.err, "%pasword% names no secret")
+        assert.notInclude(typoFailure.out + typoFailure.err, "hunter2")
+        assert.notInclude(hintedError.message, "was sent")
         // It names the URL it was going to, with the secret's name back in
-        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password% failed")
+        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
         // Its page is closed again, so the session holds no page the exported test leaves out
         const held = names(yield* run("-s", "shop", "pages"))
         assert.notInclude(held, "refused")
         // A name that's taken fails before a page opens
-        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", url)
+        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", `${url}&typo=%pasword%`)
         assert.strictEqual(twice.code, 15, twice.err)
+        assert.include(twice.err, "A page is already named shop")
+        assert.include(twice.err, "%pasword% names no secret")
+        assert.notInclude(twice.err, "was sent")
         assert.deepStrictEqual(names(yield* run("-s", "shop", "pages")), held)
         // A URL's percent-escapes name no secret, so the URL is sent as written
         const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
