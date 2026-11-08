@@ -6,6 +6,8 @@
 interface Env {
   readonly ASSETS: { fetch(request: Request): Promise<Response> }
   readonly METRICS_ORIGIN: string
+  // The site's own script on that server, which carries the site's name and the server's event endpoint
+  readonly METRICS_SCRIPT: string
 }
 
 export default {
@@ -13,10 +15,16 @@ export default {
     const { pathname } = new URL(request.url)
     if (pathname === "/a/script.js") {
       // Cached at the edge for a day: the script changes only when the server is upgraded
-      return fetch(
-        `${env.METRICS_ORIGIN}/js/script.js`,
+      const upstream = await fetch(
+        `${env.METRICS_ORIGIN}${env.METRICS_SCRIPT}`,
         { cf: { cacheEverything: true, cacheTtl: 86400 } } as RequestInit
       )
+      if (!upstream.ok) return new Response(null, { status: 502 })
+      // The script names the server's event endpoint; it sends to this Worker's instead, so the server isn't named
+      const script = (await upstream.text()).replaceAll(`${env.METRICS_ORIGIN}/api/event`, "/a/event")
+      return new Response(script, {
+        headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" }
+      })
     }
     if (pathname === "/a/event" && request.method === "POST") {
       // The server counts unique visitors by the reader's address and browser, which it never stores, so both are

@@ -27,7 +27,7 @@ export default Alchemy.Stack(
       main: Path.relative(process.cwd(), fileURLToPath(new URL("worker.ts", import.meta.url))),
       assets: { runWorkerFirst: ["/a/*"] },
       // The analytics server, kept out of the repository: deploy.sops.env sets it
-      env: { METRICS_ORIGIN: Config.Redacted("METRICS_ORIGIN") },
+      env: { METRICS_ORIGIN: Config.Redacted("METRICS_ORIGIN"), METRICS_SCRIPT: "/js/pa-mUb9xbMUS7lS2Hf0a0EUo.js" },
       // www redirects to the bare domain (301, path kept), by a zone redirect rule ahead of the Worker
       domain: { name: "usestrider.dev", redirects: ["www.usestrider.dev"] },
       // No workers.dev URL: the domain is the only way in
