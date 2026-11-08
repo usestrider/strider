@@ -103,3 +103,5 @@ of deleted upstream members, and record any replacement in the commit descriptio
 citations, update `upstreamVersion`, the guide's pin and counts here, then refresh browser statuses/evidence and run
 all checks above. Revalidate patch evidence against the new checkout. Have an independent reviewer audit mappings
 and the rendered page; completeness checks cannot determine whether the stated semantics match.
+
+Effect compositions cite the installed, version-pinned `effect` package source (currently Fiber.interrupt and Effect.sleep). The checker binds the module and export to that source URL, verifies the quotation, and hashes the installed source and package version. Review cancellation separately from deadlines: interruption is cooperative and cannot undo dispatched browser effects. Signal options inherit their implemented parent’s browser requirements; absent parents remain absent. Wait-state compositions use visibility/count expectations, with strictness, lazy identity and handle-return differences stated explicitly.

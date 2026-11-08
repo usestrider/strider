@@ -11,7 +11,9 @@ export interface Row {
   readonly patches?: ReadonlyArray<string>
   readonly option?: string
   readonly status: Status
-  readonly api: ReadonlyArray<{ readonly module: string; readonly symbol: string; readonly url: string }>
+  readonly api: ReadonlyArray<
+    { readonly package?: "effect"; readonly module: string; readonly symbol: string; readonly url: string }
+  >
   readonly notes: string
   readonly decision?: {
     readonly file: string

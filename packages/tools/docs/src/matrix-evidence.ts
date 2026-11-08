@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs"
 import ts from "typescript"
 
 export interface Api {
+  readonly package?: "effect" | undefined
+  readonly source?: { readonly file: string; readonly quote: string } | undefined
   readonly module: string
   /** An exported name, or the fully qualified declaring type and member. */
   readonly symbol: string
@@ -50,6 +52,20 @@ export const sourceSymbols = (module: string): Map<string, string> => {
   return symbols
 }
 export const assertApiLink = (api: Api): void => {
+  if (api.package === "effect") {
+    const allowed = api.module === "Effect" && api.symbol === "sleep" ||
+      api.module === "Fiber" && api.symbol === "interrupt"
+    assert.ok(allowed, "Unsupported external Effect API evidence")
+    const file = `node_modules/effect/src/${api.module}.ts`
+    const version = JSON.parse(readFileSync("node_modules/effect/package.json", "utf8")).version
+    assert.equal(api.url, `https://unpkg.com/effect@${version}/src/${api.module}.ts`)
+    assert.equal(api.source?.file, file)
+    assert.ok(api.source?.quote && api.source.quote.length >= 40, "Effect API needs source evidence")
+    const source = readFileSync(file, "utf8")
+    assert.ok(source.includes(api.source.quote), "Effect API source quotation changed")
+    assert.ok(source.includes(`export const ${api.symbol}:`), "Effect API is not exported")
+    return
+  }
   const anchor = sourceSymbols(api.module).get(api.symbol)
   assert.ok(anchor, `API symbol ${api.module}.${api.symbol} is not a public declaration`)
   assert.equal(

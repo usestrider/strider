@@ -113,6 +113,13 @@ describe("Playwright matrix", () => {
     expect(implemented.notes).toMatch(/cooperative/)
     expect(implemented.notes).toMatch(/does not undo/)
     expect(row("option-apirequestcontext-delete-signal").status).toBe("missing")
+    for (const signal of rows.filter((row) => row.option === "signal")) {
+      const parent = rows.find((row) => !row.option && !row.parent && row.upstream[0] === signal.upstream[0])
+      expect(signal.status).toBe(parent.status === "missing" ? "missing" : "has")
+      for (const mode of Object.keys(parent.browsers)) {
+        if (parent.browsers[mode].status === "missing") expect(signal.browsers[mode].status).toBe("missing")
+      }
+    }
   })
   it("backs caller delays with Effect.sleep and its fiber clock", () => {
     for (const owner of ["page", "frame"]) {
@@ -123,11 +130,21 @@ describe("Playwright matrix", () => {
     }
   })
   it("accounts for every wait state with count and visibility compositions", () => {
-    for (const method of ["locator-waitfor", "page-waitforselector", "frame-waitforselector", "elementhandle-waitforselector"]) {
+    for (
+      const method of [
+        "locator-waitfor",
+        "page-waitforselector",
+        "frame-waitforselector",
+        "elementhandle-waitforselector"
+      ]
+    ) {
       const state = row(`option-${method}-state`)
       expect(state.status).toBe("has")
       expect(state.valueCoverage.map((entry: any) => [entry.value, entry.status])).toEqual([
-        ["attached", "has"], ["detached", "has"], ["hidden", "has"], ["visible", "has"]
+        ["attached", "has"],
+        ["detached", "has"],
+        ["hidden", "has"],
+        ["visible", "has"]
       ])
       expect(state.api.some((api: any) => api.symbol === "toHaveCount")).toBe(true)
       expect(state.notes).toMatch(/strict/)
@@ -135,4 +152,9 @@ describe("Playwright matrix", () => {
     }
   })
 
+  it("rejects an Effect source link for the wrong module", () => {
+    const api = row("method-page-waitfortimeout").api[0]
+    expect(() => assertApiLink({ ...api, url: "https://unpkg.com/effect@4.0.6/src/Fiber.ts" }))
+      .toThrow()
+  })
 })
