@@ -939,7 +939,7 @@ Adapter responsibilities:
 - **What the suites found, built** (`webkitAdapter.ts`, launched profile, unless said):
   - an override stock WebKit can't apply is refused under its capability, never ignored: a mobile or scaled viewport, the locale, the time zone, the user agent, and when attached, every one; a declared viewport's window is restored when it's released; downloads are refused under `downloads`;
   - the error page after a failed load is the failed navigation's document (`ErrorPage`), as Chromium's is (Q1, Q199);
-  - a frame locator's frame, found through Automation and matched by its document (Q228), so frames work, a file input's in a frame too;
+  - a frame locator's frame, found through Automation and confirmed by a temporary window mark (QUIRKS.md, Q228), so frames work, a file input's in a frame too. Every newly established child-frame pairing in either direction uses the mark; time-origin/URL fingerprints neither prove identity nor exclude candidates, and a failed confirmation does not stop the search. Established handle caching is retained. Confirmation rejects a removed frame or a document replaced during the check or cleanup, and removes the mark even after a failed or interrupted check. This adds protocol commands, and page scripts can briefly see the mark on unique-fingerprint lookups too;
   - one `dispatchInput` is one interaction sequence, so a double click is one, the wheel's state is cumulative, and a newline is Enter (Q223); input that opens a dialog returns once it's decided (Q224);
   - a request's body read as stock WebKit's text, not base64 (Q221);
   - Automation's results that aren't JSON, and its empty frame handle, read as none (Q227);

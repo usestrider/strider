@@ -125,6 +125,28 @@ const silentListenerCases = [
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "keeps child snapshot text when time origin reads differ by one millisecond",
+      () =>
+        launched(Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          // Model the two adjacent time-origin values observed for one loaded srcdoc document.
+          // Every Automation/inspector pair differs, without a navigation or a timing dependency.
+          const child = `<h2>child heading</h2><script>
+          let reads = 0;
+          const origin = performance.timeOrigin;
+          Object.defineProperty(performance, "timeOrigin", {
+            get() { return origin + (reads++ % 2); }
+          });
+        </script>`
+          yield* page.goto(fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`))
+          const snapshot = yield* page.snapshot()
+          assert.include(snapshot.text, "child heading")
+        })),
+      timeout
+    )
+
     for (const { after, before, collisions, name, repeat } of silentListenerCases) {
       it.effect(
         `${name}, and starts the real MiniBrowser owned on another port`,
