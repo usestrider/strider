@@ -336,6 +336,9 @@ body {
 /* ── Prose ──────────────────────────────────────────────────────────────────── */
 
 .prose {
+  /* A word or code span longer than the column, such as a flag list or a qualified call, breaks rather than
+     widening the page; a word that fits is never broken */
+  overflow-wrap: break-word;
   --tw-prose-body: var(--ink);
   --tw-prose-headings: var(--ink);
   --tw-prose-lead: var(--labels);
