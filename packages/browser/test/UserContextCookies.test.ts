@@ -78,13 +78,30 @@ describe("UserContext.withCookies", () => {
         context
       )
       yield* client.get(`${origin}/app/login`)
-      const cookies = yield* context.cookies.list
+      const cookies = yield* context.cookies.listFor(`${origin}/app/page`)
       assert.deepStrictEqual(cookies.map((c) => [c.name, Redacted.value(c.value), c.domain, c.path]).sort(), [
         ["alive", "yes", "app.example.com", "/app"],
         ["default", "value", "app.example.com", "/app"],
         ["same", "app", "app.example.com", "/app"],
         ["same", "root", "app.example.com", "/"]
       ])
+    })))
+
+  it.effect("keeps cookie failures typed and skips transport after a failed read", () =>
+    run(Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const original = yield* context.cookies.listFor("invalid").pipe(Effect.flip)
+      let calls = 0
+      const client = HttpClient.make((request) => {
+        calls++
+        return Effect.succeed(response(request, ["saved=yes"]))
+      })
+      const readFailure = { ...context, cookies: { ...context.cookies, listFor: () => Effect.fail(original) } }
+      assert.strictEqual(yield* UserContext.withCookies(client, readFailure).get(origin).pipe(Effect.flip), original)
+      assert.strictEqual(calls, 0)
+      const writeFailure = { ...context, cookies: { ...context.cookies, set: () => Effect.fail(original) } }
+      assert.strictEqual(yield* UserContext.withCookies(client, writeFailure).get(origin).pipe(Effect.flip), original)
+      assert.strictEqual(calls, 1)
     })))
 
   it.effect("stores redirect cookies before sending the next hop", () =>

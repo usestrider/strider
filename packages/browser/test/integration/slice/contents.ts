@@ -16,10 +16,13 @@ import {
   Pixels,
   Snapshot,
   StorageState,
-  Url
+  Url,
+  UserContext
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -1019,6 +1022,51 @@ export const contents = (
 
       // ── Storage ──
 
+      it.effect("shares HTTP response cookies before immediate navigation and isolates contexts", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${origin}/empty`)
+            const context = page.context
+            const requests: Array<string | undefined> = []
+            const base = HttpClient.make((request) => {
+              requests.push(request.headers.cookie)
+              return Effect.succeed(HttpClientResponse.fromWeb(
+                request,
+                new Response(null, {
+                  headers: { "set-cookie": "api=shared; Path=/; HttpOnly" }
+                })
+              ))
+            })
+            const client = base.pipe(UserContext.withCookies(context))
+            yield* client.get(`${origin}/api/login`)
+            yield* page.goto(`${origin}/echo?shared-cookie`)
+            assert.include(
+              served.findLast((r) =>
+                r.path === "/echo?shared-cookie"
+              )!.headers.cookie,
+              "api=shared"
+            )
+            // Partial cookie stores expose only cookies sent to open pages. Navigation makes this one visible.
+            if (!(yield* fullySupports("cookies"))) {
+              assert.isTrue((yield* context.cookies.list).some((c) =>
+                c.name === "api"
+              ))
+            }
+            yield* client.get(`${origin}/api/account`)
+            assert.include(requests[1], "api=shared")
+            const other = yield* Browser.newContext()
+            yield* base.pipe(UserContext.withCookies(other)).get(`${origin}/api/account`)
+            yield* base.get(`${origin}/api/account`)
+            assert.isUndefined(requests[2])
+            assert.isUndefined(requests[3])
+            assert.isFalse((yield* other.cookies.list).some((c) =>
+              c.name === "api"
+            ))
+          }))
+        }), timeout)
+
       it.effect("reads, sets and removes a context's cookies, and lists what a request would send", () =>
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
@@ -1063,9 +1111,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
