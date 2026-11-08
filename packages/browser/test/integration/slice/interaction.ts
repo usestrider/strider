@@ -2665,7 +2665,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           // Hold parsing at a real resource boundary, without a sleep or machine load.
           yield* Effect.gen(function*() {
-            const navigation = yield* page.goto(url, { waitUntil: "domContentLoaded" }).pipe(Effect.forkScoped)
+            const navigation = yield* page.goto(url).pipe(Effect.forkScoped)
             yield* Deferred.await(requested)
             assert.isTrue(yield* page.evaluateInMainWorld(() => document.querySelector("#target") === null))
             yield* Deferred.succeed(release, undefined)
