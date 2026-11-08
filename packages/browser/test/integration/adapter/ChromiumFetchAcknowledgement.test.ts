@@ -16,7 +16,7 @@ import { assertPinned, chromium } from "../browsers.ts"
 import { site } from "./harness.ts"
 
 layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-  for (const control of ["unmatched", "disable"] as const) {
+  for (const control of ["unmatched", "disable", "probe"] as const) {
     it.effect(`acknowledges live-page Fetch patterns after ${control}, 40 samples`, () =>
       Effect.gen(function*() {
         const { origin } = yield* site
@@ -66,6 +66,7 @@ layer(NodeServices.layer, { excludeTestServices: true })((it) => {
         )
         // Run on an already executing document, not a target still waiting for debugger resume.
         yield* Runtime.evaluate({ expression: "document.readyState", returnByValue: true }).pipe(on)
+        const activationMs: Array<number> = []
         for (let n = 0; n < 40; n++) {
           if (control === "unmatched") {
             yield* Fetch.enable({ patterns: [{ urlPattern: "strider-intercepts-nothing:" }] }).pipe(on)
@@ -73,7 +74,23 @@ layer(NodeServices.layer, { excludeTestServices: true })((it) => {
             yield* Fetch.disable().pipe(on)
           }
           const url = `${origin}/json?ack=${n}`
+          const started = performance.now()
           yield* Fetch.enable({ patterns: [{ urlPattern: `${origin}/json*`, requestStage: "Request" }] }).pipe(on)
+          if (control === "probe") {
+            // A synthetic request on this document's factory, fulfilled before reaching the server.
+            // Still visible to Network observers: production isolation would require explicit filtering.
+            const probe = yield* Runtime.evaluate({
+              expression: `fetch(${
+                JSON.stringify(`${origin}/json?activation-probe=${n}`)
+              }, { cache: 'no-store' }).then(r => r.text())`,
+              awaitPromise: true,
+              returnByValue: true
+            }).pipe(on)
+            assert.isUndefined(probe.exceptionDetails)
+            assert.strictEqual(probe.result.value, "routed")
+            assert.strictEqual(paused[paused.length - 1], `${origin}/json?activation-probe=${n}`)
+            activationMs.push(performance.now() - started)
+          }
           // No sleep or extra protocol barrier between enable's reply and the request.
           const result = yield* Runtime.evaluate({
             expression: `fetch(${JSON.stringify(url)}, { cache: 'no-store' }).then(r => r.text())`,
@@ -82,9 +99,12 @@ layer(NodeServices.layer, { excludeTestServices: true })((it) => {
           }).pipe(on)
           assert.isUndefined(result.exceptionDetails)
           assert.strictEqual(result.result.value, "routed", `${control} sample ${n}`)
-          assert.strictEqual(paused[n], url)
+          assert.strictEqual(paused[paused.length - 1], url)
         }
-        assert.lengthOf(paused, 40)
+        assert.lengthOf(paused, control === "probe" ? 80 : 40)
+        if (control === "probe") {
+          process.stdout.write(`activation-probe-ms ${JSON.stringify(activationMs)}\n`)
+        }
       }), 60_000)
   }
 })
