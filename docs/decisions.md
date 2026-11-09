@@ -1396,7 +1396,12 @@ following [Pay for what you use](#pay-for-what-you-use).
 ## Bounded redirect evidence
 
 Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle. It
-adds no request tracking or cache, following [Pay for what you use](#pay-for-what-you-use). Exact original
-snapshots and model ownership establish which target can read a link. Missing retained evidence and unfinished
-chains fail explicitly rather than inventing a boundary. Unlimited object links were rejected because they retain
-requests for an unbounded lifetime; a second opt-in cache was rejected because the existing hop facts suffice.
+adds no request tracking or cache, following [Pay for what you use](#pay-for-what-you-use). Original snapshots
+and model ownership establish which target can read a link. Observed links are authoritative, including canceled
+successor attempts. An absent link is a boundary only with terminal evidence; a committed navigation naming the
+exact hop can supply that evidence from the existing bounded event log. Insufficient proof is an explicit typed
+unknown outcome, separately recoverable from retention, ownership and lifetime errors. Completion alone cannot
+settle a redirect on BiDi, which reports it before its successor and exposes no fetch redirect mode. Inferring a
+boundary from status, Location or elapsed time was rejected because it can invent an end. Unlimited object links
+were rejected for unbounded retention; another opt-in cache or injected fetch wrapper was rejected because it
+would add tracking without supplying the missing native request identity or terminal signal.
