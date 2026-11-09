@@ -128,6 +128,46 @@ export const toBeDetached: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
 export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeVisible(locator)
 
 /**
+ * Expects the one match to intersect the viewport at the requested ratio.
+ *
+ * **Details**
+ *
+ * Uses the browser's intersection ratio, including clipping by ancestors. A positive ratio is required even
+ * when `ratio` is zero. Opacity and overlapping elements do not affect the ratio. With `inViewport: false`,
+ * waits for the condition's inverse, and also passes when nothing matches. Multiple matches never pass.
+ * Observation belongs to this expectation and is released when it ends; it does not scroll the element.
+ *
+ * **Example** (Waiting for half a card)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const card = Effect.fn("card")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("article").pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [
+  options?: {
+    /** Minimum intersection ratio. @default 0 */
+    readonly ratio?: number | undefined
+    /** Whether to require intersection or its inverse. @default true */
+    readonly inViewport?: boolean | undefined
+  } | undefined
+]> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+  ) => ExpectImpl.toBeInViewport(locator, options)
+)
+
+/**
  * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
  *
  * **Example** (Waiting for a spinner to go)

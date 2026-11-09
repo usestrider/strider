@@ -61,6 +61,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),

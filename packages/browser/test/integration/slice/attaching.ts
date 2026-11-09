@@ -20,7 +20,7 @@ import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Launch from "../../../src/internal/launch.ts"
-import { site } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { chromium, firefox } from "../browsers.ts"
 import { supports } from "./capabilities.ts"
 
@@ -228,6 +228,27 @@ export const attaching = (
 
       if (Option.isSome(attachable)) {
         const start = attachable.value.start
+
+        it.effect("isolates certificate acceptance in new contexts of an attached browser", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const secure = yield* tlsSite
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              if (!(yield* supports("acceptInsecureCerts"))) {
+                const error = yield* Browser.newPage({ acceptInsecureCerts: true }).pipe(Effect.flip)
+                assert(Page.isPageError(error) && error.reason._tag === "Unsupported")
+                assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+              } else {
+                const page = yield* Browser.newPage({ acceptInsecureCerts: true })
+                yield* page.goto(secure.origin)
+                assert.strictEqual(yield* page.title, "secure")
+              }
+              const verified = yield* Browser.newPage()
+              const error = yield* verified.goto(secure.origin).pipe(Effect.flip)
+              assert(Page.isPageError(error) && error.reason._tag === "NavigationFailed")
+            })).pipe(Effect.provide(attached))
+          }), timeout)
 
         it.effect("honors required init-script timing or refuses it for an attached context popup", () =>
           Effect.gen(function*() {

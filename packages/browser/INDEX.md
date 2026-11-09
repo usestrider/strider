@@ -604,6 +604,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeAttached: Matcher<Locator.ReadonlyLocator>`
 - `const toBeDetached: Matcher<Locator.ReadonlyLocator>`
 - `const toBeVisible: Matcher<Locator.ReadonlyLocator>`
+- `const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [options?: { readonly ratio?: number | undefined readonly inViewport?: boolean | undefined } | undefined]>`
 - `const toBeHidden: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEnabled: Matcher<Locator.ReadonlyLocator>`
 - `const toBeDisabled: Matcher<Locator.ReadonlyLocator>`
@@ -1938,6 +1939,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly acceptInsecureCerts?: boolean | undefined`
   - `readonly httpCredentials?: { readonly origin?: string | undefined readonly username: string readonly password: Redacted.Redacted<string> } | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`
   - `readonly storageState?: StorageState.StorageState | undefined`
