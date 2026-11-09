@@ -46940,7 +46940,13 @@
           "file": "packages/browser/src/internal/webkitAdapter.ts",
           "quote": "createUserContext: refuse(\"userContexts\", noPages)"
         }
-      ]
+      ],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "context-http-credentials",
+        "quote": "Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different pairs for different origins.",
+        "revision": "a379855715526114c020dc57bd6e583733e3ca10"
+      }
     },
     {
       "id": "option-browser-newcontext-ignorehttpserrors",
@@ -48596,7 +48602,13 @@
           "file": "packages/browser/src/internal/webkitAdapter.ts",
           "quote": "createUserContext: refuse(\"userContexts\", noPages)"
         }
-      ]
+      ],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "context-http-credentials",
+        "quote": "Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different pairs for different origins.",
+        "revision": "a379855715526114c020dc57bd6e583733e3ca10"
+      }
     },
     {
       "id": "option-browser-newpage-ignorehttpserrors",
@@ -113353,7 +113365,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "b69e58d7444bd5f16dac9486a6f5b54a48ee2947e010c3c9c9fa06e8a5182b7c",
+    "docs/decisions.md": "d34e53b17e03dc96907ecd3aa2f58a7af2dc34dcab6d9908f7f2a36f1199eb1e",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
