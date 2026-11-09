@@ -19328,33 +19328,39 @@
       "upstream": [
         "method:LocatorAssertions.toBeInViewport"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeInViewport",
+          "url": "/docs/api/browser/Expect#toBeInViewport"
+        }
+      ],
+      "notes": "Native intersection ratio, default zero with positive intersection required; inViewport: false inverts the threshold and passes for a missing element. Multiple matches retry with typed count evidence, following other scalar expectations.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -47087,34 +47093,54 @@
         "method:Browser.newContext"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -48749,34 +48775,54 @@
         "method:Browser.newPage"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -89059,9 +89105,15 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeInViewport",
+          "url": "/docs/api/browser/Expect#toBeInViewport"
+        }
+      ],
+      "notes": "Native intersection ratio, default zero with positive intersection required; inViewport: false inverts the threshold and passes for a missing element. Multiple matches retry with typed count evidence, following other scalar expectations.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-ratio",
       "upstream": [
@@ -89070,36 +89122,47 @@
       "option": "ratio",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-signal",
       "upstream": [
@@ -89108,36 +89171,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-timeout",
       "upstream": [
@@ -89146,31 +89215,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "has",
@@ -113567,7 +113642,7 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "89aa59a2b6b86267f2382ce6e2e6d09642eb6fd312e01afa64fdf4cbc4d33b62",
-    "packages/browser/src/Expect.ts": "d54ee1f9794748599576066625b4c6eafe722a77d046aeae168fdc54249680c6",
+    "packages/browser/src/Expect.ts": "35a35e095ba487e45c4e46b979530bd15dcdb5b7dc3f97d375c1d409fa6f1678",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
@@ -113587,14 +113662,14 @@
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "c0254920c6fc4a96b0ad8810ac963ab334cb3f058084a32607a63a9a912e872d",
+    "packages/browser/src/UserContext.ts": "bed8523ef6b81e95e5443d1666a34a2a3f35a796f2d23190b66dcdffe8c6f800",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "a25b4605161c30b604ee128a52f05231ef36244bea4b88daf619e680080f1e46",
-    "packages/browser/src/internal/cdpAdapter.ts": "aa5d4848de004595c8edef56b274e57ca789e3da7121eeaee126ae3702e5ff1a",
+    "packages/browser/src/internal/bidiAdapter.ts": "5f7b5c116fe520eb9d976aee836d3a72844971b4acbe92b869b76c180096a6ab",
+    "packages/browser/src/internal/cdpAdapter.ts": "7079c74976dea5bca3f18336694f31902d6d0efb57c4f6d20e885f9fadf32012",
     "packages/browser/src/internal/webkitAdapter.ts": "c71f333efadbb902d5fa671c5a45f46813aeb333f14cf15760e07a3a50c4d482",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a4c087ebcaafb7874d649352a7d1c97704a4b05bf82cab381737d33b20e60ce8",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "c206488996299f7ef046d8afdd05fcbd2d1428a5291dd48e42a461d9b31ef212",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",

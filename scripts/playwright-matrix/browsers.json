@@ -16,6 +16,13 @@
           "limitations": []
         },
         {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
+        },
+        {
           "name": "userContexts.proxy",
           "status": "supported",
           "limitations": [
@@ -480,6 +487,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -955,6 +969,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -1500,6 +1521,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -2049,6 +2077,13 @@
           "status": "supported",
           "limitations": [
             "each context is a browser process of its own"
+          ]
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native capability in the context-owned process"
           ]
         },
         {
@@ -2637,6 +2672,13 @@
           "status": "unsupported",
           "limitations": [
             "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "an attached process cannot be reconfigured"
           ]
         },
         {

@@ -34,6 +34,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or no match is visible, however many match |
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
+| `toBeInViewport(options?)` | one element intersects the viewport at the requested ratio |
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
@@ -47,6 +48,22 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
+
+Use `toBeInViewport` when an element can exist outside the visible area. It waits for an intersection without scrolling the page:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cardInView = Effect.fn("cardInView")(function*(page: Page.ReadonlyPage) {
+  const card = page.getByRole("article")
+  yield* card.pipe(Expect.toBeInViewport())
+  yield* card.pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+  yield* card.pipe(Expect.toBeInViewport({ inViewport: false }))
+})
+```
+
+The default ratio is zero, which requires some positive intersection. A requested ratio includes equality with a small floating-point tolerance. Ancestor clipping counts; opacity and overlapping elements do not. `inViewport` defaults to `true`; set it to `false` to wait for the inverse, including a missing element. Multiple matches retry until the locator narrows to one (or disappears for the inverse). Failures include the observed ratio or match count. The observer is released when the expectation ends.
 
 Class strings preserve spacing and class order. Missing class attributes count as empty strings; an array also checks the number of matches. Scalar checks retry until exactly one element matches.
 

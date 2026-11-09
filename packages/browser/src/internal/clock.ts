@@ -74,6 +74,7 @@ const shim = (key: string, initial: State, version: number): string => {
         setTimeout: realSetTimeout,
         clearTimeout: realClearTimeout,
         requestAnimationFrame: realFrame,
+        cancelAnimationFrame: realCancelFrame,
         now: realPerf
       },
       enumerable: false
