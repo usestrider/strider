@@ -151,7 +151,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             const inner = `<button id="target">Target</button><p id="out"></p><script>
             document.querySelector('button').addEventListener('click', e => document.querySelector('#out').textContent = JSON.stringify([e instanceof MouseEvent, e.clientX, e.bubbles, e.cancelable, e.composed]));</script>`
-            const { url } = yield* fixture((origin) => `<iframe src="${fixtureUrl(origin, inner)}"></iframe>`)
+            const { url } = yield* fixture((origin) =>
+              `<iframe style="margin-top:3000px" src="${
+                fixtureUrl(origin.replace("127.0.0.1", "localhost"), inner)
+              }"></iframe>`
+            )
             const page = yield* newPage
             yield* page.goto(url)
             const frame = page.frame(page.locator("iframe"))
@@ -159,6 +163,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               eventClass: "MouseEvent",
               init: { clientX: 27, bubbles: false, cancelable: false, composed: false }
             })
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => window.scrollY), 0)
             assert.deepStrictEqual(JSON.parse(yield* frame.locator("#out").readText), [true, 27, false, false, false])
           })),
         timeout
@@ -178,7 +183,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const strict = yield* page.locator("div").dispatchEvent("sample").pipe(Effect.flip)
             assert(Locator.isLocatorError(strict))
             assert.strictEqual(strict.reason._tag, "StrictViolation")
-            yield* page.locator("#later").dispatchEvent("sample", { trial: true })
+            yield* page.locator("#later").dispatchEvent("sample", {
+              trial: true,
+              eventClass: "MissingEvent" as "Event"
+            })
             assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
             yield* page.locator("#later").dispatchEvent("sample")
             assert.strictEqual(yield* page.locator("#out").readText, "sent")
@@ -187,6 +195,83 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.flip
             )
             assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent refuses unavailable constructors, invalid DOM initialization and cycles without sending",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target">Target</button>${out}<script>
+            document.addEventListener('sample', () => document.querySelector('#out').textContent = 'sent');</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#target")
+            const unavailable = yield* target.dispatchEvent("sample", { eventClass: "MissingEvent" as "Event" }).pipe(
+              Effect.flip
+            )
+            assert(Locator.isLocatorError(unavailable))
+            assert.strictEqual(unavailable.reason._tag, "Unsupported")
+            assert.deepStrictEqual(unavailable.diagnostics.dispatch, { _tag: "NotSent" })
+            const invalid = yield* target.dispatchEvent("sample", {
+              eventClass: "FocusEvent",
+              init: { relatedTarget: {} }
+            }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(invalid))
+            assert.strictEqual(invalid.reason._tag, "InvalidInput")
+            assert.deepStrictEqual(invalid.diagnostics.dispatch, { _tag: "NotSent" })
+            const cycle: Record<string, unknown> = {}
+            cycle.self = cycle
+            const serialized = yield* target.dispatchEvent("sample", { init: cycle }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(serialized))
+            assert.strictEqual(serialized.reason._tag, "NotSerializable")
+            assert.deepStrictEqual(serialized.diagnostics.dispatch, { _tag: "NotSent" })
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            yield* target.dispatchEvent("sample")
+            assert.strictEqual(yield* page.locator("#out").readText, "sent")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent resolves again if its node detaches before dispatch",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target">Target</button>${out}<script>
+            let count = 0; document.addEventListener('sample', () => document.querySelector('#out').textContent = String(++count));</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#target") as LocatorImpl
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            let replaced = false
+            const intercepted: typeof original = (realm, call) => {
+              if (!replaced && call.functionDeclaration.includes("function dispatchDOMEvent")) {
+                replaced = true
+                return original(realm, {
+                  ...call,
+                  functionDeclaration: `function(element, ...args) {
+                const next = element.cloneNode(true); element.replaceWith(next);
+                return (${call.functionDeclaration})(element, ...args);
+              }`
+                })
+              }
+              return original(realm, call)
+            }
+            Object.assign(adapter, { evaluate: intercepted })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                Object.assign(adapter, { evaluate: original })
+              })
+            )
+            yield* target.dispatchEvent("sample")
+            assert(replaced)
+            assert.strictEqual(yield* page.locator("#out").readText, "1")
           })),
         timeout
       )

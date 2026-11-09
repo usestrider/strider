@@ -26,6 +26,9 @@ declare const ref: Snapshot.RefId
 describe("access is typed", () => {
   it("a page you may only inspect offers no actions", () => {
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
+    expect(reader.getByRole("button").dispatchEvent("change")).type.toRaiseError(
+      "Property 'dispatchEvent' does not exist"
+    )
   })
 
   it("a snapshot carries its page's access, so its refs can't act either", () => {
