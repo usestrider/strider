@@ -530,7 +530,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    * Page declarations take precedence over context and browser declarations; the most recent declaration
    * at the same scope wins. Removing it restores the next declaration. This reads configuration without
    * querying the browser. Window resizing, document layout and settings made by another client are not measured.
-   * A closed page fails with `TargetGone`.
+   * It does not wait for a document to load. A closed page fails with `TargetGone`.
    *
    * **Example** (Read the configured viewport)
    *

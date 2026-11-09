@@ -35,7 +35,7 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Snapshot from "../Snapshot.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
@@ -320,7 +320,16 @@ export const make = (owner: PageOwner): Page.Page => {
       return Effect.gen(function*() {
         const record = yield* Operation.record
         const { id } = record
-        yield* Runtime.openState(entry, id).pipe(Effect.mapError(fromSend("Page.viewportSize", record)))
+        const { status } = yield* entry.state.get
+        if (status._tag === "Closed") {
+          return yield* Effect.fail(
+            new Target.TargetGone({
+              target: { _tag: "Page", id: entry.id },
+              reason: status.reason,
+              diagnostics: Operation.diagnostics(id)
+            })
+          )
+        }
         return yield* adapter.viewportSize(entry.id).pipe(
           Effect.mapError((error) => failure("Page.viewportSize", id, error))
         )
