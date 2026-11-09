@@ -26,6 +26,12 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "unsupported", ["size collection requires a newly created context"]),
+      entry("network.sizes.request", "unsupported"),
+      entry("network.sizes.responseHeaders", "unsupported"),
+      entry("network.sizes.responseBody", "unsupported"),
+      entry("network.sizes.encoded", "unsupported"),
+      entry("network.sizes.decoded", "unsupported"),
       entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
       entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
@@ -215,6 +221,12 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
 export const launchedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
+    "network.sizes": ["partial", ["context opt-in; native metrics only; cache and redirect totals unavailable"]],
+    "network.sizes.request": ["supported", []],
+    "network.sizes.responseHeaders": ["supported", []],
+    "network.sizes.responseBody": ["supported", []],
+    "network.sizes.encoded": ["unsupported", ["received body bytes include transfer framing"]],
+    "network.sizes.decoded": ["supported", []],
     "network.timing": ["partial", [
       "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
     ]],

@@ -216,6 +216,7 @@ export type Fact =
     readonly context: UserContext.Id
     readonly isDefault: boolean
     readonly requestTiming?: boolean | undefined
+    readonly requestSizes?: boolean | undefined
   }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
   | {
@@ -306,6 +307,7 @@ export type Fact =
     readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
+  | { readonly _tag: "HopSizes"; readonly hop: NetworkRequest.HopId; readonly sizes: NetworkRequest.Sizes }
   | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
   | {
@@ -743,6 +745,7 @@ export interface ProxyOptions {
 /** Settings for a new user context. */
 export interface UserContextOptions {
   readonly requestTiming?: boolean | undefined
+  readonly requestSizes?: boolean | undefined
   readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean

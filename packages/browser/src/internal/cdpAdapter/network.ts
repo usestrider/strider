@@ -12,6 +12,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Sizes from "../requestSizes.ts"
 import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
@@ -50,7 +51,16 @@ const sentBody = (state: State, target: TargetEntry, request: Network.Request) =
 }
 
 /** Reports headers the network sent or received for a hop; the current hop's received ones go with its response. */
-const deliver = (state: State, request: RequestEntry, hop: NetworkRequest.HopId, { headers, phase }: ExtraInfo) => {
+const deliver = (
+  state: State,
+  request: RequestEntry,
+  hop: NetworkRequest.HopId,
+  { headers, phase, statusCode }: ExtraInfo
+) => {
+  if (statusCode === 304) {
+    const sizes = request.frame?.page.context.requestSizes?.get(hop)
+    if (sizes !== undefined) sizes.network = false
+  }
   state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
   if (hop !== request.hop) return
   if (phase === "response") {
@@ -144,6 +154,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.redirectResponse.timing)
         request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
         request.frame?.page.context.requestTiming?.delete(request.hop)
+        request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -184,6 +195,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         }
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
+      }
+      if (request.frame?.page.context.requestSizes !== undefined) {
+        Sizes.keep(request.frame.page.context.requestSizes, request.hop, request.frame.id)
       }
       if (request.frame?.page.context.requestTiming !== undefined) {
         const hop = request.hop
@@ -234,7 +248,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.responseReceivedExtraInfo, (params, { state, target }) => {
       if (target === undefined) return
-      rawHeaders(state, requestKey(target, params.requestId), { phase: "response", headers: params.headers })
+      rawHeaders(state, requestKey(target, params.requestId), {
+        phase: "response",
+        headers: params.headers,
+        ...((target.page ?? target.frame?.page)?.context.requestSizes === undefined
+          ? {}
+          : { statusCode: params.statusCode })
+      })
     })
     .on(Network.requestServedFromCache, (params, { state, target }) => {
       if (target === undefined) return
@@ -246,6 +266,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes !== undefined) {
+        sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
+      }
       request.frame?.page.context.requestTiming?.get(request.hop)?.response(
         servedBy(request, params.response) === "network" ? params.response.timing : undefined
       )
@@ -260,6 +284,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       noExtraInfo(state, request)
       emitResponse(state, request, params.response)
     })
+    .on(Network.dataReceived, (params, { state, target }) => {
+      if (target === undefined || (target.page ?? target.frame?.page)?.context.requestSizes === undefined) return
+      const request = state.requests.get(requestKey(target, params.requestId))
+      const sizes = request?.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes !== undefined && sizes.decoded !== undefined) {
+        const length = Sizes.count(params.dataLength)
+        sizes.decoded = Option.isSome(length)
+          ? Option.getOrUndefined(Sizes.count(sizes.decoded + length.value))
+          : undefined
+      }
+    })
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
@@ -268,8 +303,18 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      // A still-held response lacks final raw-header evidence (including a possible 304).
+      if (sizes?.network && request.held === undefined) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: request.hop,
+          sizes: Sizes.cdp(params.encodedDataLength, sizes.decoded)
+        })
+      }
       request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
       request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
@@ -292,6 +337,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
       request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       // Keep the failed hop eligible for late sent headers. Earlier redirect obligations
       // still consume their own ExtraInfo first; failure itself settles public waits.
       const phases = new Set<ExtraInfo["phase"]>(["request", ...request.ahead.map((extra) => extra.phase)])

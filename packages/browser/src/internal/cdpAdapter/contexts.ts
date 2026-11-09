@@ -112,6 +112,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
   )
   const entry: ContextEntry = {
     ...(options.requestTiming ? { requestTiming: new Map() } : {}),
+    ...(options.requestSizes ? { requestSizes: new Map() } : {}),
     id: state.ids.userContext(),
     browserContextId,
     isDefault: false,
@@ -125,7 +126,8 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       _tag: "UserContextAdded",
       context: entry.id,
       isDefault: false,
-      ...(options.requestTiming ? { requestTiming: true } : {})
+      ...(options.requestTiming ? { requestTiming: true } : {}),
+      ...(options.requestSizes ? { requestSizes: true } : {})
     })
   )
   yield* Kit.protocol(applyDownloads(state, entry))

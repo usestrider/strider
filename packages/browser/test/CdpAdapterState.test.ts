@@ -53,7 +53,7 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false) {
+const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false, requestSizes = false) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
@@ -68,6 +68,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   })
   const context: State.ContextEntry = {
     ...(requestTiming ? { requestTiming: new Map() } : {}),
+    ...(requestSizes ? { requestSizes: new Map() } : {}),
     id: state.defaultContext,
     browserContextId: undefined,
     isDefault: true,
@@ -2413,3 +2414,98 @@ it.effect("bounds active native baselines and clears them when their frame close
     Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
     assert.strictEqual(store.size, 0)
   }).pipe(Effect.scoped))
+
+describe("CDP request sizes opt-in", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`collects bytes only in its opted-in context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, false, enabled)
+        Object.assign(target, { page })
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const event = { state, target }
+        handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+        assert.strictEqual(page.context.requestSizes?.size ?? 0, enabled ? 1 : 0)
+        handlers.apply("Network.responseReceived", { ...landed, hasExtraInfo: false }, event)
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 10,
+          dataLength: 4124,
+          encodedDataLength: 0
+        }, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 11, encodedDataLength: 281 }, event)
+        yield* state.buffer.flush
+        const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+        assert.strictEqual(observed.length, enabled ? 1 : 0)
+        if (enabled) {
+          assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.some(4124))
+          assert.deepStrictEqual(observed[0]!.responseBodyEncodedSize, Option.none())
+        }
+        assert.strictEqual(page.context.requestSizes?.size ?? 0, 0)
+      }).pipe(Effect.scoped))
+  }
+  it.effect("bounds active collectors and clears them on frame removal", () =>
+    Effect.gen(function*() {
+      const { state, target, page } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      for (let i = 0; i <= 1000; i++) {
+        handlers.apply("Network.requestWillBeSent", { ...sent(`${origin}/landed`), requestId: `size-${i}` }, {
+          state,
+          target
+        })
+      }
+      assert.strictEqual(page.context.requestSizes!.size, 1000)
+      Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.strictEqual(page.context.requestSizes!.size, 0)
+    }).pipe(Effect.scoped))
+})
+
+for (const boundary of ["cache", "304", "late headers", "failure", "invalid chunk"] as const) {
+  it.effect(`keeps unavailable size counts honest at ${boundary}`, () =>
+    Effect.gen(function*() {
+      const { state, target, page, facts } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+      handlers.apply(
+        "Network.responseReceived",
+        landedAs({
+          hasExtraInfo: boundary === "304" || boundary === "late headers",
+          fromDiskCache: boundary === "cache"
+        }),
+        event
+      )
+      if (boundary === "304") {
+        handlers.apply("Network.requestWillBeSentExtraInfo", sentAs({}), event)
+        handlers.apply("Network.responseReceivedExtraInfo", received(304, {}), event)
+      }
+      handlers.apply(
+        "Network.dataReceived",
+        { requestId: "R1", timestamp: 1, dataLength: 10, encodedDataLength: 0 },
+        event
+      )
+      if (boundary === "invalid chunk") {
+        handlers.apply(
+          "Network.dataReceived",
+          { requestId: "R1", timestamp: 1, dataLength: -1, encodedDataLength: 0 },
+          event
+        )
+      }
+      handlers.apply(boundary === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
+        requestId: "R1",
+        timestamp: 2,
+        encodedDataLength: 281,
+        errorText: "failed"
+      }, event)
+      if (boundary === "late headers") {
+        handlers.apply("Network.requestWillBeSentExtraInfo", sentAs({}), event)
+        handlers.apply("Network.responseReceivedExtraInfo", received(304, {}), event)
+      }
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.strictEqual(observed.length, boundary === "invalid chunk" ? 1 : 0)
+      if (boundary === "invalid chunk") assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.none())
+      assert.strictEqual(page.context.requestSizes!.size, 0)
+    }).pipe(Effect.scoped))
+}

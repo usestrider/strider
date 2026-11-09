@@ -8,8 +8,12 @@ import * as Handles from "../src/internal/handles.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
 const empty = () =>
   new NetworkRequest.Sizes({
-    requestHeadersSize: Option.none(), requestBodySize: Option.none(), responseHeadersSize: Option.none(),
-    responseBodySize: Option.none(), responseBodyEncodedSize: Option.none(), responseBodyDecodedSize: Option.none(),
+    requestHeadersSize: Option.none(),
+    requestBodySize: Option.none(),
+    responseHeadersSize: Option.none(),
+    responseBodySize: Option.none(),
+    responseBodyEncodedSize: Option.none(),
+    responseBodyDecodedSize: Option.none(),
     responseTransferSize: Option.none()
   })
 const contextId = "context" as UserContext.Id
@@ -73,13 +77,13 @@ describe("request sizes ownership and isolation", () => {
       const on = yield* setup()
       const offOwner = Option.getOrThrow(off.fold.hop(off.request.hop)).context
       const onOwner = Option.getOrThrow(on.fold.hop(on.request.hop)).context
-      assert.isUndefined(Option.getOrThrow(offOwner).sizess)
-      assert.instanceOf(Option.getOrThrow(onOwner).sizess, Map)
+      assert.isUndefined(Option.getOrThrow(offOwner).sizes)
+      assert.instanceOf(Option.getOrThrow(onOwner).sizes, Map)
       const refused = yield* NetworkRequest.sizes(off.page, off.request).pipe(Effect.flip)
       assert.strictEqual(refused.reason._tag, "RequestUnavailable")
       assert.deepInclude(refused.reason, { _tag: "RequestUnavailable", why: "sizesNotEnabled" })
       yield* off.fold.sink({ _tag: "HopSizes", hop: off.request.hop, sizes: empty() })
-      assert.isUndefined(Option.getOrThrow(offOwner).sizess)
+      assert.isUndefined(Option.getOrThrow(offOwner).sizes)
       assert.deepStrictEqual((yield* NetworkRequest.sizes(on.page, on.request)).responseTransferSize, Option.none())
     }))
 })
@@ -111,7 +115,7 @@ describe("request sizes lifecycle", () => {
       const owner = Option.getOrThrow(Option.getOrThrow(a.fold.hop(a.request.hop)).context)
       yield* a.fold.sink({ _tag: "HopSizes", hop: a.request.hop, sizes: empty() })
       yield* a.fold.loseConnection
-      assert.strictEqual(owner.sizess?.size, 0)
+      assert.strictEqual(owner.sizes?.size, 0)
       const error = yield* NetworkRequest.sizes(a.page, a.request).pipe(Effect.flip)
       assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
     }))
@@ -121,7 +125,7 @@ describe("request sizes lifecycle", () => {
       const owner = Option.getOrThrow(Option.getOrThrow(fold.hop(request.hop)).context)
       yield* fold.sink({ _tag: "HopSizes", hop: request.hop, sizes: empty() })
       for (let i = 0; i < Fold.maxHops; i++) yield* fold.sink({ _tag: "RequestSent", request: sent(`other-${i}`) })
-      assert.strictEqual(owner.sizess?.size, 0)
+      assert.strictEqual(owner.sizes?.size, 0)
       const error = yield* NetworkRequest.sizes(page, request).pipe(Effect.flip)
       assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "notRetained" })
     }))
@@ -149,16 +153,30 @@ it.effect("refuses another live target and removes a detached frame's retained s
     yield* fold.sink({ _tag: "RequestSent", request: child })
     yield* fold.sink({ _tag: "HopSizes", hop: child.hop, sizes: empty() })
     const context = Option.getOrThrow(Option.getOrThrow(fold.hop(child.hop)).context)
-    assert.strictEqual(context.sizess?.size, 1)
+    assert.strictEqual(context.sizes?.size, 1)
     yield* fold.sink({
       _tag: "NavigableRemoved",
       navigable: frame,
       reason: new Target.FrameDetached({}),
       evidence: "test"
     })
-    assert.strictEqual(context.sizess?.size, 0)
+    assert.strictEqual(context.sizes?.size, 0)
     yield* fold.sink({ _tag: "HopSizes", hop: child.hop, sizes: empty() })
-    assert.strictEqual(context.sizess?.size, 0, "late facts cannot revive a removed owner's sizes")
+    assert.strictEqual(context.sizes?.size, 0, "late facts cannot revive a removed owner's sizes")
     const unavailable = yield* NetworkRequest.sizes(page, child).pipe(Effect.flip)
     assert.deepInclude(unavailable.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
+  }))
+
+it.effect("clears a context's retained sizes on closure without reviving late observations", () =>
+  Effect.gen(function*() {
+    const { fold, context, request } = yield* setup()
+    const owner = Option.getOrThrow(Option.getOrThrow(fold.hop(request.hop)).context)
+    yield* fold.sink({ _tag: "HopSizes", hop: request.hop, sizes: empty() })
+    assert.strictEqual(owner.sizes!.size, 1)
+    yield* fold.sink({ _tag: "UserContextRemoved", context: contextId })
+    assert.strictEqual(owner.sizes!.size, 0)
+    yield* fold.sink({ _tag: "HopSizes", hop: request.hop, sizes: empty() })
+    assert.strictEqual(owner.sizes!.size, 0)
+    const error = yield* NetworkRequest.sizes(context, request).pipe(Effect.flip)
+    assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
   }))
