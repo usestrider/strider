@@ -133,6 +133,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.network.throttling",
         "emulation.cpuSlowdown",
         "emulation.javaScript",
+        "emulation.extraHTTPHeaders",
         "emulation.touch",
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
@@ -176,6 +177,8 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
       return "emulation.cpuSlowdown"
     case "JavaScriptEnabled":
       return "emulation.javaScript"
+    case "ExtraHeaders":
+      return "emulation.extraHTTPHeaders"
     case "Touch":
       return "emulation.touch"
     case "FocusEmulation":
@@ -221,6 +224,7 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     "emulation.viewport.mobile": ["unsupported", ["no mobile viewport"]],
     "emulation.javaScript": ["supported", []],
     "emulation.media": ["supported", []],
+    "emulation.extraHTTPHeaders": ["supported", []],
     "emulation.focus": ["unsupported", ["each page is a window of its own"]],
     "emulation.timezone": ["unsupported", ["taken at launch, before a context's options reach it"]],
     "emulation.locale": ["unsupported", [
