@@ -146,9 +146,11 @@ export interface Session extends Protocol.ProtocolSession {
   /**
    * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
    * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
+   * `onWritten` runs synchronously after every transport write succeeds, before restoring interruption for replies.
    */
   readonly sendOrdered: <M extends string, P>(
-    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>,
+    onWritten?: (() => void) | undefined
   ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
@@ -610,7 +612,8 @@ export const make: (
 
   const sendOrdered = <M extends string, P>(
     state: SessionState,
-    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>,
+    onWritten?: (() => void) | undefined
   ) =>
     Effect.uninterruptibleMask((restore) =>
       Effect.suspend(() => {
@@ -624,6 +627,7 @@ export const make: (
             started.push(prepared)
             return prepared.write
           }), { discard: true }).pipe(
+            Effect.andThen(Effect.sync(() => onWritten?.())),
             Effect.andThen(restore(
               Effect.forEach(started, ({ reply, traced }) => traced(reply), { concurrency: "unbounded", discard: true })
             )),
@@ -699,7 +703,7 @@ export const make: (
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
-      sendOrdered: (commands) => sendOrdered(state, commands),
+      sendOrdered: (commands, onWritten) => sendOrdered(state, commands, onWritten),
       subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
       ended: Effect.suspend(() => Deferred.await(state.ingest.ended))
