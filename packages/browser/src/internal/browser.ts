@@ -166,7 +166,8 @@ const makeContext = (
       yield* runtime.model.own(pageEntry.value, scope)
       return Option.getOrThrow(runtime.page(pageEntry.value))
     }).pipe(Operation.named("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
-    cookies: Storage.cookieJar(runtime, entry.id),
+    cookies: Storage.cookieJar(runtime, entry.id, StorageStates.cookieRecorder(entry)),
+    setStorageState: (state) => StorageStates.replaceState(runtime, context, entry, state),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
@@ -313,6 +314,14 @@ const makeDeniedContext = (
       remove: () => cookie("CookieJar.remove"),
       clear: Effect.suspend(() => cookie("CookieJar.clear"))
     },
+    setStorageState: () =>
+      Effect.fail(
+        new UserContext.UserContextError({
+          operation: "UserContext.setStorageState",
+          reason: notPermitted("UserContext.setStorageState"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
     exportStorageState: Effect.suspend(() =>
       Effect.fail(
         new UserContext.UserContextError({
@@ -582,6 +591,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         }
         credentialOrigin = url.origin
       }
+      if (mode !== undefined && "context" in mode && options?.storageStateTracking !== undefined) {
+        return yield* Effect.fail(
+          contextError(
+            operation,
+            new Reason.NotPermitted({
+              required: "control",
+              hint: "storageStateTracking can only be chosen at context creation"
+            }),
+            id
+          )
+        )
+      }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
       const adopt = mode !== undefined && "context" in mode && mode.adopt === true
@@ -698,6 +719,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      if (options?.storageStateTracking === true) yield* StorageStates.track(runtime, entry, options.storageState)
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
@@ -855,7 +877,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         Effect.mapError((error) =>
           Deadline.isTimeout(error) ? error : new Page.PageError({
             operation: "Browser.newPage",
-            reason: error.reason._tag === "Incompatible"
+            reason: error.reason._tag === "Incompatible" || error.reason._tag === "PartiallyApplied"
               ? new Page.InitializationFailed({ step: "create the context", hint: error.reason.message })
               : error.reason,
             diagnostics: error.diagnostics

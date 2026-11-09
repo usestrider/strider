@@ -1027,7 +1027,10 @@ export interface AdapterConnection {
   readonly updateAuthenticator: (ref: Authenticator, update: AuthenticatorUpdate) => Effect.Effect<void, AdapterError>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
-  readonly clearCookies: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
+  readonly clearCookies: (
+    context: UserContext.Id,
+    options?: { readonly page: Target.NavigableId }
+  ) => Effect.Effect<void, AdapterError>
   readonly grantPermissions: (
     context: UserContext.Id,
     origin: Option.Option<string>,

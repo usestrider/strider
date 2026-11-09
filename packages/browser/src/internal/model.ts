@@ -405,6 +405,10 @@ export interface Model {
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
   /** The navigation's entry, created by whichever comes first: its first fact, or the caller waiting for it. */
+  readonly observeStorageSources: (
+    context: ContextEntry,
+    observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  ) => Effect.Effect<void, never, Scope.Scope>
   readonly navigation: (id: PageNavigation.Id) => Effect.Effect<NavigationEntry>
   /** Forgets a navigation once its caller has its outcome. */
   readonly forget: (id: PageNavigation.Id) => Effect.Effect<void>
@@ -486,6 +490,7 @@ export const make = Effect.fnUntraced(function*() {
         lost: fold.lost,
         context: (id) => fold.context(id, false),
         configure: fold.configure,
+        observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,
         forget: fold.forget,
         handlePrompts: (page, handler) => fold.register(page, "promptHandlers", handler),

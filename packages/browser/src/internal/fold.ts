@@ -95,6 +95,10 @@ export interface Fold {
   // Commands
   readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
+  readonly observeStorageSources: (
+    context: Model.ContextEntry,
+    observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  ) => Effect.Effect<void, never, Scope.Scope>
   readonly navigation: (id: PageNavigation.Id) => Effect.Effect<Model.NavigationEntry>
   readonly forget: (id: PageNavigation.Id) => Effect.Effect<void>
   readonly register: <K extends "promptHandlers" | "chooserHandlers">(
@@ -1001,8 +1005,67 @@ export const make = Effect.fnUntraced(function*(options: {
   const scoped = (add: Effect.Effect<void>, remove: Effect.Effect<void>): Effect.Effect<void, never, Scope.Scope> =>
     Effect.acquireRelease(apply(add), () => apply(remove))
 
+  // The ordinary sink is unchanged until a context explicitly requests document history.
+  let receive = fold
+  let observers:
+    | Map<
+      UserContext.Id,
+      {
+        observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+        origins: Map<Target.NavigableId, string>
+      }
+    >
+    | undefined
+  const observing = Effect.fnUntraced(function*(fact: Adapter.Fact) {
+    yield* fold(fact)
+    if (fact._tag === "RequestSent") {
+      const owner = ownerOfRequest(fact.request)
+      if (Option.isSome(owner.context)) {
+        const listener = observers?.get(owner.context.value.id)
+        if (listener !== undefined) {
+          const url = URL.parse(fact.request.url)
+          if (url !== null) listener.observe([url.origin], true)
+        }
+      }
+      return
+    }
+    if (fact._tag !== "DocumentCommitted") return
+    const owner = pageOf(fact.navigable)
+    if (Option.isNone(owner)) return
+    const listener = observers?.get(owner.value.context)
+    if (listener === undefined) return
+    listener.origins.set(fact.navigable, fact.origin)
+    const chain = [fact.origin]
+    let current = fact.navigable
+    const state = yield* owner.value.state.get
+    while (current !== owner.value.id) {
+      const parent = state.frames.find((frame) => frame.id === current)?.parent
+      if (parent === undefined) return
+      const origin = listener.origins.get(parent)
+      if (origin === undefined) return
+      chain.unshift(origin)
+      current = parent
+    }
+    listener.observe(chain)
+  })
+
   const self: Fold = {
-    sink: (fact) => apply(fold(fact)),
+    sink: (fact) => apply(receive(fact)),
+    observeStorageSources: (context, observe) =>
+      scoped(
+        Effect.sync(() => {
+          observers ??= new Map()
+          observers.set(context.id, { observe, origins: new Map() })
+          receive = observing
+        }),
+        Effect.sync(() => {
+          observers?.delete(context.id)
+          if (observers?.size === 0) {
+            receive = fold
+            observers = undefined
+          }
+        })
+      ),
     obligations,
     pages: pageList,
     page: (id) => Option.fromNullishOr(pages.get(id)),

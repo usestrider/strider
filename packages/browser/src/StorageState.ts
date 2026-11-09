@@ -158,3 +158,46 @@ export class Incompatible extends Schema.Error<Incompatible>("@usestrider/browse
     return `Can't apply ${this.partitions.length} partitions (${this.hint})`
   }
 }
+
+/**
+ * Reason for a storage replacement that failed after its mutation phase began.
+ *
+ * **Details**
+ *
+ * Cookies and origin storage may already have changed. No rollback is attempted; pending IndexedDB deletions
+ * may complete later when open connections close. Stop writers and release storage handles before retrying.
+ * Deadlines remain `Deadline.Timeout`, and interruption remains interruption; both can also leave partial changes.
+ *
+ * **Example** (Reporting a partially applied login)
+ *
+ * ```ts import.meta.vitest
+ * import { StorageState, UserContext } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const replace = Effect.fn("replace")(
+ *   function*(context: UserContext.UserContext, state: StorageState.StorageState) {
+ *     yield* context.setStorageState(state).pipe(
+ *       Effect.catchReason(
+ *         "UserContextError",
+ *         "PartiallyApplied",
+ *         (reason) => Effect.logWarning(reason.hint)
+ *       )
+ *     )
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class PartiallyApplied
+  extends Schema.Error<PartiallyApplied>("@usestrider/browser/StorageState/PartiallyApplied")({
+    _tag: Schema.tag("PartiallyApplied"),
+    hint: Schema.String
+  })
+{
+  override get message(): string {
+    return `Storage replacement may be partial; pending database deletions may complete later (${this.hint})`
+  }
+}
