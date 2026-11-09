@@ -1835,3 +1835,37 @@ for (const failure of ["resolution", "conversion", "dispatch"] as const) {
       assert.deepStrictEqual(released, ["acquired"])
     }).pipe(Effect.scoped))
 }
+
+it.effect("interruption doesn't wait for a busy page to acknowledge node releases", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+    const { state, target } = yield* withPage(client.root)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "busy",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "(node) => { while (true) {} }",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    const resolve = yield* browser.next
+    assert.strictEqual(resolve.method, "DOM.resolveNode")
+    yield* browser.receive({ id: resolve.id, result: { object: { type: "object", objectId: "node" } } })
+    const callback = yield* browser.next
+    assert.strictEqual(callback.method, "Runtime.callFunctionOn")
+    // The callback never returns, so the page's main thread answers nothing more, including the release below.
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    const release = yield* browser.next
+    assert.strictEqual(release.method, "Runtime.releaseObject")
+    for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+    assert.isDefined(interrupting.pollUnsafe(), "interrupting the caller waited for the busy page's release reply")
+  }).pipe(Effect.scoped))
