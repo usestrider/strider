@@ -424,6 +424,14 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     `to have the value ${show(expected)}`
   )
 
+export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>
+  expectLocator(
+    locator,
+    { _tag: "Role", expected },
+    "toHaveRole",
+    `to have the role ${show(expected)}`
+  )
+
 export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
   expectLocator(
     locator,

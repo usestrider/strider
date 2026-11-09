@@ -402,6 +402,39 @@ export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string
 )
 
 /**
+ * Expects the one match to have exactly the given computed ARIA role, explicit or implicit.
+ *
+ * **Details**
+ *
+ * Retries until the deadline, including when zero or multiple elements match. Matching is case-sensitive and
+ * does not follow the ARIA role hierarchy: a switch does not match `"checkbox"`. Hidden elements are included.
+ * Plain elements such as `div` retain the shared engine's HTML-AAM `generic` role; Playwright reports no role
+ * for them. Presentation conflicts and required-child inheritance follow the same rules as role locators and
+ * snapshots. Tabindex focusability follows HTML integer parsing, so `"2abc"` counts and non-ASCII leading
+ * whitespace does not; pinned Playwright uses JavaScript number conversion and differs on those inputs.
+ * An element without a role is observed as an empty string. Failure history records the role or match count.
+ *
+ * **Example** (Checking a custom control's role)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkSave = Effect.fn("checkSave")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: string) => ExpectImpl.toHaveRole(locator, expected)
+)
+
+/**
  * Expects the one match to have the attribute, with a matching value when one is given.
  *
  * **Example** (Checking that a menu opened)
