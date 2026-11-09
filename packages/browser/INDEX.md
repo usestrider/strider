@@ -602,6 +602,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 *matchers*
 
 - `const toBeVisible: Matcher<Locator.ReadonlyLocator>`
+- `const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [options?: { readonly ratio?: number | undefined readonly inViewport?: boolean | undefined } | undefined]>`
 - `const toBeHidden: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEnabled: Matcher<Locator.ReadonlyLocator>`
 - `const toBeDisabled: Matcher<Locator.ReadonlyLocator>`
