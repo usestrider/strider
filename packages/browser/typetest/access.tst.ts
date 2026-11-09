@@ -103,6 +103,15 @@ describe("a wait is an effect", () => {
 })
 
 describe("evaluation results are what arrives", () => {
+  it("evaluateAll is available with inspect access and preserves result and error types", () => {
+    expect(reader.locator("p").evaluateAll((elements) => elements.length)).type.toBe<
+      Effect.Effect<number, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+    expect(reader.locator("p").evaluateAll(async () => new Date(0))).type.toBe<
+      Effect.Effect<Date, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+  })
+
   it("a Date survives the crossing", () => {
     expect<Effect.Success<ReturnType<typeof page.evaluate<[], Date>>>>().type.toBe<Date>()
   })

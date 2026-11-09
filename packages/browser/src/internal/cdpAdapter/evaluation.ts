@@ -17,6 +17,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Groups from "../objectGroups.ts"
+import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
@@ -364,6 +365,15 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       ),
       Effect.ensuring(released)
     )
+  if (call.result === "value" && call.releaseResult === true) {
+    // Deep serialization may include a root object id even though the caller requested only a value.
+    const ids = new Set([reply.result.objectId, reply.exceptionDetails?.exception?.objectId])
+    for (const objectId of ids) {
+      if (objectId !== undefined) {
+        yield* Runtime.releaseObject({ objectId }).pipe(on, Effect.ignore, Operation.detached)
+      }
+    }
+  }
   const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
   const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
     const serialized = object.deepSerializedValue ??

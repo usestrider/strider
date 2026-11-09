@@ -358,12 +358,15 @@ export const contents = (
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             assert.deepStrictEqual(
               yield* page.locator("section").locator("p").evaluateAll(
-                async (elements, suffix: string) => {
+                async (elements, suffixes: { suffix: string }) => {
                   elements[0]!.remove()
                   await Promise.resolve()
-                  return { texts: elements.map((element) => element.textContent + suffix), date: new Date(0) }
+                  return {
+                    texts: elements.map((element) => element.textContent + suffixes.suffix),
+                    date: new Date(0)
+                  }
                 },
-                "!"
+                { suffix: "!" }
               ),
               { texts: ["a!", "b!"], date: new Date(0) }
             )
@@ -376,6 +379,18 @@ export const contents = (
               )
             ) as Locator.LocatorError
             assert.strictEqual(thrown.reason._tag, "EvaluationThrown")
+            const synchronous = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(() => {
+                  throw new Error("sync failed")
+                })
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(synchronous.reason._tag, "EvaluationThrown")
+            const invalid = reasonOf(
+              yield* Effect.exit(page.locator("[").evaluateAll((elements) => elements.length))
+            ) as Locator.LocatorError
+            assert.strictEqual(invalid.reason._tag, "InvalidInput")
             const bad = reasonOf(
               yield* Effect.exit(
                 page.locator("p").evaluateAll(
@@ -430,6 +445,12 @@ export const contents = (
               assert.strictEqual(yield* frame.getByRole("heading").readText, id === "same" ? "Same" : "Cross")
               assert.strictEqual(yield* frame.locator("button").count, 1)
               if (yield* supports("isolatedWorlds")) {
+                assert.deepStrictEqual(
+                  yield* frame.locator("button").evaluateAll((elements) =>
+                    elements.map((element) => element.ownerDocument.location.origin)
+                  ),
+                  [id === "same" ? origin : crossSite]
+                )
                 assert.strictEqual(
                   yield* frame.getByRole("heading").evaluate((element) => element.ownerDocument.location.origin),
                   id === "same" ? origin : crossSite

@@ -23,6 +23,7 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
+import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
@@ -1563,3 +1564,50 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
       yield* state.buffer.flush
     }))
 }
+
+describe("CdpAdapter transient evaluation results", () => {
+  for (const releaseResult of [false, true]) {
+    for (const thrown of [false, true]) {
+      it.effect(`releases incidental result ids only when requested (${releaseResult}, thrown=${thrown})`, () =>
+        Effect.gen(function*() {
+          const released: Array<string> = []
+          const mock = {
+            ...session,
+            send: (command: { readonly method: string; readonly params: { readonly objectId?: string } }) => {
+              if (command.method === "Runtime.releaseObject") {
+                released.push(command.params.objectId!)
+                return Effect.succeed({})
+              }
+              assert.strictEqual(command.method, "Runtime.callFunctionOn")
+              return Effect.succeed({
+                result: { type: "object", objectId: "array", deepSerializedValue: { type: "array", value: [] } },
+                ...(thrown
+                  ? { exceptionDetails: { text: "failed", exception: { type: "object", objectId: "exception" } } }
+                  : {})
+              })
+            }
+          } as unknown as ProtocolClient.Session
+          const { state, target } = yield* withPage(mock)
+          const realm = Tree.addRealm(state, {
+            uniqueId: "transient",
+            contextId: 1,
+            target,
+            frame: undefined,
+            world: { _tag: "Main" },
+            origin: "http://127.0.0.1:8000"
+          })
+          const result = yield* Evaluation.evaluate(state, realm.id, {
+            functionDeclaration: "() => []",
+            arguments: [],
+            awaitPromise: true,
+            result: "value",
+            userActivation: false,
+            releaseResult
+          })
+          assert.strictEqual(result._tag, thrown ? "Exception" : "Value")
+          assert.deepStrictEqual(released, releaseResult ? thrown ? ["array", "exception"] : ["array"] : [])
+          assert.strictEqual(state.handles.size, 0)
+        }).pipe(Effect.scoped))
+    }
+  }
+})

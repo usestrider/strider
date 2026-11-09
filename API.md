@@ -515,7 +515,19 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   evaluate<Args extends ReadonlyArray<unknown>, B>(      // the isolated world, with the element first; strict: exactly one match
     fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
   ): Effect<JSHandle.Serialized<B>, LocatorError>
+  evaluateAll<Args extends ReadonlyArray<unknown>, B>(   // one current match-set snapshot, including an empty array
+    fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.Serialized<B>, LocatorError>
+
 }
+
+`evaluateAll` resolves membership once and transfers node bindings into the caller's isolated world. It never
+waits for matches and never requires uniqueness. No array handle survives the call. Resolution and callback
+dispatch are separate: DOM changes may occur between them, and the snapshot's nodes may be detached. The callback's
+synchronous code runs in one JavaScript turn; an async callback may observe DOM changes across awaits. Arguments
+and results use evaluation's by-value serialization. Inspect access, isolated-world capability refusals and the
+operation deadline apply as for `evaluate`; a timeout after dispatch cannot cancel JavaScript already running.
+
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
