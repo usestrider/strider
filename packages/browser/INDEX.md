@@ -953,6 +953,10 @@ Locators: how to find elements on a page, and the actions and reads that use the
 - `interface ActionOptions`
   - `readonly checks?: Checks | undefined`
   - `readonly trial?: boolean | undefined`
+- `interface DispatchEventOptions`
+  - `readonly trial?: boolean | undefined`
+  - `readonly eventClass?: | "Event" | "CustomEvent" | "MouseEvent" | "KeyboardEvent" | "PointerEvent" | "FocusEvent" | "WheelEvent" | "InputEvent" | "DragEvent" | …`
+  - `readonly init?: Readonly<Record<string, unknown>> | undefined`
 - `interface PointerOptions extends ActionOptions`
   - `readonly position?: Mouse.Point | undefined`
   - `readonly modifiers?: ReadonlyArray<Keyboard.Modifier> | undefined`
@@ -966,6 +970,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 - `interface TypeOptions extends ActionOptions, Keyboard.TypeOptions`
 - `type SelectOption = | { readonly value: string } | { readonly label: string } | { readonly index: number }`
 - `interface Locator extends ReadonlyLocator`
+  - `dispatchEvent(type: string, options?: DispatchEventOptions | undefined): ActionEffect`
   - `getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator`
   - `getByText(text: string | RegExp, options?: TextOptions | undefined): Locator`
   - `getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator`

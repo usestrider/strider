@@ -1358,3 +1358,13 @@ can branch on the predicate without handling a type error. Visibility and inertn
 Rejected: a broader read-only definition accepting selects, checkboxes or ARIA-only textboxes, because a true
 read would then describe kinds Strider's editing actions do not accept. This preserves existing action
 semantics rather than adopting Playwright's broader kinds and unsupported-kind exception.
+
+## Explicit DOM event constructors
+
+DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.
+Initialization crosses by value under the existing evaluation serialization contract, and the target document
+constructs and dispatches the event. This keeps application events and native event fields explicit across
+browsers. Reject name-to-constructor inference tables and emulation of missing constructors or touch dictionaries:
+those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
+
+Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.

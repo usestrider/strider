@@ -832,7 +832,7 @@ export interface Checks {
 }
 
 /**
- * Settings every action takes.
+ * Settings for actions with configurable readiness checks.
  *
  * @stability unstable
  * @category models
@@ -851,6 +851,47 @@ export interface ActionOptions {
    * @default false
    */
   readonly trial?: boolean | undefined
+}
+
+/**
+ * Settings for constructing and dispatching a DOM event.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface DispatchEventOptions {
+  /**
+   * Resolve the single target without constructing or dispatching an event.
+   *
+   * @default false
+   */
+  readonly trial?: boolean | undefined
+  /**
+   * The native constructor in the target document. No constructor is emulated.
+   *
+   * @default "Event"
+   */
+  readonly eventClass?:
+    | "Event"
+    | "CustomEvent"
+    | "MouseEvent"
+    | "KeyboardEvent"
+    | "PointerEvent"
+    | "FocusEvent"
+    | "WheelEvent"
+    | "InputEvent"
+    | "DragEvent"
+    | "TouchEvent"
+    | "DeviceOrientationEvent"
+    | "DeviceMotionEvent"
+    | undefined
+  /**
+   * Constructor initialization, serialized by value as evaluation arguments are.
+   *
+   * @default { bubbles: true, cancelable: true, composed: true }
+   */
+  readonly init?: Readonly<Record<string, unknown>> | undefined
 }
 
 /**
@@ -990,6 +1031,40 @@ type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadl
  * @since 0.1.0
  */
 export interface Locator extends ReadonlyLocator {
+  /**
+   * Dispatches one untrusted DOM event on the single match, polling for attachment every 50 milliseconds
+   * without readiness checks.
+   *
+   * **Details**
+   *
+   * The constructor is explicit: `Event` by default, regardless of the event name. Choose `MouseEvent` for
+   * mouse fields, or `CustomEvent` for `detail`. Bubbles, cancelable and composed default to true; `init`
+   * can override them. Initialization crosses by value using the evaluation serialization rules; nested
+   * handles and DOM nodes cannot cross. The target document constructs the event in an isolated world where
+   * supported, otherwise in its main world.
+   *
+   * A missing constructor fails with `Unsupported`; rejected initialization fails with `InvalidInput`.
+   * No trusted input, focus or scrolling is sent. Cancellation by a listener still succeeds. Dispatch is
+   * retried only if the resolved node detached before dispatch; once sent it is never retried. A timeout
+   * can report that the event may have been dispatched. `trial` resolves
+   * and checks the target without constructing or dispatching an event.
+   *
+   * **Example** (Sending application data)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const notify = Effect.fn("notify")(function*(page: Page.Page) {
+   *   yield* page.locator("#editor").dispatchEvent("updated", {
+   *     eventClass: "CustomEvent",
+   *     init: { detail: { saved: true } }
+   *   })
+   * })
+   * ```
+   */
+  dispatchEvent(type: string, options?: DispatchEventOptions | undefined): ActionEffect
+
   getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator
   getByText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator
