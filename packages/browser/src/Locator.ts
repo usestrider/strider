@@ -638,9 +638,11 @@ export interface ReadonlyLocator
    *
    * Reads immediately without scrolling, focusing or waiting for visibility. Hidden and transparent elements
    * retain their boxes, including zero-size boxes. Child-frame origins include borders and padding;
-   * scrolling can make coordinates negative. Target transforms are included in the axis-aligned rectangle.
-   * Scaling, rotation, perspective or zoom on an ancestor frame fails with `Unsupported`.
-   * Missing and multiple matches fail with `NoMatch` and `StrictViolation`.
+   * scrolling can make coordinates negative. Target and ancestor-frame transforms, CSS zoom and perspective
+   * are included. Corners are mapped through nested frames before taking the final axis-aligned rectangle.
+   * Missing and multiple matches fail with `NoMatch` and `StrictViolation`. Firefox cannot map CSS motion
+   * paths or camera-clipped normal-flow geometry whose original layout position is unavailable; these
+   * remaining gaps fail with `Unsupported`.
    *
    * **Example** (Reading an element's position)
    *

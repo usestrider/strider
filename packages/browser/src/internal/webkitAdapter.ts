@@ -25,6 +25,7 @@ import type * as L1Target from "../Target.ts"
 import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
+import * as Geometry from "./geometry.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Automation from "./webkitAdapter/automation.ts"
@@ -210,6 +211,14 @@ export const connect: (
       grantPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
       resetPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
       responseBody: (hop) => Network.responseBody(state, hop),
+      releaseNodes: (nodes) => Evaluation.releaseNodes(state, nodes),
+      geometry: Effect.fnUntraced(function*(node, kind) {
+        const realm = yield* Evaluation.realmFor(state, node.document, { _tag: "Main" })
+        const data = yield* Evaluation.evaluate(state, realm, Geometry.call(node, kind)).pipe(
+          Effect.flatMap(Geometry.decode)
+        )
+        return { document: node.document, data }
+      }),
       contentFrame: refuse("frames.contentFrame", "stock WebKit's inspector can't say which frame an iframe holds"),
       requestBody: (hop) => Network.requestBody(state, hop),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),

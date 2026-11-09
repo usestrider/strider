@@ -311,6 +311,18 @@ interface AdapterConnection {
 }
 ```
 
+Element geometry is a readonly adapter request naming a node binding and returning its coordinate document.
+CDP box-model quads can already include same-process frame transforms; an out-of-process session has its own
+root viewport. CDP divides root-space quads by the queried child frame’s layout zoom; the adapter restores
+root CSS units using the child/root device-pixel-ratio ratio. The caller maps only the remaining frame boundaries. Stock WebKit converts renderer-local points
+to document coordinates, adjusting local units for CSS zoom, device-pixel-snapped borders and scroll. BiDi uses readonly DOM matrix
+reads, with native node serialization to expose closed shadow roots. Frame planes carry projective matrices and
+element corners remain corners until the final main-frame bounds are taken. Geometry scripts run only for the
+requesting read; they are absent from the query engine installed for ordinary locators.
+Stock Firefox has no native quad or point-conversion API. Its fallback cannot recover arbitrary camera-clipped
+normal-flow layout from rounded offsets and clipped rectangles, and it does not compose motion paths. These
+remain missing geometry support, with typed refusal; full coverage needs a native mechanism or further mapping.
+
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:

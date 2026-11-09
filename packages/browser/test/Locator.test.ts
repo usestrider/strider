@@ -11,7 +11,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
-import type * as Adapter from "../src/internal/adapter.ts"
+import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
@@ -198,6 +198,127 @@ describe("Locator.check refusal deadlines", () => {
 })
 
 describe("Locator.boundingBox", () => {
+  for (const mode of ["success", "refusal", "deadline", "installation deadline", "document handoff"] as const) {
+    it.effect(
+      mode === "installation deadline"
+        ? "ends a read at its deadline during node installation"
+        : mode === "document handoff" ?
+        "resolves a document handoff before reading geometry"
+        : `releases the temporary node after geometry ${mode}`,
+      () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const reading = yield* Deferred.make<void>()
+          const finishInstallation = yield* Deferred.make<void>()
+          let document!: Target.DocumentId
+          const released: Array<string> = []
+          let inputs = 0
+          let queries = 0
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(
+              Effect.map((adapter): Adapter.AdapterConnection => ({
+                ...adapter,
+                realm: (id) =>
+                  Effect.sync(() => {
+                    document = id
+                    return "geometry-realm" as Target.RealmId
+                  }),
+                evaluate: (_realm, call) =>
+                  mode === "installation deadline" && call.functionDeclaration === Engine.install
+                    ? Deferred.succeed(reading, undefined).pipe(
+                      Effect.andThen(Deferred.await(finishInstallation)),
+                      Effect.as({ _tag: "Value", value: { type: "string", value: "installed" } } as const)
+                    )
+                    : Effect.succeed(
+                      call.functionDeclaration === Engine.install
+                        ? { _tag: "Value", value: { type: "string", value: "installed" } }
+                        : {
+                          _tag: "Value",
+                          value: {
+                            type: "node",
+                            node: mode === "document handoff" && queries++ === 0
+                              ? { document: "during-commit" as Target.DocumentId, binding: "handoff-box" }
+                              : { document, binding: "temporary-box" }
+                          }
+                        }
+                    ),
+                geometry: (node) =>
+                  mode === "deadline" ?
+                    Deferred.succeed(reading, undefined).pipe(Effect.andThen(Effect.never)) :
+                    mode === "refusal" ?
+                    Effect.fail(
+                      new Adapter.AdapterError({
+                        reason: {
+                          _tag: "Unsupported",
+                          capability: "Locator.boundingBox",
+                          hint: "native geometry refused"
+                        }
+                      })
+                    )
+                    : Effect.succeed({
+                      document: node.document,
+                      data: {
+                        quads: [[{ x: 1, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 6 }, { x: 1, y: 6 }]],
+                        matrix: null,
+                        width: 3,
+                        height: 4,
+                        contentX: 0,
+                        contentY: 0,
+                        pixelRatio: 1,
+                        hint: null
+                      }
+                    }),
+                releaseNodes: (nodes) =>
+                  Effect.sync(() => {
+                    released.push(...nodes.map((node) => node.binding))
+                  }),
+                dispatchInput: () =>
+                  Effect.sync(() => {
+                    inputs++
+                  })
+              }))
+            )
+          )
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            if (mode === "deadline" || mode === "installation deadline") {
+              const pending = yield* page.locator("#box").boundingBox.pipe(
+                Deadline.within("1 second"),
+                Effect.flip,
+                Effect.forkChild
+              )
+              yield* Deferred.await(reading)
+              yield* TestClock.adjust("1 second")
+              const settled = pending.pollUnsafe()
+              yield* Deferred.succeed(finishInstallation, undefined)
+              const error = yield* Fiber.join(pending)
+              assert.isDefined(settled, "the pending browser read must not mask the operation deadline")
+              assert(Deadline.isTimeout(error))
+              assert.strictEqual(error.phase, "resolving")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+            } else if (mode === "refusal") {
+              const error = yield* page.locator("#box").boundingBox.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error))
+              assert.strictEqual(error.reason._tag, "Unsupported")
+            } else {
+              assert.deepStrictEqual(
+                yield* page.locator("#box").boundingBox,
+                Option.some({ x: 1, y: 2, width: 3, height: 4 })
+              )
+            }
+            if (mode === "document handoff") {
+              assert.sameMembers(released, ["temporary-box", "handoff-box"])
+              assert.strictEqual(queries, 2)
+            } else assert.deepStrictEqual(released, mode === "installation deadline" ? [] : ["temporary-box"])
+            assert.strictEqual(inputs, 0)
+          }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        }).pipe(Effect.scoped)
+    )
+  }
+
   it.effect("reports backend refusal through the readonly read error contract", () =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()

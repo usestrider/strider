@@ -1342,6 +1342,7 @@ Snapshots and role filters use the same pressed, expanded and selected readers, 
 
 A route is in force for requests that start after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select the current routes by precedence. This follows the browser's selection of interception stages at request start while keeping later handler selection current. Requiring retroactive response interception was rejected because it would require pausing responses from the start even without response routes.
 
+
 ## Pay for what you use
 
 Optional browser features do work only when requested, within the owning context or operation. Contexts that

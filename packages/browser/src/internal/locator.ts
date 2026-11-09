@@ -41,6 +41,7 @@ import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
+import * as Geometry from "./geometry.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type { Locate, Owner } from "./locatorOwner.ts"
@@ -323,23 +324,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
 
   get boundingBox() {
     const operation = "Locator.boundingBox"
-    return Effect.gen({ self: this }, function*() {
+    return Effect.scoped(Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
       const record = yield* Operation.record
-      const read = (request: Engine.Request) =>
-        Runtime.sendRouted(
-          this.owner.runtime,
-          this.owner.page,
-          request,
-          record.id,
-          record.budget.at
-        ).pipe(Effect.mapError((failure) =>
-          failure._tag === "Deadline"
-            ? record.timeout(Option.fromUndefinedOr(failure.hint))
-            : this.sendFailure(operation, failure, record)
-        ))
-      const answer = yield* read({ op: "boundingBox", steps: this.steps })
-      const response = answer.response
+      const runtime = this.owner.runtime
+      const sendFailure = (failure: Runtime.SendFailure) =>
+        failure._tag === "Deadline"
+          ? record.timeout(Option.fromUndefinedOr(failure.hint))
+          : this.sendFailure(operation, failure, record)
       const noMatch = () =>
         Effect.fail(
           this.error(
@@ -348,39 +340,95 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             record.id
           )
         )
-      if (response._tag === "NoMatch") return yield* noMatch()
-      if (response._tag !== "BoundingBox") return yield* this.unmatched(operation, response, record.id)
-      if (response.box === null) return Option.none<Locator.BoundingBox>()
-      let { x, y } = response.box
-      // Read ancestors through the same routing/deadline machinery. No input permit, scroll or action checks.
-      for (let index = answer.routed.hops.length - 1; index >= 0; index--) {
-        const steps: Array<Engine.Step> = []
-        for (let parent = 0; parent < index; parent++) {
-          steps.push(...answer.routed.hops[parent]!.steps, { _tag: "Frame" })
-        }
-        steps.push(...answer.routed.hops[index]!.steps)
-        const frame = (yield* read({ op: "boundingBoxFrame", steps })).response
-        if (frame._tag === "UnsupportedGeometry") {
-          return yield* Effect.fail(
-            this.error(
-              operation,
-              new Reason.Unsupported({
-                capability: "Locator.boundingBox",
-                backend: this.owner.runtime.backend,
-                hint: "Scaling, rotation, perspective and zoom on ancestor frames cannot be mapped by frame routing"
-              }),
-              record.id
-            )
-          )
-        }
-        if (frame._tag === "NoMatch") return yield* noMatch()
-        if (frame._tag !== "BoundingBox") return yield* this.unmatched(operation, frame, record.id)
-        if (frame.box === null) return Option.none<Locator.BoundingBox>()
-        x += frame.box.x
-        y += frame.box.y
+      const release = (node: Adapter.NodeBinding) => Operation.detached(runtime.model.adapter.releaseNodes([node]))
+      const resolve = () =>
+        Effect.acquireRelease(
+          Runtime.element(runtime, this.owner.page, this.steps, record.id, record.budget.at).pipe(
+            Effect.mapError(sendFailure)
+          ),
+          (found) => found._tag === "Found" ? release(found.node) : Effect.void
+        )
+      let found = yield* resolve()
+      // Creating a utility realm can straddle a child document commit. Resolve again only when the
+      // returned binding belongs to a different document; missing/strict results remain immediate.
+      while (found._tag === "Found" && found.node.document !== found.routed.document) found = yield* resolve()
+      if (found._tag === "Response") {
+        if (found.response._tag === "NoMatch") return yield* noMatch()
+        return yield* this.unmatched(operation, found.response, record.id)
       }
-      return Option.some({ ...response.box, x, y })
-    }).pipe(
+      const read = (node: Adapter.NodeBinding, kind: Geometry.Kind) =>
+        runtime.model.adapter.geometry(node, kind).pipe(
+          Effect.mapError((error) => this.adapterFailure(operation, error, record.id))
+        )
+      const target = yield* read(found.node, "border")
+      if (target.data.quads.length === 0) return Option.none<Locator.BoundingBox>()
+      let points = target.data.quads.flat()
+      let space = target.document
+      const documents = [...found.routed.hops.map((hop) => hop.document), found.routed.document]
+      for (let index = found.routed.hops.length - 1; index >= 0; index--) {
+        const hop = found.routed.hops[index]!
+        const parent = yield* Effect.acquireRelease(
+          Runtime.elementIn(runtime, hop.document, hop.steps, { scroll: false }, record.id).pipe(
+            Effect.mapError(sendFailure)
+          ),
+          (parent) => Option.isSome(parent) && parent.value._tag === "Found" ? release(parent.value.node) : Effect.void
+        )
+        if (Option.isNone(parent)) return yield* noMatch()
+        if (parent.value._tag === "Response") {
+          if (parent.value.response._tag === "NoMatch") return yield* noMatch()
+          return yield* this.unmatched(operation, parent.value.response, record.id)
+        }
+        const node = parent.value.node
+        const frame = yield* runtime.model.adapter.contentFrame(node).pipe(
+          Effect.mapError((error) => this.adapterFailure(operation, error, record.id))
+        )
+        if (Option.isNone(frame) || frame.value !== hop.frame) return yield* noMatch()
+        const active = yield* runtime.model.documentOf(hop.frame)
+        if (Option.isNone(active) || active.value !== documents[index + 1]) return yield* noMatch()
+        const needsMapping = space === documents[index + 1]
+        if (!needsMapping && !documents.slice(0, index + 1).includes(space)) return yield* noMatch()
+        const geometry = yield* read(node, needsMapping ? "frame" : "bounds")
+        if (geometry.data.quads.length === 0) return Option.none<Locator.BoundingBox>()
+        if (needsMapping) {
+          if (geometry.data.matrix === null) {
+            return yield* Effect.fail(
+              this.error(
+                operation,
+                new Reason.Unsupported({
+                  capability: operation,
+                  backend: runtime.backend,
+                  hint: "The browser did not expose the frame's projected plane"
+                }),
+                record.id
+              )
+            )
+          }
+          points = points.map((point) => Geometry.project(geometry.data.matrix!, point))
+          space = geometry.document
+        }
+      }
+      if (space !== documents[0]) return yield* noMatch()
+      if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+        return yield* Effect.fail(
+          this.error(
+            operation,
+            new Reason.Unsupported({
+              capability: operation,
+              backend: runtime.backend,
+              hint: "The frame projection crosses a non-finite camera plane"
+            }),
+            record.id
+          )
+        )
+      }
+      const x = Math.min(...points.map((p) => p.x)), y = Math.min(...points.map((p) => p.y))
+      return Option.some({
+        x,
+        y,
+        width: Math.max(...points.map((p) => p.x)) - x,
+        height: Math.max(...points.map((p) => p.y)) - y
+      })
+    })).pipe(
       Operation.named(operation, {
         attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
       })
