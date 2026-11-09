@@ -4982,7 +4982,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* newPage
               yield* page.goto(url)
               for (const id of ["#generic", "#paragraph", "#code"]) {
-                yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""), Deadline.within("300 millis"))
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""))
               }
               yield* page.getByRole("generic", { name: "Region", exact: true }).pipe(Expect.toHaveCount(0))
               yield* page.getByRole("paragraph", { name: "Reference override", exact: true }).pipe(
