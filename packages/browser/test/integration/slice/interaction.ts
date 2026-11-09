@@ -2115,6 +2115,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="other"><p id="target">old</p><script>
               document.designMode = "on";
               const other = document.getElementById("other");
+              document.addEventListener("beforeinput", (event) => {
+                if (event.data === "new") {
+                  document.body.dataset.insertionTarget = event.target === other ? "other" : "document";
+                }
+              });
               other.onblur = () => {
                 document.body.dataset.blurs = String(Number(document.body.dataset.blurs ?? 0) + 1);
                 setTimeout(() => {
@@ -2138,6 +2143,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 yield* page.evaluateInMainWorld(() => Number(document.body.dataset.blurs ?? 0)),
                 0,
                 "the native blur handler must execute"
+              )
+              assert.notStrictEqual(
+                yield* page.evaluateInMainWorld(() => document.body.dataset.insertionTarget),
+                "other",
+                "native insertion must not reach the previously focused input"
               )
               assert.strictEqual(yield* page.locator("#other").readValue, "other")
               // Scheduled refocus can race insertion. Successful completion is valid only on the intended target.
