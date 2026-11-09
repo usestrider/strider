@@ -155,10 +155,40 @@ const enableNewCheckout = Effect.fn("enableNewCheckout")(function*(page: Page.Pa
 
 ## HTTP authentication
 
-A site behind HTTP authentication asks the browser for credentials, where no locator can reach. With no route to
-answer, the page gets the server's own response, such as its `401` page, on Chromium and Firefox, and `goto` returns
-it; on WebKit the navigation waits for an answer nothing gives, until it times out. `{ phase: "auth" }` answers the
-challenge with credentials instead, on Chromium and Firefox:
+A site behind HTTP authentication asks the browser for credentials, where no locator can reach. Set
+`httpCredentials` when creating a context or page to answer challenges for its pages and subresources:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Config, Effect } from "effect"
+
+const openStaging = Effect.fn("openStaging")(function*() {
+  const password = yield* Config.Redacted("STAGING_PASSWORD")
+  const page = yield* Browser.newPage({
+    httpCredentials: {
+      origin: "https://staging.example.com",
+      username: "ada",
+      password
+    }
+  })
+  yield* page.goto("https://staging.example.com")
+}, Effect.scoped)
+```
+
+The password is `Redacted`. The optional origin matches scheme, hostname and effective port; omit it to allow
+any website origin. Credentials answer challenges rather than adding an authorization header to every request.
+The pair is submitted once across the whole request and redirect chain. A later challenge in the chain is
+canceled, even at another origin. Proxy challenges never receive this
+pair; configure [proxy credentials](/docs/pages/proxies) separately. Chromium enables interception for the configured
+context, which can affect request timing. Omitting this option adds no interception or credential retry state.
+Firefox cancels ambiguous website/proxy challenges instead of supplying either automatic pair.
+Stock WebKit refuses the option with `Unsupported`.
+
+For a handler that chooses credentials per challenge, register an auth route. Page routes run first, then context
+routes, then configured credentials if every route falls through. `Route.continue` cancels authentication and
+prevents the configured pair from being used; a failed handler also keeps the existing cancellation behavior.
+With neither credentials nor an auth route, the page gets the server's own `401` response on Chromium and Firefox,
+and `goto` returns it; on WebKit the navigation waits until it times out.
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -181,7 +211,7 @@ challenges only from credentials set in advance.
 
 - On Chromium, a challenge to a `fetch`, an image or a script with no route still waits on Chromium's own prompt,
   until it times out: only a document's is answered without one, since pausing every request would slow them all.
-  An `auth` route on its URL answers it.
+  An `auth` route on its URL or context HTTP credentials answers it.
 - A page in a context Strider didn't create, such as a tab of a browser it [attached](/docs/pages/attaching) to,
   keeps the browser's own answer.
 

@@ -2810,12 +2810,122 @@ for (const configured of [true, false]) {
       const fact = facts.find((fact) => fact._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest")
       assert.isDefined(fact)
       if (fact?._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest") {
+        assert.isUndefined(fact.subject.authSource, "conflicting 407 headers cannot identify a website")
         assert.deepStrictEqual(
           fact.subject.challenge,
           configured ? Option.some({ origin: "http://site.test", scheme: "Basic", realm: "website" }) : Option.none()
         )
       }
       assert.isUndefined(page.context.proxyAttempts)
+    }))
+}
+
+for (
+  const sample of [
+    {
+      name: "a website 401 with only a proxy header",
+      status: 401,
+      proxy: true,
+      website: false,
+      attempted: false,
+      source: undefined
+    },
+    {
+      name: "a proxy 407 with conflicting headers",
+      status: 407,
+      proxy: true,
+      website: true,
+      attempted: true,
+      source: undefined
+    },
+    {
+      name: "an unconfirmed 407 with only a website header",
+      status: 407,
+      proxy: false,
+      website: true,
+      attempted: false,
+      source: undefined
+    },
+    {
+      name: "a website 401 with an extra proxy header",
+      status: 401,
+      proxy: true,
+      website: true,
+      attempted: false,
+      source: "server"
+    },
+    {
+      name: "a stale 407 after this request's proxy authentication",
+      status: 407,
+      proxy: false,
+      website: true,
+      attempted: true,
+      source: "server"
+    }
+  ] as const
+) {
+  it.effect(`classifies conservatively: ${sample.name}`, () =>
+    Effect.gen(function*() {
+      const { state, page, commands, facts } = yield* withPage()
+      page.context.proxy = {
+        server: "proxy.test:8080",
+        bypass: [],
+        credentials: { username: "proxy-user", password: Redacted.make("proxy-secret") }
+      }
+      if (sample.attempted) page.context.proxyAttempts = new Set(["challenge"])
+      const registration = state.ids.registration()
+      state.intercepts.set(registration, {
+        registration,
+        bidi: "auth" as State.InterceptEntry["bidi"],
+        scope: { _tag: "Browser" },
+        globs: [],
+        phases: ["auth"]
+      })
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const params = {
+        context: "C1",
+        userContext: "default",
+        navigation: null,
+        timestamp: 1,
+        redirectCount: 0,
+        isBlocked: false,
+        request: {
+          request: "challenge",
+          url: "http://site.test/",
+          method: "GET",
+          headers: [],
+          destination: "document",
+          bodySize: 0
+        }
+      }
+      handlers.apply("network.beforeRequestSent", params, { state })
+      handlers.apply("network.authRequired", {
+        ...params,
+        isBlocked: true,
+        intercepts: ["auth"],
+        response: {
+          status: sample.status,
+          headers: [
+            ...(sample.proxy
+              ? [{ name: "Proxy-Authenticate", value: { type: "string", value: "Basic realm=\"proxy\"" } }]
+              : []),
+            ...(sample.website
+              ? [{ name: "WWW-Authenticate", value: { type: "string", value: "Basic realm=\"website\"" } }]
+              : [])
+          ],
+          authChallenges: sample.proxy ? [{ scheme: "Basic", realm: "proxy" }] : []
+        }
+      }, { state })
+      yield* state.buffer.flush
+      assert.isFalse(commands.some((command) =>
+        command.method === "network.continueWithAuth" &&
+        (command.params as { action?: string }).action === "provideCredentials"
+      ))
+      const fact = facts.find((fact) => fact._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest")
+      assert.isDefined(fact)
+      if (fact?._tag === "ObligationOpened" && fact.subject._tag === "PausedRequest") {
+        assert.strictEqual(fact.subject.authSource, sample.source)
+      }
     }))
 }
 
