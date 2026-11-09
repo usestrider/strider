@@ -12,6 +12,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
+import { execFileSync } from "node:child_process"
 import type * as Access from "../src/internal/access.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
@@ -172,6 +173,38 @@ const fixture = () => {
 class CallbackService extends Context.Service<CallbackService, { readonly value: number }>()("test/CallbackService") {}
 
 describe("locator handler execution", () => {
+  it("drops callback-only services while a removed registration is retained", () => {
+    const script = `
+import * as Browser from ${JSON.stringify(new URL("../src/Browser.ts", import.meta.url).href)}
+import * as Effect from 'effect/Effect'
+import * as Context from 'effect/Context'
+import assert from 'node:assert/strict'
+class Service extends Context.Service()('retention/service') {}
+let retained
+async function acquire() {
+  const value = { marker: 'callback-only service' }
+  const weak = new WeakRef(value)
+  retained = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const registration = yield* page.addLocatorHandler(page.locator('body'), () => Effect.asVoid(Service)).pipe(Effect.provideService(Service, value))
+    yield* registration.remove
+    return registration
+  })).pipe(Effect.provide(Browser.layerTest(''))))
+  return weak
+}
+const weak = await acquire()
+for (let i=0; i<20; i++) { global.gc(); await new Promise(resolve => setImmediate(resolve)) }
+assert.ok(retained)
+assert.equal(weak.deref(), undefined, 'removed registration retains callback services')
+console.log('callback-only service released while registration retained')
+
+    `
+    const output = execFileSync(process.execPath, ["--expose-gc", "--input-type=module", "--eval", script], {
+      encoding: "utf8"
+    })
+    assert.include(output, "callback-only service released")
+  })
+
   it.effect("captures callback services while inheriting the triggering operation and clock", () => {
     const f = fixture()
     return Effect.gen(function*() {
