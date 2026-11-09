@@ -1,6 +1,7 @@
 /** Redirect identity and bounded evidence access without browser traffic. */
 import { assert, describe, it } from "@effect/vitest"
 import { NetworkRequest, NetworkResponse, Page, Target, Url, UserContext } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Headers from "effect/http/Headers"
@@ -8,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Fold from "../src/internal/fold.ts"
 import * as Handles from "../src/internal/handles.ts"
+import * as NetworkIndex from "../src/internal/networkIndex.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
 
 const setup = Effect.fnUntraced(function*() {
@@ -125,6 +127,49 @@ describe("Scoped redirect evidence", () => {
       assert.strictEqual(lookups, 0)
       assert.isTrue(Option.isNone(yield* links.from(first)))
       assert.strictEqual(lookups, 1)
+    }))
+
+  it.effect("keeps a completed redirect pending before its successor is folded", () =>
+    Effect.gen(function*() {
+      const { page, send, fold } = yield* setup()
+      const links = yield* NetworkRequest.redirects(page)
+      const first = yield* send("gap.0")
+      yield* fold.sink({
+        _tag: "ResponseReceived",
+        response: new NetworkResponse.NetworkResponse({
+          hop: first.hop,
+          url: first.url,
+          status: 302 as NetworkResponse.StatusCode,
+          statusText: "Found",
+          httpVersion: Option.none(),
+          headers: Headers.fromInput({ location: "/next" }),
+          servedBy: "network",
+          at: first.at
+        })
+      })
+      // Firefox reports responseCompleted before the next beforeRequestSent. No next hop is visible yet.
+      yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "pending")
+      const second = yield* send("gap.1")
+      assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
+    }))
+
+  it.effect("requires a completed source for the successor retention invariant", () =>
+    Effect.gen(function*() {
+      const id = (value: string) => value as NetworkRequest.HopId
+      const make = () => ({ end: Deferred.makeUnsafe<void>() })
+      for (const sourceCompleted of [true, false]) {
+        const index = NetworkIndex.hops<{ readonly end: Deferred.Deferred<void> }, void>(2, undefined)
+        const source = make()
+        const successor = make()
+        if (sourceCompleted) yield* Deferred.succeed(source.end, undefined)
+        index.keep(id("chain.0"), source)
+        index.keep(id("chain.1"), successor)
+        yield* Deferred.succeed(successor.end, undefined)
+        index.keep(id("other.0"), make())
+        assert.strictEqual(Option.isSome(index.get(id("chain.0"))), !sourceCompleted)
+        assert.strictEqual(Option.isSome(index.get(id("chain.1"))), sourceCompleted)
+      }
     }))
 
   it.effect("reports eviction instead of inventing a first hop or absent successor", () =>

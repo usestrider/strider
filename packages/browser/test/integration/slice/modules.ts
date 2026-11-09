@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 import { navigationFailure } from "./navigationFailure.ts"
@@ -660,6 +661,44 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const [request] = (yield* NetworkRequest.history(page, { url: `${origin}/redirect-unfollowed` })).entries
             assert.isTrue(Option.isNone(yield* links.from(request!)))
             assert.isTrue(Option.isNone(yield* links.to(request!)))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "ends manual redirects using the browser completion evidence",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<title>fetch redirects</title>")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            yield* page.goto(url)
+            const followed = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const successor = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+            yield* page.evaluateInMainWorld(async () => {
+              await (await fetch("/redirect")).text()
+            })
+            yield* successor
+            assert.isTrue(Option.isSome(yield* links.to(yield* followed)))
+            const manual = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const type = yield* page.evaluateInMainWorld(async () =>
+              (await fetch("/redirect", { redirect: "manual" })).type
+            )
+            assert.strictEqual(type, "opaqueredirect")
+            // Flush earlier protocol events through an explicit browser command, without a delay or retry.
+            yield* page.evaluateInMainWorld(() => undefined)
+            const request = yield* manual
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            const next = yield* links.to(request)
+            if (Option.isSome(next)) {
+              // Chromium reports a successor attempt, also exposed by Playwright, then cancels it.
+              const attempt = Option.getOrThrow(Handles.page(page).runtime.model.hop(next.value.hop))
+              const end = yield* Deferred.await(attempt.end).pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(end._tag, "Failed")
+              if (end._tag === "Failed") assert.isTrue(end.canceled)
+              assert.isTrue(Option.isNone(yield* links.to(next.value)))
+            }
           })),
         timeout
       )
