@@ -304,6 +304,7 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
+  readonly acceptInsecureCerts?: boolean | undefined     // default false; Firefox and launched WebKit only; creation-only, explicit values refused on reclaim
   readonly proxy?: {
     readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
