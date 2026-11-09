@@ -472,6 +472,16 @@ describe("Chromium claims", () => {
             assert.isDefined(before)
             yield* Effect.scoped(
               Effect.gen(function*() {
+                // Creation-only TLS settings must fail before ownership transfers, including explicit false.
+                for (const acceptInsecureCerts of [true, false]) {
+                  const options = { acceptInsecureCerts, eventLog: 0 }
+                  const error = yield* api.UserContext.reclaim(saved.contextClaim, options).pipe(Effect.flip)
+                  assert.strictEqual(error._tag, "UserContextError")
+                  assert.strictEqual(error.reason._tag, "Unsupported")
+                  if (error.reason._tag === "Unsupported") {
+                    assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+                  }
+                }
                 const recovered = yield* api.UserContext.reclaim(saved.contextClaim, { emulation: { locale: "fr-FR" } })
                 const { context, found } = recovered
                 assert.deepStrictEqual(found.pages.map((page) => page.found), [{ _tag: "Observed", dialogs: [] }])

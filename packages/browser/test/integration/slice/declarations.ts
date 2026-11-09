@@ -14,7 +14,8 @@ import {
   Page,
   PageClock,
   Route,
-  UncaughtException
+  UncaughtException,
+  UserContext
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -30,7 +31,7 @@ import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
-import { site } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -59,6 +60,34 @@ export const declarations = (
 ) =>
   describe(`${name} declarations`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("accepts untrusted HTTPS only in the opted-in context, or refuses without changing siblings", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* tlsSite
+          const sibling = yield* Browser.newPage()
+          const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
+          assert.strictEqual(rejected._tag, "PageError")
+          const options = { acceptInsecureCerts: true, eventLog: 0 }
+          if (name === "Chromium") {
+            const error = yield* Browser.newContext(options).pipe(Effect.flip)
+            assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported")
+            assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+          } else {
+            const context = yield* Browser.newContext(options)
+            const page = yield* context.newPage
+            yield* page.goto(origin)
+            assert.strictEqual(yield* page.title, "secure")
+            // Browser.newPage must forward the same creation options.
+            const shortcut = yield* Browser.newPage(options)
+            yield* shortcut.goto(origin)
+            assert.strictEqual(yield* shortcut.title, "secure")
+          }
+          const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
+          assert.strictEqual(stillRejected._tag, "PageError")
+          const explicit = yield* Browser.newPage({ ...options, acceptInsecureCerts: false })
+          const explicitRejected = yield* explicit.goto(origin).pipe(Effect.flip)
+          assert.strictEqual(explicitRejected._tag, "PageError")
+        }), timeout)
+
       // ── Routes ──
 
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
@@ -192,7 +221,8 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
+            const blocked = yield* page.route(`${origin}/analytics/**`, () =>
+              Route.abort())
             const result = yield* run(
               page,
               origin,
