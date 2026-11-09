@@ -4202,6 +4202,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("computes roles with presentational conflict resolution and inheritance", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            // A global ARIA attribute or focusability overrides a presentational role with the implicit one, and
+            // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
+            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
+            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
+            yield* page.locator("#owned").pipe(Expect.toHaveRole("presentation"), Deadline.within("1 second"))
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
