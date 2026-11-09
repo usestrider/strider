@@ -662,5 +662,107 @@ partial per-case estimates in JSON must not be used as a successful comparison. 
 retained in `<base|head>/run/attempts.jsonl` and the worker log. They are not successful timing samples and are
 absent from the parent’s `samples.ndjson`. Setup errors also write a failed JSON report and summary.
 
-Hosted variance has not yet been measured. Before relying on small differences, repeat main against main at least
-three times, record the observed spread, and use it to judge practical resolution. No performance gate is enabled.
+### Hosted repeatability, 2026-11-09
+
+Three serial `ubuntu-24.04` jobs compared the same main commit
+`8a1ae263b06042204a515a244bc1b416aec1a601` against itself, using driver
+`24290b90cb4ff2b7a7913f6c2337ca98254b6468`, Chromium 155.0.8059.79, all 26 bench cases and 20 measured
+rounds after three warmup rounds. The jobs were:
+
+- [Job 1](https://github.com/usestrider/strider/actions/runs/42546368886): AMD EPYC 7763, 17m51s.
+- [Job 2](https://github.com/usestrider/strider/actions/runs/42547963037): AMD EPYC 7763, 17m14s.
+- [Job 3](https://github.com/usestrider/strider/actions/runs/42549611823): Intel Xeon Platinum 8370C, 16m46s.
+
+Each completed successfully with matching driver/base/head environment pins and resolved commits, 2,080 measured
+samples and 312 warmup samples. All 7,176 raw samples were downloaded and their paired intervals independently
+recomputed. Each job retained raw samples, lockfiles, source hashes, worker reports and full workflow logs in its
+artifact. The recorded browser executable SHA-256 was identical across the three jobs:
+`c821d8cccbf653b255a6950911846cc17b9b1eae7bb143e49143cd5e0d693653`.
+
+The [local-fixture scenario smoke](https://github.com/usestrider/strider/actions/runs/42546185441) also passed:
+base was the same main commit, head and driver were `24290b90`, and launch/login each completed four rounds.
+The [bench smoke](https://github.com/usestrider/strider/actions/runs/42545323538) passed earlier on the unchanged
+bench path. Neither smoke contributes to the repeatability figures. The earlier
+[failed scenario run](https://github.com/usestrider/strider/actions/runs/42545552573) exposed a missing working
+directory, retained incomplete evidence and is excluded; that setup defect was fixed before the successful smoke.
+None of the three repeatability jobs is incomplete.
+
+Head/base estimates reached a **14.9% absolute deviation from 1 on identical source**. `read-snapshot-100`
+ranged from 0.851 to 1.137, a spread of 0.287 (28.7 percentage points); `click` ranged from 0.899 to 1.079.
+By contrast, `screenshot-dense` ranged from 0.998 to 1.004. Of 78 head/base intervals, two excluded 1:
+job 1’s `locator-read` and job 3’s `launch-first-page`. These intervals are per case without a multiple-testing
+correction; exclusion of 1 alone is not sufficient evidence of a change.
+
+This hosted setup does not establish reliable detection of a 10% change across every case. Keep the performance
+gate disabled. Use the workflow for exploratory comparisons, repeat same-source controls for the affected cases,
+and inspect both intervals and across-job spread before interpreting a change. If a repeatable 10% gate or
+smaller-change measurements are required, evaluate a dedicated self-hosted runner on separate hardware rather
+than the shared desktop. These three jobs do not establish a universal noise bound: CPU models differ, host load
+is uncontrolled, rounds may be correlated, carryover across round boundaries remains, and the measurement covers
+only one source revision and Chromium on Linux. More repetitions alone do not remove systematic bias.
+
+The tables show each paired geometric mean ratio with its 95% interval. Estimate ranges are the minimum and
+maximum of the three job estimates; maximum deviation is `100 × max(abs(ratio − 1))`, computed before rounding.
+They are observed ranges, not confidence or prediction intervals for future jobs.
+
+| Case                |      Job 1 head/base |      Job 2 head/base |      Job 3 head/base | Estimate range | Max deviation from 1 |
+| ------------------- | -------------------: | -------------------: | -------------------: | -------------: | -------------------: |
+| launch-first-page   | 0.983 [0.953, 1.014] | 0.996 [0.976, 1.017] | 0.960 [0.928, 0.993] |    0.960–0.996 |                 4.0% |
+| launch              | 1.016 [0.993, 1.040] | 1.008 [0.982, 1.034] | 0.982 [0.952, 1.013] |    0.982–1.016 |                 1.8% |
+| first-page          | 0.989 [0.945, 1.035] | 1.030 [0.985, 1.077] | 1.032 [0.994, 1.073] |    0.989–1.032 |                 3.2% |
+| shutdown            | 0.974 [0.897, 1.059] | 1.029 [0.931, 1.136] | 0.946 [0.822, 1.087] |    0.946–1.029 |                 5.4% |
+| page-lifecycle      | 0.998 [0.955, 1.042] | 1.035 [0.990, 1.081] | 1.043 [0.986, 1.104] |    0.998–1.043 |                 4.3% |
+| repeated-lifecycle  | 1.012 [0.989, 1.037] | 1.002 [0.986, 1.019] | 1.002 [0.978, 1.028] |    1.002–1.012 |                 1.2% |
+| response-body-small | 0.984 [0.867, 1.117] | 0.995 [0.885, 1.118] | 1.062 [0.950, 1.186] |    0.984–1.062 |                 6.2% |
+| response-body-large | 0.990 [0.920, 1.067] | 1.043 [0.972, 1.119] | 1.026 [0.919, 1.146] |    0.990–1.043 |                 4.3% |
+| navigate            | 0.944 [0.864, 1.031] | 0.998 [0.952, 1.047] | 0.973 [0.921, 1.028] |    0.944–0.998 |                 5.6% |
+| resources           | 1.022 [0.990, 1.055] | 0.989 [0.946, 1.033] | 0.989 [0.945, 1.036] |    0.989–1.022 |                 2.2% |
+| evaluate            | 1.051 [0.971, 1.137] | 1.025 [0.938, 1.120] | 1.113 [0.953, 1.300] |    1.025–1.113 |                11.3% |
+| locator-read        | 0.926 [0.862, 0.994] | 1.050 [0.982, 1.122] | 0.970 [0.888, 1.060] |    0.926–1.050 |                 7.4% |
+| locator-values      | 0.994 [0.919, 1.075] | 1.073 [0.986, 1.167] | 1.071 [0.980, 1.171] |    0.994–1.073 |                 7.3% |
+| read-snapshot-100   | 1.137 [0.963, 1.343] | 0.851 [0.678, 1.067] | 0.948 [0.801, 1.123] |    0.851–1.137 |                14.9% |
+| read-snapshot-1000  | 0.941 [0.814, 1.089] | 1.021 [0.902, 1.157] | 0.974 [0.863, 1.098] |    0.941–1.021 |                 5.9% |
+| click               | 0.899 [0.790, 1.023] | 1.079 [0.942, 1.236] | 0.927 [0.786, 1.092] |    0.899–1.079 |                10.1% |
+| fill                | 0.952 [0.829, 1.093] | 0.931 [0.841, 1.030] | 0.929 [0.831, 1.039] |    0.929–0.952 |                 7.1% |
+| visible             | 1.026 [0.937, 1.125] | 1.034 [0.963, 1.110] | 1.053 [0.919, 1.208] |    1.026–1.053 |                 5.3% |
+| visible-delayed     | 0.999 [0.976, 1.022] | 0.993 [0.977, 1.009] | 1.008 [0.994, 1.021] |    0.993–1.008 |                 0.8% |
+| visible-many        | 0.992 [0.971, 1.013] | 0.992 [0.978, 1.006] | 0.976 [0.951, 1.002] |    0.976–0.992 |                 2.4% |
+| console-many        | 1.061 [0.926, 1.216] | 0.954 [0.804, 1.134] | 1.029 [0.808, 1.310] |    0.954–1.061 |                 6.1% |
+| screenshot          | 1.026 [0.897, 1.173] | 1.065 [0.979, 1.158] | 0.955 [0.849, 1.075] |    0.955–1.065 |                 6.5% |
+| screenshot-dense    | 0.999 [0.987, 1.012] | 0.998 [0.986, 1.011] | 1.004 [0.993, 1.015] |    0.998–1.004 |                 0.4% |
+| screenshot-repeated | 1.026 [0.970, 1.086] | 1.006 [0.942, 1.075] | 0.970 [0.911, 1.033] |    0.970–1.026 |                 3.0% |
+| screenshot-large    | 0.991 [0.942, 1.042] | 0.987 [0.937, 1.039] | 1.035 [0.935, 1.147] |    0.987–1.035 |                 3.5% |
+| screenshot-element  | 1.017 [0.928, 1.115] | 1.045 [0.983, 1.110] | 1.032 [0.910, 1.169] |    1.017–1.045 |                 4.5% |
+
+| Case                | Job 1 head/Playwright | Job 2 head/Playwright | Job 3 head/Playwright |
+| ------------------- | --------------------: | --------------------: | --------------------: |
+| launch-first-page   |  1.671 [1.638, 1.705] |  1.684 [1.646, 1.723] |  1.682 [1.634, 1.732] |
+| launch              |  1.870 [1.819, 1.923] |  1.822 [1.774, 1.872] |  1.889 [1.833, 1.947] |
+| first-page          |  1.402 [1.362, 1.444] |  1.458 [1.368, 1.553] |  1.496 [1.409, 1.588] |
+| shutdown            |  0.992 [0.932, 1.056] |  1.043 [0.958, 1.136] |  1.030 [0.909, 1.167] |
+| page-lifecycle      |  1.334 [1.299, 1.371] |  1.339 [1.280, 1.400] |  1.377 [1.303, 1.456] |
+| repeated-lifecycle  |  1.209 [1.190, 1.228] |  1.196 [1.178, 1.214] |  1.257 [1.233, 1.282] |
+| response-body-small |  0.981 [0.879, 1.094] |  1.090 [0.959, 1.240] |  1.015 [0.892, 1.155] |
+| response-body-large |  0.869 [0.821, 0.919] |  0.843 [0.795, 0.893] |  0.798 [0.732, 0.871] |
+| navigate            |  1.092 [0.995, 1.198] |  1.281 [1.210, 1.356] |  1.153 [1.080, 1.231] |
+| resources           |  1.323 [1.278, 1.371] |  1.381 [1.331, 1.432] |  1.293 [1.243, 1.345] |
+| evaluate            |  0.832 [0.746, 0.927] |  0.889 [0.793, 0.997] |  0.814 [0.713, 0.929] |
+| locator-read        |  0.665 [0.614, 0.721] |  0.698 [0.649, 0.749] |  0.640 [0.584, 0.702] |
+| locator-values      |  0.666 [0.628, 0.707] |  0.722 [0.670, 0.778] |  0.683 [0.646, 0.723] |
+| read-snapshot-100   |  0.521 [0.442, 0.614] |  0.460 [0.399, 0.530] |  0.498 [0.410, 0.605] |
+| read-snapshot-1000  |  0.717 [0.634, 0.811] |  0.750 [0.685, 0.821] |  0.677 [0.598, 0.766] |
+| click               |  0.595 [0.531, 0.666] |  0.662 [0.582, 0.754] |  0.609 [0.541, 0.685] |
+| fill                |  0.755 [0.676, 0.845] |  0.715 [0.655, 0.781] |  0.721 [0.683, 0.762] |
+| visible             |  0.578 [0.529, 0.632] |  0.607 [0.565, 0.651] |  0.566 [0.526, 0.609] |
+| visible-delayed     |  0.801 [0.780, 0.822] |  0.847 [0.829, 0.865] |  0.847 [0.829, 0.864] |
+| visible-many        |  0.654 [0.639, 0.669] |  0.677 [0.660, 0.696] |  0.667 [0.649, 0.686] |
+| console-many        |  0.725 [0.608, 0.865] |  0.649 [0.541, 0.779] |  0.685 [0.561, 0.835] |
+| screenshot          |  0.789 [0.701, 0.889] |  0.761 [0.678, 0.853] |  0.720 [0.649, 0.799] |
+| screenshot-dense    |  1.016 [1.001, 1.031] |  1.009 [0.999, 1.020] |  1.012 [0.999, 1.025] |
+| screenshot-repeated |  0.866 [0.823, 0.911] |  0.945 [0.868, 1.029] |  0.880 [0.816, 0.949] |
+| screenshot-large    |  0.683 [0.647, 0.722] |  0.706 [0.675, 0.739] |  0.739 [0.679, 0.804] |
+| screenshot-element  |  0.425 [0.390, 0.464] |  0.437 [0.405, 0.472] |  0.437 [0.405, 0.473] |
+
+Head/Playwright figures retain the existing library defaults and timing boundaries described above. In particular,
+lifecycle cases compare different readiness/release paths and resources; their ratios are not isolated protocol
+costs. Ratios from these controls describe this source revision and these runners, not a general parity claim.
