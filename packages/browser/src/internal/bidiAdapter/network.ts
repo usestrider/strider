@@ -10,6 +10,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
 import { pause, requestSnapshot } from "./obligations.ts"
@@ -61,6 +62,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         at: Adapter.now()
       })
       state.buffer.emit({ _tag: "RequestSent", request: snapshot })
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(data.timings, false) })
+      }
       // The headers the request event gives are the ones sent, cookies included
       state.buffer.emit({ _tag: "HopHeaders", hop: snapshot.hop, phase: "request", headers: snapshot.headers })
       if (params.isBlocked) pause(state, params, "request", snapshot, Option.none())
@@ -68,6 +72,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.responseStarted, (params, { state }) => {
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, false) })
+      }
       if (request.navigation !== undefined) request.navigation.status = params.response.status
       const response = new NetworkResponse.NetworkResponse({
         hop: request.hop,
@@ -93,6 +100,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, true) })
+      }
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,

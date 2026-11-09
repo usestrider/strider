@@ -526,6 +526,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           )
         )
       }
+      if (options?.requestTiming && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.timing",
+            backend: adapter.info.product,
+            hint: "Request timings must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
       if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
         return yield* Effect.fail(contextError(
           operation,
@@ -672,7 +683,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           : adapter.createUserContext({
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
-            reclaimable
+            reclaimable,
+            requestTiming: options?.requestTiming
           })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)
