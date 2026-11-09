@@ -4206,7 +4206,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       it.effect("computes roles with presentational conflict resolution and inheritance", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
-            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul>`
+            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul><h3 id="decimal-tabindex" role="none" tabindex="0.5">Decimal</h3>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
@@ -4216,6 +4216,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
             yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+            // HTML parses tabindex="0.5" as 0, so the element is focusable and keeps its implicit role.
+            yield* page.locator("#decimal-tabindex").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
             yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
             const snapshot = yield* page.locator("#described").snapshot()
