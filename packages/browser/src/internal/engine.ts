@@ -154,6 +154,7 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -2173,6 +2174,21 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
+      }
+      case "AccessibleName": {
+        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
+        nameCache.delete(element)
+        const name = accessibleName(element, false)
+        const matcher = expectation.expected
+        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
+        return {
+          passed: matcher._tag === "RegExp"
+            ? new RegExp(matcher.source, matcher.flags).test(name)
+            : expectation.ignoreCase
+            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+            : normalize(name) === normalize(matcher.value),
+          observed: name
+        }
       }
       case "ContainsText": {
         const text = textOf(element)
