@@ -13,6 +13,7 @@ import type * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
+import * as Operation from "../operation.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
 import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
 
@@ -48,11 +49,15 @@ export const dispatchInput = Effect.fnUntraced(
       !state.interceptingDrags.has(page.id) && !state.drags.has(page.id) &&
       (state.heldButtons.get(page.id) ?? 0) === 0
     ) {
-      // The move's reply waits a rendering frame, which a complete unheld click needn't spend. Its commands
-      // go out as one step, so an interruption can't leave the button pressed, and only the replies overlap.
-      // Drags, held buttons, double clicks and modifier transitions stay sequential, and so does frame routing,
-      // coordinate clicks included. With drag interception on, a late drag needs the sequential path's cancellation.
-      yield* Kit.protocol(page.target.session.sendOrdered(click.map(mouseCommand)))
+      // Move and press may overlap, but a modal mousedown handler can suspend the press while Chromium
+      // acknowledges (and discards) a release. Wait for the press before sending the normal release.
+      // Each group writes uninterruptibly; a failed or interrupted press wait still releases the button,
+      // outside the action's deadline. Drags and frame routing keep their sequential path below.
+      const release = Kit.protocol(page.target.session.sendOrdered([mouseCommand(click[2])]))
+      yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand))).pipe(
+        Effect.onError(() => release.pipe(Operation.detached, Effect.ignore))
+      )
+      yield* release
       return
     }
     for (const event of events) {
