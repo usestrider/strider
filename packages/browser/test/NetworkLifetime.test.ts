@@ -211,6 +211,16 @@ describe("Request response lifetime", () => {
       assert.strictEqual(Option.getOrThrow(yield* (yield* NetworkRequest.response(target, next))).status, 200)
     })))
 
+  it.effect("keeps a request that failed before its target closed answering none", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, target, sent } = yield* responseFixture
+      const wait = yield* NetworkRequest.response(target, sent)
+      yield* fold.sink({ _tag: "RequestFailed", hop: sent.hop, error: "offline", canceled: false, at: sent.at })
+      assert.deepStrictEqual(yield* wait, Option.none())
+      yield* fold.sink({ _tag: "UserContextRemoved", context })
+      assert.deepStrictEqual(yield* wait, Option.none())
+    })))
+
   it.effect("wakes when the target closes before arrival", () =>
     Effect.scoped(Effect.gen(function*() {
       const { fold, target, sent } = yield* responseFixture
