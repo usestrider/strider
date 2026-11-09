@@ -101,6 +101,9 @@ export const capabilities = (
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
       entry("network.requestBody.redirects", "partial", ["earlier hops require complete event-carried data"]),
+      entry("network.requestBody.absence", "supported", [
+        "native hasPostData reports body presence; empty fallback reports are refused"
+      ]),
       entry("network.requestBody.empty", "supported", []),
       entry("network.requestBody.multipart", "unsupported", [
         "multipart file completeness cannot be established from the native report"

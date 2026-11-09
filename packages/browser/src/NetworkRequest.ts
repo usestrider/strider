@@ -224,8 +224,9 @@ export interface Filter {
  *
  * `url` is required here, unlike in `stream` and `history`. A `body` decoder declares scoped collection before
  * this returns and needs inspect access. Capture starts when a matching request arrives, without waiting for
- * its response. The decoded result is owned and available as `Option`; `None` means no body was reported.
- * Firefox reports both an empty payload and no payload that way. Missing or incomplete data fails instead.
+ * its response. The decoded result is owned and available as `Option`; `None` means the native protocol indicates no payload.
+ * Firefox reports both an empty payload and no payload that way. Stock WebKit refuses empty or missing reports
+ * because they cannot establish completeness. Missing or incomplete data fails instead.
  * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
  * Without `body`, this collects no body data.
  *
@@ -441,12 +442,13 @@ export const headersSent = (
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
 
 /**
- * A request whose collected body has been decoded; `None` means no body was reported.
+ * A request whose collected body has been decoded; `None` means the native protocol indicates no payload.
  *
  * **Details**
  *
  * The decoder result is owned by the caller and outlives the subscription and page. Browsers can conflate an
- * empty body with no body; unavailable or incomplete data fails instead of producing `None`.
+ * empty body with no body; unavailable or incomplete data fails instead of producing `None`. Stock WebKit
+ * refuses empty or missing native text, which cannot establish completeness.
  *
  * @stability unstable
  * @category models

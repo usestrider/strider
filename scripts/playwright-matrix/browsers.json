@@ -146,6 +146,13 @@
           ]
         },
         {
+          "name": "network.requestBody.absence",
+          "status": "supported",
+          "limitations": [
+            "native hasPostData reports body presence; empty fallback reports are refused"
+          ]
+        },
+        {
           "name": "network.requestBody.empty",
           "status": "supported",
           "limitations": []
@@ -602,6 +609,13 @@
           "status": "partial",
           "limitations": [
             "earlier hops require complete event-carried data"
+          ]
+        },
+        {
+          "name": "network.requestBody.absence",
+          "status": "supported",
+          "limitations": [
+            "native hasPostData reports body presence; empty fallback reports are refused"
           ]
         },
         {
@@ -1076,6 +1090,13 @@
           "status": "unsupported",
           "limitations": [
             "redirected hops cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.absence",
+          "status": "partial",
+          "limitations": [
+            "zero body size conflates empty payload with absence"
           ]
         },
         {
@@ -1614,6 +1635,13 @@
           "status": "unsupported",
           "limitations": [
             "redirected hops cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.absence",
+          "status": "partial",
+          "limitations": [
+            "zero body size conflates empty payload with absence"
           ]
         },
         {
@@ -2357,9 +2385,18 @@
           "limitations": []
         },
         {
+          "name": "network.requestBody.absence",
+          "status": "unsupported",
+          "limitations": [
+            "empty or missing native text cannot establish absence or completeness"
+          ]
+        },
+        {
           "name": "network.requestBody.empty",
-          "status": "supported",
-          "limitations": []
+          "status": "unsupported",
+          "limitations": [
+            "empty native reports can omit Blob or File payloads and are refused"
+          ]
         },
         {
           "name": "network.requestBody.multipart",
@@ -2379,7 +2416,7 @@
           "name": "network.requestBody.text",
           "status": "partial",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         },
         {
@@ -2940,9 +2977,18 @@
           "limitations": []
         },
         {
+          "name": "network.requestBody.absence",
+          "status": "unsupported",
+          "limitations": [
+            "empty or missing native text cannot establish absence or completeness"
+          ]
+        },
+        {
           "name": "network.requestBody.empty",
-          "status": "supported",
-          "limitations": []
+          "status": "unsupported",
+          "limitations": [
+            "empty native reports can omit Blob or File payloads and are refused"
+          ]
         },
         {
           "name": "network.requestBody.multipart",
@@ -2962,7 +3008,7 @@
           "name": "network.requestBody.text",
           "status": "partial",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         },
         {

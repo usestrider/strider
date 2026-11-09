@@ -28,8 +28,8 @@ Effect's `HttpIncomingMessage.schemaBodyJson`, as with [response bodies](/docs/e
 Text honors the declared charset and defaults to UTF-8; unknown charsets fall back to UTF-8, with invalid
 sequences replaced.
 
-The result's `body` is an `Option`. `None` means the browser reported no payload; Firefox also reports an empty
-payload this way. Unavailable data fails with `RequestError` whose reason is `BodyUnavailable`. An over-limit or
+The result's `body` is an `Option`. `None` means the native protocol indicates no payload; Firefox also reports an empty
+payload this way. Stock WebKit cannot establish absence from missing or empty text and refuses both reports. Unavailable data fails with `RequestError` whose reason is `BodyUnavailable`. An over-limit or
 incomplete body fails with `BodyTruncated` before the decoder runs. Invalid JSON produces `MalformedBody`, and
 schema failures remain the decoder's own errors.
 
@@ -58,7 +58,9 @@ Each capture and decoder uses the deadline budget in force when subscribing. A f
 The subscriber's scope owns outstanding reads, and results remain bounded by the subscription's buffers.
 
 Stock WebKit supplies the browser's reported text, which may differ from the original binary payload. Exact-byte
-reads fail there; its text limit counts the UTF-8 representation. WebKit multipart reports and Chromium's multipart
+reads fail there; its text limit counts the UTF-8 representation. Blob or File payloads can produce an empty
+report, so even an actually empty payload is refused. Chromium also refuses an empty fallback report; complete
+event-carried bytes can still represent an empty payload. WebKit multipart reports and Chromium's multipart
 fallback can omit file contents, so those incomplete reports are refused. No multipart file reconstruction is
 performed. Redirected bodies that the browser cannot independently address fail rather than returning another
 hop's payload; Firefox's native request-data identifier cannot distinguish those hops.

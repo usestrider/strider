@@ -446,6 +446,9 @@ export const captureRequestBody = Effect.fnUntraced(
       result.success.base64Encoded === true,
       "Network.getRequestPostData"
     )
+    // The fallback can omit file parts. An empty string cannot establish a complete
+    // empty payload; only carried event bytes can establish that representation.
+    if (bytes.length === 0) return { _tag: "Unavailable", why: "unavailable" }
     return bytes.length > limit ? { _tag: "OverLimit" } : { _tag: "Bytes", bytes }
   }
 )

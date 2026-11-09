@@ -94,6 +94,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
       entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),
+      entry("network.requestBody.absence", "partial", ["zero body size conflates empty payload with absence"]),
       entry("network.requestBody.empty", "unsupported", ["empty payload and no payload both report zero body size"]),
       entry("network.requestBody.multipart", "supported", []),
       entry("network.requestBody.bytes", "partial", [

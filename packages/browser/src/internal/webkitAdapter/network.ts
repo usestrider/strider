@@ -424,7 +424,9 @@ export const captureRequestBody = Effect.fnUntraced(
     // Multipart reports may silently omit files (Q184); the protocol cannot establish completeness.
     if (/^multipart\//i.test(snapshot.headers["content-type"] ?? "")) return { _tag: "Incomplete" }
     const text = request.postData[state.ids.redirectsOf(snapshot.hop)]
-    if (text === undefined) return { _tag: "Absent" }
+    // Blob/File-backed parts can produce an empty report. A missing field supplies no
+    // affirmative absence signal either; neither report establishes completeness.
+    if (text === undefined || text === "") return { _tag: "Unavailable", why: "unavailable" }
     if (new TextEncoder().encode(text).length > limit) return { _tag: "OverLimit" }
     return { _tag: "ReportedText", text }
   }

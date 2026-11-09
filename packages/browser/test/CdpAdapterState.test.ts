@@ -2126,5 +2126,7 @@ describe("CDP request body fallback completeness", () => {
         _tag: "Unavailable",
         why: "unavailable"
       })
+      // The stricter subscription contract does not alter legacy route/recording reads.
+      assert.deepStrictEqual(yield* Network.requestBody(state, snapshot.hop), Option.some(new Uint8Array()))
     }))
 })

@@ -91,6 +91,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       bodies: "Response bodies",
       "network.requestBody.bytes": "Collected request bytes",
       "network.requestBody.text": "Collected request text",
+      "network.requestBody.absence": "Reporting absent request bodies",
       "network.requestBody.empty": "Distinguishing an empty request body",
       "network.requestBody.multipart": "Complete multipart request bodies",
       "network.requestBody.redirects": "Reading bodies by redirect hop",

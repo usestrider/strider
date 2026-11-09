@@ -28552,7 +28552,7 @@
           "url": "/docs/api/browser/NetworkRequest#stream"
         }
       ],
-      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.text; stock WebKit returns native reported text.",
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.text; stock WebKit returns only nonempty native reported text and refuses empty or missing reports because Blob/File data may be omitted. Chromium empty fallback reports are also refused.",
       "capabilities": [
         "network.requestBody.text"
       ],
@@ -28584,13 +28584,13 @@
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         }
       },
@@ -28700,7 +28700,7 @@
           "url": "/docs/api/browser/NetworkRequest#stream"
         }
       ],
-      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.json or schemaBodyJson, or message.urlParamsBody for URL-encoded forms with repeated keys; select decoding explicitly rather than guessing from media type.",
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.json or schemaBodyJson, or message.urlParamsBody for URL-encoded forms with repeated keys; select decoding explicitly rather than guessing from media type. Stock WebKit refuses empty or missing reports whose completeness is unknown.",
       "capabilities": [
         "network.requestBody.text"
       ],
@@ -28732,13 +28732,13 @@
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+            "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
           ]
         }
       },
@@ -113425,7 +113425,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "04fbb85755466b22dca2c176ace8993a647084473f3f5a24f2a909a16ed68ad2",
+    "packages/browser/src/NetworkRequest.ts": "ec11afbe331f812cda4d15b4342f5826fcf5b7745ca7c2c0c8b8e1e8f8f2c42d",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
@@ -113441,10 +113441,10 @@
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "e0f511a953ecd165dda969f20e143da19f87f48afbb86b4c6da84d4d238834c1",
-    "packages/browser/src/internal/cdpAdapter.ts": "b94d2ed7bd08dcd9ae5ba5cdf73d97bc520c80464d4deecb91997eaf696c0654",
+    "packages/browser/src/internal/bidiAdapter.ts": "09cfdfb5adb9ee3ed6c668ba0c053b97f7d6b28295d6f8d052f9cafd7f45ed39",
+    "packages/browser/src/internal/cdpAdapter.ts": "79f4eb68b01087aad05c5e68df627c086fd8a90d032a567ae57dbcb82a2a0a56",
     "packages/browser/src/internal/webkitAdapter.ts": "3c2ad76e787f787ce28b25bd08611747d94543020e42352bc9d6bf7cc8808883",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "c5e0da301a74a7a71151a263517fda50a2bb9c1afeb4de31076660d1537ada5c",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a4c087ebcaafb7874d649352a7d1c97704a4b05bf82cab381737d33b20e60ce8",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
