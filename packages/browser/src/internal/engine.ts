@@ -2817,11 +2817,12 @@ export function engine(render: (root: SnapNode) => string) {
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | string => {
+  const element = (text: string): Element | Array<Element> | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
       readonly validationSteps?: ReadonlyArray<Step>
+      readonly all?: boolean
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
@@ -2845,6 +2846,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
       throw error
     }
+    if (request.all === true) return found
     if (found.length === 0) return JSON.stringify({ _tag: "NoMatch" } satisfies Response)
     if (found.length > 1) return JSON.stringify(strict(found))
     const one = found[0]!

@@ -783,6 +783,38 @@ export interface ReadonlyLocator
     fn: (element: Element, ...args: Args) => B | Promise<B>,
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<B>, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Calls `fn` in the isolated world with an array of all current matches, and returns its result by value.
+   *
+   * **Details**
+   *
+   * Resolves once without waiting or requiring a unique match; no matches passes an empty array. Array membership
+   * is a snapshot taken before the callback is dispatched. The DOM may change between resolution and invocation;
+   * the elements remain live and may be detached. Synchronous callback code runs in one JavaScript turn, but an
+   * async callback can observe changes across awaits. Its promise is awaited within the operation's deadline.
+   * A timeout after dispatch does not stop code already running in the page.
+   *
+   * Arguments and results use the same serialization as `evaluate`; DOM nodes cannot return by value. Functions
+   * must be self-contained. No array handle is retained. Requires inspect access and isolated-world support;
+   * backends without isolated worlds fail with `Unsupported`.
+   *
+   * **Example** (Reading all product names together)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const productNames = Effect.fn("productNames")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("listitem").evaluateAll((items) =>
+   *     items.map((item) => item.textContent)
+   *   )
+   * })
+   * ```
+   */
+  evaluateAll<Args extends ReadonlyArray<unknown>, B>(
+    fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.Serialized<B>, LocatorError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**

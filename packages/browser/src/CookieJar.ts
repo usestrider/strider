@@ -117,11 +117,11 @@ export interface Input {
   readonly name: Name | string
   readonly value: string | Redacted.Redacted<string>
   /**
-   * Where the cookie applies: a URL, or a domain and path.
+   * Where the cookie applies: `{ url }`, or `{ domain, path }`.
    */
   readonly scope:
-    | { readonly _tag: "Url"; readonly url: Url.Url | string }
-    | { readonly _tag: "Domain"; readonly domain: Domain | string; readonly path: string }
+    | { readonly url: Url.Url | string; readonly domain?: never; readonly path?: never }
+    | { readonly domain: Domain | string; readonly path: string; readonly url?: never }
   /**
    * When it expires.
    *
@@ -238,7 +238,7 @@ export interface CookieJar {
    *   yield* page.context.cookies.set({
    *     name: "beta",
    *     value: "1",
-   *     scope: { _tag: "Url", url: "https://app.example.com" }
+   *     scope: { url: "https://app.example.com" }
    *   })
    *   yield* page.goto("https://app.example.com")
    * })

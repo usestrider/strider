@@ -12,6 +12,12 @@ import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
 import { afterAll, TestRunner } from "vitest"
 
+/** An attachment of this file, as the kind reporters see it as. */
+const attachment = (kind: "Screenshot" | "Har"): TestRun.TestArtifact =>
+  kind === "Screenshot"
+    ? { screenshot: "test/VitestBrowser.test.ts" as never }
+    : { har: "test/VitestBrowser.test.ts" as never }
+
 describe("VitestBrowser", () => {
   it.effect("describes the test running, and attaches its files", () =>
     Effect.gen(function*() {
@@ -19,7 +25,7 @@ describe("VitestBrowser", () => {
       assert.include(run.info.id, "VitestBrowser > describes the test running, and attaches its files")
       assert.include(run.info.file, "VitestBrowser.test.ts")
       assert.strictEqual(run.info.attempt, 0)
-      yield* run.attach({ _tag: "Screenshot", path: "test/VitestBrowser.test.ts" as never })
+      yield* run.attach({ screenshot: "test/VitestBrowser.test.ts" as never })
       const test = TestRunner.getCurrentTest()!
       assert.deepInclude(
         test.artifacts.map((artifact) => artifact.type),
@@ -66,7 +72,7 @@ layer(VitestBrowser.layer(sharedBrowser), { concurrent: true })("shared browser"
         yield* Effect.promise(started)
         const before = run.info
         yield* Effect.yieldNow
-        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* run.attach(attachment(artifact))
         yield* Effect.promise(attached)
         // The callback's own context remains stable across both asynchronous boundaries.
         context.expect.soft(context.task).toBe(task)
@@ -103,7 +109,7 @@ it("keeps sequential identity and retry attempt across an asynchronous yield", {
       assert.include(run.info.id, task.name)
       assert.strictEqual(before.attempt, attempt)
       assert.strictEqual(run.info.attempt, attempt)
-      yield* run.attach({ _tag: "Screenshot", path: "test/VitestBrowser.test.ts" as never })
+      yield* run.attach({ screenshot: "test/VitestBrowser.test.ts" as never })
       assert.isTrue(task.artifacts.some((entry) => entry.type === "@usestrider/browser"))
     }).pipe(VitestBrowser.withTest(context))
   )
@@ -124,7 +130,7 @@ for (const artifact of ["Screenshot", "Har"] as const) {
       Effect.gen(function*() {
         const run = yield* TestRun.TestRun
         yield* Effect.promise(providedStarted)
-        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* run.attach(attachment(artifact))
         yield* Effect.promise(providedAttached)
         context.expect.soft(run.info.id).toContain(task.name)
         context.expect.soft(
@@ -160,7 +166,7 @@ for (const order of ["binding first", "layer first", "shared memo map"] as const
         const info = run.info
         yield* Effect.promise(ready)
         yield* Effect.yieldNow
-        yield* run.attach({ _tag: artifact, path: "test/VitestBrowser.test.ts" as never })
+        yield* run.attach(attachment(artifact))
         yield* Effect.promise(done)
         context.expect.soft(run.info).toBe(info)
         context.expect.soft(info.id).toContain(task.name)

@@ -314,7 +314,7 @@ A context's cookies: reading, setting and removing them.
 - `interface Input`
   - `readonly name: Name | string`
   - `readonly value: string | Redacted.Redacted<string>`
-  - `readonly scope: | { readonly _tag: "Url"; readonly url: Url.Url | string } | { readonly _tag: "Domain"; readonly domain: Domain | string; readonly path: string…`
+  - `readonly scope: | { readonly url: Url.Url | string; readonly domain?: never; readonly path?: never } | { readonly domain: Domain | string; readonly path: strin…`
   - `readonly expires?: DateTime.DateTime.Input | undefined`
   - `readonly httpOnly?: boolean | undefined`
   - `readonly secure?: boolean | undefined`
@@ -942,6 +942,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
+  - `evaluateAll<Args extends ReadonlyArray<unknown>, B>(fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Ser…`
 - `interface Checks`
   - `readonly rendered?: boolean | undefined`
   - `readonly visible?: boolean | undefined`
@@ -1328,11 +1329,8 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly url: string`
   - `readonly name: Option.Option<string>`
   - `readonly children: ReadonlyArray<FrameTreeEncoded>`
-- `interface ScreenshotOptions`
-  - `readonly area?: | { readonly _tag: "Viewport" } | { readonly _tag: "FullPage" } | { readonly _tag: "Clip" readonly rect: { readonly x: Pixels.Css readonly y: P…`
-  - `readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number } | undefined`
-  - `readonly scale?: "css" | "device" | undefined`
-  - `readonly omitBackground?: boolean | undefined`
+- `type ScreenshotOptions = ScreenshotFormat & { readonly area?: | "viewport" | "fullPage" | { readonly clip: { readonly x: Pixels.Css readonly y: Pixels.Css readonly width: Pixels.Css readonly height: Pixels.Css } readonly ele…`
+- `type ScreenshotFormat = | { readonly format?: "png" | undefined readonly quality?: undefined } | { readonly format: "jpeg" readonly quality: number }`
 - `interface Length`
   - `readonly value: number`
   - `readonly unit: "in" | "cm" | "mm" | "px"`
@@ -2485,7 +2483,7 @@ Test support that works with any test runner: the running test, and the files at
 
 *schemas*
 
-- `const TestArtifact = Schema.Union([Schema.TaggedStruct("Trace", { path: FilePath.Local }), Schema.TaggedStruct("Har", { path: FilePath.Local }), Schema.TaggedStruct("Screenshot", { path: FilePath.Local })])`
+- `const TestArtifact = Schema.Union([Schema.Struct({ trace: FilePath.Local }), Schema.Struct({ har: FilePath.Local }), Schema.Struct({ screenshot: FilePath.Local })])`
 
 ## `@usestrider/browser/webkit`
 

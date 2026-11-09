@@ -4,7 +4,9 @@
  * by `uniqueContextId`. Values come back in WebDriver BiDi's serialization, which CDP produces with
  * `serialization: "deep"`.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as DOM from "../../cdp/DOM.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -17,6 +19,8 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Groups from "../objectGroups.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
@@ -319,73 +323,115 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
   const realm = yield* realmOf(state, id)
   const on = Protocol.on(realm.target.session)
   const failed = Kit.realmFailure(id, () => realm.ended)
-  // A node crosses into this realm by its binding, from whichever world returned it
+  // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
+  // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()
-  for (const argument of call.arguments) {
-    if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
-    const { object } = yield* DOM.resolveNode({
-      backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
-      executionContextId: realm.contextId as Runtime.ExecutionContextId
-    }).pipe(on, Effect.mapError(failed))
-    if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
-  }
-  const released = Effect.forEach(
-    nodes.values(),
-    (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
-    { discard: true }
-  )
-  const reply = yield* Effect.forEach(call.arguments, (local) =>
-    Kit.argument<Runtime.CallArgument>(local, {
-      ids: state.ids,
-      realm: id,
-      value: callValue,
-      handle: (handle) => {
-        const entry = state.handles.get(handle)
-        return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
-      },
-      node: (node) => {
-        const objectId = nodes.get(node.binding)
-        return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
-      }
-    })).pipe(
-      Effect.flatMap((args) =>
-        Runtime.callFunctionOn({
-          functionDeclaration: call.functionDeclaration,
-          uniqueContextId: realm.uniqueId,
-          arguments: args,
-          awaitPromise: call.awaitPromise,
-          userGesture: call.userActivation,
-          ...(call.group === undefined ? {} : { objectGroup: call.group }),
-          returnByValue: false,
-          serializationOptions: call.result === "value"
-            ? { serialization: "deep", maxDepth: 64 }
-            : { serialization: "idOnly" }
-        }).pipe(on, Effect.mapError(failed))
+  const resultIds = new Set<string>()
+  let cleanup: Fiber.Fiber<void> | undefined
+  const handoff = Effect.suspend(() => {
+    const ids = new Set([...nodes.values(), ...resultIds])
+    // A closing connection owns teardown of its realms; never start unowned work or wait here.
+    if (ids.size === 0 || state.cleanupScope.state._tag === "Closed") return Effect.void
+    const work = Effect.forEach(
+      ids,
+      (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
+      { discard: true }
+    ).pipe(
+      Operation.detached,
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logWarning("CDP evaluation object cleanup failed", cause)
       ),
-      Effect.ensuring(released)
+      Effect.interruptible
     )
-  const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
-  const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
-    const serialized = object.deepSerializedValue ??
-      { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
-    if (call.result === "handle" && object.objectId !== undefined) {
-      const handle = state.ids.handle()
-      state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
-      if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-      return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
-    }
-    return toRemoteValue(serialized, documentOf)
-  }
-  if (reply.exceptionDetails !== undefined) {
-    const details = reply.exceptionDetails
-    return {
-      _tag: "Exception",
-      text: details.exception?.description ?? details.text,
-      exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
-      stack: Option.fromUndefinedOr(details.exception?.description)
-    } satisfies Adapter.RemoteResult
-  }
-  return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+    return work.pipe(
+      Effect.forkIn(state.cleanupScope, { startImmediately: true }),
+      Effect.tap((fiber) =>
+        Effect.sync(() => {
+          cleanup = fiber
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      for (const argument of call.arguments) {
+        if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
+        const { object } = yield* DOM.resolveNode({
+          backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
+          executionContextId: realm.contextId as Runtime.ExecutionContextId
+        }).pipe(on, Effect.mapError(failed), restore)
+        if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
+      }
+      const reply = yield* Effect.forEach(call.arguments, (local) =>
+        Kit.argument<Runtime.CallArgument>(local, {
+          ids: state.ids,
+          realm: id,
+          value: callValue,
+          handle: (handle) => {
+            const entry = state.handles.get(handle)
+            return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
+          },
+          node: (node) => {
+            const objectId = nodes.get(node.binding)
+            return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
+          }
+        })).pipe(
+          Effect.flatMap((args) =>
+            Runtime.callFunctionOn({
+              functionDeclaration: call.functionDeclaration,
+              uniqueContextId: realm.uniqueId,
+              arguments: args,
+              awaitPromise: call.awaitPromise,
+              userGesture: call.userActivation,
+              ...(call.group === undefined ? {} : { objectGroup: call.group }),
+              returnByValue: false,
+              serializationOptions: call.result === "value"
+                ? { serialization: "deep", maxDepth: 64 }
+                : { serialization: "idOnly" }
+            }).pipe(on, Effect.mapError(failed), restore)
+          )
+        )
+      if (call.result === "value" && call.releaseResult === true) {
+        if (reply.result.objectId !== undefined) resultIds.add(reply.result.objectId)
+        const exception = reply.exceptionDetails?.exception?.objectId
+        if (exception !== undefined) resultIds.add(exception)
+      }
+      const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
+      const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
+        const serialized = object.deepSerializedValue ??
+          { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
+        if (call.result === "handle" && object.objectId !== undefined) {
+          const handle = state.ids.handle()
+          state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
+          if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
+          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+        }
+        return toRemoteValue(serialized, documentOf)
+      }
+      if (reply.exceptionDetails !== undefined) {
+        const details = reply.exceptionDetails
+        return {
+          _tag: "Exception",
+          text: details.exception?.description ?? details.text,
+          exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
+          stack: Option.fromUndefinedOr(details.exception?.description)
+        } satisfies Adapter.RemoteResult
+      }
+      return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+    }).pipe(
+      // Ownership transfers while masked; the caller's finalizer never waits for the browser.
+      Effect.ensuring(handoff),
+      Effect.flatMap((result) =>
+        cleanup === undefined
+          ? Effect.succeed(result)
+          : restore(Fiber.await(cleanup)).pipe(Effect.as(result))
+      )
+    )
+  )
 })
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */

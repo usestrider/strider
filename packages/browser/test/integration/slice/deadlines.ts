@@ -53,7 +53,7 @@ export const deadlines = (name: string, backend: Layer.Layer<Browser.Browser, un
               ["CookieJar.list", page.context.cookies.list, "resolving"],
               [
                 "CookieJar.set",
-                page.context.cookies.set({ name: "cart", value: "1", scope: { _tag: "Url", url: served.origin } }),
+                page.context.cookies.set({ name: "cart", value: "1", scope: { url: served.origin } }),
                 "dispatchedUnconfirmed"
               ],
               ["Page.title", page.title, "resolving"],

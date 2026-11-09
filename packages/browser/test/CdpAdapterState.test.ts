@@ -23,18 +23,21 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
+import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
 
@@ -1563,3 +1566,421 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
       yield* state.buffer.flush
     }))
 }
+
+describe("CdpAdapter transient evaluation results", () => {
+  for (const releaseResult of [false, true]) {
+    for (const thrown of [false, true]) {
+      it.effect(`releases incidental result ids only when requested (${releaseResult}, thrown=${thrown})`, () =>
+        Effect.gen(function*() {
+          const released: Array<string> = []
+          const mock = {
+            ...session,
+            send: (command: { readonly method: string; readonly params: { readonly objectId?: string } }) => {
+              if (command.method === "Runtime.releaseObject") {
+                released.push(command.params.objectId!)
+                return Effect.succeed({})
+              }
+              assert.strictEqual(command.method, "Runtime.callFunctionOn")
+              return Effect.succeed({
+                result: { type: "object", objectId: "array", deepSerializedValue: { type: "array", value: [] } },
+                ...(thrown
+                  ? { exceptionDetails: { text: "failed", exception: { type: "object", objectId: "exception" } } }
+                  : {})
+              })
+            }
+          } as unknown as ProtocolClient.Session
+          const { state, target } = yield* withPage(mock)
+          const realm = Tree.addRealm(state, {
+            uniqueId: "transient",
+            contextId: 1,
+            target,
+            frame: undefined,
+            world: { _tag: "Main" },
+            origin: "http://127.0.0.1:8000"
+          })
+          const result = yield* Evaluation.evaluate(state, realm.id, {
+            functionDeclaration: "() => []",
+            arguments: [],
+            awaitPromise: true,
+            result: "value",
+            userActivation: false,
+            releaseResult
+          })
+          assert.strictEqual(result._tag, thrown ? "Exception" : "Value")
+          assert.deepStrictEqual(released, releaseResult ? thrown ? ["array", "exception"] : ["array"] : [])
+          assert.strictEqual(state.handles.size, 0)
+        }).pipe(Effect.scoped))
+    }
+  }
+})
+
+describe("CdpAdapter node arguments under interruption", () => {
+  it.effect("releases the nodes it resolved when the call is interrupted before dispatch", () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const resolving = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: (
+          command: {
+            readonly method: string
+            readonly params: { readonly backendNodeId?: number; readonly objectId?: string }
+          }
+        ) => {
+          if (command.method === "Runtime.releaseObject") {
+            released.push(command.params.objectId!)
+            return Effect.succeed({})
+          }
+          assert.strictEqual(command.method, "DOM.resolveNode")
+          // The first two nodes resolve; the third never answers, as when a deadline ends the call on its way
+          return command.params.backendNodeId === 3
+            ? Effect.andThen(Deferred.succeed(resolving, undefined), Effect.never)
+            : Effect.succeed({ object: { type: "object", objectId: `node-${command.params.backendNodeId}` } })
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "nodes",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1:8000"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const fiber = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "(...nodes) => nodes.length",
+        arguments: [node("1"), node("2"), node("3")],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false,
+        releaseResult: true
+      }).pipe(Effect.forkChild)
+      yield* Deferred.await(resolving)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(released.sort(), ["node-1", "node-2"])
+    }).pipe(Effect.scoped))
+})
+
+it.effect("releases a callback reply lost to interruption during node cleanup", () =>
+  Effect.gen(function*() {
+    const cleaning = yield* Deferred.make<void>()
+    const finishCleanup = yield* Deferred.make<void>()
+    const released: Array<string> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: { objectId?: string } }) => {
+        if (command.method === "DOM.resolveNode") {
+          return Effect.succeed({ object: { type: "object", objectId: "node" } })
+        }
+        if (command.method === "Runtime.callFunctionOn") {
+          return Effect.succeed({
+            result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } }
+          })
+        }
+        assert.strictEqual(command.method, "Runtime.releaseObject")
+        return Effect.gen(function*() {
+          if (command.params.objectId === "node") {
+            yield* Deferred.succeed(cleaning, undefined)
+            yield* Deferred.await(finishCleanup)
+          }
+          released.push(command.params.objectId!)
+          return {}
+        })
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "reply",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "() => []",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    yield* Deferred.await(cleaning)
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(finishCleanup, undefined)
+    yield* Fiber.join(interrupting)
+    assert.deepStrictEqual(released.sort(), ["node", "result"])
+  }).pipe(Effect.scoped))
+
+for (const command of ["resolve", "callback"] as const) {
+  it.effect(`releases late ${command} objects after interruption while the browser reply is pending`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "pending",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "async () => await new Promise(() => {})",
+        arguments: command === "resolve"
+          ? [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }]
+          : [],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.method, command === "resolve" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+      // No reply exists yet: interrupt must finish without waiting for the page's promise.
+      yield* Fiber.interrupt(waiting)
+      assert.strictEqual(yield* browser.pending, 0)
+      // The page finishes later. Cleanup must be triggered by these newly-created ids, not an earlier group release.
+      yield* browser.receive({
+        id: sent.id,
+        result: command === "resolve"
+          ? { object: { type: "object", objectId: "late-node" } }
+          : {
+            result: { type: "object", objectId: "late-result" },
+            exceptionDetails: { text: "late", exception: { type: "object", objectId: "late-exception" } }
+          }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, command === "resolve" ? "late-node" : "late-result")
+      yield* browser.receive({ id: first.id, result: {} })
+      if (command === "callback") {
+        const second = yield* browser.next
+        assert.strictEqual(second.method, "Runtime.releaseObject")
+        assert.strictEqual(second.params?.objectId, "late-exception")
+        yield* browser.receive({ id: second.id, result: {} })
+      }
+      yield* browser.delivered
+      assert.strictEqual(state.handles.size, 0)
+    }).pipe(Effect.scoped))
+}
+
+for (const failure of ["resolution", "conversion", "dispatch"] as const) {
+  it.effect(`cleans acquired node ids outside the command deadline on ${failure} failure`, () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const mock = {
+        ...session,
+        send: (command: { method: string; params: { backendNodeId?: number; objectId?: string } }) => {
+          if (command.method === "Runtime.releaseObject") {
+            return Effect.gen(function*() {
+              assert(Option.isNone(yield* ProtocolClient.CommandDeadline))
+              assert(Option.isNone(yield* Operation.current))
+              released.push(command.params.objectId!)
+              return {}
+            })
+          }
+          if (command.method === "DOM.resolveNode" && command.params.backendNodeId === 1) {
+            return Effect.succeed({ object: { type: "object", objectId: "acquired" } })
+          }
+          assert.strictEqual(command.method, failure === "resolution" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+          return Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: command.method,
+                reason: "Unrecognized",
+                code: -32000,
+                description: "failed"
+              })
+            })
+          )
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "failure",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const extra: Array<Adapter.LocalValue> = failure === "resolution"
+        ? [node("2")]
+        : failure === "conversion"
+        ? [{ _tag: "Handle", handle: "missing" as Adapter.HandleId }]
+        : []
+      yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), ...extra],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(
+        Operation.named("test.evaluation"),
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(BrowserClock.live.now())),
+        Effect.flip
+      )
+      assert.deepStrictEqual(released, ["acquired"])
+    }).pipe(Effect.scoped))
+}
+
+it.effect("interruption doesn't wait for a busy page to acknowledge node releases", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+    const { state, target } = yield* withPage(client.root)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "busy",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "(node) => { while (true) {} }",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    const resolve = yield* browser.next
+    assert.strictEqual(resolve.method, "DOM.resolveNode")
+    yield* browser.receive({ id: resolve.id, result: { object: { type: "object", objectId: "node" } } })
+    const callback = yield* browser.next
+    assert.strictEqual(callback.method, "Runtime.callFunctionOn")
+    // The callback never returns, so the page's main thread answers nothing more, including the release below.
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    const release = yield* browser.next
+    assert.strictEqual(release.method, "Runtime.releaseObject")
+    for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+    assert.isDefined(interrupting.pollUnsafe(), "interrupting the caller waited for the busy page's release reply")
+  }).pipe(Effect.scoped))
+
+for (const finish of ["reply", "shutdown", "success", "shutdown-success"] as const) {
+  it.effect(`evaluation cleanup waits and remains owned on ${finish}`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const owner = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void))
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "owned-cleanup",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const waiting = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), node("2")],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      for (const id of ["node-1", "node-2"]) {
+        const resolving = yield* browser.next
+        assert.strictEqual(resolving.method, "DOM.resolveNode")
+        yield* browser.receive({ id: resolving.id, result: { object: { type: "object", objectId: id } } })
+      }
+      const callback = yield* browser.next
+      yield* browser.receive({
+        id: callback.id,
+        result: {
+          result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } },
+          exceptionDetails: {
+            exceptionId: 1,
+            text: "failed",
+            lineNumber: 0,
+            columnNumber: 0,
+            exception: { type: "object", objectId: "exception" }
+          }
+        }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, "node-1")
+      assert.isUndefined(waiting.pollUnsafe(), "successful completion must still wait for its cleanup")
+      if (finish === "reply" || finish === "shutdown") {
+        const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(interrupting.pollUnsafe(), "caller interruption must not wait for a release acknowledgment")
+      }
+      if (finish === "reply" || finish === "success") {
+        // Resuming the page drains every id already owned before interruption, including the received result.
+        yield* browser.receive({ id: first.id, result: {} })
+        for (const id of ["node-2", "result", "exception"]) {
+          const release = yield* browser.next
+          assert.strictEqual(release.method, "Runtime.releaseObject")
+          assert.strictEqual(release.params?.objectId, id)
+          yield* browser.receive({ id: release.id, result: {} })
+        }
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+        if (finish === "success") assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
+        yield* Scope.close(owner, Exit.void)
+      } else {
+        const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(closing.pollUnsafe(), "shutdown must interrupt an unanswered cleanup request")
+        if (finish === "shutdown-success") {
+          for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+          assert.isDefined(waiting.pollUnsafe(), "closing the cleanup owner must end a successful caller's wait")
+          assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
+        }
+        // An acknowledgment after shutdown cannot restart cleanup in an unowned fiber.
+        yield* browser.receive({ id: first.id, result: {} })
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+      }
+    }).pipe(Effect.scoped))
+}
+
+it.effect("does not register evaluation cleanup in the connection scope when it owns no ids", () =>
+  Effect.gen(function*() {
+    const owner = yield* Scope.make()
+    const { state, target } = yield* withPage(
+      {
+        ...session,
+        send: () => Effect.succeed({ result: { type: "number", value: 1 } })
+      } as unknown as ProtocolClient.Session
+    )
+    const realm = Tree.addRealm(state, {
+      uniqueId: "no-objects",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const result = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+      functionDeclaration: "() => 1",
+      arguments: [],
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    })
+    assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
+    assert.strictEqual(owner.state._tag, "Empty")
+    yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))

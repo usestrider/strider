@@ -160,7 +160,7 @@ layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })(
         const trace = yield* Trace.record(page, { screenshots: "perAction" })
         const run = yield* TestRun.TestRun
         const attachTrace = trace.exportTrace("traces/add-to-cart.zip").pipe(
-          Effect.flatMap((path) => run.attach({ _tag: "Trace", path })),
+          Effect.flatMap((path) => run.attach({ trace: path })),
           Effect.ignore
         )
         // Attached whether the steps pass or fail

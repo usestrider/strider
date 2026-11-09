@@ -246,7 +246,7 @@ describe("Chromium adapter, CDP only", () => {
                 yield* context.cookies.set({
                   name: "session",
                   value: "1",
-                  scope: { _tag: "Url", url: served.origin }
+                  scope: { url: served.origin }
                 })
                 const opened = yield* context.newPage
                 yield* opened.close()

@@ -463,6 +463,72 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     }))
   }
 
+  /** Evaluates the fixed membership snapshot in the caller’s isolated world. */
+  evaluateAll<Args extends ReadonlyArray<unknown>, B>(
+    fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.Serialized<B>, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    const operation = "Locator.evaluateAll"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
+      if (record.left() <= 0) return yield* Effect.fail(record.timeout(Option.none()))
+      yield* this.requires(operation, "isolatedWorlds", id)
+      const found = yield* Runtime.elements(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+      )
+      if (found._tag === "Response") {
+        const response = found.response
+        switch (response._tag) {
+          case "InvalidSelector":
+            return yield* Effect.fail(this.invalidSelector(operation, response, id))
+          default:
+            return yield* this.unmatched(operation, response, id)
+        }
+      }
+      const value = yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(
+          owner.runtime,
+          found.routed.document,
+          Evaluation.isolatedWorld,
+          id
+        )
+        const rest = yield* Evaluation.toLocal(args, realm, 1)
+        // The call is on its way: a deadline after it can't say the function didn't run
+        const result = yield* Evaluation.call(owner.runtime, {
+          dispatch: record,
+          realm,
+          functionDeclaration:
+            `function(...values) { return (${fn.toString()})(values.slice(0, ${found.nodes.length}), ...values.slice(${found.nodes.length})); }`,
+          arguments: [...found.nodes.map((node): Adapter.LocalValue => ({ _tag: "Node", node })), ...rest],
+          result: "value",
+          releaseResult: true,
+          userActivation: false,
+          page: Option.some(owner.page),
+          at: budget.at,
+          id
+        })
+        return yield* Evaluation.fromRemote(result)
+      }).pipe(Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? record.timeout(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? Option.some("The page didn't answer before the deadline; the function may still be running")
+              : Option.none()
+          )
+          : this.error(operation, failure.reason, id)
+      ))
+      return value as JSHandle.Serialized<B>
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
+  }
+
   /** A one-shot read of the one match: strict, and immediate. */
   private readOne<A>(operation: string, what: Engine.Read, value: (read: unknown) => A) {
     return this.read(operation, { op: "read", steps: this.steps, read: what }, (response, id) => {
