@@ -142,6 +142,26 @@ const toRemoteValue = (
   }
 }
 
+/** Whether JSON would lose data inside this value. Top-level undefined has a native CDP argument form. */
+const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean => {
+  switch (value.type) {
+    case "undefined":
+      return nested
+    case "null":
+    case "string":
+    case "boolean":
+      return false
+    case "number":
+      return typeof value.value !== "number" || !Number.isFinite(value.value) || Object.is(value.value, -0)
+    case "array":
+      return (value.value ?? []).some((item) => requiresDecoder(item, true))
+    case "object":
+      return (value.value ?? []).some(([key, item]) => typeof key !== "string" || requiresDecoder(item, true))
+    default:
+      return true
+  }
+}
+
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -355,11 +375,13 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
         }).pipe(on, Effect.mapError(failed), restore)
         if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
       }
+      // Decide from values, never callback source: ordinary engine requests are strings (or have no arguments).
+      const reconstruct = call.arguments.some((local) => local._tag === "Value" && requiresDecoder(local.value))
       const reply = yield* Effect.forEach(call.arguments, (local) =>
         Kit.argument<Runtime.CallArgument>(local, {
           ids: state.ids,
           realm: id,
-          value: (value) => ({ value }),
+          value: (value) => reconstruct ? { value } : value.type === "undefined" ? {} : { value: Kit.plain(value) },
           handle: (handle) => {
             const entry = state.handles.get(handle)
             return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
@@ -371,12 +393,14 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
         })).pipe(
           Effect.flatMap((args) =>
             Runtime.callFunctionOn({
-              functionDeclaration: Argument.call(call.functionDeclaration),
+              functionDeclaration: reconstruct ? Argument.call(call.functionDeclaration) : call.functionDeclaration,
               uniqueContextId: realm.uniqueId,
-              arguments: [
-                { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
-                ...args
-              ],
+              arguments: reconstruct ?
+                [
+                  { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
+                  ...args
+                ] :
+                args,
               awaitPromise: call.awaitPromise,
               userGesture: call.userActivation,
               ...(call.group === undefined ? {} : { objectGroup: call.group }),
