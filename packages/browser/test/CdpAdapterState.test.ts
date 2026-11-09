@@ -1535,7 +1535,7 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
-it.effect("answers an automatic auth challenge before its Network request arrives and bounds subsequent attempts", () =>
+it.effect("waits for observed Network ownership before providing automatic credentials and bounds attempts", () =>
   Effect.gen(function*() {
     const calls: Array<{ method: string; params: unknown }> = []
     const mock = {
@@ -1573,7 +1573,7 @@ it.effect("answers an automatic auth challenge before its Network request arrive
       method: "Fetch.continueWithAuth",
       params: {
         requestId: "F1",
-        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+        authChallengeResponse: { response: "CancelAuth" }
       }
     })
     handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
@@ -1584,10 +1584,77 @@ it.effect("answers an automatic auth challenge before its Network request arrive
     yield* Obligations.resolve(state, second.id, decision)
     assert.deepStrictEqual(calls.at(-1), {
       method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    challenge()
+    const third = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, third.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
       params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
     })
     handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
-    assert.strictEqual(target.proxyAuth?.size, 0)
+    yield* state.buffer.flush
+  }))
+
+it.effect("correlates parent-page Fetch authentication with its worker's Network request", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    handlers.apply("Fetch.authRequired", {
+      requestId: "F1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request,
+      authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+    }, { state, target: parent })
+    const obligation = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, obligation.id, {
+      _tag: "ProvideCredentials",
+      username: "user",
+      password: "secret",
+      once: true
+    })
+    assert.deepStrictEqual(calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isUndefined(parent.proxyAuth)
     yield* state.buffer.flush
   }))
 

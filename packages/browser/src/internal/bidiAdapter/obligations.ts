@@ -51,9 +51,9 @@ export const requestSnapshot = (
   })
 
 /** Continues a paused request as if nothing had paused it. */
-const continued = (state: State, phase: Phase, request: Network.Request) =>
+const continued = (state: State, phase: Phase, request: Network.Request, authSource?: "server" | "proxy") =>
   phase === "auth"
-    ? state.send(Network.continueWithAuth({ request, action: "default" }))
+    ? state.send(Network.continueWithAuth({ request, action: authSource === undefined ? "cancel" : "default" }))
     : phase === "response"
     ? state.send(Network.continueResponse({ request }))
     : state.send(Network.continueRequest({ request }))
@@ -85,11 +85,7 @@ export const pause = (
     (intercept.globs.length === 0 || intercept.globs.some((glob) => glob.test(params.request.url)))
   )
   if (!wanted) {
-    state.buffer.later(
-      phase === "auth" && authSource === undefined
-        ? state.send(Network.continueWithAuth({ request: params.request.request, action: "cancel" }))
-        : continued(state, phase, params.request.request)
-    )
+    state.buffer.later(continued(state, phase, params.request.request, authSource))
     return
   }
   const obligation = state.ids.obligation()

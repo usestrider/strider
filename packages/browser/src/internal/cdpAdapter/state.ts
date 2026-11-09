@@ -44,14 +44,7 @@ export const contextLock = (context: ContextEntry) => context.lifecycleLock ??= 
 export type TargetKind = "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
 
 export interface TargetEntry {
-  /** Native auth attempts, retained only for automatic proxy or website credentials. */
-  proxyAuth?:
-    | Map<string, {
-      readonly networkId: string | undefined
-      attempted: boolean
-      readonly websiteAttempted?: boolean | undefined
-    }>
-    | undefined
+  proxyAuth?: Map<string, { readonly networkId: string | undefined; attempted: boolean }> | undefined
   readonly kind: TargetKind
   readonly targetId: string
   readonly session: ProtocolClient.Session
@@ -143,6 +136,7 @@ export interface Attribution {
 }
 
 export interface RequestEntry {
+  credentialsAttempted?: boolean | undefined
   readonly id: NetworkRequest.Id
   readonly target: TargetEntry
   readonly requestId: string

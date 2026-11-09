@@ -154,7 +154,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         const previous = target.proxyAuth.get(params.requestId)
         const provide = previous?.attempted !== true &&
           URL.parse(params.authChallenge.origin)?.origin === URL.parse(`http://${proxy.server}`)?.origin
-        target.proxyAuth.set(params.requestId, { ...previous, networkId: previous?.networkId, attempted: true })
+        target.proxyAuth.set(params.requestId, { networkId: previous?.networkId, attempted: true })
         state.buffer.later(
           Fetch.continueWithAuth({
             requestId: params.requestId,
@@ -337,33 +337,27 @@ const decide = (
       return Fetch.failRequest({ requestId, errorReason: failReasons[decision.error] }).pipe(on)
     case "ProvideCredentials": {
       if (decision.once === true) {
-        const request = [...state.requests.values()].find((entry) =>
+        const direct = [...state.requests.values()].find((entry) =>
           entry.target === obligation.target && entry.attribution.fetchId === requestId
         )
-        // A Fetch pause may precede Network.requestWillBeSent. Its pending key still identifies the
-        // native request, and the existing auth ledger is already cleared on terminal events/target end.
-        const pending = request === undefined ?
+        // Dedicated-worker Network events can arrive on the worker session while Fetch pauses arrive
+        // on its parent page. The existing pending attribution supplies their native Network id.
+        const pending = direct === undefined ?
           [...state.pendingAttribution].find(([, entry]) =>
             entry.target === obligation.target && entry.fetchId === requestId
           ) :
           undefined
-        const networkId = request?.requestId ?? pending?.[0].slice(requestKey(obligation.target, "").length)
-        const attempts = obligation.target.proxyAuth
-        if (
-          networkId === undefined ||
-          [...(attempts?.values() ?? [])].some((entry) =>
-            entry.networkId === networkId && entry.websiteAttempted === true
+        const networkId = pending?.[0].slice(requestKey(obligation.target, "").length)
+        const related = direct === undefined && networkId !== undefined && obligation.target.page !== undefined
+          ? [...state.requests.values()].filter((entry) =>
+            entry.requestId === networkId && entry.target.page === obligation.target.page
           )
-        ) {
+          : []
+        const request = direct ?? (related.length === 1 ? related[0] : undefined)
+        if (request === undefined || request.credentialsAttempted === true) {
           return Fetch.continueWithAuth({ requestId, authChallengeResponse: { response: "CancelAuth" } }).pipe(on)
         }
-        obligation.target.proxyAuth ??= new Map()
-        obligation.target.proxyAuth.set(requestId, {
-          attempted: false,
-          ...attempts?.get(requestId),
-          networkId,
-          websiteAttempted: true
-        })
+        request.credentialsAttempted = true
       }
       return Fetch.continueWithAuth({
         requestId,
