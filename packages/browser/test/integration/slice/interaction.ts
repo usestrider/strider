@@ -2170,6 +2170,41 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "guards design-mode insertion when focus moves into an ancestor document",
+        () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              yield* page.activate
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              let changed = false
+              const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+                if (!changed) {
+                  changed = true
+                  yield* page.evaluateInMainWorld(() => (document.getElementById("other") as HTMLInputElement).focus())
+                    .pipe(Effect.orDie)
+                }
+                return yield* original(...args)
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                () => target.fill("new").pipe(Deadline.within("2 seconds")),
+                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+              )
+              assert.strictEqual(yield* page.locator("#other").readValue, "other")
+              assert.strictEqual(yield* target.readText, "new")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "releases design-mode insertion guards on failure and interruption",
         (context) =>
           Effect.gen(function*() {
