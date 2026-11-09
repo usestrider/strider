@@ -624,21 +624,31 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.isTrue(Option.isNone(yield* links.from(first)))
             assert.isTrue(Option.isNone(yield* links.to(third)))
             const foreign = yield* NetworkRequest.redirects(other)
-            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "foreignTarget")
+            const redirectError1 = yield* Effect.flip(foreign.from(first))
+            assert(redirectError1.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError1.reason.why, "foreignTarget")
             yield* other.goto(`${origin}/redirect-repeat`)
             const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
             assert.strictEqual(otherRequests.length, 3)
-            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "foreignTarget")
+            const redirectError2 = yield* Effect.flip(links.from(otherRequests[0]!))
+            assert(redirectError2.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError2.reason.why, "foreignTarget")
             const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
             yield* page.evaluateInMainWorld(() => {
               void fetch("/events")
             })
-            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "inFlight")
+            const redirectError3 = yield* Effect.flip(links.to(yield* streaming))
+            assert(redirectError3.reason._tag === "RedirectUnknown")
+            assert.strictEqual(redirectError3.reason.why, "inFlight")
             yield* Scope.close(scope, Exit.void)
-            assert.strictEqual((yield* Effect.flip(links.from(first))).reason.why, "released")
+            const redirectError4 = yield* Effect.flip(links.from(first))
+            assert(redirectError4.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError4.reason.why, "released")
             const live = yield* NetworkRequest.redirects(page)
             yield* page.close()
-            assert.strictEqual((yield* Effect.flip(live.from(first))).reason.why, "targetClosed")
+            const redirectError5 = yield* Effect.flip(live.from(first))
+            assert(redirectError5.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError5.reason.why, "targetClosed")
           })),
         timeout
       )
@@ -694,7 +704,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const outcome = yield* links.to(request).pipe(Effect.result)
             // Nothing proves a manual fetch's chain ended: it reads as the observed attempt or as unknown, never `None`
             if (outcome._tag === "Failure") {
-              assert.strictEqual(outcome.failure.reason._tag, "RedirectUnknown")
+              assert(outcome.failure.reason._tag === "RedirectUnknown")
               assert.strictEqual(outcome.failure.reason.why, "completedRedirect")
             } else {
               assert.isTrue(Option.isSome(outcome.success))

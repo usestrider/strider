@@ -11,6 +11,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Headers from "effect/http/Headers"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -38,6 +39,7 @@ import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
@@ -2277,6 +2279,85 @@ it.effect("does not register evaluation cleanup in the connection scope when it 
     yield* Scope.close(owner, Exit.void)
   }).pipe(Effect.scoped))
 
+describe("CDP request body identity", () => {
+  it.effect("refuses fallback bytes when a redirect changes the hop during the native read", () =>
+    Effect.gen(function*() {
+      const called = yield* Deferred.make<void>()
+      const reply = yield* Deferred.make<{ postData: string; base64Encoded: boolean }>()
+      const wire = {
+        ...session,
+        send: () => Deferred.succeed(called, undefined).pipe(Effect.andThen(Deferred.await(reply)))
+      } as unknown as ProtocolClient.Session
+      const { page, state, target } = yield* withPage(wire)
+      Object.assign(target, { page })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      const params = sent(`${origin}/send`)
+      handlers.apply("Network.requestWillBeSent", {
+        ...params,
+        request: { ...params.request, method: "POST", hasPostData: true }
+      }, event)
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: `${origin}/send` as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      const reading = yield* Network.captureRequestBody(state, snapshot, 100).pipe(Effect.forkChild)
+      yield* Deferred.await(called)
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/next`, { location: "/next" }), event)
+      yield* Deferred.succeed(reply, { postData: "different-hop", base64Encoded: false })
+      assert.deepStrictEqual(yield* Fiber.join(reading), { _tag: "Unavailable", why: "redirect" })
+    }))
+})
+
+describe("CDP request body fallback completeness", () => {
+  it.effect("refuses an empty fallback for a request with native body presence", () =>
+    Effect.gen(function*() {
+      const wire = {
+        ...session,
+        send: () => Effect.succeed({ postData: "", base64Encoded: false })
+      } as unknown as ProtocolClient.Session
+      const { page, state, target } = yield* withPage(wire)
+      Object.assign(target, { page })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const params = sent(`${origin}/send`)
+      handlers.apply("Network.requestWillBeSent", {
+        ...params,
+        request: { ...params.request, method: "POST", hasPostData: true }
+      }, { state, target })
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: `${origin}/send` as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      assert.deepStrictEqual(yield* Network.captureRequestBody(state, snapshot, 100), {
+        _tag: "Unavailable",
+        why: "unavailable"
+      })
+      // The stricter subscription contract does not alter legacy route/recording reads.
+      assert.deepStrictEqual(yield* Network.requestBody(state, snapshot.hop), Option.some(new Uint8Array()))
+    }))
+})
 describe("CDP request timing opt-in dispatch", () => {
   for (const enabled of [false, true]) {
     it.effect(`touches native timing only for an enabled context (${enabled})`, () =>

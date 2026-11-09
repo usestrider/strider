@@ -12,10 +12,6 @@ const site = "https://usestrider.dev"
 
 // The API reference dataset, which `pnpm reference` writes at the repository's root
 process.env["STRIDER_REFERENCE_DATA"] ??= fileURLToPath(new URL("../.data/api-reference/", import.meta.url))
-// The scenarios' programs, which `pnpm scenarios` runs, read as written
-process.env["STRIDER_SCENARIOS_SOURCE"] ??= fileURLToPath(
-  new URL("../packages/scenarios/src/scenarios.ts", import.meta.url)
-)
 
 export default defineConfig({
   site,

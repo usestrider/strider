@@ -386,7 +386,10 @@ export const declare = Effect.fnUntraced(
       case "BodyCollection": {
         const { collector } = yield* Kit.protocol(state.send(Network.addDataCollector({
           dataTypes: [...declaration.bodies],
-          maxEncodedDataSize: declaration.maxBytes,
+          // Request binary data can be counted as base64 by Firefox; L1 enforces the decoded byte limit.
+          maxEncodedDataSize: declaration.decodedRequestBytes === true
+            ? Math.ceil(declaration.maxBytes / 3) * 4
+            : declaration.maxBytes,
           ...scopeParams(state, scope)
         })))
         state.collectors.set(id, collector)

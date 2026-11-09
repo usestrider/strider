@@ -15,6 +15,7 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
 import { tooling } from "./tooling.ts"
@@ -37,4 +38,5 @@ attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chro
 
 webauthn("Chromium", backend)
 
+requestBodies("Chromium", backend)
 requestTiming("Chromium", backend)
