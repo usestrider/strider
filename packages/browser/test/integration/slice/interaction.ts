@@ -4731,8 +4731,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   Effect.flip
                 )
                 assert(Expect.isExpectationFailed(error), String(error))
-                assert(Option.isSome(error.last))
-                assert.deepStrictEqual(error.last.value.value, observed)
+                for (const entry of error.history) {
+                  assert.deepStrictEqual(entry.value, observed)
+                }
                 assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
                 assert(error.condition.startsWith("to have the class "))
               }
