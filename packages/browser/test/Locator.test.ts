@@ -430,3 +430,13 @@ describe("Locator.blur", () => {
       assert.strictEqual(error.reason._tag, "Unsupported")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Locator.evaluateAll", () => {
+  it.effect("preserves a typed backend refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("p").evaluateAll((elements) => elements.length).pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})

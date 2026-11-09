@@ -349,6 +349,49 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("evaluates all current locator matches once, including none", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`))
+            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            assert.deepStrictEqual(
+              yield* page.locator("section").locator("p").evaluateAll(
+                async (elements, suffix: string) => {
+                  elements[0]!.remove()
+                  await Promise.resolve()
+                  return { texts: elements.map((element) => element.textContent + suffix), date: new Date(0) }
+                },
+                "!"
+              ),
+              { texts: ["a!", "b!"], date: new Date(0) }
+            )
+            assert.strictEqual(yield* page.locator("#absent").evaluateAll((elements) => elements.length), 0)
+            const thrown = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(async () => {
+                  throw new Error("all failed")
+                })
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(thrown.reason._tag, "EvaluationThrown")
+            const bad = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(
+                  (_elements, value: unknown) => value,
+                  Symbol("bad")
+                )
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(bad.reason._tag, "NotSerializable")
+            const node = reasonOf(
+              yield* Effect.exit(page.locator("p").evaluateAll((elements) => elements))
+            ) as Locator.LocatorError
+            assert.strictEqual(node.reason._tag, "NotSerializable")
+          }))
+        }), timeout)
+
       it.effect("grants user activation to main-world evaluation inside withUserGesture", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
