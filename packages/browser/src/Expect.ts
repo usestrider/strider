@@ -277,6 +277,48 @@ export const toHaveText: DualMatcher<
 )
 
 /**
+ * Expects the one match's accessible name to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
+ * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
+ * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
+ * visible element. Roles that prohibit naming, such as generic, paragraph and code, have an empty name;
+ * their content can still contribute to another element's name. An explicit nameable role can override the
+ * implicit role. Missing or multiple matches keep retrying and fail with their match count.
+ *
+ * **Example** (Checking a save button's accessible name)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkSave = Effect.fn("checkSave")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByTestId("save").pipe(Expect.toHaveAccessibleName("Save changes"))
+ *   yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
+ *     ignoreCase: true
+ *   })
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleName: DualMatcher<
+  Locator.ReadonlyLocator,
+  [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleName(locator, expected, options)
+)
+
+/**
  * Expects the one match's class string to match `expected`, or, given a list, as many matches as the list has entries,
  * each matching its entry in order.
  *

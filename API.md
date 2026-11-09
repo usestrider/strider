@@ -309,6 +309,11 @@ interface Options {                                      // UserContext.Options;
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
     readonly credentials?: { readonly username: string; readonly password: Redacted<string> } | undefined // default none
   } | undefined                                          // default existing browser proxy settings
+  readonly httpCredentials?: {
+    readonly origin?: string | undefined                 // HTTP(S) origin; default any website origin
+    readonly username: string
+    readonly password: Redacted<string>
+  } | undefined                                          // default none; user auth routes take precedence; one attempt across a request and its redirect chain; never proxy challenges; Chromium/Firefox, WebKit refuses
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
@@ -713,6 +718,7 @@ declare const toBeVisible: Matcher<Locator.ReadonlyLocator>   // Matcher<S> = (s
 //   locator.pipe(Expect.toHaveText("1 item"))   or   Expect.toHaveText(locator, "1 item")
 declare const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [options?: { ratio?: number; inViewport?: boolean }]> // defaults: ratio 0, inViewport true
 declare const toHaveText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
+declare const toHaveAccessibleName: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined]>
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
@@ -747,6 +753,8 @@ declare const unchecked: Children                                               
   - **A locator's expectation waits in the page.** One round is one engine request: it checks, and if the condition doesn't hold, checks again on each mutation of the document (children, attributes, text), each `input`, `change`, `focusin` and `focusout` event, and each animation frame, answering when the condition holds or after a second. L1 sends rounds until the deadline. No change is missed between checks, and there is no polling cadence; a page that renders no frames and changes nothing is checked again at the next round.
   - **A `Watchable`** (`toHaveURL` on `page.url`, `Expect.that` on any `Watchable`) is checked again on each change.
   - **Any other effect,** given to `Expect.that`, is run again at `Expect.CheckInterval` (100 ms unless set). It runs under the expectation's deadline, and a check still running at the deadline, or failing with it, is a check that didn't finish: the expectation fails with `ExpectationFailed`, not the subject's `Timeout`.
+
+  `toHaveAccessibleName` retries the one match's computed accessible name (excluding hidden elements, including hidden referenced labels). Strings match the whole name with whitespace normalized; regular expressions test the computed name. Its optional `ignoreCase` overrides the regular expression flag, while omission preserves it. Roles that prohibit naming have empty names in both this matcher and role-locator filtering; their label/content contributions to other elements are preserved, and explicit nameable roles override implicit roles. Missing or multiple matches retry with match-count evidence; name mismatches report the observed name.
 
   `toBeVisible` passes when exactly one element matches and is visible; no match, several, or a hidden one are observations it keeps re-checking, and its failure reports the last one and the history. `toHaveText` with a string matches the whole engine text exactly, with a `RegExp` tests it, and with a list matches each match in order, and their count. `toHaveClass` compares the complete class string without whitespace normalization; arrays require equal counts and compare each element in locator order. Missing class attributes are empty strings. Scalar expectations retry zero or multiple matches and report their counts; arrays can match an empty selection. `toBeFocused` is the deep active element, through open shadow roots.
   `toBeInViewport` uses native intersection observations, including ancestor clipping, without scrolling. Its default `ratio: 0` requires a strictly positive intersection; a threshold passes when the ratio exceeds `ratio - 1e-9`. Opacity and occlusion do not affect the ratio. `inViewport: false` inverts that condition and passes for a missing element. Multiple matches retry with count evidence; one match reports `{ matches: 1, ratio }`. Observers and pending frames belong to one requesting round and are released on success, timeout or interruption, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). No observer is installed for other operations.

@@ -159,6 +159,80 @@ for (
         )
       }
 
+      it.effect("uses context website credentials behind an authenticated proxy", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") return
+          const served = yield* site
+          const local = yield* proxy({ username: "proxy-user", password: "proxy-secret" })
+          const page = yield* Browser.newPage({
+            ...options(local.address, [], "proxy-secret"),
+            httpCredentials: { username: "strider", password: Redacted.make("secret") }
+          })
+          yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`).pipe(
+            Deadline.within("10 seconds")
+          )
+          yield* page.getByText("signed in").pipe(Expect.toBeVisible)
+          assert.isTrue(served.served.every((request) => request.headers["proxy-authorization"] === undefined))
+        }), 60_000)
+
+      it.effect("keeps context website credentials separate from proxy challenges", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") return
+          const served = yield* site
+          const local = yield* proxy({ username: "strider", password: "secret" })
+          const page = yield* Browser.newPage({
+            proxy: { server: local.address },
+            httpCredentials: { username: "strider", password: Redacted.make("secret") }
+          })
+          const error = yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`).pipe(
+            Deadline.within("10 seconds"),
+            Effect.flip
+          )
+          assert.notEqual(error._tag, "Timeout")
+          assert.isFalse(local.requests.some((request) => request.authenticated))
+        }), 60_000)
+
+      it.effect(
+        "never answers a proxy challenge carrying WWW-Authenticate with context website credentials",
+        () =>
+          Effect.gen(function*() {
+            if (name === "WebKit") return
+            const served = yield* site
+            const local = yield* proxy({ username: "strider", password: "secret" }, { websiteChallenge: true })
+            const page = yield* Browser.newPage({
+              proxy: { server: local.address },
+              httpCredentials: { username: "strider", password: Redacted.make("secret") }
+            })
+            yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`).pipe(
+              Deadline.within("10 seconds"),
+              Effect.ignore
+            )
+            assert.isFalse(local.requests.some((request) => request.authenticated))
+          }),
+        60_000
+      )
+
+      if (name === "Firefox") {
+        it.effect(
+          "refuses conflicting proxy challenge headers with both automatic credential pairs configured",
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const local = yield* proxy({ username: "strider", password: "secret" }, { websiteChallenge: true })
+              const page = yield* Browser.newPage({
+                ...options(local.address, [], "secret", "strider"),
+                httpCredentials: { username: "strider", password: Redacted.make("secret") }
+              })
+              yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`).pipe(
+                Deadline.within("10 seconds"),
+                Effect.ignore
+              )
+              assert.isFalse(local.requests.some((request) => request.authenticated))
+            }),
+          60_000
+        )
+      }
+
       it.effect(
         "keeps proxy credentials out of logs, spans and strict/local trace archives on success and rejection",
         () =>
@@ -167,6 +241,7 @@ for (
             const username = `username-${crypto.randomUUID()}`
             const password = `password-${crypto.randomUUID()}`
             const wrong = `wrong-${crypto.randomUUID()}`
+            const websiteSecret = `website-${crypto.randomUUID()}`
 
             const observed: Array<unknown> = []
             const spans: Array<Tracer.NativeSpan> = []
@@ -196,13 +271,17 @@ for (
                   continue
                 }
                 yield* Effect.scoped(Effect.gen(function*() {
-                  const page = yield* Browser.newPage(options(local.address, [], supplied, username))
+                  const page = yield* Browser.newPage({
+                    ...options(local.address, [], supplied, username),
+                    httpCredentials: { username: "strider", password: Redacted.make(websiteSecret) }
+                  })
                   const recording = yield* Trace.record(page, { screenshots: "off", network: true })
                   const navigate = page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/recorded`).pipe(
                     Deadline.within("10 seconds")
                   )
                   if (supplied === password) {
                     yield* navigate
+                    yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`)
                     if (name === "Firefox") {
                       const conflict = yield* Browser.newContext(options(local.address, [], wrong, username)).pipe(
                         Effect.flip
@@ -243,6 +322,8 @@ for (
                 username,
                 password,
                 wrong,
+                websiteSecret,
+                Buffer.from(`strider:${websiteSecret}`).toString("base64"),
                 Buffer.from(`${username}:${password}`).toString("base64"),
                 Buffer.from(`${username}:${wrong}`).toString("base64")
               ]

@@ -463,6 +463,29 @@ export const toBeInViewport = (
     `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
   )
 }
+/** Accessible names use the shared engine only when this expectation is requested. */
+export const toHaveAccessibleName = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) => {
+  const ignoreCase = options?.ignoreCase
+  const flags = typeof expected === "string" ? "" : expected.flags
+  const text = typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  }
+  return expectLocator(
+    locator,
+    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    "toHaveAccessibleName",
+    `to have the accessible name ${show(expected)}${
+      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+    }`
+  )
+}
+
 export const toHaveCSS = (
   locator: Locator.ReadonlyLocator,
   name: string,

@@ -4699,6 +4699,126 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "expects accessible names with normalized strings, regex flags and typed evidence",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<span id="label" hidden>  Save   changes </span><button id="named" aria-labelledby="label">Ignored</button><button id="hidden" hidden aria-label="Secret"></button><label for="field">Email address</label><input id="field"><button class="many">One</button><button class="many">Two</button>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const named = page.locator("#named")
+              yield* named.pipe(Expect.toHaveAccessibleName("  Sa\u200bve\n cha\u00adnges  "))
+              yield* Expect.toHaveAccessibleName(named, /save changes/, { ignoreCase: true })
+              yield* named.pipe(Expect.toHaveAccessibleName(/SAVE CHANGES/i))
+              yield* named.pipe(Expect.toHaveAccessibleName("SAVE CHANGES", { ignoreCase: true }))
+              yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleName(""))
+              yield* page.getByRole("button", { name: "Secret", includeHidden: true }).pipe(
+                Expect.toHaveAccessibleName("")
+              )
+              yield* page.locator("#field").pipe(Expect.toHaveAccessibleName("Email address"))
+              // Wait for a real mismatching engine round before changing the label.
+              const impl = named as LocatorImpl
+              assert(impl instanceof LocatorImpl)
+              const adapter = impl.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const initial = yield* Deferred.make<void>()
+              const evaluate: typeof original = (realm, call) =>
+                original(realm, call).pipe(
+                  Effect.tap((result) => {
+                    const arg = call.arguments[0]
+                    if (
+                      call.functionDeclaration !== Engine.run || arg?._tag !== "Value" || arg.value.type !== "string"
+                    ) {
+                      return Effect.void
+                    }
+                    const request = JSON.parse(arg.value.value) as Engine.Request
+                    if (request.op !== "expect" || request.expectation._tag !== "AccessibleName") return Effect.void
+                    assert(result._tag === "Value" && result.value.type === "string")
+                    const response = JSON.parse(result.value.value) as Engine.Response
+                    if (response._tag !== "Expected" || response.passed) return Effect.void
+                    assert.strictEqual(response.observed, "Save changes")
+                    return Deferred.succeed(initial, undefined)
+                  })
+                )
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => Object.assign(adapter, { evaluate })),
+                  () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+                )
+                const pending = yield* named.pipe(Expect.toHaveAccessibleName("Updated"), Effect.forkChild)
+                yield* Effect.raceFirst(
+                  Deferred.await(initial),
+                  Fiber.join(pending).pipe(
+                    Effect.andThen(Effect.die(new Error("Name expectation passed before mutation")))
+                  )
+                )
+                assert.strictEqual(pending.pollUnsafe(), undefined)
+                yield* page.evaluateInMainWorld(() => {
+                  document.querySelector("#label")!.textContent = "Updated"
+                })
+                yield* Fiber.join(pending)
+              }))
+              for (
+                const [locator, expected, options, observed] of [
+                  [named, /updated/i, { ignoreCase: false }, "Updated"],
+                  [named, "updated", undefined, "Updated"],
+                  [named, /Updated  /, undefined, "Updated"],
+                  [page.locator("#missing"), "", undefined, { matches: 0 }],
+                  [page.locator(".many"), /One/, undefined, { matches: 2 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleName(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                // A transport deadline can precede every response; immediate engine checks cover exact observations.
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects no accessible name where the element's role prohibits naming",
+        () =>
+          Effect.gen(function*() {
+            // Roles such as generic, paragraph and code cannot be named, so their author label is not their name.
+            const { url } = yield* fixture(() =>
+              `<div id="generic" aria-label="Region">Text</div><p id="paragraph" aria-labelledby="reference">Text</p><code id="code" title="Snippet">x</code><span id="reference" aria-label="Reference override">Reference text</span><p id="override" role="button" aria-label="Allowed">Ignored</p><button id="content"><strong>Confirm</strong><code>code</code></button><button id="referenced" aria-labelledby="reference">Ignored</button><label for="native"><span>Native label</span></label><input id="native">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              for (const id of ["#generic", "#paragraph", "#code"]) {
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""), Deadline.within("300 millis"))
+              }
+              yield* page.getByRole("generic", { name: "Region", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("paragraph", { name: "Reference override", exact: true }).pipe(
+                Expect.toHaveCount(0)
+              )
+              yield* page.getByRole("code", { name: "Snippet", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("button", { name: "Allowed", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#override").pipe(Expect.toHaveAccessibleName("Allowed"))
+              yield* page.getByRole("button", { name: "Confirmcode", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#content").pipe(Expect.toHaveAccessibleName("Confirmcode"))
+              yield* page.getByRole("button", { name: "Reference override", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#referenced").pipe(Expect.toHaveAccessibleName("Reference override"))
+              yield* page.getByRole("textbox", { name: "Native label", exact: true }).pipe(Expect.toHaveCount(1))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "expects computed CSS with exact strings, regex flags and pseudo-elements",
         () =>
           Effect.gen(function*() {

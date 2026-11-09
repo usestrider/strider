@@ -535,6 +535,31 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
           }), timeout)
 
+        it.effect("reports accessible-name mismatches and cardinality on an immediate check", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="named" aria-label="Updated"></button><button class="many">One</button><button class="many">Two</button>`
+            )
+            for (
+              const [selector, expected, observed] of [
+                ["#named", { _tag: "String", value: "updated", exact: true }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "updated", flags: "" }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "Updated  ", flags: "" }, "Updated"],
+                ["#missing", { _tag: "String", value: "", exact: true }, { matches: 0 }],
+                [".many", { _tag: "RegExp", source: "One", flags: "" }, { matches: 2 }]
+              ] as const
+            ) {
+              const response = yield* send({
+                op: "expect",
+                steps: [{ _tag: "Css", selector }],
+                cap: 0,
+                expectation: { _tag: "AccessibleName", expected, ignoreCase: false }
+              })
+              assert.deepStrictEqual(response, { _tag: "Expected", passed: false, observed, changed: false })
+            }
+          }))
+
         it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
           Effect.gen(function*() {
             const { send, call } = yield* open(
