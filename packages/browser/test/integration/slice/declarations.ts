@@ -65,9 +65,9 @@ export const declarations = (
           const { origin } = yield* tlsSite
           const sibling = yield* Browser.newPage()
           const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
-          assert.strictEqual(rejected._tag, "PageError")
+          assert(Page.isPageError(rejected) && rejected.reason._tag === "NavigationFailed")
           const options = { acceptInsecureCerts: true, eventLog: 0 }
-          if (name === "Chromium") {
+          if (!(yield* supports("acceptInsecureCerts"))) {
             const error = yield* Browser.newContext(options).pipe(Effect.flip)
             assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported")
             assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
@@ -82,10 +82,10 @@ export const declarations = (
             assert.strictEqual(yield* shortcut.title, "secure")
           }
           const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
-          assert.strictEqual(stillRejected._tag, "PageError")
+          assert(Page.isPageError(stillRejected) && stillRejected.reason._tag === "NavigationFailed")
           const explicit = yield* Browser.newPage({ ...options, acceptInsecureCerts: false })
           const explicitRejected = yield* explicit.goto(origin).pipe(Effect.flip)
-          assert.strictEqual(explicitRejected._tag, "PageError")
+          assert(Page.isPageError(explicitRejected) && explicitRejected.reason._tag === "NavigationFailed")
         }), timeout)
 
       // ── Routes ──

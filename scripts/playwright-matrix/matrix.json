@@ -46928,34 +46928,54 @@
         "method:Browser.newContext"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -48564,34 +48584,54 @@
         "method:Browser.newPage"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -113344,14 +113384,14 @@
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "499fe81f688cf0f467f306d92463b08ab6166da2ca5f042a6549791786bffaca",
+    "packages/browser/src/UserContext.ts": "5aac02a6fe9b5fc755974767f8a189830c842c54aa0a0aa0e50a3da54c82ff97",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
-    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
+    "packages/browser/src/internal/bidiAdapter.ts": "a799eddb4ec08d81f39f84f582d831cbb23e9a03979cca1eb417bdb03ce560c3",
+    "packages/browser/src/internal/cdpAdapter.ts": "ff6c9744f80e8256339e96b843eea051ddc64b73bddaa7793b170eeb279df2fb",
     "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "27375cca35695d95c2dc34af9db66a069e4a6c76f42bab3cd714b8460ee0dccc",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",

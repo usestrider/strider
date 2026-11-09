@@ -476,7 +476,7 @@ describe("Chromium claims", () => {
                 for (const acceptInsecureCerts of [true, false]) {
                   const options = { acceptInsecureCerts, eventLog: 0 }
                   const error = yield* api.UserContext.reclaim(saved.contextClaim, options).pipe(Effect.flip)
-                  assert.strictEqual(error._tag, "UserContextError")
+                  assert(error._tag === "UserContextError")
                   assert.strictEqual(error.reason._tag, "Unsupported")
                   if (error.reason._tag === "Unsupported") {
                     assert.strictEqual(error.reason.capability, "acceptInsecureCerts")

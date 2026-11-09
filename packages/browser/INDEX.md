@@ -1922,6 +1922,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly acceptInsecureCerts?: boolean | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`

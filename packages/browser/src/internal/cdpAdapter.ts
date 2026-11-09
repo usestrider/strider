@@ -65,6 +65,7 @@ export const capabilities = (
     entries: [
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),
