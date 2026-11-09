@@ -27,6 +27,19 @@ describe("access is typed", () => {
   it("a page you may only inspect offers no actions", () => {
     expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
+    expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")
+    expect(page.locator("input").selectText()).type.not.toRaiseError()
+    expect(reader.getByRole("button").dispatchEvent("change")).type.toRaiseError(
+      "Property 'dispatchEvent' does not exist"
+    )
+    expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
+    expect(page.getByRole("button").blur()).type.not.toRaiseError()
+  })
+
+  it("editability needs only inspect access and preserves read failures", () => {
+    const read = reader.getByRole("textbox").isEditable
+    expect(read).type.toBe<Effect.Effect<boolean, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>>()
+    expect(observed.locator("input").isEditable).type.toRaiseError()
   })
 
   it("a snapshot carries its page's access, so its refs can't act either", () => {
@@ -52,6 +65,14 @@ describe("access is typed", () => {
 
   it("the main world needs control", () => {
     expect(reader.evaluateInMainWorld(() => 1)).type.toRaiseError("Property 'evaluateInMainWorld' does not exist")
+  })
+
+  it("replacing HTML needs control and returns a bounded typed effect", () => {
+    expect(reader.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(observed.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(page.setContent("<p>Hello</p>")).type.toBe<
+      Effect.Effect<void, Page.PageError | Target.TargetGone | Deadline.Timeout>
+    >()
   })
 
   it("downloads need control", () => {
@@ -99,6 +120,15 @@ describe("a wait is an effect", () => {
 })
 
 describe("evaluation results are what arrives", () => {
+  it("evaluateAll is available with inspect access and preserves result and error types", () => {
+    expect(reader.locator("p").evaluateAll((elements) => elements.length)).type.toBe<
+      Effect.Effect<number, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+    expect(reader.locator("p").evaluateAll(async () => new Date(0))).type.toBe<
+      Effect.Effect<Date, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+  })
+
   it("a Date survives the crossing", () => {
     expect<Effect.Success<ReturnType<typeof page.evaluate<[], Date>>>>().type.toBe<Date>()
   })

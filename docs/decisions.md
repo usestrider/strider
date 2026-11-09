@@ -320,9 +320,16 @@ input permit, so a queued action never uses the preliminary check's stale geomet
 
 - **Why.** Waiting for rendering before taking the baseline adds one frame to each of the two checks without
   adding a rendering update between samples. A changed rectangle or replacement element still resets stability.
-- **Rejected:** removing the rendering wait entirely when stability is disabled, since a browser may drop input
-  before rendering; and skipping the check under the input permit, since another action may change the target
+- **Rejected:** skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
+
+**Readiness waits for a drawn frame by default only for pointer actions.** Per-call `checks.rendered` keeps
+pointer routing aligned with what was drawn, while fill and other non-pointer actions check current layout
+immediately. Stability sampling, retry waits and the check under the input permit remain independent. A frame
+is no hydration guarantee; callers can wait for application readiness or opt one action into rendering. With
+rendering disabled, timeouts retain readiness reasons rather than a no-frame hint. Rejected: a uniform default
+on, which delays ready fills; a uniform default off, which risks pointer routing; and a suite-wide switch, which
+hides the choice from the action that needs it.
 
 **An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
 single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
@@ -432,6 +439,13 @@ along with negative indexing, which removes a useful selection.
 `Nth` separately, so errors and traces say `nth(0)`, `nth(-1)`, `first` or `last` without guessing from an
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
+
+**Options a caller writes carry no `_tag`.** A choice with no data is a string literal (`area: "fullPage"`,
+`format: "jpeg"`); one with data is told apart by its keys (`area: { clip }` or `{ element }`, a cookie's
+`scope: { url }` or `{ domain, path }`, a test's `attach({ trace })`), each member ruling out the others' keys with
+`?: never` where a caller could write both, so the union stays exclusive. Outputs keep `_tag`, since a caller matches on them. Rejected: tagged objects, which made callers spell
+`{ _tag: "FullPage" }` for a choice with nothing in it; and constructors (`Screenshot.fullPage`), which add a module
+to import for plain data.
 
 **Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions and snapshots. ARIA keywords `true`, `false`, `mixed` and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio and switch; on checkbox, menuitemcheckbox, option and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states. Snapshot representation remains a positive checked marker, not a mixed-state encoding.
 
@@ -1358,3 +1372,22 @@ Optional browser features do work only when requested, within the owning context
 never request a feature gain no interception, injected instrumentation, per-action checks or retained request
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
+
+## Editability reads share editing rules
+
+`isEditable` reads the same predicate as editing actions and `toBeEditable`: an enabled text or settable
+input, textarea or contenteditable element that is not read-only. Unsupported kinds return false so callers
+can branch on the predicate without handling a type error. Visibility and inertness remain separate checks.
+Rejected: a broader read-only definition accepting selects, checkboxes or ARIA-only textboxes, because a true
+read would then describe kinds Strider's editing actions do not accept. This preserves existing action
+semantics rather than adopting Playwright's broader kinds and unsupported-kind exception.
+
+## Explicit DOM event constructors
+
+DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.
+Initialization crosses by value under the existing evaluation serialization contract, and the target document
+constructs and dispatches the event. This keeps application events and native event fields explicit across
+browsers. Reject name-to-constructor inference tables and emulation of missing constructors or touch dictionaries:
+those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
+
+Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.

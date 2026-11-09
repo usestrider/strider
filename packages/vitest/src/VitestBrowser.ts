@@ -27,7 +27,7 @@ declare module "vitest" {
   interface TestArtifactRegistry {
     "@usestrider/browser": {
       readonly type: "@usestrider/browser"
-      readonly artifact: TestRun.TestArtifact["_tag"]
+      readonly artifact: ArtifactKind
       readonly attachments: Array<{ readonly path: string; readonly contentType: string }>
     }
   }
@@ -59,7 +59,17 @@ const infoOf = (test: RunnerTest | undefined): TestRun.TestInfo =>
     shard: env("VITEST_SHARD")
   })
 
-const contentType: Record<TestRun.TestArtifact["_tag"], string> = {
+/** What reporters see an attachment as. */
+type ArtifactKind = "Trace" | "Har" | "Screenshot"
+
+const kindOf = (artifact: TestRun.TestArtifact): readonly [ArtifactKind, string] =>
+  "trace" in artifact
+    ? ["Trace", artifact.trace]
+    : "har" in artifact
+    ? ["Har", artifact.har]
+    : ["Screenshot", artifact.screenshot]
+
+const contentType: Record<ArtifactKind, string> = {
   Trace: "application/zip",
   Har: "application/json",
   Screenshot: "image/png"
@@ -72,24 +82,21 @@ const makeTestRun = (current: () => RunnerTest | undefined, snapshot?: TestRun.T
   },
   attach: (artifact) =>
     Effect.suspend(() => {
+      const [kind, path] = kindOf(artifact)
       const test = current()
       if (test === undefined) {
-        return Effect.logWarning(`TestRun.attach: no test is running, so ${artifact.path} wasn't attached`)
+        return Effect.logWarning(`TestRun.attach: no test is running, so ${path} wasn't attached`)
       }
-      const type = artifact._tag === "Screenshot" && /\.jpe?g$/i.test(artifact.path)
-        ? "image/jpeg"
-        : contentType[artifact._tag]
+      const type = kind === "Screenshot" && /\.jpe?g$/i.test(path) ? "image/jpeg" : contentType[kind]
       return Effect.tryPromise(() =>
         recordArtifact(test, {
           type: "@usestrider/browser",
-          artifact: artifact._tag,
-          attachments: [{ path: artifact.path, contentType: type }]
+          artifact: kind,
+          attachments: [{ path, contentType: type }]
         })
       ).pipe(
         Effect.asVoid,
-        Effect.catch((error) =>
-          Effect.logWarning(`TestRun.attach: Vitest didn't attach ${artifact.path}: ${error.message}`)
-        )
+        Effect.catch((error) => Effect.logWarning(`TestRun.attach: Vitest didn't attach ${path}: ${error.message}`))
       )
     })
 })
@@ -231,7 +238,7 @@ export const withTest = (
           const finish = Effect.fnUntraced(function*(failed: boolean) {
             if (failed) yield* exportFailure
             if (failed) {
-              if (staged !== undefined) yield* warn(run.attach({ _tag: "Trace", path: staged }))
+              if (staged !== undefined) yield* warn(run.attach({ trace: staged }))
             } else if (exported) {
               // A failed write can leave a partial archive, too.
               const path = staged ?? destination

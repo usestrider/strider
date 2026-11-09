@@ -314,7 +314,7 @@ A context's cookies: reading, setting and removing them.
 - `interface Input`
   - `readonly name: Name | string`
   - `readonly value: string | Redacted.Redacted<string>`
-  - `readonly scope: | { readonly _tag: "Url"; readonly url: Url.Url | string } | { readonly _tag: "Domain"; readonly domain: Domain | string; readonly path: string…`
+  - `readonly scope: | { readonly url: Url.Url | string; readonly domain?: never; readonly path?: never } | { readonly domain: Domain | string; readonly path: strin…`
   - `readonly expires?: DateTime.DateTime.Input | undefined`
   - `readonly httpOnly?: boolean | undefined`
   - `readonly secure?: boolean | undefined`
@@ -608,6 +608,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
@@ -938,12 +939,15 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isEditable: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isChecked: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `snapshot(options?: Snapshot.Options | undefined): Effect.Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
+  - `evaluateAll<Args extends ReadonlyArray<unknown>, B>(fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Ser…`
 - `interface Checks`
+  - `readonly rendered?: boolean | undefined`
   - `readonly visible?: boolean | undefined`
   - `readonly enabled?: boolean | undefined`
   - `readonly editable?: boolean | undefined`
@@ -954,6 +958,10 @@ Locators: how to find elements on a page, and the actions and reads that use the
 - `interface ActionOptions`
   - `readonly checks?: Checks | undefined`
   - `readonly trial?: boolean | undefined`
+- `interface DispatchEventOptions`
+  - `readonly trial?: boolean | undefined`
+  - `readonly eventClass?: | "Event" | "CustomEvent" | "MouseEvent" | "KeyboardEvent" | "PointerEvent" | "FocusEvent" | "WheelEvent" | "InputEvent" | "DragEvent" | …`
+  - `readonly init?: Readonly<Record<string, unknown>> | undefined`
 - `interface PointerOptions extends ActionOptions`
   - `readonly position?: Mouse.Point | undefined`
   - `readonly modifiers?: ReadonlyArray<Keyboard.Modifier> | undefined`
@@ -967,6 +975,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 - `interface TypeOptions extends ActionOptions, Keyboard.TypeOptions`
 - `type SelectOption = | { readonly value: string } | { readonly label: string } | { readonly index: number }`
 - `interface Locator extends ReadonlyLocator`
+  - `dispatchEvent(type: string, options?: DispatchEventOptions | undefined): ActionEffect`
   - `getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator`
   - `getByText(text: string | RegExp, options?: TextOptions | undefined): Locator`
   - `getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator`
@@ -992,11 +1001,13 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `check(options?: PointerOptions | undefined): ActionEffect`
   - `uncheck(options?: PointerOptions | undefined): ActionEffect`
   - `focus(options?: ActionOptions | undefined): ActionEffect`
+  - `blur(options?: ActionOptions | undefined): ActionEffect`
   - `clear(options?: ActionOptions | undefined): ActionEffect`
   - `scrollIntoView(options?: ActionOptions | undefined): ActionEffect`
   - `fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect`
   - `press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect`
   - `pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect`
+  - `selectText(options?: ActionOptions | undefined): ActionEffect`
   - `selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): ActionEffect`
   - `setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: ActionOptions | undefined): ActionEffect`
   - `dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect`
@@ -1322,11 +1333,8 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly url: string`
   - `readonly name: Option.Option<string>`
   - `readonly children: ReadonlyArray<FrameTreeEncoded>`
-- `interface ScreenshotOptions`
-  - `readonly area?: | { readonly _tag: "Viewport" } | { readonly _tag: "FullPage" } | { readonly _tag: "Clip" readonly rect: { readonly x: Pixels.Css readonly y: P…`
-  - `readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number } | undefined`
-  - `readonly scale?: "css" | "device" | undefined`
-  - `readonly omitBackground?: boolean | undefined`
+- `type ScreenshotOptions = ScreenshotFormat & { readonly area?: | "viewport" | "fullPage" | { readonly clip: { readonly x: Pixels.Css readonly y: Pixels.Css readonly width: Pixels.Css readonly height: Pixels.Css } readonly ele…`
+- `type ScreenshotFormat = | { readonly format?: "png" | undefined readonly quality?: undefined } | { readonly format: "jpeg" readonly quality: number }`
 - `interface Length`
   - `readonly value: number`
   - `readonly unit: "in" | "cm" | "mm" | "px"`
@@ -1386,6 +1394,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly sessionStorage: OriginStorage.OriginStorage`
   - `readonly context: UserContext.UserContext`
   - `goto(url: Url.Url | string, options?: GotoOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `setContent(html: string, options?: { readonly waitUntil?: PageNavigation.LoadState | undefined } | undefined): Effect.Effect<void, PageError | Target.TargetGon…`
   - `reload(options?: ReloadOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
   - `back(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
   - `forward(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -2478,7 +2487,7 @@ Test support that works with any test runner: the running test, and the files at
 
 *schemas*
 
-- `const TestArtifact = Schema.Union([Schema.TaggedStruct("Trace", { path: FilePath.Local }), Schema.TaggedStruct("Har", { path: FilePath.Local }), Schema.TaggedStruct("Screenshot", { path: FilePath.Local })])`
+- `const TestArtifact = Schema.Union([Schema.Struct({ trace: FilePath.Local }), Schema.Struct({ har: FilePath.Local }), Schema.Struct({ screenshot: FilePath.Local })])`
 
 ## `@usestrider/browser/webkit`
 

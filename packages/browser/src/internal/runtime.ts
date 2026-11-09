@@ -180,13 +180,15 @@ const call = (
   runtime: Runtime,
   realm: Target.RealmId,
   functionDeclaration: string,
-  args: ReadonlyArray<Adapter.LocalValue>
+  args: ReadonlyArray<Adapter.LocalValue>,
+  releaseResult?: boolean
 ) =>
   runtime.model.adapter.evaluate(realm, {
     functionDeclaration,
     arguments: args,
     awaitPromise: true,
     result: "value",
+    ...(releaseResult === true ? { releaseResult: true } : {}),
     userActivation: false
   })
 
@@ -319,13 +321,14 @@ const callEngine = (
   document: Target.DocumentId,
   functionDeclaration: string,
   request: string | Effect.Effect<string>,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  releaseResult?: boolean
 ): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
   engineRealm(runtime, document).pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
         typeof request === "string" ? Effect.succeed(request) : request,
-        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)])
+        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
       )
     ),
     Effect.map(Option.some),
@@ -649,12 +652,25 @@ export const sendToDocument = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>
     Option.isSome(runtime.model.document(document))
-      ? Effect.asVoid(callEngine(runtime, document, Engine.run, JSON.stringify(request), id))
+      ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        Effect.flatMap((value) =>
+          Effect.gen(function*() {
+            if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
+            if (
+              Option.isSome(value) && value.value.type === "string" &&
+              (yield* decode(value.value.value))._tag === "FillGuard"
+            ) {
+              return
+            }
+            return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
+          })
+        )
+      )
       : Effect.void
   )
 
@@ -690,6 +706,73 @@ export const element = (
         Effect.map(Option.map((found): Found => ({ ...found, routed: route.routed })))
       )
     }),
+    promptBlocked(page)
+  )
+
+type FoundElements =
+  | { readonly _tag: "Found"; readonly nodes: ReadonlyArray<Adapter.NodeBinding>; readonly routed: Routed }
+  | { readonly _tag: "Response"; readonly response: Engine.Response; readonly routed: Routed }
+
+/** All matches resolved together in the final document; node bindings carry no retained array handle. */
+export const elements = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<
+  FoundElements,
+  SendFailure
+> =>
+  Effect.raceFirst(
+    routing(
+      runtime,
+      page,
+      steps,
+      false,
+      id,
+      at,
+      Effect.fnUntraced(
+        function*(
+          route: Route,
+          last: ReadonlyArray<Engine.Step>
+        ): Effect.fn.Return<Option.Option<FoundElements>, SendFailure> {
+          const routed = route.routed
+          if (route._tag === "Answer") {
+            return Option.some({ _tag: "Response" as const, response: route.response, routed })
+          }
+          if (route._tag === "Missing") {
+            return Option.some({ _tag: "Found" as const, nodes: [], routed })
+          }
+          const stale = replaced(routed.document, last)
+          if (Option.isSome(stale)) return Option.some({ _tag: "Response" as const, response: stale.value, routed })
+          const result = yield* callEngine(
+            runtime,
+            routed.document,
+            Engine.element,
+            JSON.stringify({ steps: last, all: true }),
+            id,
+            true
+          )
+          if (Option.isNone(result)) return Option.none()
+          const value = result.value
+          if (value.type === "string") {
+            return Option.some({ _tag: "Response" as const, response: yield* decode(value.value), routed })
+          }
+          if (value.type !== "array" || value.value === undefined) {
+            return yield* Effect.die(new Error("The engine's matches came back without an array"))
+          }
+          const nodes: Array<Adapter.NodeBinding> = []
+          for (const member of value.value) {
+            if (member.type !== "node" || member.node === undefined) {
+              return yield* Effect.die(new Error("The engine's match came back without a node binding"))
+            }
+            nodes.push(member.node)
+          }
+          return Option.some({ _tag: "Found" as const, nodes, routed })
+        }
+      )
+    ),
     promptBlocked(page)
   )
 

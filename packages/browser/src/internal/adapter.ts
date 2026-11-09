@@ -454,6 +454,9 @@ export interface EvaluationCall {
   readonly awaitPromise: boolean
   /** `"value"` serializes the result; `"handle"` keeps objects as handles the caller must release. */
   readonly result: "value" | "handle"
+  /** Releases incidental protocol object ids after a by-value result is decoded; no caller owns them. */
+  readonly releaseResult?: boolean | undefined
+
   /**
    * A backend hint: the object group a handle result joins, so that `releaseHandles` given every handle of a group
    * releases them in one command (QUIRKS.md, Q132). It changes how handles are released, never what they are: a

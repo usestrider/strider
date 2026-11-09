@@ -16,6 +16,7 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -36,6 +37,7 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Devices from "./devices.ts"
 import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -67,6 +69,7 @@ interface Ready {
 
 /** The checks each action documents (API.md, Locators, actions and actionability). */
 const pointerChecks: CheckSet = {
+  rendered: true,
   visible: true,
   enabled: true,
   editable: false,
@@ -76,6 +79,7 @@ const pointerChecks: CheckSet = {
   receivesPointer: true
 }
 const editChecks: CheckSet = {
+  rendered: false,
   visible: true,
   enabled: true,
   editable: true,
@@ -90,6 +94,7 @@ const selectChecks: CheckSet = { ...editChecks, editable: false, notInert: false
 const noChecks: CheckSet = { ...focusChecks, visible: false, notInert: false }
 
 const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engine.Checks => ({
+  rendered: checks?.rendered ?? defaults.rendered,
   visible: checks?.visible ?? defaults.visible,
   enabled: checks?.enabled ?? defaults.enabled,
   editable: checks?.editable ?? defaults.editable,
@@ -466,6 +471,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       (value) => Option.fromNullishOr(value as string | null)
     )
   }
+  get isEditable() {
+    return this.readOne("Locator.isEditable", { _tag: "Editable" }, (value) => value as boolean)
+  }
   get isEnabled() {
     return this.readOne("Locator.isEnabled", { _tag: "Enabled" }, (value) => value as boolean)
   }
@@ -569,6 +577,72 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     }))
   }
 
+  /** Evaluates the fixed membership snapshot in the caller’s isolated world. */
+  evaluateAll<Args extends ReadonlyArray<unknown>, B>(
+    fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.Serialized<B>, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    const operation = "Locator.evaluateAll"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
+      if (record.left() <= 0) return yield* Effect.fail(record.timeout(Option.none()))
+      yield* this.requires(operation, "isolatedWorlds", id)
+      const found = yield* Runtime.elements(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+      )
+      if (found._tag === "Response") {
+        const response = found.response
+        switch (response._tag) {
+          case "InvalidSelector":
+            return yield* Effect.fail(this.invalidSelector(operation, response, id))
+          default:
+            return yield* this.unmatched(operation, response, id)
+        }
+      }
+      const value = yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(
+          owner.runtime,
+          found.routed.document,
+          Evaluation.isolatedWorld,
+          id
+        )
+        const rest = yield* Evaluation.toLocal(args, realm, 1)
+        // The call is on its way: a deadline after it can't say the function didn't run
+        const result = yield* Evaluation.call(owner.runtime, {
+          dispatch: record,
+          realm,
+          functionDeclaration:
+            `function(...values) { return (${fn.toString()})(values.slice(0, ${found.nodes.length}), ...values.slice(${found.nodes.length})); }`,
+          arguments: [...found.nodes.map((node): Adapter.LocalValue => ({ _tag: "Node", node })), ...rest],
+          result: "value",
+          releaseResult: true,
+          userActivation: false,
+          page: Option.some(owner.page),
+          at: budget.at,
+          id
+        })
+        return yield* Evaluation.fromRemote(result)
+      }).pipe(Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? record.timeout(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? Option.some("The page didn't answer before the deadline; the function may still be running")
+              : Option.none()
+          )
+          : this.error(operation, failure.reason, id)
+      ))
+      return value as JSHandle.Serialized<B>
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
+  }
+
   /** A one-shot read of the one match: strict, and immediate. */
   private readOne<A>(operation: string, what: Engine.Read, value: (read: unknown) => A) {
     return this.read(operation, { op: "read", steps: this.steps, read: what }, (response, id) => {
@@ -624,8 +698,20 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   uncheck(options?: Locator.PointerOptions) {
     return this.setChecked("Locator.uncheck", false, options)
   }
+  blur(options?: Locator.ActionOptions) {
+    return this.act("Locator.blur", options, noChecks, { _tag: "Blur" }, () => Effect.succeed("done" as const))
+  }
   focus(options?: Locator.ActionOptions) {
     return this.act("Locator.focus", options, focusChecks, { _tag: "Focus" }, () => Effect.succeed("done" as const))
+  }
+  selectText(options?: Locator.ActionOptions) {
+    return this.act(
+      "Locator.selectText",
+      options,
+      { ...noChecks, visible: true },
+      { _tag: "SelectText" },
+      () => Effect.succeed("done" as const)
+    )
   }
   scrollIntoView(options?: Locator.ActionOptions) {
     return this.act(
@@ -698,6 +784,105 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           "done" as const
         ),
       { redacted: Redacted.isRedacted(text) }
+    )
+  }
+  dispatchEvent(type: string, options?: Locator.DispatchEventOptions) {
+    const operation = "Locator.dispatchEvent"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const hint = () =>
+        record.dispatch._tag === "MayHaveBeenSent"
+          ? Option.some("The event may have been dispatched; it will not be sent again")
+          : Option.some("Waiting for one element to match the locator")
+      const attempt = Effect.gen({ self: this }, function*() {
+        if (record.left() <= 0) return yield* Effect.fail(record.timeout(hint()))
+        const id = record.id
+        const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, record.budget.at).pipe(
+          Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+        )
+        if (found._tag === "Response") {
+          if (found.response._tag === "NoMatch") return { retry: { _tag: "NoMatch" } } as const
+          return yield* this.unmatched(operation, found.response, id)
+        }
+        if (options?.trial === true) return "done" as const
+        const result = yield* Effect.gen(function*() {
+          // A frame may commit while its engine is installed; the node identifies the document that returned it.
+          const realm = yield* Evaluation.documentRealm(
+            owner.runtime,
+            found.node.document,
+            yield* Runtime.ownWorld(owner.runtime, Evaluation.isolatedWorld),
+            id
+          )
+          const args = yield* Evaluation.toLocal([{
+            type,
+            eventClass: options?.eventClass ?? "Event",
+            init: options?.init ?? {}
+          }], realm)
+          if (record.left() <= 0) return yield* Effect.fail({ _tag: "Deadline" } as const)
+          const remote = yield* Evaluation.call(owner.runtime, {
+            dispatch: record,
+            realm,
+            functionDeclaration: dispatchDOMEvent.toString(),
+            arguments: [{ _tag: "Node", node: found.node }, ...args],
+            result: "value",
+            userActivation: false,
+            page: Option.some(owner.page),
+            at: record.budget.at,
+            id
+          })
+          return yield* Evaluation.fromRemote(remote)
+        }).pipe(Effect.mapError((failure) =>
+          failure._tag === "Gone" ?
+            failure.error
+            : failure._tag === "Deadline" ?
+            record.timeout(hint())
+            : this.error(operation, failure.reason, id, record.dispatch)
+        ))
+        if (result === "detached") {
+          record.markNotSent()
+          return { retry: { _tag: "NoMatch" } } as const
+        }
+        if (result === "unsupported") {
+          record.markNotSent()
+          return yield* Effect.fail(this.error(
+            operation,
+            new Reason.Unsupported({
+              capability: "dom.eventConstructor",
+              backend: owner.runtime.backend,
+              hint: "The target document does not provide the requested native event constructor"
+            }),
+            id
+          ))
+        }
+        if (result === "invalid") {
+          record.markNotSent()
+          return yield* Effect.fail(this.error(
+            operation,
+            new Reason.InvalidInput({
+              input: "event initialization",
+              expected: "initialization accepted by the native event constructor",
+              hint: "Use fields supported by the selected event class; DOM references cannot cross by value"
+            }),
+            id
+          ))
+        }
+        record.markConfirmed()
+        return "done" as const
+      })
+      while (true) {
+        const outcome = yield* record.bound(owner.page.input.withPermit(attempt), hint)
+        if (outcome === "done") return
+        record.observe(outcome.retry)
+        yield* record.bound(BrowserClock.sleep(50), hint)
+      }
+    }).pipe(
+      Effect.raceFirst(Runtime.pageEnded(owner.page)),
+      Operation.named(operation, {
+        attributes: { "browser.page.id": owner.page.id, "browser.locator": this.description }
+      }),
+      Effect.provideService(Recorders.CurrentSubject, Option.some({ steps: this.steps, secret: false }))
     )
   }
   selectOption(choice: Locator.SelectOption | ReadonlyArray<Locator.SelectOption>, options?: Locator.ActionOptions) {
@@ -793,7 +978,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       (state, point, targetPoint) => Input.drag(state, point, targetPoint!, steps, options?.modifiers ?? []),
       {
-        target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
+        target: Effect.suspend(() => to.pointOf(options?.targetPosition, options?.checks?.rendered)),
         draggable: (record, io) =>
           html === "native"
             // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't
@@ -1105,7 +1290,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
-  pointOf(position: Mouse.Point | undefined) {
+  pointOf(position: Mouse.Point | undefined, rendered?: boolean | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
       // A drag's target, found inside the drag: its record, and its deadline
@@ -1117,7 +1302,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         {
           op: "act",
           steps: this.steps,
-          checks: checksFor(pointerChecks, { stable: false, receivesPointer: false }),
+          checks: checksFor(pointerChecks, { rendered, stable: false, receivesPointer: false }),
           cap: Runtime.roundCap(record.left()),
           action: {
             _tag: "Point",
@@ -1202,17 +1387,15 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       editChecks,
       { _tag: "Fill", value: text },
-      (ready, io) =>
-        ready.fill === "set"
-          ? Effect.succeed("done" as const)
-          : Effect.as(
-            io.send(
-              text === ""
-                ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
-                : [{ _tag: "InsertText", text }]
-            ),
-            "done" as const
-          ),
+      (ready, io) => {
+        if (ready.fill === "set") return Effect.succeed("done" as const)
+        const insert = io.send(
+          text === ""
+            ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
+            : [{ _tag: "InsertText", text }]
+        )
+        return ready.fill === "guarded" ? io.guardFill(insert) : Effect.as(insert, "done" as const)
+      },
       { redacted: Redacted.isRedacted(value) }
     )
   }
@@ -1283,6 +1466,108 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           // A guard left armed would stop the page's next gesture: any failure after arming it removes it
           Effect.onError(() => guard ? Effect.ignore(io.disarm) : Effect.void)
         )
+    )
+  }
+
+  /** Brackets a design-mode insertion, including interruption while its guard is being installed. */
+  private guardFill(
+    operation: string,
+    routed: Runtime.Routed,
+    record: Operation.Record,
+    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+  ) {
+    const targets = [
+      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false }
+    ]
+    const documents = targets.map((target) => target.document)
+    const call = (document: Target.DocumentId, request: Engine.Request) =>
+      Runtime.sendToDocument(this.owner.runtime, this.owner.page, document, request, record.id).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record)),
+        Effect.flatMap((response) =>
+          Option.isSome(response) && response.value._tag === "FillGuard"
+            ? Effect.succeed(response.value)
+            : Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "fill guard",
+                hint: "The insertion guard could not confirm the native input"
+              }),
+              record.id,
+              record.dispatch
+            ))
+        )
+      )
+    let released = false
+    const disarm = Effect.forEach(documents, (document) => call(document, { op: "fillDisarm" })).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          released = true
+        })
+      )
+    )
+    return Effect.acquireUseRelease(
+      Effect.void,
+      () =>
+        Effect.gen({ self: this }, function*() {
+          const guards = yield* Effect.forEach(targets, (target) =>
+            call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
+          if (
+            guards.every((guard) =>
+              guard.blocked === null
+            )
+          ) yield* insert
+          const outcomes = yield* disarm
+          const blocked = outcomes.find((guard) => guard.blocked !== null)?.blocked ?? null
+          if (
+            outcomes.some((guard) => guard.unsafe) || (blocked !== null && outcomes.some((guard) => guard.accepted))
+          ) {
+            return yield* Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "native insertion",
+                hint: "Focus or selection changed; native input may already have changed the page"
+              }),
+              record.id,
+              record.dispatch
+            ))
+          }
+          return blocked === null
+            ? "done" as const
+            : { retry: { _tag: "PreparingFocus", from: blocked } as Engine.NotReady }
+        }),
+      () =>
+        released ? Effect.void : Effect.gen({ self: this }, function*() {
+          // Close the permit while we still own it. Taking it again in the cleanup fiber would queue
+          // behind already waiting input, which must not run through the guard we are removing.
+          yield* this.owner.page.input.resize(0)
+          yield* Effect.gen({ self: this }, function*() {
+            const cleanup = yield* Operation.record
+            const outcomes = yield* Effect.forEach(documents, (document) =>
+              Runtime.releaseInDocument(
+                this.owner.runtime,
+                document,
+                { op: "fillDisarm" },
+                cleanup.id
+              ).pipe(Effect.exit))
+            const failed = outcomes.find(Exit.isFailure)
+            if (failed !== undefined) return yield* Effect.failCause(failed.cause)
+            yield* this.owner.page.input.resize(1)
+          }).pipe(
+            Operation.named(`${operation}.guardCleanup`, { attributes: { "browser.page.id": this.owner.page.id } }),
+            Operation.detached,
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Native insertion guard cleanup failed; page input remains blocked. Close this page before sending more input.",
+                { pageId: this.owner.page.id, cause }
+              )
+            ),
+            // The interrupted caller returns promptly, including when a dialog holds the browser command.
+            Effect.forkIn(this.owner.runtime.model.scope, { startImmediately: true })
+          )
+        })
     )
   }
 
@@ -1366,6 +1651,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
+        readonly guardFill: (
+          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+        ) => Effect.Effect<
+          "done" | { readonly retry: Engine.NotReady },
+          Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+        >
       },
       record: Operation.Record
     ) => Effect.Effect<
@@ -1387,7 +1678,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
-        action._tag === "Select"
+        action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
       const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
           if (apply && inRound) record.markSent()
@@ -1572,7 +1863,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             if (Option.isNone(again)) return "again" as const
             // A trial stops at the last check, holding the permit as the action would
             if (options?.trial === true) return "done" as const
-            const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
+            const done = yield* perform(again.value.response, {
+              send: send(again.value),
+              disarm,
+              guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
+            }, record)
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()
@@ -1674,4 +1969,40 @@ export const pageFrame = (owner: Owner, iframe: Locator.ReadonlyLocator): Locato
     throw new Error("Page.frame: the iframe's locator belongs to another page")
   }
   return frameLocator(owner, iframe.steps)
+}
+
+/** Sent only by dispatchEvent; no constructor lookup or event state is added to engine installation. */
+function dispatchDOMEvent(element: Element, data: {
+  readonly type: string
+  readonly eventClass: string
+  readonly init: Readonly<Record<string, unknown>>
+}) {
+  const { type, eventClass, init } = data
+  if (!element.isConnected) return "detached"
+  const constructors = {
+    Event: globalThis.Event,
+    CustomEvent: globalThis.CustomEvent,
+    MouseEvent: globalThis.MouseEvent,
+    KeyboardEvent: globalThis.KeyboardEvent,
+    PointerEvent: globalThis.PointerEvent,
+    FocusEvent: globalThis.FocusEvent,
+    WheelEvent: globalThis.WheelEvent,
+    InputEvent: globalThis.InputEvent,
+    DragEvent: globalThis.DragEvent,
+    TouchEvent: globalThis.TouchEvent,
+    DeviceOrientationEvent: globalThis.DeviceOrientationEvent,
+    DeviceMotionEvent: globalThis.DeviceMotionEvent
+  }
+  const Constructor = Object.prototype.hasOwnProperty.call(constructors, eventClass)
+    ? constructors[eventClass as keyof typeof constructors] :
+    undefined
+  if (typeof Constructor !== "function") return "unsupported"
+  let event: Event
+  try {
+    event = new Constructor(type, { bubbles: true, cancelable: true, composed: true, ...init })
+  } catch {
+    return "invalid"
+  }
+  element.dispatchEvent(event)
+  return "sent"
 }

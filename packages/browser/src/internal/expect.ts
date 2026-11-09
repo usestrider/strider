@@ -394,6 +394,20 @@ export const toHaveText = (
   )
 }
 
+export const toHaveClass = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>
+) => {
+  const list = Array.isArray(expected)
+  const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
+  return expectLocator(
+    locator,
+    { _tag: "Class", expected: all.map((each) => matcher(each, true)), list },
+    "toHaveClass",
+    `to have the class ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
+  )
+}
+
 export const toContainText = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
   expectLocator(
     locator,

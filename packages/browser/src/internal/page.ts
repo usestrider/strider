@@ -40,6 +40,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
 import * as Clock from "./clock.ts"
@@ -406,6 +407,94 @@ export const make = (owner: PageOwner): Page.Page => {
         options?.accept ?? []
       ).pipe(Effect.map(Option.getOrThrow))
     },
+    setContent: (html, options) =>
+      Effect.gen(function*() {
+        const record = yield* Operation.record
+        const waitUntil = options?.waitUntil ?? "load"
+        const key = `__strider_setContent_${record.id}`
+        return yield* Effect.gen(function*() {
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          const call = (fn: Function, args: ReadonlyArray<Adapter.LocalValue>, write: boolean, at = record.budget.at) =>
+            Evaluation.call(runtime, {
+              ...(write ? { dispatch: record } : {}),
+              realm,
+              functionDeclaration: fn.toString(),
+              arguments: args,
+              result: "value",
+              userActivation: false,
+              page: Option.some(entry),
+              at,
+              id: record.id
+            })
+          const args = yield* Evaluation.toLocal([html, waitUntil, key], realm)
+          const keyed = yield* Evaluation.toLocal([key], realm)
+          return yield* record.bound(
+            Effect.gen(function*() {
+              yield* entry.input.withPermit(call(
+                (html: string, waitUntil: string, key: string) => {
+                  document.open()
+                  if (waitUntil !== "commit") {
+                    const target = waitUntil === "load" ? window : document
+                    const event = waitUntil === "load" ? "load" : "DOMContentLoaded"
+                    let finish!: () => void
+                    const ready = new Promise<void>((resolve) => {
+                      finish = () => {
+                        target.removeEventListener(event, finish)
+                        resolve()
+                      }
+                      target.addEventListener(event, finish, { once: true })
+                    })
+                    Reflect.set(globalThis, key, { ready, finish })
+                  }
+                  document.write(html)
+                  document.close()
+                },
+                args,
+                true
+              ))
+              if (waitUntil !== "commit") {
+                // Await in the same realm: a later navigation cannot satisfy this replacement's readiness.
+                yield* call((key: string) => Reflect.get(globalThis, key).ready, keyed, false)
+              }
+            }).pipe(Effect.ensuring(
+              waitUntil === "commit" ? Effect.void : Operation.detached(Effect.gen(function*() {
+                const at = yield* BrowserClock.after(1000)
+                const cleaned = yield* call(
+                  (key: string) => {
+                    const pending = Reflect.get(globalThis, key)
+                    if (pending !== undefined) {
+                      pending.finish()
+                      Reflect.deleteProperty(globalThis, key)
+                    }
+                  },
+                  keyed,
+                  false,
+                  at
+                ).pipe(Effect.exit)
+                record.noteCleanup(
+                  Exit.isSuccess(cleaned) ||
+                    Option.exists(Exit.findErrorOption(cleaned), (error) => error._tag === "Gone")
+                    ? { _tag: "Completed" }
+                    : { _tag: "Failed", cause: Exit.isFailure(cleaned) ? Cause.pretty(cleaned.cause) : "" }
+                )
+              }))
+            ))
+          )
+        }).pipe(Effect.mapError((failure) =>
+          failure._tag === "Timeout" ? failure : failure._tag === "Gone" ? failure.error : failure._tag === "Deadline"
+            ? record.timeout(
+              Option.some(
+                "The document did not finish replacement and readiness before the deadline; scripts and requests may still be running"
+              )
+            )
+            : pageError("Page.setContent", failure.reason, record.id)
+        ))
+      }).pipe(
+        Effect.raceFirst(Runtime.pageEnded(entry)),
+        Operation.named("Page.setContent", {
+          attributes: { "browser.page.id": entry.id, "browser.document.wait_until": options?.waitUntil ?? "load" }
+        })
+      ),
     reload: (options) =>
       navigate(
         "Page.reload",

@@ -145,6 +145,7 @@ const record = async (
   run: Parameters<typeof measure>[0]
 ) => {
   process.stdout.write(`${name} ... `)
+  process.send?.({ type: "case", name })
   const samples = await measure(run, config.runs, config.warmup)
   const comparison = compare(samples.strider, samples.playwright, config.maxRatio)
   results.push({ name, description, samples, comparison })

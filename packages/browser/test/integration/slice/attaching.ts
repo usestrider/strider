@@ -143,14 +143,21 @@ export const attaching = (
               yield* tab.getByRole("button", { name: "Refresh" }).click()
               yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
               assert.strictEqual(yield* blocked.hits, 1)
+              assert.isFalse(yield* tab.getByRole("heading").isEditable)
               kept = tab
             }))
             // Released: what the grant gave fails, and the page stays open
             const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
             assert.deepInclude(read, { _tag: "TargetGone" })
             assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const selected = reasonOf(yield* Effect.exit(kept!.getByRole("heading").selectText()))
+            assert.deepStrictEqual((selected as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const editable = reasonOf(yield* Effect.exit(kept!.getByRole("heading").isEditable))
+            assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const replaced = reasonOf(yield* Effect.exit(kept!.setContent("<title>Forbidden</title>")))
+            assert.deepStrictEqual((replaced as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
               yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
             )
@@ -161,6 +168,7 @@ export const attaching = (
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
               assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
+              assert.isFalse(yield* reader.getByRole("heading").isEditable)
               const tab = yield* first.control
               yield* tab.activate
               yield* tab.getByRole("button", { name: "Refresh" }).click()
@@ -177,7 +185,7 @@ export const attaching = (
           let page: Page.Page | undefined
           yield* Effect.scoped(Effect.gen(function*() {
             context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             page = yield* context.newPage
             yield* page.goto(
               fixtureUrl(

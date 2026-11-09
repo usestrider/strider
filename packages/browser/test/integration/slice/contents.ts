@@ -18,8 +18,10 @@ import {
   StorageState,
   Url
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -27,6 +29,10 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
+import { vi } from "vitest"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
+import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
@@ -127,6 +133,192 @@ export const contents = (
 ) =>
   describe(`${name} contents`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("setContent waits for guarded native insertion before replacing the document", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+          yield* page.activate
+          const target = page.frame(page.locator("iframe")).locator("#target")
+          assert(target instanceof LocatorImpl)
+          const adapter = target.owner.runtime.model.adapter
+          const original = adapter.dispatchInput
+          const ready = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          let held = false
+          const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+            if (!held) {
+              held = true
+              yield* Deferred.succeed(ready, undefined)
+              yield* Deferred.await(release)
+            }
+            return yield* original(...args)
+          })
+          const replacement = `<input id="other" value="replacement"><script>
+            const other = document.getElementById("other"); other.focus(); other.setSelectionRange(11, 11);
+          </script>`
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() =>
+              Object.assign(adapter, { dispatchInput })
+            ),
+            () =>
+              Effect.gen(function*() {
+                const fill = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                yield* Deferred.await(ready).pipe(Deadline.within("2 seconds"))
+                const replaced = yield* page.setContent(replacement).pipe(Deadline.within("250 millis"), Effect.exit)
+                yield* Deferred.succeed(release, undefined)
+                const filled = yield* Fiber.await(fill).pipe(Deadline.within("2 seconds"))
+                const value = yield* page.locator("#other").readValue
+                assert(
+                  Exit.isFailure(replaced),
+                  `replacement must wait for native insertion; parent value was ${value}`
+                )
+                assert(Exit.isSuccess(filled), "the prepared native fill must complete before replacement")
+                assert.strictEqual(value, "other")
+                assert.strictEqual(yield* target.readText, "new")
+                yield* page.setContent(replacement)
+                assert.strictEqual(yield* page.locator("#other").readValue, "replacement")
+                const pending = yield* page.setContent("<input id=\"while-loading\"><img src=\"/pending-image\">").pipe(
+                  Effect.forkScoped
+                )
+                yield* page.locator("#while-loading").fill("still usable").pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(pending.pollUnsafe(), undefined, "resource readiness must still be pending")
+                yield* Fiber.interrupt(pending).pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(yield* page.locator("#while-loading").readValue, "still usable")
+              }),
+            () =>
+              Deferred.succeed(release, undefined).pipe(
+                Effect.andThen(Effect.sync(() => Object.assign(adapter, { dispatchInput: original })))
+              )
+          )
+        }), timeout)
+
+      it.effect("setContent replaces markup repeatedly without navigating and executes parser scripts", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.setContent("<title>Fresh</title>")
+          assert.strictEqual(yield* page.title, "Fresh")
+          yield* page.goto(fixtureUrl(origin, "<title>Before</title><p>Old</p>"), { waitUntil: "load" })
+          const before = yield* page.evaluateInMainWorld(() => {
+            Reflect.set(window, "originalDocument", document)
+            return { url: location.href, history: history.length }
+          })
+          const status = yield* page.status
+          yield* page.setContent(
+            "<!doctype html><title>After</title><p>New</p><script>document.querySelector(\"p\").textContent += \" script\"</script>"
+          )
+          assert.strictEqual(yield* page.title, "After")
+          assert.strictEqual(yield* page.getByText("New script").readText, "New script")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => ({
+              url: location.href,
+              history: history.length
+            })),
+            before
+          )
+          assert.isTrue(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "originalDocument") === document
+            )
+          )
+          const after = yield* page.status
+          assert.strictEqual(after._tag, status._tag)
+          if (after._tag === "Open" && status._tag === "Open") {
+            assert.strictEqual(after.document.id, status.document.id)
+          }
+          yield* page.setContent("<title>Again</title><button>Again</button>")
+          assert.strictEqual(yield* page.getByRole("button").readText, "Again")
+          assert.strictEqual(yield* page.getByText("New script").count, 0)
+          yield* page.setContent("")
+          assert.strictEqual(yield* page.title, "")
+        }), timeout)
+
+      it.effect("setContent waits for resources by default and supports domcontentloaded", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          const child = fixtureUrl(origin, "<img src=\"/slow-image\">")
+          yield* page.setContent(`<img src="/slow-image"><iframe src="${child}"></iframe>`)
+          assert.isTrue(
+            yield* page.evaluateInMainWorld(() => {
+              const child = document.querySelector("iframe")!.contentDocument!
+              return child.readyState === "complete" && child.querySelector("img")!.complete
+            })
+          )
+          assert.isTrue(
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
+          )
+          yield* page.setContent(
+            "<img src=\"/pending-image\"><script defer src=\"/set-content-deferred.js\"></script>",
+            {
+              waitUntil: "domContentLoaded"
+            }
+          )
+          assert.strictEqual(yield* page.title, "Deferred")
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
+          )
+        }), timeout)
+
+      it.effect("setContent deadline stops waiting and permits a subsequent replacement", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          const error = yield* page.setContent("<img src=\"/pending-image\">").pipe(
+            Deadline.within("500 millis"),
+            Effect.flip
+          )
+          assert.isTrue(Deadline.isTimeout(error))
+          if (Deadline.isTimeout(error)) {
+            assert.strictEqual(error.operation, "Page.setContent")
+            assert.strictEqual(error.phase, "postcondition")
+            assert.strictEqual(error.diagnostics.cleanup._tag, "Completed")
+          }
+          yield* page.setContent("<title>Recovered</title>", { waitUntil: "domContentLoaded" })
+          assert.strictEqual(yield* page.title, "Recovered")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("setContent commit skips readiness and interruption leaves the page reusable", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          yield* page.setContent("<img src=\"/pending-image\">", { waitUntil: "commit" })
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
+          )
+          const replacing = yield* page.setContent("<h1>Waiting</h1><img src=\"/pending-image\">").pipe(
+            Effect.forkScoped
+          )
+          yield* page.getByRole("heading", { name: "Waiting" }).pipe(Expect.toBeVisible)
+          assert.isUndefined(replacing.pollUnsafe())
+          yield* Fiber.interrupt(replacing)
+          yield* page.setContent("<title>After interruption</title>", { waitUntil: "domContentLoaded" })
+          assert.strictEqual(yield* page.title, "After interruption")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+            ),
+            []
+          )
+        }), timeout)
+
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -313,7 +505,9 @@ export const contents = (
             y: Math.min(...red.map((p) =>
               p.y
             )),
-            width: Math.max(...red.map((p) => p.x)) - Math.min(...red.map((p) => p.x)) +
+            width: Math.max(...red.map((p) =>
+              p.x
+            )) - Math.min(...red.map((p) => p.x)) +
               1,
             height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
           }
@@ -794,6 +988,155 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("evaluates all current locator matches once, including none", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`))
+            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            assert.deepStrictEqual(
+              yield* page.locator("section").locator("p").evaluateAll(
+                async (elements, suffixes: { suffix: string }) => {
+                  elements[0]!.remove()
+                  await Promise.resolve()
+                  return {
+                    texts: elements.map((element) => element.textContent + suffixes.suffix),
+                    date: new Date(0)
+                  }
+                },
+                { suffix: "!" }
+              ),
+              { texts: ["a!", "b!"], date: new Date(0) }
+            )
+            assert.strictEqual(yield* page.locator("#absent").evaluateAll((elements) => elements.length), 0)
+            const thrown = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(async () => {
+                  throw new Error("all failed")
+                })
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(thrown.reason._tag, "EvaluationThrown")
+            const synchronous = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(() => {
+                  throw new Error("sync failed")
+                })
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(synchronous.reason._tag, "EvaluationThrown")
+            const invalid = reasonOf(
+              yield* Effect.exit(page.locator("[").evaluateAll((elements) => elements.length))
+            ) as Locator.LocatorError
+            assert.strictEqual(invalid.reason._tag, "InvalidInput")
+            const bad = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").evaluateAll(
+                  (_elements, value: unknown) => value,
+                  Symbol("bad")
+                )
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(bad.reason._tag, "NotSerializable")
+            const node = reasonOf(
+              yield* Effect.exit(page.locator("p").evaluateAll((elements) => elements))
+            ) as Locator.LocatorError
+            assert.strictEqual(node.reason._tag, "NotSerializable")
+          }))
+        }), timeout)
+
+      it.effect("evaluates snapshot matches detached between query and callback", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            const original = Runtime.elements
+            let queries = 0
+            const hook = vi.spyOn(Runtime, "elements").mockImplementation((...args) =>
+              original(...args).pipe(
+                Effect.tap(() =>
+                  Effect.gen(function*() {
+                    queries++
+                    yield* page.evaluateInMainWorld(() => {
+                      const matches = Array.from(document.querySelectorAll("p"))
+                      // Keep detached nodes reachable, so this probes detachment rather than garbage collection.
+                      Object.assign(window, { detachedMatches: matches })
+                      for (const match of matches) match.remove()
+                    }).pipe(Effect.orDie)
+                  })
+                )
+              )
+            )
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            assert.deepStrictEqual(
+              yield* page.locator("p").evaluateAll((elements) =>
+                elements.map((element) => ({
+                  text: element.textContent,
+                  connected: element.isConnected
+                }))
+              ),
+              [{ text: "a", connected: false }, { text: "b", connected: false }]
+            )
+            assert.strictEqual(queries, 1)
+            assert.strictEqual(yield* page.locator("p").count, 0)
+          }))
+        }), timeout)
+
+      it.effect(
+        "evaluates all current matches with a pending promise and releases its late result after interruption",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+              if (
+                yield* isolatedRefused(
+                  page.locator("p").evaluateAll((elements) => elements.length)
+                )
+              ) {
+                return
+              }
+              const cleaned = yield* Deferred.make<void>()
+              const lateMethods: Array<string> = []
+              const waiting = yield* page.locator("p").evaluateAll((elements) =>
+                new Promise<Array<string | null>>((resolve) => {
+                  document.addEventListener(
+                    "finish-evaluation",
+                    () => resolve(elements.map((element) => element.textContent)),
+                    { once: true }
+                  )
+                  document.body.setAttribute("data-evaluation-started", "yes")
+                })
+              ).pipe(
+                Protocol.withLateReplyHandler((reply) => {
+                  lateMethods.push(reply.method)
+                  if (name !== "Firefox") {
+                    const raw = reply.result as { result?: { objectId?: string } }
+                    assert.strictEqual(typeof raw.result?.objectId, "string")
+                  }
+
+                  // Await the real protocol release acknowledgments before reporting cleanup complete.
+                  return reply.release.pipe(Effect.andThen(Deferred.succeed(cleaned, undefined)))
+                }),
+                Effect.forkChild
+              )
+              yield* page.locator("body").pipe(Expect.toHaveAttribute("data-evaluation-started", "yes"))
+              yield* Fiber.interrupt(waiting)
+              assert.deepStrictEqual(lateMethods, [])
+              yield* page.evaluateInMainWorld(() => document.dispatchEvent(new Event("finish-evaluation")))
+              yield* Deferred.await(cleaned)
+              assert.deepStrictEqual(lateMethods, [
+                name === "Firefox" ? "script.callFunction" : "Runtime.callFunctionOn"
+              ])
+            }))
+          }),
+        timeout
+      )
+
       it.effect("grants user activation to main-world evaluation inside withUserGesture", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -827,11 +1170,18 @@ export const contents = (
               yield* add.click()
               yield* add.click()
               yield* frame.locator("#count").pipe(Expect.toHaveText("2"))
+              assert.isTrue(yield* frame.getByLabel("Name").isEditable)
               yield* frame.getByLabel("Name").fill(`typed in ${id}`)
               assert.strictEqual(yield* frame.getByLabel("Name").readValue, `typed in ${id}`)
               assert.strictEqual(yield* frame.getByRole("heading").readText, id === "same" ? "Same" : "Cross")
               assert.strictEqual(yield* frame.locator("button").count, 1)
               if (yield* supports("isolatedWorlds")) {
+                assert.deepStrictEqual(
+                  yield* frame.locator("button").evaluateAll((elements) =>
+                    elements.map((element) => element.ownerDocument.location.origin)
+                  ),
+                  [id === "same" ? origin : crossSite]
+                )
                 assert.strictEqual(
                   yield* frame.getByRole("heading").evaluate((element) => element.ownerDocument.location.origin),
                   id === "same" ? origin : crossSite
@@ -1283,7 +1633,7 @@ export const contents = (
             assert.deepStrictEqual(
               yield* pixel(
                 yield* page.screenshot({
-                  area: { _tag: "Clip", rect: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
+                  area: { clip: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
                 })
               ),
               [30, 170, 90, 255]
@@ -1319,21 +1669,21 @@ export const contents = (
             assert.deepStrictEqual(viewport, { width: Math.round(width * ratio), height: Math.round(height * ratio) })
             const clip = pngSize(
               yield* page.screenshot({
-                area: { _tag: "Clip", rect: cssRect({ x: 10, y: 2000, width: 100, height: 50 }) }
+                area: { clip: cssRect({ x: 10, y: 2000, width: 100, height: 50 }) }
               })
             )
             assert.deepStrictEqual(clip, { width: 100 * ratio, height: 50 * ratio })
-            const box = pngSize(yield* page.screenshot({ area: { _tag: "Element", locator: page.locator("#box") } }))
+            const box = pngSize(yield* page.screenshot({ area: { element: page.locator("#box") } }))
             assert.deepStrictEqual(box, { width: 120 * ratio, height: 80 * ratio })
             const frame = page.frame(page.locator("#frame"))
             yield* frame.locator("#inner").pipe(Expect.toBeVisible)
             const inner = pngSize(
-              yield* page.screenshot({ area: { _tag: "Element", locator: frame.locator("#inner") } })
+              yield* page.screenshot({ area: { element: frame.locator("#inner") } })
             )
             assert.deepStrictEqual(inner, { width: 50 * ratio, height: 40 * ratio })
-            const full = pngSize(yield* page.screenshot({ area: { _tag: "FullPage" } }))
+            const full = pngSize(yield* page.screenshot({ area: "fullPage" }))
             assert.strictEqual(full.height, (1500 + 80 + 200 + 1000) * ratio + (full.height % ratio))
-            const jpeg = yield* Effect.exit(page.screenshot({ format: { _tag: "Jpeg", quality: 50 } }))
+            const jpeg = yield* Effect.exit(page.screenshot({ format: "jpeg", quality: 50 }))
             if (yield* fullySupports("screenshot.format")) {
               assert(Exit.isSuccess(jpeg), String(jpeg))
               assert.deepStrictEqual([...jpeg.value.subarray(0, 2)], [0xff, 0xd8])
@@ -1345,7 +1695,7 @@ export const contents = (
               })
             }
             const missing = reasonOf(
-              yield* Effect.exit(page.screenshot({ area: { _tag: "Element", locator: page.locator("#none") } }))
+              yield* Effect.exit(page.screenshot({ area: { element: page.locator("#none") } }))
             )
             // A capture never waits: an element that isn't there is the locator's NoMatch (QUIRKS.md, Q126)
             assert.strictEqual((missing as unknown as Page.PageError).reason._tag, "NoMatch")
@@ -1363,7 +1713,7 @@ export const contents = (
               devicePixelRatio
             )
             const clip = pngSize(
-              yield* page.screenshot({ area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) } })
+              yield* page.screenshot({ area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) } })
             )
             assert.deepStrictEqual(clip, { width: 20 * ratio, height: 20 * ratio })
           }))
@@ -1382,7 +1732,7 @@ export const contents = (
             const clear = yield* Effect.exit(
               page.screenshot({
                 omitBackground: true,
-                area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
+                area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
               })
             )
             if (yield* supports("screenshot.cssScale")) {
@@ -1406,7 +1756,7 @@ export const contents = (
             }
             // The background is back afterwards
             const after = yield* page.screenshot({
-              area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
+              area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
             })
             assert.strictEqual(firstAlpha(after), 255)
           }))
@@ -1480,7 +1830,7 @@ export const contents = (
               yield* jar.set({
                 name: "token",
                 value: Redacted.make("secret"),
-                scope: { _tag: "Url", url: `${origin}/app/page` }
+                scope: { url: `${origin}/app/page` }
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
@@ -1499,12 +1849,12 @@ export const contents = (
             yield* jar.set({
               name: "token",
               value: Redacted.make("secret"),
-              scope: { _tag: "Url", url: `${origin}/app/page` }
+              scope: { url: `${origin}/app/page` }
             })
             yield* jar.set({
               name: "other",
               value: "2",
-              scope: { _tag: "Domain", domain: new URL(crossSite).hostname, path: "/" },
+              scope: { domain: new URL(crossSite).hostname, path: "/" },
               sameSite: "strict"
             })
             const all = yield* jar.list
@@ -1531,7 +1881,7 @@ export const contents = (
             const partitioned = yield* Effect.exit(jar.set({
               name: "chip",
               value: "1",
-              scope: { _tag: "Url", url: "https://shop.example/" },
+              scope: { url: "https://shop.example/" },
               secure: true,
               sameSite: "none",
               partitionKey: {
@@ -1556,7 +1906,7 @@ export const contents = (
             yield* jar.clear
             assert.deepStrictEqual(yield* jar.list, [])
             const invalid = reasonOf(
-              yield* Effect.exit(jar.set({ name: "a b", value: "1", scope: { _tag: "Url", url: origin } }))
+              yield* Effect.exit(jar.set({ name: "a b", value: "1", scope: { url: origin } }))
             )
             assert.strictEqual((invalid as unknown as CookieJar.CookieJarError).reason._tag, "InvalidInput")
           }))

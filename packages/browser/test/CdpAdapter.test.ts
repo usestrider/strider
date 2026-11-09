@@ -1339,9 +1339,9 @@ describe("Chromium capture document replacement", () => {
         const pending = yield* Effect.forkScoped(
           reader.screenshot(
             preparation === "layout"
-              ? { area: { _tag: "FullPage" } }
+              ? { area: "fullPage" }
               : preparation === "element"
-              ? { area: { _tag: "Element", locator: reader.locator("main") } }
+              ? { area: { element: reader.locator("main") } }
               : undefined
           ).pipe(Effect.flip)
         )
@@ -1659,7 +1659,7 @@ describe("Chromium screenshot renderer readiness", () => {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(page.screenshot({
-          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: { _tag: "FullPage" as const } } : {}),
+          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: "fullPage" as const } : {}),
           scale: sizing === "css" || sizing === "fullPageCss" ? "css" : "device"
         }))
         const first = yield* Queue.take(h.screenshotWork)

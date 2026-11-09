@@ -884,11 +884,24 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               yield* page.locator("#name").fill("Ada")
               yield* page.locator("#secret").fill(Redacted.make("hunter2"))
               yield* page.getByRole("button", { name: "Go" }).click()
+              yield* page.setContent("<h1>Replacement fixture</h1>")
               yield* trace.exportTrace(strict)
               yield* trace.exportTrace(local).pipe(Diagnostics.withPreset("local"))
             }))
             const events = lines((yield* unzip(strict)).get("trace.trace"))
             const snapshots = events.filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+            const replacement = events.find((event) => event.type === "before" && event.title === "Page.setContent")!
+            assert.isDefined(replacement)
+            const replaced = snapshots.filter((each) => each.callId === replacement.callId && each.isMainFrame)
+            assert.isDefined(replaced.find((each) => each.phase === "before"))
+            const replacedAfter = replaced.find((each) => each.phase === "after")
+            assert.isDefined(replacedAfter)
+            assert.isDefined(
+              find(
+                expand(snapshots, replacedAfter),
+                (node) => node[0] === "H1" && textOf(node) === "Replacement fixture"
+              )
+            )
             const click = events.find((event) => event.type === "before" && event.title === "Locator.click")!
             const main = (phase: string) =>
               snapshots.find((each) => each.callId === click.callId && each.phase === phase && each.isMainFrame)
@@ -911,10 +924,14 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.strictEqual(input("secret")[1]["__playwright_value_"], "REDACTED")
             assert.notInclude(JSON.stringify(snapshots), "__strider_secret__")
             assert.notInclude(JSON.stringify(snapshots), "hunter2")
-            assert.isDefined(find(tree(after), (node) =>
-              node[0] === "template" && node[1]["__playwright_shadow_root_"] === "open" && textOf(node) === "shadow"))
-            assert.isDefined(find(tree(after), (node) =>
-              node[0] === "template" && String(node[1]["__playwright_style_sheet_"]).includes("font-weight")))
+            assert.isDefined(
+              find(tree(after), (node) =>
+                node[0] === "template" && node[1]["__playwright_shadow_root_"] === "open" && textOf(node) === "shadow")
+            )
+            assert.isDefined(
+              find(tree(after), (node) =>
+                node[0] === "template" && String(node[1]["__playwright_style_sheet_"]).includes("font-weight"))
+            )
             assert.include(
               textOf(
                 find(tree(after), (node) =>
@@ -936,7 +953,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.include(JSON.stringify(after.html), "[[")
             // A local export keeps the secret
             const kept = lines((yield* unzip(local)).get("trace.trace"))
-              .filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+              .filter((event) =>
+                event.type === "frame-snapshot"
+              ).map((event) => event.snapshot)
             assert.include(JSON.stringify(kept), "hunter2")
           }),
         timeout

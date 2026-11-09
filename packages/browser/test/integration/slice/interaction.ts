@@ -8,6 +8,7 @@ import {
   Browser,
   Condition,
   Deadline,
+  Dialog,
   Expect,
   FileInput,
   Keyboard,
@@ -115,6 +116,408 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
   describe(`${name} interaction`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
+
+      it.effect(
+        "selectText selects control values and DOM contents without editing",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p><p id="unfocusable">unfocusable text</p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [id, text] of [["input", "Ada Lovelace"], ["area", "two lines"], ["editable", "nested text"], [
+                "plain",
+                "plain text"
+              ]] as const
+            ) {
+              const target = page.locator(`#${id}`)
+              yield* target.selectText()
+              const selected = yield* page.evaluateInMainWorld((id: string) => {
+                const element = document.getElementById(id)!
+                if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+                  return element.value.slice(element.selectionStart ?? 0, element.selectionEnd ?? 0)
+                }
+                return element.ownerDocument.getSelection()?.toString() ?? ""
+              }, id)
+              assert.strictEqual(selected, text)
+              assert.isTrue(yield* page.evaluateInMainWorld((id: string) => document.activeElement?.id === id, id))
+            }
+            yield* page.locator("#unfocusable").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "unfocusable text")
+            assert.isFalse(
+              yield* page.evaluateInMainWorld(() => document.activeElement?.id === "unfocusable")
+            )
+            assert.strictEqual(yield* page.locator("#input").readValue, "Ada Lovelace")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText selects email values without relying on selection offsets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="email" value="ada@example.com">`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const email = page.locator("input")
+            yield* email.selectText()
+            assert.strictEqual(yield* email.readValue, "ada@example.com")
+            yield* email.press("Backspace")
+            assert.strictEqual(yield* email.readValue, "")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText follows associated labels and preserves interactive targets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<label id="explicit" for="field"><span id="nested">Name</span><button id="button"><span id="buttonText">button text</span></button></label><input id="field" value="hello"><label id="implicit">Other<input id="other" value="world"></label><label id="unassociated">own text</label>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [label, control] of [["explicit", "field"], ["nested", "field"], ["implicit", "other"]] as const
+            ) {
+              yield* page.locator(`#${label}`).selectText({ trial: true })
+              assert.isFalse(
+                yield* page.evaluateInMainWorld((id: string) => document.activeElement?.id === id, control)
+              )
+              yield* page.locator(`#${label}`).selectText()
+              assert.deepStrictEqual(
+                yield* page.evaluateInMainWorld((id: string) => {
+                  const input = document.getElementById(id) as HTMLInputElement
+                  const result = [document.activeElement?.id, input.selectionStart, input.selectionEnd]
+                  input.blur()
+                  input.setSelectionRange(0, 0)
+                  return result
+                }, control),
+                [control, 0, 5]
+              )
+            }
+            yield* page.locator("#buttonText").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => [document.activeElement?.id, getSelection()?.toString()]),
+              ["button", "button text"]
+            )
+            yield* page.locator("#unassociated").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "own text")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText uses native number selection and accepts inputs without selectable text",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="number" type="number" value="42"><input id="checkbox" type="checkbox" checked>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const number = page.locator("#number")
+            yield* number.selectText()
+            yield* number.press("Backspace")
+            assert.strictEqual(yield* number.readValue, "")
+            yield* number.press("7")
+            assert.strictEqual(yield* number.readValue, "7")
+            yield* page.locator("#checkbox").selectText({ trial: true })
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "number"))
+            yield* page.locator("#checkbox").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("checkbox") as HTMLInputElement
+                return [document.activeElement?.id, input.checked, input.selectionStart, input.selectionEnd]
+              }),
+              ["checkbox", true, null, null]
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText checks the matched label visibility before retargeting",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<label id="hiddenLabel" for="visible" style="display:none">Hidden</label><input id="visible" value="hello"><label id="visibleLabel" for="hidden">Visible</label><input id="hidden" value="world" style="display:none">`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const hiddenLabel = page.locator("#hiddenLabel")
+            const error = yield* hiddenLabel.selectText({ trial: true }).pipe(
+              Deadline.within("150 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(error))
+            yield* hiddenLabel.selectText({ checks: { visible: false } })
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "visible"))
+            yield* page.locator("#visibleLabel").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("hidden") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd]
+              }),
+              [0, 5]
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText trial preserves focus and selection; visibility can be overridden",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" value="hello"><p id="hidden" style="display:none">hidden text</p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText({ trial: true })
+            assert.isFalse(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "field"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                (document.getElementById("field") as HTMLInputElement).selectionEnd
+              ),
+              0
+            )
+            const hidden = page.locator("#hidden")
+            const error = yield* hidden.selectText().pipe(Deadline.within("150 millis"), Effect.flip)
+            assert(Deadline.isTimeout(error))
+            yield* hidden.selectText({ checks: { visible: false } })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText rejects ambiguous matches and waits for absent targets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="number" value="42"><p>one</p><p>two</p>`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("p").selectText().pipe(Effect.flip)
+            assert(Locator.isLocatorError(error))
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            const missing = yield* page.locator("#missing").selectText().pipe(
+              Deadline.within("150 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText permits readonly, disabled, inert and covered targets without input events",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div inert><input id="field" readonly disabled value="unchanged"></div><div style="position:fixed;inset:0">cover</div><label id="label" for="field">label text</label><script>window.edits=0;document.addEventListener('input',()=>window.edits++);document.addEventListener('change',()=>window.edits++);</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("field") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd, input.value]
+              }),
+              [0, 9, "unchanged"]
+            )
+            yield* page.locator("#label").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("field") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd]
+              }),
+              [0, 9]
+            )
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as unknown as { edits: number }).edits), 0)
+          })),
+        timeout
+      )
+
+      it.effect("selectText selects within the target frame document", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<iframe srcdoc='<p id="target" tabindex="0">frame text</p>'></iframe>`)
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("#target")
+          yield* target.selectText()
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              (document.querySelector("iframe") as HTMLIFrameElement).contentDocument!.getSelection()?.toString()
+            ),
+            "frame text"
+          )
+          assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "")
+        })), timeout)
+
+      it.effect(
+        "dispatchEvent constructs an explicit custom event on a hidden disabled target exactly once",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target" disabled hidden>Target</button>${out}
+            <script>let count = 0; document.addEventListener('sample', e => {
+              document.querySelector('#out').textContent = JSON.stringify([++count, e.detail, e.bubbles, e.cancelable, e.composed, e.isTrusted]);
+              e.preventDefault();
+            });</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#target").dispatchEvent("sample", {
+              eventClass: "CustomEvent",
+              init: { detail: { value: 42 } }
+            })
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), [
+              1,
+              { value: 42 },
+              true,
+              true,
+              true,
+              false
+            ])
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent uses a frame's constructors and explicit event flags",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const inner = `<button id="target">Target</button><p id="out"></p><script>
+            document.querySelector('button').addEventListener('click', e => document.querySelector('#out').textContent = JSON.stringify([e instanceof MouseEvent, e.clientX, e.bubbles, e.cancelable, e.composed]));</script>`
+            const { url } = yield* fixture((origin) =>
+              `<iframe style="margin-top:3000px" src="${
+                fixtureUrl(origin.replace("127.0.0.1", "localhost"), inner)
+              }"></iframe>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const frame = page.frame(page.locator("iframe"))
+            yield* frame.locator("#target").dispatchEvent("click", {
+              eventClass: "MouseEvent",
+              init: { clientX: 27, bubbles: false, cancelable: false, composed: false }
+            })
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => window.scrollY), 0)
+            assert.deepStrictEqual(JSON.parse(yield* frame.locator("#out").readText), [true, 27, false, false, false])
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent is strict, waits for attachment, supports trial and preserves deadlines",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div></div><div></div>${out}<script>
+            document.addEventListener('sample', () => document.querySelector('#out').textContent = 'sent');
+            setTimeout(() => { const node = document.createElement('button'); node.id = 'later'; document.body.append(node); }, 100);</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const strict = yield* page.locator("div").dispatchEvent("sample").pipe(Effect.flip)
+            assert(Locator.isLocatorError(strict))
+            assert.strictEqual(strict.reason._tag, "StrictViolation")
+            yield* page.locator("#later").dispatchEvent("sample", {
+              trial: true,
+              eventClass: "MissingEvent" as "Event"
+            })
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            yield* page.locator("#later").dispatchEvent("sample")
+            assert.strictEqual(yield* page.locator("#out").readText, "sent")
+            const missing = yield* page.locator("#missing").dispatchEvent("sample").pipe(
+              Deadline.within("50 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent refuses unavailable constructors, invalid DOM initialization and cycles without sending",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target">Target</button>${out}<script>
+            document.addEventListener('sample', () => document.querySelector('#out').textContent = 'sent');</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#target")
+            const unavailable = yield* target.dispatchEvent("sample", { eventClass: "MissingEvent" as "Event" }).pipe(
+              Effect.flip
+            )
+            assert(Locator.isLocatorError(unavailable))
+            assert.strictEqual(unavailable.reason._tag, "Unsupported")
+            assert.deepStrictEqual(unavailable.diagnostics.dispatch, { _tag: "NotSent" })
+            const invalid = yield* target.dispatchEvent("sample", {
+              eventClass: "FocusEvent",
+              init: { relatedTarget: {} }
+            }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(invalid))
+            assert.strictEqual(invalid.reason._tag, "InvalidInput")
+            assert.deepStrictEqual(invalid.diagnostics.dispatch, { _tag: "NotSent" })
+            const cycle: Record<string, unknown> = {}
+            cycle.self = cycle
+            const serialized = yield* target.dispatchEvent("sample", { init: cycle }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(serialized))
+            assert.strictEqual(serialized.reason._tag, "NotSerializable")
+            assert.deepStrictEqual(serialized.diagnostics.dispatch, { _tag: "NotSent" })
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            yield* target.dispatchEvent("sample")
+            assert.strictEqual(yield* page.locator("#out").readText, "sent")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "dispatchEvent resolves again if its node detaches before dispatch",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="target">Target</button>${out}<script>
+            let count = 0; document.addEventListener('sample', () => document.querySelector('#out').textContent = String(++count));</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#target") as LocatorImpl
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            let replaced = false
+            const intercepted: typeof original = (realm, call) => {
+              if (!replaced && call.functionDeclaration.includes("function dispatchDOMEvent")) {
+                replaced = true
+                return original(realm, {
+                  ...call,
+                  functionDeclaration: `function(element, ...args) {
+                const next = element.cloneNode(true); element.replaceWith(next);
+                return (${call.functionDeclaration})(element, ...args);
+              }`
+                })
+              }
+              return original(realm, call)
+            }
+            Object.assign(adapter, { evaluate: intercepted })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                Object.assign(adapter, { evaluate: original })
+              })
+            )
+            yield* target.dispatchEvent("sample")
+            assert(replaced)
+            assert.strictEqual(yield* page.locator("#out").readText, "1")
+          })),
+        timeout
+      )
 
       // The guard itself: each thing a case can leave in the shared context is reported, and the cases after get a
       // new context. Each is left through a scope that is never closed, as a case's own leak would be. A popup closes
@@ -246,6 +649,110 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }
             assert.strictEqual(yield* page.frame(page.locator("#absent-frame")).getByRole("link").count, 0)
             assert.strictEqual(yield* page.getByRole("link").count, 1)
+          })),
+        timeout
+      )
+
+      it.effect(
+        "blurs only the matched element with native focus events and no input",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="a"><input id="b"><input id="hidden" hidden inert disabled><div id="plain"></div><math tabindex="0" id="math"><mi>x</mi></math><p id="events"></p>
+            <script>
+              const record = e => document.querySelector('#events').textContent += e.type + ':' + e.target.id + ';';
+              for (const element of document.querySelectorAll('input, div, math')) element.addEventListener('blur', record);
+              for (const type of ['focusout', 'keydown', 'pointerdown', 'input'])
+                document.addEventListener(type, record, true);
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#a").focus()
+            const native = yield* page.evaluateInMainWorld(() => {
+              const field = document.querySelector<HTMLInputElement>("#a")!
+              const hasFocus = document.hasFocus()
+              field.blur()
+              const events = document.querySelector("#events")!
+              const recorded = events.textContent!
+              events.textContent = ""
+              return { hasFocus, events: recorded }
+            })
+            assert.include(native.events, "focusout:a;")
+            if (native.hasFocus) assert.include(native.events, "blur:a;")
+            yield* page.locator("#a").focus()
+            yield* page.locator("#a").blur({ trial: true })
+            yield* page.locator("#b").blur()
+            yield* page.locator("#a").pipe(Expect.toBeFocused)
+            yield* page.locator("#hidden").blur()
+            yield* page.locator("#plain").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(""))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
+            assert.notStrictEqual(yield* page.evaluateInMainWorld(() => document.activeElement?.id), "a")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#events")!.textContent = ""
+              document.querySelector<MathMLElement>("#math")!.focus()
+            })
+            const nativeMath = yield* page.evaluateInMainWorld(() => {
+              const events = document.querySelector("#events")!
+              const field = document.querySelector<MathMLElement>("#math")!
+              const hasFocus = document.hasFocus()
+              field.blur()
+              const recorded = events.textContent!
+              events.textContent = ""
+              return { hasFocus, events: recorded }
+            })
+            yield* page.evaluateInMainWorld(() => document.querySelector<MathMLElement>("#math")!.focus())
+            yield* page.locator("#math").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(nativeMath.events))
+            console.log("Native blur events", { html: native, math: nativeMath })
+            yield* page.evaluateInMainWorld(() => {
+              const foreign = document.createElementNS("urn:example", "widget")
+              foreign.setAttribute("id", "foreign")
+              document.body.append(foreign)
+            })
+            const wrong = yield* page.locator("#foreign").blur({ trial: true }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(wrong))
+            assert.strictEqual(wrong.reason._tag, "WrongElement")
+            const strict = yield* page.locator("input").blur().pipe(Effect.flip)
+            assert(Locator.isLocatorError(strict))
+            assert.strictEqual(strict.reason._tag, "StrictViolation")
+            const missing = yield* page.locator("#absent").blur().pipe(Deadline.within("100 millis"), Effect.flip)
+            assert(Deadline.isTimeout(missing))
+            assert.strictEqual(missing.operation, "Locator.blur")
+            assert.deepStrictEqual(missing.diagnostics.dispatch, { _tag: "NotSent" })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps blur in its owning context and uses the backend's engine world",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><p id="out"></p><script>
+            const nativeBlur = HTMLElement.prototype.blur;
+            HTMLElement.prototype.blur = function() {
+              document.querySelector('#out').textContent = 'page blur';
+              return nativeBlur.call(this);
+            };
+          </script>`
+            )
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const other = yield* newPage
+            yield* other.goto(url)
+            yield* other.locator("#field").focus()
+            yield* page.goto(url)
+            yield* page.locator("#field").focus()
+            yield* page.locator("#field").blur()
+            const isolated = yield* supports("isolatedWorlds")
+            yield* page.locator("#out").pipe(Expect.toHaveText(isolated ? "" : "page blur"))
+            yield* other.locator("#out").pipe(Expect.toHaveText(""))
+            assert.strictEqual(yield* other.evaluateInMainWorld(() => document.activeElement?.id), "field")
           })),
         timeout
       )
@@ -889,6 +1396,115 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url)
             yield* page.locator("#go").click({ position: { x: 13, y: 9 } })
             assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), { x: 58, y: 76, target: "go" })
+          }))
+        }), timeout)
+
+      it.effect("uses each action's rendered default and honors both overrides", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="text"><input id="box" type="checkbox"><input id="checked" type="checkbox" checked><input id="file" type="file"><select id="select"><option value="a">A</option></select><button id="end">End</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const text = page.locator("#text")
+            assert(text instanceof LocatorImpl)
+            const rounds = yield* observeChecks(text)
+            const actions: ReadonlyArray<
+              readonly [boolean, (options: Locator.ActionOptions) => Effect.Effect<unknown, unknown>]
+            > = [
+              [true, (o) => text.click(o)],
+              [true, (o) => text.dblclick(o)],
+              [true, (o) => text.tap(o)],
+              [true, (o) => text.hover(o)],
+              [true, (o) => page.locator("#box").check(o)],
+              [true, (o) => page.locator("#checked").uncheck(o)],
+              [true, (o) => text.dragTo(page.locator("#end"), o)],
+              [false, (o) => text.fill("value", o)],
+              [false, (o) => text.clear(o)],
+              [false, (o) => text.focus(o)],
+              [false, (o) => text.blur(o)],
+              [false, (o) => text.selectText(o)],
+              [false, (o) => text.press("a", o)],
+              [false, (o) => text.pressSequentially("a", o)],
+              [false, (o) => page.locator("#select").selectOption({ value: "a" }, o)],
+              [false, (o) => page.locator("#file").setInputFiles([], o)],
+              [false, (o) => text.scrollIntoView(o)]
+            ]
+            for (const [defaultRendered, act] of actions) {
+              for (const rendered of [undefined, false, true]) {
+                rounds.length = 0
+                yield* act({ trial: true, checks: { stable: false, ...(rendered === undefined ? {} : { rendered }) } })
+                assert.isAtLeast(rounds.length, 1)
+                for (const round of rounds) {
+                  assert.strictEqual(round.request.checks.rendered, rendered ?? defaultRendered)
+                  assert.strictEqual(round.frames, (rendered ?? defaultRendered) ? 1 : 0)
+                }
+              }
+            }
+          }))
+        }), timeout)
+
+      it.effect("applies the rendered choice to both drag endpoints", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<button id="start">Start</button><button id="end">End</button>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const start = page.locator("#start")
+            assert(start instanceof LocatorImpl)
+            const rounds = yield* observeChecks(start)
+            for (const rendered of [undefined, false, true]) {
+              rounds.length = 0
+              yield* start.dragTo(page.locator("#end"), {
+                checks: { stable: false, ...(rendered === undefined ? {} : { rendered }) }
+              })
+              assert(rounds.some((round) =>
+                round.request.steps.some((step) => step._tag === "Css" && step.selector === "#end")
+              ))
+              for (const round of rounds) {
+                assert.strictEqual(round.request.checks.rendered, rendered ?? true)
+                assert.strictEqual(round.frames, (rendered ?? true) ? 1 : 0)
+              }
+            }
+          }))
+        }), timeout)
+
+      it.effect("revalidates fill immediately under the input permit with rendered off", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<input id="field">`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            assert(field instanceof LocatorImpl)
+            const rounds = yield* observeChecks(field)
+            const input = field.owner.page.input
+            const original = input.withPermit
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                input.withPermit = (effect) =>
+                  original(Effect.andThen(
+                    page.evaluateInMainWorld(() => {
+                      ;(document.getElementById("field") as HTMLInputElement).disabled = true
+                    }).pipe(Effect.orDie),
+                    effect
+                  ))
+              }),
+              () =>
+                Effect.sync(() => {
+                  input.withPermit = original
+                })
+            )
+            const error = yield* field.fill("unsafe").pipe(Deadline.within("500 millis"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(yield* field.readValue, "")
+            assert(rounds.some((round) =>
+              round.request.apply && round.response._tag === "NotReady" && round.response.reason._tag === "Disabled"
+            ))
+            assert(rounds.every((round) =>
+              !round.request.checks.rendered
+            ))
           }))
         }), timeout)
 
@@ -1894,6 +2510,420 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "guards native design-mode fill when focus or selection changes after preparation",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) context.skip()
+            const { url } = yield* fixture(() =>
+              `<input id="other" value="other"><p id="target">old</p><p id="alternate">safe</p><script>document.designMode="on";
+            document.addEventListener("beforeinput", e => {
+              if (e.target.id === "other") document.body.dataset.wrong = "yes";
+            });</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.activate
+              const target = page.locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              for (const [value, change] of [["new", "focus"], ["", "focus"], ["new", "selection"]] as const) {
+                yield* page.evaluateInMainWorld(() => {
+                  document.getElementById("target")!.textContent = "old"
+                  delete document.body.dataset.wrong
+                })
+                let changed = false
+                const dispatchInput: typeof original = Effect.fnUntraced(
+                  function*(...args: Parameters<typeof original>) {
+                    if (!changed) {
+                      changed = true
+                      yield* (change === "focus"
+                        ? page.evaluateInMainWorld(() => (document.getElementById("other") as HTMLInputElement).focus())
+                        : page.evaluateInMainWorld(() => {
+                          const range = document.createRange()
+                          range.selectNodeContents(document.getElementById("alternate")!)
+                          const selection = getSelection()!
+                          selection.removeAllRanges()
+                          selection.addRange(range)
+                        })).pipe(Effect.orDie)
+                    }
+                    return yield* original(...args)
+                  }
+                )
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => target.fill(value).pipe(Deadline.within("2 seconds")),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                assert.strictEqual(yield* target.readText, value)
+                assert.strictEqual(yield* page.locator("#alternate").readText, "safe")
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.wrong), undefined)
+              }
+              yield* page.evaluateInMainWorld(() => {
+                const other = document.getElementById("other") as HTMLInputElement
+                other.focus()
+                other.setSelectionRange(5, 5)
+              })
+              yield* page.keyboard.insertText("x")
+              assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("retains native design-mode events in the prepared child document", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const record = `<script>
+            const nativeEvents = [];
+            document.documentElement.dataset.nativeEvents = "[]";
+            for (const type of ["keydown", "keypress", "keyup", "beforeinput", "input"]) {
+              window.addEventListener(type, event => {
+                if (event.isTrusted) {
+                  nativeEvents.push({ type, target: event.target.tagName,
+                    inputType: event.inputType || null, data: event.data || null });
+                  document.documentElement.dataset.nativeEvents = JSON.stringify(nativeEvents);
+                }
+              }, true);
+            }
+          </script>`
+          const child = fixtureUrl(
+            crossSite,
+            `<p id="target">old</p>${record}<script>document.designMode="on";</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>${record}`)
+            )
+            yield* page.activate
+            const frame = page.frame(page.locator("iframe"))
+            const target = frame.locator("#target")
+            yield* target.fill("new")
+            const parentEvents = yield* page.evaluateInMainWorld(() =>
+              JSON.parse(document.documentElement.dataset.nativeEvents!) as Array<{ type: string; target: string }>
+            )
+            const childEvents = JSON.parse(
+              Option.getOrThrow(yield* frame.locator("html").readAttribute("data-native-events"))
+            ) as Array<{ type: string; target: string; data: string | null }>
+            console.info("native design-mode frame evidence", JSON.stringify({ parentEvents, childEvents }))
+            assert(childEvents.some((event) => event.type === "beforeinput"))
+            assert(childEvents.some((event) => event.type === "input"))
+            assert(!parentEvents.some((event) => event.type === "beforeinput" || event.type === "input"))
+            assert.strictEqual(yield* target.readText, "new")
+            assert.strictEqual(yield* page.locator("#other").readValue, "other")
+          }))
+        }), timeout)
+
+      it.effect(
+        "guards design-mode insertion when focus moves into an ancestor document",
+        () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              yield* page.activate
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              let changed = false
+              const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+                if (!changed) {
+                  changed = true
+                  yield* page.evaluateInMainWorld(() => (document.getElementById("other") as HTMLInputElement).focus())
+                    .pipe(Effect.orDie)
+                }
+                return yield* original(...args)
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                () => target.fill("new").pipe(Deadline.within("2 seconds")),
+                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+              )
+              assert.strictEqual(yield* page.locator("#other").readValue, "other")
+              assert.strictEqual(yield* target.readText, "new")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "holds already queued ordinary input until interrupted fill guards are removed",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const child = fixtureUrl(origin, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const armed = yield* Deferred.make<void>()
+              const cleaning = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              const queued = yield* Deferred.make<void>()
+              const input = target.owner.page.input
+              const withPermit = input.withPermit.bind(input)
+              const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                const argument = call.arguments[0]
+                const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string"
+                  ? JSON.parse(argument.value.value) as Engine.Request :
+                  undefined
+                if (request?.op === "fillDisarm") {
+                  yield* Deferred.succeed(cleaning, undefined)
+                  yield* Deferred.await(release)
+                }
+                const result = yield* original(realm, call)
+                if (request?.op === "fillGuard" && !request.ancestor) {
+                  yield* Deferred.succeed(armed, undefined)
+                  return yield* Effect.never
+                }
+                return result
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { evaluate })),
+                () =>
+                  Effect.gen(function*() {
+                    const fill = yield* target.fill("new").pipe(Effect.forkScoped)
+                    yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                    yield* page.evaluateInMainWorld(() => {
+                      const other = document.getElementById("other") as HTMLInputElement
+                      other.focus()
+                      other.setSelectionRange(5, 5)
+                    })
+                    yield* Effect.sync(() =>
+                      Object.assign(input, {
+                        withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+                          Deferred.succeed(queued, undefined).pipe(Effect.andThen(withPermit(effect)))
+                      })
+                    )
+                    const ordinary = yield* page.keyboard.insertText("x").pipe(Effect.forkScoped)
+                    yield* Deferred.await(queued)
+                    yield* Effect.yieldNow
+                    yield* Fiber.interrupt(fill).pipe(Deadline.within("2 seconds"))
+                    yield* Deferred.await(cleaning).pipe(Deadline.within("2 seconds"))
+                    assert.strictEqual(
+                      ordinary.pollUnsafe(),
+                      undefined,
+                      "queued input must remain blocked during cleanup"
+                    )
+                    yield* Deferred.succeed(release, undefined)
+                    yield* Fiber.join(ordinary).pipe(Deadline.within("2 seconds"))
+                    assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+                    assert.strictEqual(yield* target.readText, "old")
+                  }),
+                () =>
+                  Effect.gen(function*() {
+                    yield* Deferred.succeed(release, undefined)
+                    yield* Effect.sync(() => {
+                      Object.assign(adapter, { evaluate: original })
+                      Object.assign(input, { withPermit })
+                    })
+                  })
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps ordinary input blocked when fill guard cleanup fails in a live document",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const child = fixtureUrl(origin, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const armed = yield* Deferred.make<void>()
+              const failed = yield* Deferred.make<void>()
+              let cleanupAttempts = 0
+              const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                const argument = call.arguments[0]
+                const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string"
+                  ? JSON.parse(argument.value.value) as Engine.Request :
+                  undefined
+                if (request?.op === "fillDisarm") {
+                  cleanupAttempts++
+                  if (cleanupAttempts === 2) yield* Deferred.succeed(failed, undefined)
+                  return yield* Effect.die("injected cleanup failure in a still-live document")
+                }
+                const result = yield* original(realm, call)
+                if (request?.op === "fillGuard" && !request.ancestor) {
+                  yield* Deferred.succeed(armed, undefined)
+                  return yield* Effect.never
+                }
+                return result
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { evaluate })),
+                () =>
+                  Effect.gen(function*() {
+                    const fill = yield* target.fill("new").pipe(Effect.forkScoped)
+                    yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                    yield* Fiber.interrupt(fill).pipe(Deadline.within("2 seconds"))
+                    yield* Deferred.await(failed).pipe(Deadline.within("2 seconds"))
+                    yield* page.evaluateInMainWorld(() => {
+                      const other = document.getElementById("other") as HTMLInputElement
+                      other.focus()
+                      other.setSelectionRange(5, 5)
+                    })
+                    const exit = yield* page.keyboard.insertText("x").pipe(Deadline.within("100 millis"), Effect.exit)
+                    assert(Exit.isFailure(exit), "unconfirmed cleanup must prevent native input from being sent")
+                    assert.strictEqual(cleanupAttempts, 2, "cleanup must attempt every document after a failure")
+                    assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                    assert.strictEqual(yield* target.readText, "old")
+                  }),
+                () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "releases design-mode insertion guards on failure, interruption and dialogs",
+        () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const child = fixtureUrl(
+              crossSite,
+              `<p id="probe">child</p><p id="target">old</p><script>document.designMode="on";</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              yield* page.activate
+              const frame = page.frame(page.locator("iframe"))
+              const target = frame.locator("#target")
+              const probe = frame.locator("#probe")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const shown = yield* Deferred.make<void>()
+              const releaseDialog = yield* Deferred.make<void>()
+              yield* Dialog.handle(page, (dialog) =>
+                Deferred.succeed(shown, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDialog)),
+                  Effect.andThen(Dialog.dismissAll(dialog))
+                ))
+              let probes = 0
+              for (const phase of ["failure", "interruption", "dialog"] as const) {
+                const armed = yield* Deferred.make<void>()
+                const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                  const result = yield* original(realm, call)
+                  const argument = call.arguments[0]
+                  const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                      argument.value.type === "string"
+                    ? JSON.parse(argument.value.value) as Engine.Request :
+                    undefined
+                  if (request?.op === "fillGuard" && !request.ancestor) {
+                    yield* Deferred.succeed(armed, undefined)
+                    if (phase === "failure") return yield* Effect.die("injected after installing the insertion guards")
+                    return yield* Effect.never
+                  }
+                  return result
+                })
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { evaluate })),
+                  () =>
+                    Effect.gen(function*() {
+                      const fiber = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                      yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                      let opening: Fiber.Fiber<unknown, unknown> | undefined
+                      if (phase === "dialog") {
+                        opening = yield* page.evaluateInMainWorld(() => alert("hold insertion cleanup")).pipe(
+                          Effect.forkScoped
+                        )
+                        yield* Deferred.await(shown).pipe(Deadline.within("2 seconds"))
+                      }
+                      if (phase !== "failure") yield* Fiber.interrupt(fiber)
+                      const exit = yield* Fiber.await(fiber)
+                      assert(Exit.isFailure(exit))
+                      if (phase === "dialog") {
+                        yield* Deferred.succeed(releaseDialog, undefined)
+                        yield* page.status.waitFor((status) => status._tag === "Open" && Option.isNone(status.prompt))
+                          .pipe(Deadline.within("2 seconds"))
+                        if (opening !== undefined) yield* Fiber.await(opening)
+                      }
+                    }),
+                  () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+                )
+                yield* page.evaluateInMainWorld(() => {
+                  const other = document.getElementById("other") as HTMLInputElement
+                  other.value = "other"
+                  other.focus()
+                  other.setSelectionRange(5, 5)
+                })
+                yield* page.keyboard.insertText("x")
+                assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+                yield* probe.click()
+                yield* probe.press("End")
+                yield* probe.press("x")
+                probes++
+                assert.strictEqual(yield* probe.readText, "child" + "x".repeat(probes))
+                assert.strictEqual(yield* target.readText, "old")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("does not replay partially inserted design-mode text after focus moves", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture((origin) =>
+            `<input id="other" value="other"><iframe src="${
+              fixtureUrl(
+                origin,
+                `<p id="target">old</p><output id="events">0</output><script>
+              document.designMode="on";
+              document.addEventListener("input", () => {
+                const events = document.getElementById("events");
+                events.textContent = String(Number(events.textContent) + 1);
+                parent.document.getElementById("other").focus();
+              });</script>`
+              )
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.activate
+            const frame = page.frame(page.locator("iframe"))
+            const result = yield* frame.locator("#target").fill("new").pipe(Deadline.within("2 seconds"), Effect.result)
+            assert.strictEqual(yield* page.locator("#other").readValue, "other")
+            const inputs = Number(yield* frame.locator("#events").readText)
+            const text = yield* frame.locator("#target").readText
+            if (result._tag === "Success") {
+              assert.strictEqual(text, "new")
+              assert.isAtLeast(inputs, 1)
+            } else {
+              assert(
+                Locator.isLocatorError(result.failure) && result.failure.reason._tag === "BackendFailure",
+                String(result.failure)
+              )
+              assert.strictEqual(inputs, 1)
+              assert.isAbove(text.length, 0)
+              assert.isBelow(text.length, 3)
+              assert("new".startsWith(text))
+            }
+          }))
+        }), timeout)
+
+      it.effect(
         "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",
         (context) =>
           Effect.gen(function*() {
@@ -1904,6 +2934,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="other"><p id="target">old</p><script>
               document.designMode = "on";
               const other = document.getElementById("other");
+              document.addEventListener("beforeinput", (event) => {
+                if (event.data === "new") {
+                  document.body.dataset.insertionTarget = event.target === other ? "other" : "document";
+                }
+              });
               other.onblur = () => {
                 document.body.dataset.blurs = String(Number(document.body.dataset.blurs ?? 0) + 1);
                 setTimeout(() => {
@@ -1927,6 +2962,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 yield* page.evaluateInMainWorld(() => Number(document.body.dataset.blurs ?? 0)),
                 0,
                 "the native blur handler must execute"
+              )
+              assert.notStrictEqual(
+                yield* page.evaluateInMainWorld(() => document.body.dataset.insertionTarget),
+                "other",
+                "native insertion must not reach the previously focused input"
               )
               assert.strictEqual(yield* page.locator("#other").readValue, "other")
               // Scheduled refocus can race insertion. Successful completion is valid only on the intended target.
@@ -3563,6 +4603,45 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("reads isEditable using the action and expectation rules", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="text"><input id="date" type="date"><textarea id="readonly" readonly></textarea>
+             <fieldset disabled><input id="disabled"></fieldset>
+             <div contenteditable><span id="inherited">edit</span><span id="off" contenteditable="false">off</span></div>
+             <input id="aria" aria-readonly="true"><input id="case" aria-readonly="TRUE">
+             <div aria-readonly="true"><input id="readonlyAncestor"></div>
+             <div aria-disabled="true"><input id="ariaDisabled"></div>
+             <input id="inert" inert><input id="hidden" hidden>
+             <div id="inertEdit" contenteditable inert>edit</div><div id="hiddenEdit" contenteditable hidden>edit</div>
+             <select id="select"></select><input id="checkbox" type="checkbox"><div id="role" role="textbox"></div>
+             <p class="two">a</p><p class="two">b</p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (const id of ["text", "date", "inherited", "case", "inert", "hidden", "readonlyAncestor"]) {
+              assert.isTrue(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            // The engine follows the native property: WebKit can suppress editability here.
+            for (const id of ["inertEdit", "hiddenEdit"]) {
+              const native = yield* page.evaluateInMainWorld((id) => document.getElementById(id)!.isContentEditable, id)
+              assert.strictEqual(yield* page.locator(`#${id}`).isEditable, native, id)
+            }
+            for (const id of ["readonly", "disabled", "off", "aria", "ariaDisabled", "select", "checkbox", "role"]) {
+              assert.isFalse(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            for (const [selector, tag] of [["#absent", "NoMatch"], [".two", "StrictViolation"]] as const) {
+              const error = yield* page.locator(selector).isEditable.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === tag, String(error))
+            }
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#text")!.readOnly = true
+            })
+            assert.isFalse(yield* page.locator("#text").isEditable)
+          }))
+        }), timeout)
+
       it.effect("reads one match at once: text, value, html, attributes, states", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -3614,6 +4693,53 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 () => page.locator("#ready").pipe(Expect.toHaveText("New document")),
                 { concurrency: "unbounded" }
               )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects raw classes, ordered class arrays and class changes with failure evidence",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="raw" class=" foo  bar "></div><div id="ordered" class="foo bar"></div><div id="empty" class=""></div><div id="missing"></div><svg class="icon active"></svg><ul><li class="first"></li><li class="second"></li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#raw").pipe(Expect.toHaveClass(" foo  bar "))
+              yield* Expect.toHaveClass(page.locator("#raw"), /^ foo  bar $/g)
+              yield* page.locator("svg").pipe(Expect.toHaveClass(/icon/))
+              yield* page.locator("#empty").pipe(Expect.toHaveClass(""))
+              yield* page.locator("#missing").pipe(Expect.toHaveClass(""))
+              yield* page.locator("li").pipe(Expect.toHaveClass(["first", /second/g]))
+              yield* page.locator(".absent").pipe(Expect.toHaveClass([]))
+              for (
+                const [selector, expected, observed] of [
+                  ["#raw", "foo bar", " foo  bar "],
+                  ["#ordered", "bar foo", "foo bar"],
+                  [".absent", "", { matches: 0 }],
+                  ["li", /first/, { matches: 2 }],
+                  ["li", ["second", "first"], ["first", "second"]],
+                  ["li", ["first"], ["first", "second"]]
+                ] as const
+              ) {
+                const error = yield* page.locator(selector).pipe(
+                  Expect.toHaveClass(expected),
+                  Deadline.within("500 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert(Option.isSome(error.last))
+                assert.deepStrictEqual(error.last.value.value, observed)
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+                assert(error.condition.startsWith("to have the class "))
+              }
+              yield* page.evaluateInMainWorld(() => {
+                setTimeout(() => document.querySelector("#raw")!.setAttribute("class", "ready"), 100)
+              })
+              yield* page.locator("#raw").pipe(Expect.toHaveClass(/^ready$/g))
             }))
           }),
         timeout
