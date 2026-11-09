@@ -111,17 +111,42 @@ click can land on it, and the action then fails with `StateUnchanged`. The full 
 
 ## Checks
 
-Before sending anything, an action waits, checking at each animation frame, until its element is ready:
+Before sending anything, an action checks whether its element is ready and retries at each animation frame when it is not:
 
 | Action                                                            | Checks                                                                   |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | visible, stable, enabled, not inert, in the viewport, receives the pointer |
+| `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | rendered, visible, stable, enabled, not inert, in the viewport, receives the pointer |
 | `fill`, `clear`                                                   | visible, enabled, editable, not inert                                    |
 | `blur` | none (still requires exactly one match) |
 | `focus`, `press`, `pressSequentially`                             | visible, not inert                                                       |
+| `selectText` | visible |
 | `scrollIntoView`                                                  | visible, stable                                                          |
 | `selectOption`                                                    | visible, enabled                                                         |
 | `setInputFiles`                                                   | none                                                                     |
+
+Pointer actions (`click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo` and `hover`) default to
+`checks.rendered: true`: they wait for a drawn frame because pointer routing uses what the browser last drew.
+A drag waits at both endpoints. Other actions with checks, including `clear` and `selectText`, default to `checks.rendered: false` and
+check current layout immediately. Stability still waits for its requested frames, independently of this setting.
+Actions with checks check again after acquiring the page's input permit, with the same rendering choice.
+`dispatchEvent` waits only for an attached match and has no rendering or other readiness checks.
+
+A server-rendered input can accept a fill before the framework hydrates it, then lose that value during hydration.
+Wait for an app-defined readiness condition, or enable the frame wait for one call; Playwright has the same race.
+A drawn frame alone does not guarantee hydration has finished:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const enterName = Effect.fn("enterName")(function*(page: Page.Page) {
+  yield* page.getByLabel("Name").fill("Ada", { checks: { rendered: true } })
+})
+```
+
+With `rendered: false`, an action can succeed even when the page is not drawing. If another check keeps it
+waiting, its timeout reports that readiness reason without the “page rendered no frame” hint. You can also
+set `rendered: false` on a pointer action when your application can tolerate routing against the last drawn frame.
 
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 

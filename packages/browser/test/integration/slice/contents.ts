@@ -30,6 +30,7 @@ import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { vi } from "vitest"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
@@ -120,6 +121,67 @@ export const contents = (
 ) =>
   describe(`${name} contents`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("setContent waits for guarded native insertion before replacing the document", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+          yield* page.activate
+          const target = page.frame(page.locator("iframe")).locator("#target")
+          assert(target instanceof LocatorImpl)
+          const adapter = target.owner.runtime.model.adapter
+          const original = adapter.dispatchInput
+          const ready = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          let held = false
+          const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+            if (!held) {
+              held = true
+              yield* Deferred.succeed(ready, undefined)
+              yield* Deferred.await(release)
+            }
+            return yield* original(...args)
+          })
+          const replacement = `<input id="other" value="replacement"><script>
+            const other = document.getElementById("other"); other.focus(); other.setSelectionRange(11, 11);
+          </script>`
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() =>
+              Object.assign(adapter, { dispatchInput })
+            ),
+            () =>
+              Effect.gen(function*() {
+                const fill = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                yield* Deferred.await(ready).pipe(Deadline.within("2 seconds"))
+                const replaced = yield* page.setContent(replacement).pipe(Deadline.within("250 millis"), Effect.exit)
+                yield* Deferred.succeed(release, undefined)
+                const filled = yield* Fiber.await(fill).pipe(Deadline.within("2 seconds"))
+                const value = yield* page.locator("#other").readValue
+                assert(
+                  Exit.isFailure(replaced),
+                  `replacement must wait for native insertion; parent value was ${value}`
+                )
+                assert(Exit.isSuccess(filled), "the prepared native fill must complete before replacement")
+                assert.strictEqual(value, "other")
+                assert.strictEqual(yield* target.readText, "new")
+                yield* page.setContent(replacement)
+                assert.strictEqual(yield* page.locator("#other").readValue, "replacement")
+                const pending = yield* page.setContent("<input id=\"while-loading\"><img src=\"/pending-image\">").pipe(
+                  Effect.forkScoped
+                )
+                yield* page.locator("#while-loading").fill("still usable").pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(pending.pollUnsafe(), undefined, "resource readiness must still be pending")
+                yield* Fiber.interrupt(pending).pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(yield* page.locator("#while-loading").readValue, "still usable")
+              }),
+            () =>
+              Deferred.succeed(release, undefined).pipe(
+                Effect.andThen(Effect.sync(() => Object.assign(adapter, { dispatchInput: original })))
+              )
+          )
+        }), timeout)
+
       it.effect("setContent replaces markup repeatedly without navigating and executes parser scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -187,7 +249,9 @@ export const contents = (
           )
           assert.strictEqual(yield* page.title, "Deferred")
           assert.isFalse(
-            yield* page.evaluateInMainWorld(() => document.images[0]!.complete)
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
           )
         }), timeout)
 
