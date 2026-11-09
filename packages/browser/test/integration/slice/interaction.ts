@@ -3674,6 +3674,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
              <fieldset disabled><input id="disabled"></fieldset>
              <div contenteditable><span id="inherited">edit</span><span id="off" contenteditable="false">off</span></div>
              <input id="aria" aria-readonly="true"><input id="case" aria-readonly="TRUE">
+             <div aria-readonly="true"><input id="readonlyAncestor"></div>
              <div aria-disabled="true"><input id="ariaDisabled"></div>
              <div id="inert" contenteditable inert hidden>edit</div>
              <select id="select"></select><input id="checkbox" type="checkbox"><div id="role" role="textbox"></div>
@@ -3682,7 +3683,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
-            for (const id of ["text", "date", "inherited", "case", "inert"]) {
+            for (const id of ["text", "date", "inherited", "case", "inert", "readonlyAncestor"]) {
               assert.isTrue(yield* page.locator(`#${id}`).isEditable, id)
             }
             for (const id of ["readonly", "disabled", "off", "aria", "ariaDisabled", "select", "checkbox", "role"]) {

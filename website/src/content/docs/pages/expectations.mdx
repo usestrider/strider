@@ -161,9 +161,24 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 | `readValue`                           | a form control's value                                           |
 | `readAttribute(name)`                 | an attribute, as an `Option`                                     |
 | `readHtml`                            | the element's `outerHTML`                                        |
-| `isVisible`, `isEnabled`, `isChecked` | what they say, now                                               |
+| `isVisible`, `isEnabled`, `isEditable`, `isChecked` | what they say, now                                               |
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
+
+`isEditable` reads the same state as `toBeEditable`: a text or settable input, textarea or
+contenteditable element must be enabled and not read-only. Hidden or inert elements can still read true.
+Other kinds, including selects and ARIA-only textboxes, read false; Playwright accepts more kinds and
+throws for unsupported elements. Native read-only state and the element's `aria-readonly="true"` prevent
+editing; ARIA tokens are case-sensitive.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const canRename = Effect.fn("canRename")(function*(page: Page.ReadonlyPage) {
+  return yield* page.getByRole("textbox", { name: "Name" }).isEditable
+})
+```
 
 Reads need [exactly one match](/docs/errors#strictness); one that hasn't rendered yet fails with `NoMatch`, so
 expect it first. `count` and `all` take any number, so count what may not be there:

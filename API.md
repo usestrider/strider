@@ -507,6 +507,8 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   readonly readValue: Effect<string, LocatorError>       // an input's, a textarea's or a select's; else WrongElement
   readonly readHtml: Effect<string, LocatorError>        // outerHTML
   readonly isVisible: Effect<boolean, LocatorError>
+  // Same Editable predicate as actions/expectations; unsupported kinds return false. Strict, immediate read.
+  readonly isEditable: Effect<boolean, LocatorError>
   readonly isEnabled: Effect<boolean, LocatorError>
   readonly isChecked: Effect<boolean, LocatorError>      // a checkbox's, a radio's or an ARIA checkable's; else WrongElement
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, LocatorError>   // pinned to the current nth matches

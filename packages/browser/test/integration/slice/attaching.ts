@@ -164,6 +164,7 @@ export const attaching = (
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
               assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
+              assert.isFalse(yield* reader.getByRole("heading").isEditable)
               const tab = yield* first.control
               yield* tab.activate
               yield* tab.getByRole("button", { name: "Refresh" }).click()
