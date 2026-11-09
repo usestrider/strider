@@ -1391,3 +1391,13 @@ browsers. Reject name-to-constructor inference tables and emulation of missing c
 those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
+
+## Extra request header ownership
+
+Extra request headers use the existing scoped override registry and native protocol header commands. Each
+registration replaces the map within its scope; page headers merge over context headers, with page values
+winning when names match. Removal restores the preceding map within the scope, and an empty page map retains
+context headers. This matches BiDi's native header merging and Playwright's contract. Rejected: replacing the
+whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
+which adds unnecessary request handling. Unset configuration adds no header commands or request state,
+following [Pay for what you use](#pay-for-what-you-use).

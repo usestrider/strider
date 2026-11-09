@@ -565,6 +565,7 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
   - `readonly longitude: number`
   - `readonly accuracy?: number | undefined`
 - `interface Emulation`
+  - `readonly extraHTTPHeaders?: Readonly<Record<string, string>> | undefined`
   - `readonly viewport?: Viewport | undefined`
   - `readonly userAgent?: string | undefined`
   - `readonly locale?: Locale | string | undefined`

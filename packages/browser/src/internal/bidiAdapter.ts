@@ -160,6 +160,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("emulation.network.throttling", "unsupported", ["WebDriver BiDi can only take a page offline"]),
       entry("emulation.cpuSlowdown", "unsupported", ["WebDriver BiDi has no CPU throttling"]),
       entry("emulation.javaScript", "unsupported", ["Firefox doesn't implement emulation.setScriptingEnabled"]),
+      entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
       entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
       entry("screenshot.cssScale", "unsupported", ["WebDriver BiDi captures device pixels only"]),
