@@ -391,7 +391,8 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
 export interface Options {
   /**
    * Answers website authentication challenges with these credentials. User auth routes run first;
-   * falling through uses these credentials. A rejected pair is tried only once per request.
+   * falling through uses these credentials. The pair is submitted once per request, including its whole
+   * redirect chain. A later challenge in that chain is canceled, even at another origin.
    * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname and effective port.
    * An omitted origin permits any website. Proxy challenges never receive these credentials.
    * Chromium and Firefox support this option; stock WebKit refuses it with `Unsupported`.

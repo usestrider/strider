@@ -177,9 +177,11 @@ const openStaging = Effect.fn("openStaging")(function*() {
 
 The password is `Redacted`. The optional origin matches scheme, hostname and effective port; omit it to allow
 any website origin. Credentials answer challenges rather than adding an authorization header to every request.
-A rejected pair is tried once per request, then the challenge is canceled. Proxy challenges never receive this
+The pair is submitted once across the whole request and redirect chain. A later challenge in the chain is
+canceled, even at another origin. Proxy challenges never receive this
 pair; configure [proxy credentials](/docs/pages/proxies) separately. Chromium enables interception for the configured
 context, which can affect request timing. Omitting this option adds no interception or credential retry state.
+Firefox cancels ambiguous website/proxy challenges instead of supplying either automatic pair.
 Stock WebKit refuses the option with `Unsupported`.
 
 For a handler that chooses credentials per challenge, register an auth route. Page routes run first, then context

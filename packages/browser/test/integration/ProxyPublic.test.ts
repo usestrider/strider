@@ -212,6 +212,27 @@ for (
         60_000
       )
 
+      if (name === "Firefox") {
+        it.effect(
+          "refuses conflicting proxy challenge headers with both automatic credential pairs configured",
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const local = yield* proxy({ username: "strider", password: "secret" }, { websiteChallenge: true })
+              const page = yield* Browser.newPage({
+                ...options(local.address, [], "secret", "strider"),
+                httpCredentials: { username: "strider", password: Redacted.make("secret") }
+              })
+              yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/auth`).pipe(
+                Deadline.within("10 seconds"),
+                Effect.ignore
+              )
+              assert.isFalse(local.requests.some((request) => request.authenticated))
+            }),
+          60_000
+        )
+      }
+
       it.effect(
         "keeps proxy credentials out of logs, spans and strict/local trace archives on success and rejection",
         () =>

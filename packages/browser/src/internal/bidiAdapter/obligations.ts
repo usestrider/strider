@@ -85,7 +85,11 @@ export const pause = (
     (intercept.globs.length === 0 || intercept.globs.some((glob) => glob.test(params.request.url)))
   )
   if (!wanted) {
-    state.buffer.later(continued(state, phase, params.request.request))
+    state.buffer.later(
+      phase === "auth" && authSource === undefined
+        ? state.send(Network.continueWithAuth({ request: params.request.request, action: "cancel" }))
+        : continued(state, phase, params.request.request)
+    )
     return
   }
   const obligation = state.ids.obligation()
@@ -137,9 +141,24 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const context = state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context
       const proxyHeader = params.response.headers.find((header) => header.name.toLowerCase() === "proxy-authenticate")
       const website = params.response.headers.find((header) => header.name.toLowerCase() === "www-authenticate")
-      // An origin can add Proxy-Authenticate to its own response. Never answer its website challenge
-      // with the proxy's credentials, even when Firefox retains a stale 407 or proxy challenge metadata.
-      if (proxyHeader !== undefined && website === undefined && context?.proxy?.credentials !== undefined) {
+      const proxyChallenge = proxyHeader === undefined ? undefined : websiteChallenge(bytesText(proxyHeader.value))
+      // Neither header identifies its sender by itself. A fresh 401 is a website challenge; a 407
+      // with conflicting headers is ambiguous even when Firefox reports challenge metadata for it.
+      // Firefox's stale 407 is usable only after this request's proxy attempt, with no proxy header
+      // and an explicitly empty challenge list. Otherwise automatic credentials fail closed.
+      const source = params.response.status === 401 && website !== undefined
+        ? "server"
+        : params.response.status === 407 && proxyHeader !== undefined && website === undefined &&
+            proxyChallenge !== undefined && params.response.authChallenges?.some((challenge) =>
+              challenge.scheme.toLowerCase() === proxyChallenge.scheme.toLowerCase() &&
+              challenge.realm === proxyChallenge.realm
+            )
+        ? "proxy"
+        : params.response.status === 407 && proxyHeader === undefined && website !== undefined &&
+            params.response.authChallenges?.length === 0 && context?.proxyAttempts?.has(params.request.request) === true
+        ? "server"
+        : undefined
+      if (source === "proxy" && context?.proxy?.credentials !== undefined) {
         const attempted = context.proxyAttempts?.has(params.request.request) === true
         context.proxyAttempts ??= new Set()
         context.proxyAttempts.add(params.request.request)
@@ -166,7 +185,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         requestSnapshot(params, request),
         Option.none(),
         challenge,
-        website === undefined ? "proxy" : "server"
+        source
       )
     })
     .on(BrowsingContext.userPromptOpened, (params, { state }) => {

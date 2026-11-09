@@ -154,7 +154,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         const previous = target.proxyAuth.get(params.requestId)
         const provide = previous?.attempted !== true &&
           URL.parse(params.authChallenge.origin)?.origin === URL.parse(`http://${proxy.server}`)?.origin
-        target.proxyAuth.set(params.requestId, { networkId: previous?.networkId, attempted: true })
+        target.proxyAuth.set(params.requestId, { ...previous, networkId: previous?.networkId, attempted: true })
         state.buffer.later(
           Fetch.continueWithAuth({
             requestId: params.requestId,
@@ -340,10 +340,30 @@ const decide = (
         const request = [...state.requests.values()].find((entry) =>
           entry.target === obligation.target && entry.attribution.fetchId === requestId
         )
-        if (request === undefined || request.credentialsAttempted === true) {
+        // A Fetch pause may precede Network.requestWillBeSent. Its pending key still identifies the
+        // native request, and the existing auth ledger is already cleared on terminal events/target end.
+        const pending = request === undefined ?
+          [...state.pendingAttribution].find(([, entry]) =>
+            entry.target === obligation.target && entry.fetchId === requestId
+          ) :
+          undefined
+        const networkId = request?.requestId ?? pending?.[0].slice(requestKey(obligation.target, "").length)
+        const attempts = obligation.target.proxyAuth
+        if (
+          networkId === undefined ||
+          [...(attempts?.values() ?? [])].some((entry) =>
+            entry.networkId === networkId && entry.websiteAttempted === true
+          )
+        ) {
           return Fetch.continueWithAuth({ requestId, authChallengeResponse: { response: "CancelAuth" } }).pipe(on)
         }
-        request.credentialsAttempted = true
+        obligation.target.proxyAuth ??= new Map()
+        obligation.target.proxyAuth.set(requestId, {
+          attempted: false,
+          ...attempts?.get(requestId),
+          networkId,
+          websiteAttempted: true
+        })
       }
       return Fetch.continueWithAuth({
         requestId,

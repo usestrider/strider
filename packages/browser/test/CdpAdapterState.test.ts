@@ -1586,6 +1586,8 @@ it.effect("answers an automatic auth challenge before its Network request arrive
       method: "Fetch.continueWithAuth",
       params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
     })
+    handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    assert.strictEqual(target.proxyAuth?.size, 0)
     yield* state.buffer.flush
   }))
 

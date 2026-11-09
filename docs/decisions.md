@@ -1398,6 +1398,7 @@ following [Pay for what you use](#pay-for-what-you-use).
 Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different
 pairs for different origins. Keeping origin-specific selection in routes avoids a second routing table and keeps
 page and context route precedence explicit. User auth routes run before the configured pair, and automatic
-submission is bounded to one attempt per native request so rejection cannot create an unbounded challenge loop.
+submission is bounded to one attempt across a native request and its whole redirect chain, including changes of origin,
+so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
