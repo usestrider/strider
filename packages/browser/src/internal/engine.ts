@@ -154,6 +154,8 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  /** The raw class string of one match, or each match in order. */
+  | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -2115,6 +2117,9 @@ export function engine(render: (root: SnapNode) => string) {
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
+  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
     clearTreeCaches()
@@ -2148,6 +2153,18 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      case "Class": {
+        const texts = found.map((element) => element.classList.toString())
+        if (expectation.list) {
+          return {
+            passed: texts.length === expectation.expected.length &&
+              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+            observed: texts
+          }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
