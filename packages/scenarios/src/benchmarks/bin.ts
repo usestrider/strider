@@ -466,17 +466,23 @@ try {
                 }))),
               playwright: async () => {
                 const context = await browser.newContext({ viewport, deviceScaleFactor: 1 })
+                let page: Awaited<ReturnType<typeof context.newPage>> | undefined
                 try {
+                  page = await context.newPage()
                   context.setDefaultTimeout(30_000)
                   context.setDefaultNavigationTimeout(30_000)
-                  const page = await context.newPage()
                   await page.goto(`${site.origin}${entry.fixture ?? "/benchmark"}`, { waitUntil: "load" })
                   if (entry.preparePlaywright) await entry.preparePlaywright(page)
-                  const sample = await elapsed(() => entry.playwright(page, site.origin))
+                  const measuredPage = page
+                  const sample = await elapsed(() => entry.playwright(measuredPage, site.origin))
                   entry.verify(sample.value)
                   return sample.ms
                 } finally {
-                  await context.close()
+                  try {
+                    if (page && entry.cleanupPlaywright) await entry.cleanupPlaywright(page)
+                  } finally {
+                    await context.close()
+                  }
                 }
               }
             })
