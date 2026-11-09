@@ -313,6 +313,60 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
+        "finishes a click when release delivery overlaps a mousedown dialog",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const opened = yield* Deferred.make<void>()
+            const released = yield* Deferred.make<void>()
+            let pressCompleted = false
+            let pressId: number | undefined
+            let releaseQueued = false
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased" && !pressCompleted) {
+                      // Deliver an overlapping release only once the press handler is suspended in its dialog.
+                      releaseQueued = true
+                      yield* Deferred.await(opened)
+                      yield* transport.send(message)
+                      yield* Deferred.succeed(released, undefined)
+                      return
+                    }
+                  }
+                  if (wire.method === "Page.handleJavaScriptDialog" && releaseQueued) {
+                    yield* Deferred.await(released)
+                  }
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(Stream.mapEffect((message) => {
+                  const wire = JSON.parse(message)
+                  if (wire.id === pressId && pressId !== undefined) pressCompleted = true
+                  return wire.method === "Page.javascriptDialogOpening"
+                    ? Effect.as(Deferred.succeed(opened, undefined), message)
+                    : Effect.succeed(message)
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button id="go" onmousedown="confirm('Go?');out.textContent+='down '" onmouseup="out.textContent+='up '" onclick="out.textContent+='click'">Go</button><output id="out"></output>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(yield* page.locator("#out").readText, "down up click")
+              assert.isFalse(releaseQueued)
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
         "click sends stay ordered across a suspended transport and do not wait for earlier acknowledgments",
         () =>
           Effect.gen(function*() {
