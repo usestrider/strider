@@ -163,6 +163,50 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("measures viewport intersection of a cross-site frame's match against the top-level viewport", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const child = fixtureUrl(
+            crossSite,
+            `<style>body{margin:0}</style><div id="target" style="position:absolute;top:50px;width:100px;height:100px"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<style>body{margin:0}iframe{border:0;display:block;width:200px;height:100px}</style>
+<iframe id="clipped" src="${child}"></iframe><div style="height:3000px"></div><iframe id="below" src="${child}"></iframe>`
+            ))
+            // The iframe clips the match to its top half
+            const clipped = page.frame(page.locator("#clipped")).locator("#target")
+            yield* clipped.pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+            yield* clipped.pipe(Expect.toBeInViewport({ ratio: 0.6, inViewport: false }))
+            // Inside its own frame's viewport, but the frame is below the page's fold
+            yield* page.frame(page.locator("#below")).locator("#target").pipe(
+              Expect.toBeInViewport({ inViewport: false })
+            )
+          }))
+        }), timeout)
+
+      it.effect("checks viewport intersection while the page clock is controlled", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<div id="target" style="position:absolute;top:2000px;width:100px;height:100px"></div>
+<button style="position:fixed;top:0" onclick="window.scrollTo(0,2000)">Scroll</button>`
+            ))
+            yield* page.locator("#target").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* Effect.all([
+              page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
+              page.getByRole("button").click()
+            ], { concurrency: "unbounded" })
+          }))
+        }), timeout)
+
       it.effect("setContent waits for guarded native insertion before replacing the document", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
@@ -219,7 +263,9 @@ export const contents = (
               }),
             () =>
               Deferred.succeed(release, undefined).pipe(
-                Effect.andThen(Effect.sync(() => Object.assign(adapter, { dispatchInput: original })))
+                Effect.andThen(Effect.sync(() =>
+                  Object.assign(adapter, { dispatchInput: original })
+                ))
               )
           )
         }), timeout)
@@ -316,7 +362,9 @@ export const contents = (
           assert.strictEqual(yield* page.title, "Recovered")
           assert.deepStrictEqual(
             yield* page.evaluateInMainWorld(() =>
-              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+              Object.keys(globalThis).filter((key) =>
+                key.startsWith("__strider_setContent_")
+              )
             ),
             []
           )
