@@ -3812,10 +3812,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
         })), timeout)
 
-      // A label acts for its control, or the target is checkable itself, both ways. Every other kind is refused before
-      // any input, the same way for check and uncheck, so each is one of the engine's rules, checked once: `button`
-      // stands for the elements interactive by their tag, and `a`, `video` and `img` are interactive by an attribute,
-      // without which (`inert-link`, `inert-media`, `image`) the label acts
+      // checkableForAction selects a target before the action direction is considered. Exercise each targeting rule
+      // once, with ordinary labels retaining both associations and directions. Own ARIA/native state and prevented
+      // input retain both directions too; the other kinds sample the same targeting branch with check.
+      // `button` samples tag interactivity; `a`, `video` and `img` exercise attribute-based interactivity and their
+      // inert counterparts. Slot and DOM/composed-boundary rules have their own cases below.
       for (const association of ["explicit", "wrapping"] as const) {
         for (
           const kind of [
@@ -3842,9 +3843,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             "ancestor"
           ] as const
         ) {
-          const acts = ["ordinary", "inert-link", "inert-media", "image", "prevented", "own", "own-ancestor", "native"]
-            .includes(kind)
-          for (const checked of acts ? [true, false] : [true]) {
+          if (association === "wrapping" && kind !== "ordinary") continue
+          const bothDirections = ["ordinary", "prevented", "own", "native"].includes(kind)
+          for (const checked of bothDirections ? [true, false] : [true]) {
             it.effect(
               `label descendant ${association} ${kind} ${checked ? "check" : "uncheck"}`,
               () =>
