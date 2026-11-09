@@ -23,13 +23,14 @@ if (!Number.isSafeInteger(runs) || runs < 4 || runs > 1000 || runs % 4 !== 0) {
   throw new Error("--runs must be a multiple of 4 between 4 and 1000")
 }
 if (values.browser !== "chromium") throw new Error("Paired comparisons currently support only pinned stock Chromium")
-if (!["bench", "scenarios", "roles"].includes(values.workload)) {
-  throw new Error("--workload must be bench, scenarios or roles")
+if (!["bench", "scenarios"].includes(values.workload)) {
+  throw new Error("--workload must be bench or scenarios")
 }
 if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
 if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
+const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
 fs.mkdirSync(output, { recursive: true })
 const samples: Array<Message & { role: string; sequence: number }> = []
@@ -121,7 +122,7 @@ try {
     throw new Error(`Browser version mismatch: expected Chromium ${pins.chromium.version}, got ${version}`)
   }
   save()
-  if (values.workload === "roles") {
+  if (roleMode) {
     const { roleDiagnostic } = await import("./role-engine.ts")
     await roleDiagnostic({ roots, output, runs })
   } else {
@@ -227,7 +228,7 @@ try {
     `${c.ratio.toFixed(3)} [${c.low.toFixed(3)}, ${c.high.toFixed(3)}]`
   fs.writeFileSync(
     path.join(output, "summary.md"),
-    values.workload === "roles" && fs.existsSync(path.join(output, "role-summary.md"))
+    roleMode && fs.existsSync(path.join(output, "role-summary.md"))
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
       : [
         `Comparison status: **${report.status}**`,

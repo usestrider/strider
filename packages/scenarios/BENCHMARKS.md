@@ -774,7 +774,7 @@ without using `Expect.toHaveRole`; Strider and Playwright must each return 100 e
 conflicts. `read-snapshot-100` and `read-snapshot-1000` evaluate a main-world input-property function; they measure
 DOM evaluation and value transfer, not ARIA role traversal or the accessibility snapshot API.
 
-For shared role-engine diagnosis, dispatch `benchmarks.yml` with `workload=roles`, `base` naming the original
+For shared role-engine diagnosis, dispatch `benchmarks.yml` with `workload=bench`, `only=role-engine-diagnostic`, `base` naming the original
 engine and `head` the reviewed engine. The driver supplies the optimized engine; when its engine is unchanged,
 the harness labels the combined candidate explicitly. Six serialized engine variants run interleaved on one
 page (use 24 measured rounds to balance its rotations) over focusable/non-focusable presentation headings and list/table inheritance. Every `engine.run` count

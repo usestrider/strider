@@ -15,7 +15,7 @@ on:
       workload:
         description: Workload
         type: choice
-        options: [bench, scenarios, roles]
+        options: [bench, scenarios]
         default: bench
       only:
         description: Case or group (required for scenarios)
