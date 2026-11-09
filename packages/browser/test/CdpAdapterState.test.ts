@@ -1770,3 +1770,68 @@ for (const command of ["resolve", "callback"] as const) {
       assert.strictEqual(state.handles.size, 0)
     }).pipe(Effect.scoped))
 }
+
+for (const failure of ["resolution", "conversion", "dispatch"] as const) {
+  it.effect(`cleans acquired node ids outside the command deadline on ${failure} failure`, () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const mock = {
+        ...session,
+        send: (command: { method: string; params: { backendNodeId?: number; objectId?: string } }) => {
+          if (command.method === "Runtime.releaseObject") {
+            return Effect.gen(function*() {
+              assert(Option.isNone(yield* ProtocolClient.CommandDeadline))
+              assert(Option.isNone(yield* Operation.current))
+              released.push(command.params.objectId!)
+              return {}
+            })
+          }
+          if (command.method === "DOM.resolveNode" && command.params.backendNodeId === 1) {
+            return Effect.succeed({ object: { type: "object", objectId: "acquired" } })
+          }
+          assert.strictEqual(command.method, failure === "resolution" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+          return Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: command.method,
+                reason: "Unrecognized",
+                code: -32000,
+                description: "failed"
+              })
+            })
+          )
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "failure",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const extra: Array<Adapter.LocalValue> = failure === "resolution"
+        ? [node("2")]
+        : failure === "conversion"
+        ? [{ _tag: "Handle", handle: "missing" as Adapter.HandleId }]
+        : []
+      yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), ...extra],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(
+        Operation.named("test.evaluation"),
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(BrowserClock.live.now())),
+        Effect.flip
+      )
+      assert.deepStrictEqual(released, ["acquired"])
+    }).pipe(Effect.scoped))
+}

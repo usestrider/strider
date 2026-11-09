@@ -18,6 +18,7 @@ import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
@@ -320,82 +321,85 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
   const realm = yield* realmOf(state, id)
   const on = Protocol.on(realm.target.session)
   const failed = Kit.realmFailure(id, () => realm.ended)
-  // A node crosses into this realm by its binding, from whichever world returned it
+  // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
+  // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()
-  for (const argument of call.arguments) {
-    if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
-    const { object } = yield* DOM.resolveNode({
-      backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
-      executionContextId: realm.contextId as Runtime.ExecutionContextId
-    }).pipe(on, Effect.mapError(failed))
-    if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
-  }
-  const released = Effect.forEach(
-    nodes.values(),
-    (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
-    { discard: true }
-  )
-  const reply = yield* Effect.forEach(call.arguments, (local) =>
-    Kit.argument<Runtime.CallArgument>(local, {
-      ids: state.ids,
-      realm: id,
-      value: callValue,
-      handle: (handle) => {
-        const entry = state.handles.get(handle)
-        return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
-      },
-      node: (node) => {
-        const objectId = nodes.get(node.binding)
-        return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
-      }
-    })).pipe(
-      Effect.flatMap((args) =>
-        Runtime.callFunctionOn({
-          functionDeclaration: call.functionDeclaration,
-          uniqueContextId: realm.uniqueId,
-          arguments: args,
-          awaitPromise: call.awaitPromise,
-          userGesture: call.userActivation,
-          ...(call.group === undefined ? {} : { objectGroup: call.group }),
-          returnByValue: false,
-          serializationOptions: call.result === "value"
-            ? { serialization: "deep", maxDepth: 64 }
-            : { serialization: "idOnly" }
-        }).pipe(on, Effect.mapError(failed))
-      ),
-      Effect.ensuring(released)
+  const resultIds = new Set<string>()
+  const release = Effect.suspend(() =>
+    Effect.forEach(
+      new Set([...nodes.values(), ...resultIds]),
+      (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
+      { discard: true }
     )
-  if (call.result === "value" && call.releaseResult === true) {
-    // Deep serialization may include a root object id even though the caller requested only a value.
-    const ids = new Set([reply.result.objectId, reply.exceptionDetails?.exception?.objectId])
-    for (const objectId of ids) {
-      if (objectId !== undefined) {
-        yield* Runtime.releaseObject({ objectId }).pipe(on, Effect.ignore, Operation.detached)
+  ).pipe(Operation.detached, Effect.provideService(ProtocolClient.CommandDeadline, Option.none()))
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      for (const argument of call.arguments) {
+        if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
+        const { object } = yield* DOM.resolveNode({
+          backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
+          executionContextId: realm.contextId as Runtime.ExecutionContextId
+        }).pipe(on, Effect.mapError(failed), restore)
+        if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
       }
-    }
-  }
-  const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
-  const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
-    const serialized = object.deepSerializedValue ??
-      { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
-    if (call.result === "handle" && object.objectId !== undefined) {
-      const handle = state.ids.handle()
-      state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
-      if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-      return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
-    }
-    return toRemoteValue(serialized, documentOf)
-  }
-  if (reply.exceptionDetails !== undefined) {
-    const details = reply.exceptionDetails
-    return {
-      _tag: "Exception",
-      text: details.exception?.description ?? details.text,
-      exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
-      stack: Option.fromUndefinedOr(details.exception?.description)
-    } satisfies Adapter.RemoteResult
-  }
-  return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+      const reply = yield* Effect.forEach(call.arguments, (local) =>
+        Kit.argument<Runtime.CallArgument>(local, {
+          ids: state.ids,
+          realm: id,
+          value: callValue,
+          handle: (handle) => {
+            const entry = state.handles.get(handle)
+            return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
+          },
+          node: (node) => {
+            const objectId = nodes.get(node.binding)
+            return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
+          }
+        })).pipe(
+          Effect.flatMap((args) =>
+            Runtime.callFunctionOn({
+              functionDeclaration: call.functionDeclaration,
+              uniqueContextId: realm.uniqueId,
+              arguments: args,
+              awaitPromise: call.awaitPromise,
+              userGesture: call.userActivation,
+              ...(call.group === undefined ? {} : { objectGroup: call.group }),
+              returnByValue: false,
+              serializationOptions: call.result === "value"
+                ? { serialization: "deep", maxDepth: 64 }
+                : { serialization: "idOnly" }
+            }).pipe(on, Effect.mapError(failed), restore)
+          )
+        )
+      if (call.result === "value" && call.releaseResult === true) {
+        if (reply.result.objectId !== undefined) resultIds.add(reply.result.objectId)
+        const exception = reply.exceptionDetails?.exception?.objectId
+        if (exception !== undefined) resultIds.add(exception)
+      }
+      const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
+      const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
+        const serialized = object.deepSerializedValue ??
+          { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
+        if (call.result === "handle" && object.objectId !== undefined) {
+          const handle = state.ids.handle()
+          state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
+          if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
+          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+        }
+        return toRemoteValue(serialized, documentOf)
+      }
+      if (reply.exceptionDetails !== undefined) {
+        const details = reply.exceptionDetails
+        return {
+          _tag: "Exception",
+          text: details.exception?.description ?? details.text,
+          exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
+          stack: Option.fromUndefinedOr(details.exception?.description)
+        } satisfies Adapter.RemoteResult
+      }
+      return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+    }).pipe(Effect.ensuring(release))
+  )
 })
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */

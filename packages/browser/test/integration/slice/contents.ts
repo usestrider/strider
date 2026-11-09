@@ -18,8 +18,10 @@ import {
   StorageState,
   Url
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -27,6 +29,9 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
+import { vi } from "vitest"
+import * as Runtime from "../../../src/internal/runtime.ts"
+import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
@@ -406,6 +411,97 @@ export const contents = (
             assert.strictEqual(node.reason._tag, "NotSerializable")
           }))
         }), timeout)
+
+      it.effect("evaluates snapshot matches detached between query and callback", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            const original = Runtime.elements
+            let queries = 0
+            const hook = vi.spyOn(Runtime, "elements").mockImplementation((...args) =>
+              original(...args).pipe(
+                Effect.tap(() =>
+                  Effect.gen(function*() {
+                    queries++
+                    yield* page.evaluateInMainWorld(() => {
+                      const matches = Array.from(document.querySelectorAll("p"))
+                      // Keep detached nodes reachable, so this probes detachment rather than garbage collection.
+                      Object.assign(window, { detachedMatches: matches })
+                      for (const match of matches) match.remove()
+                    }).pipe(Effect.orDie)
+                  })
+                )
+              )
+            )
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            assert.deepStrictEqual(
+              yield* page.locator("p").evaluateAll((elements) =>
+                elements.map((element) => ({
+                  text: element.textContent,
+                  connected: element.isConnected
+                }))
+              ),
+              [{ text: "a", connected: false }, { text: "b", connected: false }]
+            )
+            assert.strictEqual(queries, 1)
+            assert.strictEqual(yield* page.locator("p").count, 0)
+          }))
+        }), timeout)
+
+      it.effect(
+        "evaluates all current matches with a pending promise and releases its late result after interruption",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+              if (
+                yield* isolatedRefused(
+                  page.locator("p").evaluateAll((elements) => elements.length)
+                )
+              ) {
+                return
+              }
+              const cleaned = yield* Deferred.make<void>()
+              const lateMethods: Array<string> = []
+              const waiting = yield* page.locator("p").evaluateAll((elements) =>
+                new Promise<Array<string | null>>((resolve) => {
+                  document.addEventListener(
+                    "finish-evaluation",
+                    () => resolve(elements.map((element) => element.textContent)),
+                    { once: true }
+                  )
+                  document.body.setAttribute("data-evaluation-started", "yes")
+                })
+              ).pipe(
+                Protocol.withLateReplyHandler((reply) => {
+                  lateMethods.push(reply.method)
+                  if (name !== "Firefox") {
+                    const raw = reply.result as { result?: { objectId?: string } }
+                    assert.strictEqual(typeof raw.result?.objectId, "string")
+                  }
+
+                  // Await the real protocol release acknowledgments before reporting cleanup complete.
+                  return reply.release.pipe(Effect.andThen(Deferred.succeed(cleaned, undefined)))
+                }),
+                Effect.forkChild
+              )
+              yield* page.locator("body").pipe(Expect.toHaveAttribute("data-evaluation-started", "yes"))
+              yield* Fiber.interrupt(waiting)
+              assert.deepStrictEqual(lateMethods, [])
+              yield* page.evaluateInMainWorld(() => document.dispatchEvent(new Event("finish-evaluation")))
+              yield* Deferred.await(cleaned)
+              assert.deepStrictEqual(lateMethods, [
+                name === "Firefox" ? "script.callFunction" : "Runtime.callFunctionOn"
+              ])
+            }))
+          }),
+        timeout
+      )
 
       it.effect("grants user activation to main-world evaluation inside withUserGesture", () =>
         Effect.gen(function*() {
