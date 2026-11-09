@@ -1,0 +1,18 @@
+{
+  "id": "method-websocket-waitforevent",
+  "upstream": [
+    "method:WebSocket.waitForEvent"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "NetworkConnection observes connections, frame streams and a closed effect; it has no arbitrary event dispatcher or immediate boolean closed-state query.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkConnection.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "patches": []
+}

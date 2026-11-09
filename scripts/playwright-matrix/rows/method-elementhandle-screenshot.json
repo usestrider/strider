@@ -1,0 +1,25 @@
+{
+  "id": "method-elementhandle-screenshot",
+  "upstream": [
+    "method:ElementHandle.screenshot"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.screenshot",
+      "url": "/docs/api/browser/Page#ReadonlyPage.screenshot"
+    }
+  ],
+  "notes": "Element screenshots use area: { element }; see screenshot option gaps. This uses a lazy locator instead of fixed ElementHandle identity.",
+  "capabilities": [
+    "screenshot"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

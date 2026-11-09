@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-scrollintoviewifneeded",
+  "upstream": [
+    "method:Locator.scrollIntoViewIfNeeded"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.scrollIntoView",
+      "url": "/docs/api/browser/Locator#Locator.scrollIntoView"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

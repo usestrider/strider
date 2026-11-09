@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-inputvalue",
+  "upstream": [
+    "method:Frame.inputValue"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.readValue",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.readValue"
+    }
+  ],
+  "notes": "Reads observe immediately and fail on no match; text is whitespace-normalized; attributes return Option.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

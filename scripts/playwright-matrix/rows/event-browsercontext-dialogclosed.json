@@ -1,0 +1,17 @@
+{
+  "id": "event-browsercontext-dialogclosed",
+  "upstream": [
+    "event:BrowserContext.dialogClosed"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "event-page-framedetached",
+  "upstream": [
+    "event:Page.frameDetached"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.frames",
+      "url": "/docs/api/browser/Page#ObservedPage.frames"
+    },
+    {
+      "module": "Watchable",
+      "symbol": "Watchable.changes",
+      "url": "/docs/api/browser/Watchable#Watchable.changes"
+    }
+  ],
+  "notes": "Observe page.frames changes and compare frame ids to find removals; no retained Frame event object is returned.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

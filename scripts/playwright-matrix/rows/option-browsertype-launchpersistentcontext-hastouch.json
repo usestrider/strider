@@ -1,0 +1,20 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-hastouch",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "hasTouch",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "emulation.touch"
+  ],
+  "requirements": []
+}

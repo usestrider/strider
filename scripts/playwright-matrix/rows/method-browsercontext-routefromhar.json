@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-routefromhar",
+  "upstream": [
+    "method:BrowserContext.routeFromHAR"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.route",
+      "url": "/docs/api/browser/UserContext#UserContext.route"
+    }
+  ],
+  "notes": "HAR replay uses Route.fromHar. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

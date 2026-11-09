@@ -1,0 +1,25 @@
+{
+  "id": "event-browsercontext-serviceworker",
+  "upstream": [
+    "event:BrowserContext.serviceWorker"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "BrowserWorker",
+      "symbol": "stream",
+      "url": "/docs/api/browser/BrowserWorker#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [
+    "workers.service"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

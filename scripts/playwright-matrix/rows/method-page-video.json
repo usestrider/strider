@@ -1,0 +1,29 @@
+{
+  "id": "method-page-video",
+  "upstream": [
+    "method:Page.video"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    }
+  ],
+  "notes": "Explicit recording scope. Chromium needs VideoWriter; WebKit needs polling options and VideoWriter.",
+  "capabilities": [
+    "capability.video"
+  ],
+  "configuration": {
+    "chromium": "Provide a VideoWriter service.",
+    "webkit": "Provide polling options and a VideoWriter service."
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

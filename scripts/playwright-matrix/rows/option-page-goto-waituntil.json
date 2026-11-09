@@ -1,0 +1,40 @@
+{
+  "id": "option-page-goto-waituntil",
+  "upstream": [
+    "method:Page.goto"
+  ],
+  "option": "waitUntil",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "GotoOptions",
+      "url": "/docs/api/browser/Page#GotoOptions"
+    }
+  ],
+  "notes": "commit, domContentLoaded or load; networkidle is missing.",
+  "capabilities": [],
+  "requirements": [],
+  "gaps": [
+    "navigation-networkidle"
+  ],
+  "valueCoverage": [
+    {
+      "value": "commit",
+      "status": "has"
+    },
+    {
+      "value": "domcontentloaded",
+      "status": "has"
+    },
+    {
+      "value": "load",
+      "status": "has"
+    },
+    {
+      "value": "networkidle",
+      "status": "missing",
+      "gap": "navigation-networkidle"
+    }
+  ]
+}

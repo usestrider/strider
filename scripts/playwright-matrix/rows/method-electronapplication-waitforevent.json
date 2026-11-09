@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-waitforevent",
+  "upstream": [
+    "method:ElectronApplication.waitForEvent"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

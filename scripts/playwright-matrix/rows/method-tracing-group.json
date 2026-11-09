@@ -1,0 +1,31 @@
+{
+  "id": "method-tracing-group",
+  "upstream": [
+    "method:Tracing.group"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Operation",
+      "symbol": "named",
+      "url": "/docs/api/browser/Operation#named"
+    },
+    {
+      "module": "Operation",
+      "symbol": "fn",
+      "url": "/docs/api/browser/Operation#fn"
+    }
+  ],
+  "notes": "Wrap the grouped effects in a named operation, which records their span/steps in an active trace. The group ends with the effect, not an imperative groupEnd call. Caller location is captured; arbitrary location override is not available.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

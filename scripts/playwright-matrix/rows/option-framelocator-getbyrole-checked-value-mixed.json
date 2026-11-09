@@ -1,0 +1,14 @@
+{
+  "id": "option-framelocator-getbyrole-checked-value-mixed",
+  "upstream": [
+    "method:FrameLocator.getByRole"
+  ],
+  "status": "missing",
+  "api": [],
+  "capabilities": [],
+  "requirements": [],
+  "parent": "option-framelocator-getbyrole-checked",
+  "value": "mixed",
+  "notes": "The checked role filter takes a boolean; it cannot select mixed checked state.",
+  "option": "checked"
+}

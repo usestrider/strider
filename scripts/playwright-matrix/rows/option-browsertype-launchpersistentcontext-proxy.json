@@ -1,0 +1,36 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-proxy",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "proxy",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "userContexts.proxy"
+  ],
+  "requirements": [],
+  "gaps": [
+    "option-browsertype-launchpersistentcontext-proxy-value-socks-or-https-proxy-endpoint",
+    "option-browsertype-launchpersistentcontext-proxy-value-proxy-credentials"
+  ],
+  "valueCoverage": [
+    {
+      "value": "SOCKS or HTTPS proxy endpoint",
+      "status": "missing",
+      "gap": "option-browsertype-launchpersistentcontext-proxy-value-socks-or-https-proxy-endpoint"
+    },
+    {
+      "value": "proxy credentials",
+      "status": "missing",
+      "gap": "option-browsertype-launchpersistentcontext-proxy-value-proxy-credentials"
+    }
+  ]
+}

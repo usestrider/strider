@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsertype-launchpersistentcontext-artifactsdir",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "artifactsDir",
+  "requirements": []
+}

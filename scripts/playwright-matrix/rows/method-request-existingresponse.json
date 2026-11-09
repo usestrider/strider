@@ -1,0 +1,17 @@
+{
+  "id": "method-request-existingresponse",
+  "upstream": [
+    "method:Request.existingResponse"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

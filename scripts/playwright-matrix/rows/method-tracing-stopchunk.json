@@ -1,0 +1,20 @@
+{
+  "id": "method-tracing-stopchunk",
+  "upstream": [
+    "method:Tracing.stopChunk"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Trace.record can make independent recordings, but has no chunk boundaries within one running recorder. Starting another scoped recording is not a rollover operation.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

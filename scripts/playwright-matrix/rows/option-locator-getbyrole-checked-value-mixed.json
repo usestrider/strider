@@ -1,0 +1,14 @@
+{
+  "id": "option-locator-getbyrole-checked-value-mixed",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "status": "missing",
+  "api": [],
+  "capabilities": [],
+  "requirements": [],
+  "parent": "option-locator-getbyrole-checked",
+  "value": "mixed",
+  "notes": "The checked role filter takes a boolean; it cannot select mixed checked state.",
+  "option": "checked"
+}

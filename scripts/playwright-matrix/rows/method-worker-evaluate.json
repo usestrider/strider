@@ -1,0 +1,25 @@
+{
+  "id": "method-worker-evaluate",
+  "upstream": [
+    "method:Worker.evaluate"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "BrowserWorker",
+      "symbol": "BrowserWorker.evaluate",
+      "url": "/docs/api/browser/BrowserWorker#BrowserWorker.evaluate"
+    }
+  ],
+  "notes": "Dedicated workers; shared/service worker discovery has separate browser limits.",
+  "capabilities": [
+    "workers.evaluate"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/BrowserWorker.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

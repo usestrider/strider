@@ -1,0 +1,53 @@
+{
+  "id": "method-browsercontext-setgeolocation-value-unavailable-position",
+  "upstream": [
+    "method:BrowserContext.setGeolocation"
+  ],
+  "parent": "method-browsercontext-setgeolocation",
+  "value": "unavailable position",
+  "status": "missing",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.emulate",
+      "url": "/docs/api/browser/UserContext#UserContext.emulate"
+    }
+  ],
+  "notes": "Unavailable geolocation is unsupported on Firefox and stock WebKit.",
+  "capabilities": [],
+  "requirements": [],
+  "browserOverrides": {
+    "chromium.launched": {
+      "status": "has",
+      "limitations": []
+    },
+    "chromium.attached": {
+      "status": "has",
+      "limitations": []
+    },
+    "firefox.launched": {
+      "status": "missing",
+      "limitations": [
+        "Unavailable geolocation is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "firefox.attached": {
+      "status": "missing",
+      "limitations": [
+        "Unavailable geolocation is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "webkit.launched": {
+      "status": "missing",
+      "limitations": [
+        "Unavailable geolocation is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "webkit.attached": {
+      "status": "missing",
+      "limitations": [
+        "Unavailable geolocation is unsupported on Firefox and stock WebKit."
+      ]
+    }
+  }
+}

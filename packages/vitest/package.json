@@ -46,9 +46,10 @@
   },
   "scripts": {
     "codegen": "strider-utils barrel",
-    "build": "tsc -b tsconfig.json && pnpm babel",
+    "build": "node ../tools/docs/src/bin.mjs index --package vitest && tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "prepack": "node ../tools/docs/src/bin.mjs index --package vitest"
   },
   "peerDependencies": {
     "@usestrider/browser": "workspace:^",

@@ -1433,3 +1433,16 @@ submission is bounded to one attempt across a native request and its whole redir
 so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
+
+## Generated reference outputs and curated comparisons
+
+API indexes and the capability matrix's browser statuses and current evidence hashes are ignored outputs,
+regenerated during validation; package builds and packing recreate the indexes for publication. Matrix classifications,
+requirements and provenance remain curated, with one stable-ID row per file, so unrelated features in the same
+Playwright class can merge independently. Hashes describe current inputs, never an acknowledgement of semantic review;
+source symbols, quotations, completeness, decisions, capabilities and built links are still checked on each PR.
+Stored browser-status and adapter-capability snapshot drift gates are removed too: capability changes require
+reviewing generated results rather than committed snapshot diffs. Generated code remains tracked with freshness checks.
+Rejected: per-module index fragments, which keep redundant output; per-class matrix files, which still couple
+concurrent Locator or Page features; and post-merge generation, which delays validation and needs privileged writes
+unavailable to fork PRs.
