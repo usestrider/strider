@@ -22,6 +22,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -54,3 +55,5 @@ webauthn("WebKit", backend)
 
 requestBodies("WebKit", backend)
 requestTiming("WebKit", backend)
+
+storageReplacement("WebKit", backend)
