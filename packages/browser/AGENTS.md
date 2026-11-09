@@ -6,7 +6,7 @@ The design and its reasons are in the repository: https://github.com/usestrider/
 Strider is pre-release, and the API can still change before 1.0. Launching,
 `Browser.newPage`, navigation, the queries, frames (`page.frame`, `locator.frame`, `page.frames`), every locator
 action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear`, `fill`, `press`,
-`pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
+`pressSequentially`, `dispatchEvent`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
 `page.keyboard` and `page.mouse`, every `Expect` matcher, `Condition`, `Deadline`, evaluation (`page.evaluate`,
 `evaluateInMainWorld`, `evaluateHandle`, `JSHandle`, `Locator.evaluate`), snapshots with refs and `AriaPattern`,
 `screenshot`, `pdf` and `readHtml`, cookies, `localStorage` and `sessionStorage`, storage state with IndexedDB

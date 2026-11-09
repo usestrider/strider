@@ -754,6 +754,54 @@ export interface Page extends ReadonlyPage {
     options?: GotoOptions | undefined
   ): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Replaces the current document's HTML using the browser's parser and waits for readiness.
+   *
+   * **Details**
+   *
+   * Uses `document.open`, `document.write` and `document.close`. The URL, history entry, document identity
+   * and main-world globals remain; the DOM and its event listeners are replaced. Scripts execute and resources
+   * load under the current document's origin, base URL and security policy. A `base` element can change resource URLs.
+   *
+   * `waitUntil` defaults to `"load"`, including child-frame and resource loading. `"domContentLoaded"` waits
+   * for parsing and deferred scripts, while `"commit"` returns after writing and closing, without waiting for
+   * readiness. This does not perform a navigation or produce a `PageNavigation`.
+   *
+   * **Gotchas**
+   *
+   * Interruption or a deadline stops waiting; it does not undo the replacement or stop scripts and requests
+   * already started. The temporary readiness listener is removed with a separate one-second cleanup budget;
+   * cleanup failures are recorded in diagnostics. Earlier resource requests can continue to delay load after
+   * another replacement; choose parsing readiness when those requests need not finish. Navigation during the
+   * call can fail with `TargetGone`. Page scripts can tamper with the main-world document methods. Avoid
+   * concurrent replacements.
+   *
+   * **Example** (Rendering an HTML fixture)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const renderReceipt = Effect.fn("renderReceipt")(function*(page: Page.Page) {
+   *   yield* page.setContent("<title>Receipt</title><h1>Order received</h1>")
+   *   return yield* page.getByRole("heading").readText
+   * })
+   * ```
+   *
+   * @see {@link Deadline.within} to bound replacement and readiness with one deadline
+   * @stability unstable
+   * @since 0.1.0
+   */
+  setContent(
+    html: string,
+    options?: {
+      /**
+       * Readiness to wait for after writing the HTML; `"commit"` skips the readiness wait.
+       * @default "load"
+       */
+      readonly waitUntil?: PageNavigation.LoadState | undefined
+    } | undefined
+  ): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Reloads the current document.
    *
    * **Example** (Reloading without the cache)

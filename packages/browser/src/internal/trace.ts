@@ -177,10 +177,12 @@ const actions = new Set([
   "Locator.press",
   "Locator.pressSequentially",
   "Locator.selectOption",
+  "Locator.dispatchEvent",
   "Locator.setInputFiles",
   "Locator.dragTo",
   "Locator.scrollIntoView",
   "Page.goto",
+  "Page.setContent",
   "Page.reload",
   "Page.back",
   "Page.forward"
