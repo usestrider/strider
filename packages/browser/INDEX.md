@@ -609,6 +609,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toHaveAccessibleName: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined] >`
 - `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
