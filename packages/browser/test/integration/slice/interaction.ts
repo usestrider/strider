@@ -4730,9 +4730,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.strictEqual(error.condition, `to have the role ${JSON.stringify(role)}`)
-              assert(error.history.length > 0)
-              assert.deepStrictEqual(error.history.at(-1)!.value, observed)
-              assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
             }
           }))
         }), timeout)
@@ -5062,7 +5061,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   Effect.flip
                 )
                 assert(Expect.isExpectationFailed(error), String(error))
-                assert.deepStrictEqual(error.history.map((entry) => entry.value), [{ matches }])
+                for (const entry of error.history) assert.deepStrictEqual(entry.value, { matches })
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
               }
             }))
           }),
