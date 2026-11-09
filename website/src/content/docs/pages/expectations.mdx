@@ -40,6 +40,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toContainText(expected)`                      | its text contains `expected`                                     |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
@@ -92,6 +93,26 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
   yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
 })
 ```
+
+Computed CSS includes styles from stylesheets and inheritance, in the browser's serialized form.
+Strings compare exactly, including whitespace; regular expressions keep their flags:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const styled = Effect.fn("styled")(function*(page: Page.ReadonlyPage) {
+  const notice = page.getByRole("status")
+  yield* notice.pipe(Expect.toHaveCSS("display", "flex"))
+  yield* Expect.toHaveCSS(notice, "color", /^rgb\(/)
+  yield* notice.pipe(Expect.toHaveCSS("display", "none", { not: true }))
+  yield* notice.pipe(Expect.toHaveCSS("content", "\"Ready\"", { pseudo: "before" }))
+})
+```
+
+CSS expectations require exactly one match even with `not: true`. Missing or multiple matches retry until
+the deadline and report the match count; Playwright rejects multiple matches immediately.
+Use `Deadline.within` to bound the expectation. Without options, it compares the element's own computed style.
 
 A matcher without arguments is the function itself; one with arguments is dual:
 

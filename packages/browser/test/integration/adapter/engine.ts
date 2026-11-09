@@ -9,8 +9,14 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Browser from "../../../src/Browser.ts"
+import * as Expect from "../../../src/Expect.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as Engine from "../../../src/internal/engine.ts"
+import type { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as Operation from "../../../src/internal/operation.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
 
@@ -215,6 +221,57 @@ export const engine = (backend: Backend) =>
             })
           }), timeout)
 
+        for (const publicExpectation of [false, true]) {
+          it.effect(
+            `${
+              publicExpectation ? "public expectation" : "ordinary runtime"
+            } follows a navigation during a waiting round`,
+            () =>
+              Effect.gen(function*() {
+                const served = yield* site
+                const browser = BrowserImpl.layer((sink) =>
+                  backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                    adapter
+                  ))
+                )
+                yield* Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  const next = `${served.origin}/fixture?html=${encodeURIComponent("<div id=\"done\">Done</div>")}`
+                  // Replace the document while the engine is waiting for the hidden target.
+                  yield* page.goto(
+                    `${served.origin}/fixture?html=${
+                      encodeURIComponent(
+                        `<div id="done" hidden>Done</div><script>setTimeout(() => { location.href = ${
+                          JSON.stringify(next)
+                        } }, 300)</script>`
+                      )
+                    }`
+                  )
+                  if (publicExpectation) {
+                    yield* page.locator("#done").pipe(Expect.toBeVisible)
+                    return
+                  }
+                  const target = page.locator("#done") as LocatorImpl
+                  const reply = yield* Effect.gen(function*() {
+                    const record = yield* Operation.record
+                    return yield* Runtime.send(
+                      target.owner.runtime,
+                      target.owner.page,
+                      { op: "expect", steps: target.steps, expectation: { _tag: "Visible" }, cap: 2000 },
+                      record.id,
+                      record.budget.at
+                    )
+                  }).pipe(Operation.named("Test.ordinaryNavigation"), Effect.result)
+                  assert(reply._tag === "Success", JSON.stringify(reply))
+                  assert.strictEqual(reply.success._tag, "Expected")
+                  if (reply.success._tag === "Expected") {
+                    assert.isTrue(reply.success.passed)
+                  }
+                }).pipe(Effect.scoped, Effect.provide(browser))
+              }),
+            timeout
+          )
+        }
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
