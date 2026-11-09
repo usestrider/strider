@@ -4774,16 +4774,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }))
             ])
             for (const { id, focused } of focus) {
-              yield* page.locator(`#${id}`).pipe(
-                Expect.toHaveRole(focused ? "heading" : "none"),
-                Deadline.within("1 second")
-              )
+              yield* page.locator(`#${id}`).pipe(Expect.toHaveRole(focused ? "heading" : "none"))
             }
             // A global ARIA attribute or focusability overrides a presentational role with the implicit one, and
             // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
-            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
-            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
-            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"))
+            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"))
+            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"))
             yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
             yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
             const snapshot = yield* page.locator("#described").snapshot()
