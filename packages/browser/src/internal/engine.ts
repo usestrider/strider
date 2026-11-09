@@ -159,6 +159,7 @@ export type Expectation =
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
+  | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
@@ -2327,6 +2328,18 @@ export function engine(render: (root: SnapNode) => string) {
             ? new RegExp(matcher.source, matcher.flags).test(text)
             : text.includes(collapse(matcher.value)),
           observed: text
+        }
+      }
+      case "Values": {
+        const control = textSelectionTarget(element)
+        if (!(control instanceof HTMLSelectElement) || !control.multiple) {
+          return { passed: false, observed: "not a select element with a multiple attribute" }
+        }
+        const values = Array.from(control.selectedOptions, (option) => option.value)
+        return {
+          passed: values.length === expectation.expected.length &&
+            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+          observed: values
         }
       }
       case "Value": {

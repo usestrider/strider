@@ -320,6 +320,37 @@ export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string
 )
 
 /**
+ * Expects the selected values of one multiple select to match in option order.
+ *
+ * **Details**
+ *
+ * Strings match exactly, including whitespace; regular expressions test each value.
+ * An empty array expects no selected options. Labels resolve to their associated control.
+ * Missing or multiple matches and controls other than a multiple select retry until the deadline,
+ * then fail with `ExpectationFailed` evidence.
+ *
+ * **Example** (Checking selected colors)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const colors = Effect.fn("colors")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByLabel("Colors").pipe(Expect.toHaveValues(["red", /green/]))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+    ExpectImpl.toHaveValues(locator, expected)
+)
+
+/**
  * Expects the one match to have the attribute, with a matching value when one is given.
  *
  * **Example** (Checking that a menu opened)

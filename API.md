@@ -713,6 +713,7 @@ declare const toHaveText: DualMatcher<Locator.ReadonlyLocator, [expected: string
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
 declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>

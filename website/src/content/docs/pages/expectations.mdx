@@ -38,6 +38,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
+| `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
@@ -55,6 +56,19 @@ import { Effect } from "effect"
 const checkClasses = Effect.fn("checkClasses")(function*(page: Page.ReadonlyPage) {
   yield* page.getByTestId("status").pipe(Expect.toHaveClass("status ready"))
   yield* page.getByRole("listitem").pipe(Expect.toHaveClass(["selected", /^pending/]))
+})
+```
+
+Selected values match exactly, including whitespace, or by regular expression, in option order.
+`toHaveValues([])` waits for an empty selection; the locator must still match one `<select multiple>`.
+Labels resolve to their associated control. Other controls fail with expectation evidence at the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkColors = Effect.fn("checkColors")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByLabel("Colors").pipe(Expect.toHaveValues(["red", /^green$/]))
 })
 ```
 
