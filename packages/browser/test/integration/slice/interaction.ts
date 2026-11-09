@@ -3676,15 +3676,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
              <input id="aria" aria-readonly="true"><input id="case" aria-readonly="TRUE">
              <div aria-readonly="true"><input id="readonlyAncestor"></div>
              <div aria-disabled="true"><input id="ariaDisabled"></div>
-             <div id="inert" contenteditable inert hidden>edit</div>
+             <input id="inert" inert><input id="hidden" hidden>
+             <div id="inertEdit" contenteditable inert>edit</div><div id="hiddenEdit" contenteditable hidden>edit</div>
              <select id="select"></select><input id="checkbox" type="checkbox"><div id="role" role="textbox"></div>
              <p class="two">a</p><p class="two">b</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
-            for (const id of ["text", "date", "inherited", "case", "inert", "readonlyAncestor"]) {
+            for (const id of ["text", "date", "inherited", "case", "inert", "hidden", "readonlyAncestor"]) {
               assert.isTrue(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            // The engine follows the native property: WebKit can suppress editability here.
+            for (const id of ["inertEdit", "hiddenEdit"]) {
+              const native = yield* page.evaluateInMainWorld((id) => document.getElementById(id)!.isContentEditable, id)
+              assert.strictEqual(yield* page.locator(`#${id}`).isEditable, native, id)
             }
             for (const id of ["readonly", "disabled", "off", "aria", "ariaDisabled", "select", "checkbox", "role"]) {
               assert.isFalse(yield* page.locator(`#${id}`).isEditable, id)

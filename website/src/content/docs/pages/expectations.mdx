@@ -169,7 +169,8 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 contenteditable element must be enabled and not read-only. Hidden or inert elements can still read true.
 Other kinds, including selects and ARIA-only textboxes, read false; Playwright accepts more kinds and
 throws for unsupported elements. Native read-only state and the element's `aria-readonly="true"` prevent
-editing; ARIA tokens are case-sensitive.
+editing; ARIA tokens are case-sensitive. Contenteditable follows the browser’s `isContentEditable`
+property; WebKit can report false for hidden or inert contenteditable elements.
 
 ```ts
 import { Page } from "@usestrider/browser"
