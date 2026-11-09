@@ -22,7 +22,8 @@ const request: Engine.CooperativeRequest = {
   cap: 1000
 }
 
-const scenario = () => {
+const scenario = (resumes: ReadonlyArray<Engine.CooperativeResponse> = []) => {
+  let resumed = 0
   const commands: Array<Engine.CooperativeCommand> = []
   const evaluations: Array<"install" | "run" | "cooperate"> = []
   const layer = BrowserImpl.layer((sink) =>
@@ -54,9 +55,9 @@ const scenario = () => {
             } :
             command.command === "cancel" ?
             { _tag: "Disposed" } :
-            command.decision === "restart"
-            ? { _tag: "Restart" }
-            : { _tag: "Done", response: ordinary }
+            resumes[resumed++] ?? (command.decision === "restart"
+              ? { _tag: "Restart" }
+              : { _tag: "Done", response: ordinary })
           return { _tag: "Value", value: { type: "string", value: JSON.stringify(response) } } as const
         })
     })))
@@ -145,6 +146,39 @@ describe("cooperative runtime", () => {
         assert.strictEqual(error._tag, "Deadline")
         assert.deepStrictEqual(commands.map((command) => command.command), ["start", "cancel"])
       }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+    }))
+
+  it.effect("returns round-expiry observations even when the hook requests restart", () =>
+    Effect.gen(function*() {
+      const terminal = { _tag: "Expected", passed: false, observed: "actual", changed: true } as const
+      const { layer, commands } = scenario([{ _tag: "Done", response: terminal }])
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const result = yield* run(owner, () => Effect.succeed("restart" as const))
+        assert(!("_tag" in result))
+        assert.deepStrictEqual(result.response, terminal)
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume"])
+      }).pipe(Effect.scoped, Effect.provide(layer))
+    }))
+
+  it.effect("fails explicitly instead of restarting when a continuation answer is unavailable", () =>
+    Effect.gen(function*() {
+      const { layer, commands } = scenario([
+        { _tag: "Disposed" },
+        { _tag: "Done", response: { _tag: "Expected", passed: false, observed: "lost", changed: true } }
+      ])
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const failure = yield* run(owner, () => Effect.succeed("continue" as const)).pipe(Effect.flip)
+        assert.strictEqual(failure._tag, "Reason")
+        if (failure._tag === "Reason") {
+          assert.strictEqual(failure.reason._tag, "BackendFailure")
+          assert.include(failure.reason.message, "unavailable")
+        }
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume", "cancel"])
+      }).pipe(Effect.scoped, Effect.provide(layer))
     }))
 
   it.effect("does no cooperative browser work on ordinary requests", () =>

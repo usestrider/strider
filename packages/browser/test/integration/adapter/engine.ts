@@ -199,6 +199,32 @@ const trackCooperativeResources = `() => {
   globalThis.cancelAnimationFrame = () => { throw Error("The engine canceled a virtual frame") }
 }`
 
+/** Drive the saved real clock deterministically, including automatic terminal-result eviction. */
+const controlledCooperativeClock = `() => {
+  (${trackCooperativeResources})()
+  const real = globalThis[Symbol.for("@usestrider/browser/clock/real")]
+  const resources = globalThis.engineTestResources
+  let time = 0
+  let sequence = 10000
+  const timers = new Map()
+  real.now = () => time
+  real.setTimeout = (callback, delay) => {
+    const id = ++sequence
+    timers.set(id, { at: time + delay, callback })
+    resources.timers.add(id)
+    return id
+  }
+  real.clearTimeout = (id) => { timers.delete(id); resources.timers.delete(id) }
+  globalThis.engineTestAdvance = (millis) => {
+    time += millis
+    while (true) {
+      const due = [...timers].filter(([, timer]) => timer.at <= time).sort((a, b) => a[1].at - b[1].at)[0]
+      if (!due) break
+      timers.delete(due[0]); resources.timers.delete(due[0]); due[1].callback()
+    }
+  }
+}`
+
 /** Execute the opt-in wire protocol in one evaluation to control frame ordering. */
 const cooperativeExercise = Effect.fnUntraced(function*(
   call: Effect.Success<ReturnType<typeof open>>["call"],
@@ -380,9 +406,11 @@ export const engine = (backend: Backend) =>
             const result = yield* cooperativeExercise(
               call,
               `
-              const control = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              let control = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              control = await command({ command: "resume", token: control.token, left: 2000, decision: "continue" })
               const answered = await command({ command: "resume", token: control.token, left: 0, decision: "continue" })
-              const first = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
+              let first = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
+              first = await command({ command: "resume", token: first.token, left: 100, decision: "continue" })
               await new Promise((resolve) => setTimeout(resolve, 300))
               const expired = await command({ command: "resume", token: first.token, left: 0, decision: "continue" })
               return JSON.stringify({ answered, expired })
@@ -391,6 +419,99 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(result.answered._tag, "Done")
             assert.strictEqual(result.expired._tag, "Done", JSON.stringify(result.expired))
             assert.strictEqual(result.expired.response._tag, result.answered.response._tag)
+            assert.deepStrictEqual(result.answered.response.reason, { _tag: "NotVisible" })
+            assert.deepStrictEqual(result.expired.response.reason, { _tag: "NotVisible" })
+            assert.deepStrictEqual(result.expired.response.history, [{ _tag: "NotVisible" }])
+          }), timeout)
+        it.effect("cooperative expired observations are owned, consumed once, and cleared on cancel or departure", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"go\">actual</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const resources = () => Object.values(globalThis.engineTestResources).map((set) => set.size)
+              const request = { op: "expect", steps: [{ _tag: "Css", selector: "#go" }], cap: 1000,
+                expectation: { _tag: "Text", expected: [{ _tag: "String", value: "expected", exact: true }], list: false } }
+              const expired = async (session) => {
+                document.querySelector('#go').textContent = "actual"
+                let reply = await command({ command: "start", session, budget: 100, request })
+                reply = await command({ command: "resume", session, token: reply.token, left: 100, decision: "continue" })
+                globalThis.engineTestAdvance(100)
+                document.querySelector('#go').textContent = "changed after expiry"
+                return reply.token
+              }
+              const token = await expired("consume")
+              const retained = resources()
+              const foreign = await command({ command: "resume", session: "consume", operation: "other", token, left: 0, decision: "continue" })
+              const wrongDocument = await command({ command: "resume", session: "consume", document: "other", token, left: 0, decision: "continue" })
+              const consumed = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
+              const replay = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
+              const afterConsumption = resources()
+              const canceledToken = await expired("cancel")
+              await command({ command: "cancel", session: "cancel" })
+              const canceled = await command({ command: "resume", session: "cancel", token: canceledToken, left: 0, decision: "continue" })
+              const afterCancel = resources()
+              const departedToken = await expired("depart")
+              dispatchEvent(new Event("pagehide"))
+              const departed = await command({ command: "resume", session: "depart", token: departedToken, left: 0, decision: "continue" })
+              const afterDeparture = resources()
+              const abandonedToken = await expired("abandon")
+              globalThis.engineTestAdvance(30000)
+              const afterRetention = resources()
+              const abandoned = await command({ command: "resume", session: "abandon", token: abandonedToken, left: 0, decision: "continue" })
+              return JSON.stringify({ retained, foreign, wrongDocument, consumed, replay, afterConsumption,
+                canceled, afterCancel, departed, afterDeparture, abandoned, afterRetention })
+            `
+            )
+            assert.deepStrictEqual(result.retained, [1, 0, 0, 1])
+            assert.strictEqual(result.consumed._tag, "Done")
+            assert.strictEqual(result.consumed.response.observed, "actual")
+            assert.isFalse(result.consumed.response.passed)
+            for (const key of ["foreign", "wrongDocument", "replay", "canceled", "departed", "abandoned"]) {
+              assert.strictEqual(result[key]._tag, "Disposed", key)
+            }
+            for (const key of ["afterConsumption", "afterCancel", "afterDeparture", "afterRetention"]) {
+              assert.deepStrictEqual(result[key], [0, 0, 0, 0], key)
+            }
+          }), timeout)
+        it.effect("cooperative abandoned terminal storage is bounded by count and serialized size", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"go\">actual</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const request = { op: "expect", steps: [], cap: 1000, expectation: { _tag: "Title", expected: { _tag: "String", value: "expected", exact: true } } }
+              const tokens = []
+              for (let index = 0; index < 65; index++) {
+                const session = "count-" + index
+                const reply = await command({ command: "start", session, budget: 100, request })
+                tokens.push(reply.token)
+                globalThis.engineTestAdvance(100)
+              }
+              const oldest = await command({ command: "resume", session: "count-0", token: tokens[0], left: 0, decision: "continue" })
+              const newest = await command({ command: "resume", session: "count-64", token: tokens[64], left: 0, decision: "continue" })
+              dispatchEvent(new Event("pagehide"))
+              document.title = "x".repeat(300000)
+              const large = []
+              for (let index = 0; index < 2; index++) {
+                const session = "size-" + index
+                let reply = await command({ command: "start", session, budget: 100, request })
+                reply = await command({ command: "resume", session, token: reply.token, left: 100, decision: "continue" })
+                large.push(reply.token)
+                globalThis.engineTestAdvance(100)
+              }
+              const evicted = await command({ command: "resume", session: "size-0", token: large[0], left: 0, decision: "continue" })
+              const kept = await command({ command: "resume", session: "size-1", token: large[1], left: 0, decision: "continue" })
+              return JSON.stringify({ oldest, newest, evicted, keptTag: kept._tag, observedLength: kept.response?.observed.length,
+                resources: Object.values(globalThis.engineTestResources).map((set) => set.size) })
+            `
+            )
+            assert.strictEqual(result.oldest._tag, "Disposed")
+            assert.strictEqual(result.newest._tag, "Done")
+            assert.strictEqual(result.evicted._tag, "Disposed")
+            assert.strictEqual(result.keptTag, "Done")
+            assert.strictEqual(result.observedLength, 300000)
+            assert.deepStrictEqual(result.resources, [0, 0, 0, 0])
           }), timeout)
         it.effect("cooperative runtime probes a top-document trigger while the target is cross-origin", () =>
           Effect.gen(function*() {
