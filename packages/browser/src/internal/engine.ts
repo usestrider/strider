@@ -124,6 +124,7 @@ export type Action =
     readonly guard: boolean
   }
   | { readonly _tag: "Focus" }
+  | { readonly _tag: "Blur" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
   | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
@@ -1944,6 +1945,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
+      case "Blur":
+        if (!("blur" in element) || typeof element.blur !== "function") {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "an element with a blur method", element: describe(element) }
+          }
+        }
+        if (apply) element.blur()
+        return answer
       default:
         break
     }

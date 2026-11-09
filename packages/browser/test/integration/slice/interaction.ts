@@ -250,6 +250,110 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "blurs only the matched element with native focus events and no input",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="a"><input id="b"><input id="hidden" hidden inert disabled><div id="plain"></div><math tabindex="0" id="math"><mi>x</mi></math><p id="events"></p>
+            <script>
+              const record = e => document.querySelector('#events').textContent += e.type + ':' + e.target.id + ';';
+              for (const element of document.querySelectorAll('input, div, math')) element.addEventListener('blur', record);
+              for (const type of ['focusout', 'keydown', 'pointerdown', 'input'])
+                document.addEventListener(type, record, true);
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#a").focus()
+            const native = yield* page.evaluateInMainWorld(() => {
+              const field = document.querySelector<HTMLInputElement>("#a")!
+              const hasFocus = document.hasFocus()
+              field.blur()
+              const events = document.querySelector("#events")!
+              const recorded = events.textContent!
+              events.textContent = ""
+              return { hasFocus, events: recorded }
+            })
+            assert.include(native.events, "focusout:a;")
+            if (native.hasFocus) assert.include(native.events, "blur:a;")
+            yield* page.locator("#a").focus()
+            yield* page.locator("#a").blur({ trial: true })
+            yield* page.locator("#b").blur()
+            yield* page.locator("#a").pipe(Expect.toBeFocused)
+            yield* page.locator("#hidden").blur()
+            yield* page.locator("#plain").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(""))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
+            yield* page.locator("#a").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(native.events))
+            assert.notStrictEqual(yield* page.evaluateInMainWorld(() => document.activeElement?.id), "a")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#events")!.textContent = ""
+              document.querySelector<MathMLElement>("#math")!.focus()
+            })
+            const nativeMath = yield* page.evaluateInMainWorld(() => {
+              const events = document.querySelector("#events")!
+              const field = document.querySelector<MathMLElement>("#math")!
+              const hasFocus = document.hasFocus()
+              field.blur()
+              const recorded = events.textContent!
+              events.textContent = ""
+              return { hasFocus, events: recorded }
+            })
+            yield* page.evaluateInMainWorld(() => document.querySelector<MathMLElement>("#math")!.focus())
+            yield* page.locator("#math").blur()
+            yield* page.locator("#events").pipe(Expect.toHaveText(nativeMath.events))
+            console.log("Native blur events", { html: native, math: nativeMath })
+            yield* page.evaluateInMainWorld(() => {
+              const foreign = document.createElementNS("urn:example", "widget")
+              foreign.setAttribute("id", "foreign")
+              document.body.append(foreign)
+            })
+            const wrong = yield* page.locator("#foreign").blur({ trial: true }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(wrong))
+            assert.strictEqual(wrong.reason._tag, "WrongElement")
+            const strict = yield* page.locator("input").blur().pipe(Effect.flip)
+            assert(Locator.isLocatorError(strict))
+            assert.strictEqual(strict.reason._tag, "StrictViolation")
+            const missing = yield* page.locator("#absent").blur().pipe(Deadline.within("100 millis"), Effect.flip)
+            assert(Deadline.isTimeout(missing))
+            assert.strictEqual(missing.operation, "Locator.blur")
+            assert.deepStrictEqual(missing.diagnostics.dispatch, { _tag: "NotSent" })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps blur in its owning context and uses the backend's engine world",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><p id="out"></p><script>
+            const nativeBlur = HTMLElement.prototype.blur;
+            HTMLElement.prototype.blur = function() {
+              document.querySelector('#out').textContent = 'page blur';
+              return nativeBlur.call(this);
+            };
+          </script>`
+            )
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const other = yield* newPage
+            yield* other.goto(url)
+            yield* other.locator("#field").focus()
+            yield* page.goto(url)
+            yield* page.locator("#field").focus()
+            yield* page.locator("#field").blur()
+            const isolated = yield* supports("isolatedWorlds")
+            yield* page.locator("#out").pipe(Expect.toHaveText(isolated ? "" : "page blur"))
+            yield* other.locator("#out").pipe(Expect.toHaveText(""))
+            assert.strictEqual(yield* other.evaluateInMainWorld(() => document.activeElement?.id), "field")
+          })),
+        timeout
+      )
+
       for (const ancestor of [false, true]) {
         for (const action of ["click", "check", "fill"] as const) {
           it.effect(
