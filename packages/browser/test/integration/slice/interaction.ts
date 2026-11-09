@@ -4698,6 +4698,53 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "expects raw classes, ordered class arrays and class changes with failure evidence",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="raw" class=" foo  bar "></div><div id="ordered" class="foo bar"></div><div id="empty" class=""></div><div id="missing"></div><svg class="icon active"></svg><ul><li class="first"></li><li class="second"></li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#raw").pipe(Expect.toHaveClass(" foo  bar "))
+              yield* Expect.toHaveClass(page.locator("#raw"), /^ foo  bar $/g)
+              yield* page.locator("svg").pipe(Expect.toHaveClass(/icon/))
+              yield* page.locator("#empty").pipe(Expect.toHaveClass(""))
+              yield* page.locator("#missing").pipe(Expect.toHaveClass(""))
+              yield* page.locator("li").pipe(Expect.toHaveClass(["first", /second/g]))
+              yield* page.locator(".absent").pipe(Expect.toHaveClass([]))
+              for (
+                const [selector, expected, observed] of [
+                  ["#raw", "foo bar", " foo  bar "],
+                  ["#ordered", "bar foo", "foo bar"],
+                  [".absent", "", { matches: 0 }],
+                  ["li", /first/, { matches: 2 }],
+                  ["li", ["second", "first"], ["first", "second"]],
+                  ["li", ["first"], ["first", "second"]]
+                ] as const
+              ) {
+                const error = yield* page.locator(selector).pipe(
+                  Expect.toHaveClass(expected),
+                  Deadline.within("500 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert(Option.isSome(error.last))
+                assert.deepStrictEqual(error.last.value.value, observed)
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+                assert(error.condition.startsWith("to have the class "))
+              }
+              yield* page.evaluateInMainWorld(() => {
+                setTimeout(() => document.querySelector("#raw")!.setAttribute("class", "ready"), 100)
+              })
+              yield* page.locator("#raw").pipe(Expect.toHaveClass(/^ready$/g))
+            }))
+          }),
+        timeout
+      )
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

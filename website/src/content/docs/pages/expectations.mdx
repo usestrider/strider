@@ -35,6 +35,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
+| `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
@@ -44,6 +45,18 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
+
+Class strings preserve spacing and class order. Missing class attributes count as empty strings; an array also checks the number of matches. Scalar checks retry until exactly one element matches.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkClasses = Effect.fn("checkClasses")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("status").pipe(Expect.toHaveClass("status ready"))
+  yield* page.getByRole("listitem").pipe(Expect.toHaveClass(["selected", /^pending/]))
+})
+```
 
 A string `toHaveText` matches the whole text; a `RegExp` is tested; an array matches each match's text, in order.
 `toBeHidden` also passes when nothing matches, so it waits for something to go away:

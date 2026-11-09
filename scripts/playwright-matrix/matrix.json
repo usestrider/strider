@@ -19662,33 +19662,39 @@
       "upstream": [
         "method:LocatorAssertions.toHaveClass"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveClass",
+          "url": "/docs/api/browser/Expect#toHaveClass"
+        }
+      ],
+      "notes": "Full class strings or regular expressions; ordered arrays require equal counts. Scalar zero/multiple matches retry with typed expectation evidence.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -89853,9 +89859,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tohaveclass-signal",
       "upstream": [
@@ -89864,36 +89881,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locatorassertions-tohaveclass-timeout",
       "upstream": [
@@ -89902,31 +89925,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "has",
@@ -113223,7 +113252,7 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "f7a3bcd231b009f98b48df7dae243b4ae52f2083ae4f559d82db4913e0756402",
-    "packages/browser/src/Expect.ts": "0aeacd3e3a5da894f23795f3ab2a4093a1bc0fcb6ec19b65f32ddbaeca819dec",
+    "packages/browser/src/Expect.ts": "71fcb3b8db64cb95581c3e48fff356afb3d12056faf8b669bd4a947640b15f73",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
