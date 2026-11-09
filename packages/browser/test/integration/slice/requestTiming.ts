@@ -9,9 +9,14 @@ import * as http from "node:http"
 import { supports } from "./capabilities.ts"
 
 const site = Effect.gen(function*() {
+  const hits = new Map<string, number>()
   let release: (() => void) | undefined
   const server = http.createServer((request, response) => {
-    if (request.url === "/fail") {
+    hits.set(request.url ?? "/", (hits.get(request.url ?? "/") ?? 0) + 1)
+    if (request.url === "/cached-redirect") {
+      response.writeHead(301, { location: "/cache", "cache-control": "max-age=3600" })
+      response.end()
+    } else if (request.url === "/fail") {
       request.socket.destroy()
     } else if (request.url === "/redirect") {
       response.writeHead(302, { location: "/stream" })
@@ -20,6 +25,9 @@ const site = Effect.gen(function*() {
       response.writeHead(200, { "content-type": "text/plain", "cache-control": "no-store" })
       response.write("first\n")
       release = request.url === "/broken" ? () => response.destroy() : () => response.end("last\n")
+    } else if (request.url === "/cache-script") {
+      response.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=3600" })
+      response.end("globalThis.cacheLoads = (globalThis.cacheLoads || 0) + 1")
     } else if (request.url === "/cache") {
       response.writeHead(200, { "content-type": "text/plain", "cache-control": "max-age=3600" })
       response.end("cached")
@@ -35,6 +43,7 @@ const site = Effect.gen(function*() {
   const address = server.address()
   assert(address !== null && typeof address !== "string")
   return {
+    hits: (path: string) => hits.get(path) ?? 0,
     origin: `http://127.0.0.1:${address.port}`,
     release: () => {
       assert(release !== undefined)
@@ -143,6 +152,56 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
           }).pipe(Effect.scoped),
         60_000
       )
+
+      it.effect("reuses a cacheable script without a second server request", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const context = yield* Browser.newContext({ requestTiming: true })
+          const page = yield* context.newPage
+          yield* page.goto(served.origin)
+          for (let i = 0; i < 2; i++) {
+            yield* page.evaluateInMainWorld(async () => {
+              await new Promise<void>((resolve, reject) => {
+                const script = document.createElement("script")
+                script.src = "/cache-script"
+                script.onload = () => resolve()
+                script.onerror = () => reject(new Error("script failed"))
+                document.head.append(script)
+              })
+            })
+            assert.strictEqual(served.hits("/cache-script"), 1, "the second script must come from cache")
+          }
+        }).pipe(Effect.scoped), 60_000)
+
+      if (name === "Chromium") {
+        it.effect(
+          "observes a server-counted cached permanent redirect",
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const context = yield* Browser.newContext({ requestTiming: true })
+              const page = yield* context.newPage
+              yield* page.goto(served.origin)
+              for (let i = 0; i < 2; i++) {
+                const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/cached-redirect` })
+                const full = yield* NetworkResponse.next(page, {
+                  url: `${served.origin}/cache`,
+                  body: (body) => body.text
+                })
+                assert.strictEqual(
+                  yield* page.evaluateInMainWorld(async () => (await fetch("/cached-redirect")).text()),
+                  "cached"
+                )
+                yield* full
+                const timing = yield* NetworkRequest.timing(page, yield* sent)
+                assert.strictEqual(served.hits("/cached-redirect"), 1)
+                assert.strictEqual(served.hits("/cache"), 1)
+                console.log("REDIRECT_CACHE_EVIDENCE", JSON.stringify({ iteration: i, timing }))
+              }
+            }).pipe(Effect.scoped),
+          60_000
+        )
+      }
 
       it.effect(
         "leaves unavailable connection phases absent on reused and cached requests",
