@@ -623,21 +623,21 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.isTrue(Option.isNone(yield* links.from(first)))
             assert.isTrue(Option.isNone(yield* links.to(third)))
             const foreign = yield* NetworkRequest.redirects(other)
-            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "Unavailable")
+            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "unavailable")
             yield* other.goto(`${origin}/redirect-repeat`)
             const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
             assert.strictEqual(otherRequests.length, 3)
-            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "Unavailable")
+            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "unavailable")
             const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
             yield* page.evaluateInMainWorld(() => {
               void fetch("/events")
             })
-            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "Pending")
+            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "pending")
             yield* Scope.close(scope, Exit.void)
-            assert.strictEqual((yield* Effect.flip(links.from(first))).reason.why, "Released")
+            assert.strictEqual((yield* Effect.flip(links.from(first))).reason.why, "released")
             const live = yield* NetworkRequest.redirects(page)
             yield* page.close()
-            assert.strictEqual((yield* Effect.flip(live.from(first))).reason.why, "TargetClosed")
+            assert.strictEqual((yield* Effect.flip(live.from(first))).reason.why, "targetClosed")
           })),
         timeout
       )

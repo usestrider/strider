@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
+import * as Diagnostics from "./Diagnostics.ts"
 import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
@@ -399,8 +400,8 @@ export const headersSent = (
  *
  * **Details**
  *
- * `Pending` means the next hop is not known yet; `Unavailable` means the request or its neighbor is no longer
- * retained, is reconstructed, or belongs to another target. `Released` ends scoped access and `TargetClosed`
+ * `pending` means the next hop is not known yet; `unavailable` means the request or its neighbor is no longer
+ * retained, is reconstructed, or belongs to another target. `released` ends scoped access and `targetClosed`
  * ends access through a closed page, context or connection.
  *
  * @stability unstable
@@ -410,7 +411,7 @@ export const headersSent = (
 export class RedirectUnavailable
   extends Schema.Error<RedirectUnavailable>("@usestrider/browser/NetworkRequest/RedirectUnavailable")({
     _tag: Schema.tag("RedirectUnavailable"),
-    why: Schema.Literals(["Pending", "Unavailable", "Released", "TargetClosed"])
+    why: Schema.Literals(["pending", "unavailable", "released", "targetClosed"])
   })
 {
   override get message(): string {
@@ -425,14 +426,18 @@ export class RedirectUnavailable
  * @category errors
  * @since 0.1.0
  */
-export class NetworkRequestError
-  extends Schema.TaggedError<NetworkRequestError>("@usestrider/browser/NetworkRequest/NetworkRequestError")(
-    "NetworkRequestError",
-    {
-      reason: RedirectUnavailable
-    }
-  )
-{}
+export class RequestError extends Schema.TaggedError<RequestError>("@usestrider/browser/NetworkRequest/RequestError")(
+  "RequestError",
+  {
+    hop: HopId,
+    reason: Schema.Union([RedirectUnavailable]),
+    diagnostics: Diagnostics.Diagnostics
+  }
+) {
+  override get message(): string {
+    return this.reason.message
+  }
+}
 
 /**
  * Scoped access to neighboring request snapshots in the browser's bounded hop index.
@@ -448,9 +453,9 @@ export class NetworkRequestError
  */
 export interface Redirects {
   /** Reads the preceding hop, or `None` for the first hop. */
-  readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>
+  readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>
   /** Reads the following hop, or `None` after a terminal non-redirect response or failure. */
-  readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>
+  readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>
 }
 
 /**
@@ -464,9 +469,9 @@ export interface Redirects {
  * closing the target or connection also prevents reads. Access may read requests sent before it opened.
  *
  * `from` and `to` use chain identity and hop ordinal, including when URLs repeat. They require the exact original
- * snapshot and its owning page or context. Missing retained evidence fails with `Unavailable`; a successor not
- * yet established fails with `Pending` while the hop is unfinished. A completed redirect whose successor is absent
- * fails with `Unavailable`:
+ * snapshot and its owning page or context. Missing retained evidence fails with `unavailable`; a successor not
+ * yet established fails with `pending` while the hop is unfinished. A completed redirect whose successor is absent
+ * fails with `unavailable`:
  * no terminal boundary can be inferred from a redirect response alone. Neither member waits.
  *
  * **Example** (Reading a redirect's predecessor)

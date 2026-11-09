@@ -49,7 +49,7 @@ describe("Scoped redirect evidence", () => {
       const links = yield* NetworkRequest.redirects(page)
       const first = yield* send("chain.0")
       assert.isTrue(Option.isNone(yield* links.from(first)))
-      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "Pending")
+      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "pending")
       const second = yield* send("chain.1")
       const last = yield* send("chain.2")
       assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
@@ -59,7 +59,7 @@ describe("Scoped redirect evidence", () => {
       yield* fold.sink({ _tag: "RequestFailed", hop: last.hop, error: "canceled", canceled: true, at: last.at })
       assert.isTrue(Option.isNone(yield* links.to(last)))
       const clone = new NetworkRequest.NetworkRequest({ ...first })
-      assert.strictEqual((yield* Effect.flip(links.from(clone))).reason.why, "Unavailable")
+      assert.strictEqual((yield* Effect.flip(links.from(clone))).reason.why, "unavailable")
     }))
 
   it.effect("requires terminal evidence and distinguishes redirects from other 3xx responses", () =>
@@ -79,16 +79,16 @@ describe("Scoped redirect evidence", () => {
           at: request.at
         })
         yield* fold.sink({ _tag: "ResponseReceived", response })
-        assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "Pending")
+        assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "pending")
         yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
-        if (status === 302) assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "Unavailable")
+        if (status === 302) assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "unavailable")
         else assert.isTrue(Option.isNone(yield* links.to(request)))
       }
       const missing = yield* send("no-response.0")
       yield* fold.sink({ _tag: "RequestFinished", hop: missing.hop, encodedBytes: 0, at: missing.at })
-      assert.strictEqual((yield* Effect.flip(links.to(missing))).reason.why, "Unavailable")
+      assert.strictEqual((yield* Effect.flip(links.to(missing))).reason.why, "unavailable")
       yield* fold.loseConnection
-      assert.strictEqual((yield* Effect.flip(links.from(missing))).reason.why, "TargetClosed")
+      assert.strictEqual((yield* Effect.flip(links.from(missing))).reason.why, "targetClosed")
     }))
 
   it.effect("opens and releases access without subscribing, reading hops or changing context settings", () =>
@@ -134,8 +134,8 @@ describe("Scoped redirect evidence", () => {
       const first = yield* send("chain.0")
       const second = yield* send("chain.1")
       for (let i = 0; i < Fold.maxHops - 1; i++) yield* send(`other-${i}.0`)
-      assert.strictEqual((yield* Effect.flip(links.from(second))).reason.why, "Unavailable")
-      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "Unavailable")
+      assert.strictEqual((yield* Effect.flip(links.from(second))).reason.why, "unavailable")
+      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "unavailable")
     }))
 
   it.effect("revokes access on scope release and target removal", () =>
@@ -145,7 +145,7 @@ describe("Scoped redirect evidence", () => {
       const scope = yield* Scope.make()
       const released = yield* NetworkRequest.redirects(page).pipe(Scope.provide(scope))
       yield* Scope.close(scope, Exit.void)
-      assert.strictEqual((yield* Effect.flip(released.from(first))).reason.why, "Released")
+      assert.strictEqual((yield* Effect.flip(released.from(first))).reason.why, "released")
       const closed = yield* NetworkRequest.redirects(page)
       yield* fold.sink({
         _tag: "NavigableRemoved",
@@ -153,6 +153,6 @@ describe("Scoped redirect evidence", () => {
         reason: new Target.PageClosed({ by: "command" }),
         evidence: "test"
       })
-      assert.strictEqual((yield* Effect.flip(closed.from(first))).reason.why, "TargetClosed")
+      assert.strictEqual((yield* Effect.flip(closed.from(first))).reason.why, "targetClosed")
     }))
 })

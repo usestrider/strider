@@ -1160,8 +1160,8 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
 - `interface Redirects`
-  - `readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>`
-  - `readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>`
+  - `readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>`
+  - `readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>`
 
 *schemas*
 
@@ -1188,7 +1188,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 *errors*
 
-- `class NetworkRequestError: Schema.TaggedError "NetworkRequestError" { reason }`
+- `class RequestError: Schema.TaggedError "RequestError" { hop, reason, diagnostics }`
 
 *reasons*
 

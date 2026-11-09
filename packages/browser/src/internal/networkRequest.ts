@@ -14,6 +14,7 @@ import type * as UserContext from "../UserContext.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
+import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 
 export const { history, next, stream } = EventModule.make<
@@ -71,23 +72,25 @@ export const redirects: (
       Effect.gen(function*() {
         const fail = (why: NetworkRequest.RedirectUnavailable["why"]) =>
           Effect.fail(
-            new NetworkRequest.NetworkRequestError({
-              reason: new NetworkRequest.RedirectUnavailable({ why })
+            new NetworkRequest.RequestError({
+              hop: request.hop,
+              reason: new NetworkRequest.RedirectUnavailable({ why }),
+              diagnostics: Operation.diagnosticsNow()
             })
           )
         const current = owner
-        if (current === undefined) return yield* fail("Released")
+        if (current === undefined) return yield* fail("released")
         const { entry, runtime } = current.behind
         if (Deferred.isDoneUnsafe(entry.closed) || Deferred.isDoneUnsafe(runtime.model.lost)) {
-          return yield* fail("TargetClosed")
+          return yield* fail("targetClosed")
         }
-        const owned = (hop: import("./model.ts").HopEntry) =>
+        const owned = (hop: Model.HopEntry) =>
           current._tag === "Page"
             ? Option.exists(hop.page, (page) => page === current.behind.entry)
             : Option.exists(hop.context, (context) => context === current.behind.entry)
         const source = runtime.model.hop(request.hop)
         if (Option.isNone(source) || source.value.request !== request || !owned(source.value)) {
-          return yield* fail("Unavailable")
+          return yield* fail("unavailable")
         }
         const separator = request.hop.lastIndexOf(".")
         const ordinal = Number(request.hop.slice(separator + 1))
@@ -96,18 +99,18 @@ export const redirects: (
           `${request.hop.slice(0, separator)}.${ordinal + direction}` as NetworkRequest.HopId
         )
         if (Option.isSome(adjacent)) {
-          if (!owned(adjacent.value)) return yield* fail("Unavailable")
+          if (!owned(adjacent.value)) return yield* fail("unavailable")
           return Option.some(adjacent.value.request)
         }
-        if (direction === -1) return yield* fail("Unavailable")
+        if (direction === -1) return yield* fail("unavailable")
         const end = yield* Deferred.poll(source.value.end)
-        if (Option.isNone(end)) return yield* fail("Pending")
+        if (Option.isNone(end)) return yield* fail("pending")
         const terminal = yield* end.value
-        if (terminal._tag === "Forgotten") return yield* fail("Unavailable")
+        if (terminal._tag === "Forgotten") return yield* fail("unavailable")
         if (terminal._tag === "Failed") return Option.none()
         const response = (yield* source.value.state.get).response
-        if (Option.isNone(response)) return yield* fail("Unavailable")
-        if ([301, 302, 303, 307, 308].includes(response.value.status)) return yield* fail("Unavailable")
+        if (Option.isNone(response)) return yield* fail("unavailable")
+        if ([301, 302, 303, 307, 308].includes(response.value.status)) return yield* fail("unavailable")
         return Option.none()
       }).pipe(Operation.named(direction === -1 ? "NetworkRequest.redirects.from" : "NetworkRequest.redirects.to", {
         attributes: { "browser.hop.id": request.hop }

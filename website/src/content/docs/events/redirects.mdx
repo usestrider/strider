@@ -30,13 +30,13 @@ Access reuses the existing connection-wide index of at most 1000 hops. It adds n
 protocol command. Completed hops are evicted oldest first, then unfinished hops if necessary; requests in another
 context can evict evidence too. Access can read retained requests from before it opened.
 
-A lookup fails with `NetworkRequestError`, whose `RedirectUnavailable` reason has a `why`:
+A lookup fails with `RequestError`, whose `RedirectUnavailable` reason has a `why`:
 
-- `Pending`: the hop is unfinished and its successor is not established. Finish the action that causes the request before inspecting it.
-  A completed redirect without a retained successor is `Unavailable`; it does not prove that the chain ended.
-- `Unavailable`: a snapshot or neighbor was evicted, belongs to another target, was copied, or lacks terminal evidence.
-- `Released`: the scope that opened access has ended.
-- `TargetClosed`: the page, context or browser connection has closed.
+- `pending`: the hop is unfinished and its successor is not established. Finish the action that causes the request before inspecting it.
+  A completed redirect without a retained successor is `unavailable`; it does not prove that the chain ended.
+- `unavailable`: a snapshot or neighbor was evicted, belongs to another target, was copied, or lacks terminal evidence.
+- `released`: the scope that opened access has ended.
+- `targetClosed`: the page, context or browser connection has closed.
 
 These failures preserve uncertainty instead of reporting an absent link. Retain snapshots you need as ordinary
 data, but closing the scope revokes further lookups through its handle.
