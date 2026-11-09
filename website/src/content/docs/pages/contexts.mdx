@@ -74,7 +74,8 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
 | `eventLog`       | how many past events of each kind [`history`](/docs/events/events#history) keeps, for each page and for the context; 100 unless set |
 
 `emulation.extraHTTPHeaders` sends extra headers on navigation and subresource requests. A page's map replaces
-its context's whole map; `{}` clears it while that registration lives, and removal restores the previous map.
+its previous map and merges over context headers; page values win when names match. `{}` retains context
+headers while clearing page-specific ones, and removal restores the previous map.
 Names are case-insensitive, values must be strings valid as HTTP field values, and invalid input fails with
 `InvalidInput`. Request route overrides take precedence; header order is not guaranteed. This setting works on
 Chromium, Firefox and launched stock WebKit; attached stock WebKit refuses it.

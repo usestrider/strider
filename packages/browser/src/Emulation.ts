@@ -285,8 +285,8 @@ export interface Emulation {
   /**
    * Extra headers for requests initiated by the page, including navigation and subresources.
    * Names are case-insensitive; values must be HTTP field values. Each registration replaces the
-   * whole map: a page map takes precedence over its context map, including an empty map.
-   * Removing it restores the previous map. Route request overrides take precedence.
+   * map within its scope: page headers merge over context headers, with page values winning.
+   * An empty page map retains context headers. Removing a registration restores the previous map. Route request overrides take precedence.
    * Header order is not guaranteed. Unset, no extra headers are configured.
    */
   readonly extraHTTPHeaders?: Readonly<Record<string, string>> | undefined

@@ -3990,7 +3990,7 @@
           "url": "/docs/api/browser/Emulation#Emulation"
         }
       ],
-      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the whole map; page maps replace rather than merge context maps. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
+      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the map within their scope; page headers merge over context headers. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
       "capabilities": [
         "emulation.extraHTTPHeaders"
       ],
@@ -4033,8 +4033,8 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "extra-request-header-ownership",
-        "quote": "Each registration replaces the whole map, with page scope taking precedence over context scope; removal restores the preceding map.",
-        "revision": "1e577ef91fdd01d5d9dffc5ace4cb0c14adb3f71"
+        "quote": "Each registration replaces the map within its scope; page headers merge over context headers, with page values winning when names match.",
+        "revision": "bb55fb8a24c8703eb9b5915a4b270d32a3606342"
       }
     },
     {
@@ -25998,7 +25998,7 @@
           "url": "/docs/api/browser/Emulation#Emulation"
         }
       ],
-      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the whole map; page maps replace rather than merge context maps. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
+      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the map within their scope; page headers merge over context headers. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
       "capabilities": [
         "emulation.extraHTTPHeaders"
       ],
@@ -26041,8 +26041,8 @@
       "decision": {
         "file": "docs/decisions.md",
         "anchor": "extra-request-header-ownership",
-        "quote": "Each registration replaces the whole map, with page scope taking precedence over context scope; removal restores the preceding map.",
-        "revision": "1e577ef91fdd01d5d9dffc5ace4cb0c14adb3f71"
+        "quote": "Each registration replaces the map within its scope; page headers merge over context headers, with page values winning when names match.",
+        "revision": "bb55fb8a24c8703eb9b5915a4b270d32a3606342"
       }
     },
     {
@@ -46638,7 +46638,7 @@
           "url": "/docs/api/browser/Emulation#Emulation"
         }
       ],
-      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. See scoped whole-map precedence when a page later overrides the context.",
+      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. Later page registrations merge over context headers.",
       "capabilities": [
         "emulation.extraHTTPHeaders"
       ],
@@ -48274,7 +48274,7 @@
           "url": "/docs/api/browser/Emulation#Emulation"
         }
       ],
-      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. See scoped whole-map precedence when a page later overrides the context.",
+      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. Later page registrations merge over context headers.",
       "capabilities": [
         "emulation.extraHTTPHeaders"
       ],
@@ -113272,7 +113272,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "80a71be6937f5722620d7f08dede468f08c590c11e1ba7b97871a1eb8f962723",
+    "docs/decisions.md": "a89a38a1d143d94db831febf54ac3eb85aac2786ed32ad14eca7e5354588b26e",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113282,7 +113282,7 @@
     "packages/browser/src/Declaration.ts": "252d1067442dc26e93b94f8c988af9ef9a0574d3e864406bf9cadf16f2d67e56",
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
-    "packages/browser/src/Emulation.ts": "4f015af8927d568b418311019bba0319efcad641cd069c5057690a77fa92c621",
+    "packages/browser/src/Emulation.ts": "89aa59a2b6b86267f2382ce6e2e6d09642eb6fd312e01afa64fdf4cbc4d33b62",
     "packages/browser/src/Expect.ts": "0aeacd3e3a5da894f23795f3ab2a4093a1bc0fcb6ec19b65f32ddbaeca819dec",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",

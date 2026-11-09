@@ -558,7 +558,7 @@ export const declarations = (
             )?.headers["x-strider"],
             "outer"
           )
-          assert.strictEqual((yield* read(page))["x-context"], undefined)
+          assert.strictEqual((yield* read(page))["x-context"], "yes")
           yield* Effect.scoped(Effect.gen(function*() {
             yield* page.emulate({ extraHTTPHeaders: { "x-strider": "inner" } })
             assert.strictEqual((yield* read(page))["x-strider"], "inner")
@@ -566,7 +566,7 @@ export const declarations = (
           assert.strictEqual((yield* read(page))["x-strider"], "outer")
           yield* Effect.scoped(Effect.gen(function*() {
             yield* page.emulate({ extraHTTPHeaders: {} })
-            assert.strictEqual((yield* read(page))["x-strider"], undefined)
+            assert.strictEqual((yield* read(page))["x-strider"], "context")
           }))
           yield* Effect.scoped(Effect.gen(function*() {
             yield* page.route(`${origin}/headers`, () =>
