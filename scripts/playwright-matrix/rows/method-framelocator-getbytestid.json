@@ -1,0 +1,33 @@
+{
+  "id": "method-framelocator-getbytestid",
+  "upstream": [
+    "method:FrameLocator.getByTestId"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.getByTestId",
+      "url": "/docs/api/browser/Locator#Locator.getByTestId"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-framelocator-getbytestid-value-regexp-test-id"
+  ],
+  "valueCoverage": [
+    {
+      "value": "RegExp test id",
+      "status": "missing",
+      "gap": "method-framelocator-getbytestid-value-regexp-test-id"
+    }
+  ]
+}

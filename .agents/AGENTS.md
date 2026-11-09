@@ -45,7 +45,8 @@ and stock WebKit, and every member the API declares is built. One declared befor
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
     drift test (`test/integration/record.ts`): `pnpm test:integration:full --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
-  - `INDEX.md`: every declaration and member, generated.
+  - `INDEX.md`: every declaration and member, generated and ignored. Run `pnpm index` in a source checkout;
+    reference, package builds and prepack recreate it, and published packages include it.
   - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
     packages, like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
 - `packages/cli`: published as `@usestrider/cli`, the `strider` command to install globally: a small launcher that runs

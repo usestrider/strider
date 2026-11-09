@@ -1,0 +1,37 @@
+{
+  "id": "method-video-saveas",
+  "upstream": [
+    "method:Video.saveAs"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    },
+    {
+      "module": "Capability",
+      "symbol": "VideoRecording.file",
+      "url": "/docs/api/browser/Capability#VideoRecording.file"
+    }
+  ],
+  "notes": "VideoRecording.file waits for the finished local file. Keep its owning context alive while using it; copy it with Effect FileSystem for saveAs, or remove it for delete. These are explicit file operations, not Video methods.",
+  "capabilities": [
+    "capability.video"
+  ],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  },
+  "configuration": {
+    "chromium": "Provide a VideoWriter service.",
+    "webkit": "Provide polling options and a VideoWriter service."
+  }
+}

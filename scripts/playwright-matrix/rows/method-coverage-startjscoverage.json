@@ -1,0 +1,11 @@
+{
+  "id": "method-coverage-startjscoverage",
+  "upstream": [
+    "method:Coverage.startJSCoverage"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public JavaScript/CSS coverage collection API.",
+  "capabilities": [],
+  "requirements": []
+}

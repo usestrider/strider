@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobeenabled",
+  "upstream": [
+    "method:LocatorAssertions.toBeEnabled"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeEnabled",
+      "url": "/docs/api/browser/Expect#toBeEnabled"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

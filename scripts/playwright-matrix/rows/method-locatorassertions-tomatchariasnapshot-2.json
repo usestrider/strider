@@ -1,0 +1,11 @@
+{
+  "id": "method-locatorassertions-tomatchariasnapshot-2",
+  "upstream": [
+    "method:LocatorAssertions.toMatchAriaSnapshot#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

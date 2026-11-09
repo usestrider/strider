@@ -1,0 +1,23 @@
+{
+  "id": "event-browsercontext-close",
+  "upstream": [
+    "event:BrowserContext.close"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "ObservedUserContext.closed",
+      "url": "/docs/api/browser/UserContext#ObservedUserContext.closed"
+    }
+  ],
+  "notes": "The closed effect gives the reason the target ended.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

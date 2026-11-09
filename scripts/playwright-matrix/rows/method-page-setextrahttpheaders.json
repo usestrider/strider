@@ -1,0 +1,32 @@
+{
+  "id": "method-page-setextrahttpheaders",
+  "upstream": [
+    "method:Page.setExtraHTTPHeaders"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Emulation",
+      "symbol": "Emulation",
+      "url": "/docs/api/browser/Emulation#Emulation"
+    }
+  ],
+  "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the map within their scope; page headers merge over context headers. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
+  "capabilities": [
+    "emulation.extraHTTPHeaders"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Emulation.ts",
+      "packages/browser/src/internal/emulation.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "extra-request-header-ownership",
+    "quote": "Each registration replaces the map within its scope; page headers merge over context headers, with page values winning when names match.",
+    "revision": "bb55fb8a24c8703eb9b5915a4b270d32a3606342"
+  }
+}

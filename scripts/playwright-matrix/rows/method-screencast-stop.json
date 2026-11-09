@@ -1,0 +1,31 @@
+{
+  "id": "method-screencast-stop",
+  "upstream": [
+    "method:Screencast.stop"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Screencast",
+      "url": "/docs/api/browser/Capability#Screencast"
+    },
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    }
+  ],
+  "notes": "Close the scope owning the frame stream or video recording. Video completion still waits for its writer; no global stop method ends unrelated acquisitions.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

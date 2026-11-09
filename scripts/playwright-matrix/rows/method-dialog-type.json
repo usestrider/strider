@@ -1,0 +1,28 @@
+{
+  "id": "method-dialog-type",
+  "upstream": [
+    "method:Dialog.type"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Dialog",
+      "symbol": "Kind",
+      "url": "/docs/api/browser/Dialog#Kind"
+    }
+  ],
+  "notes": "A handler returns a dialog decision. WebKit reports Unknown dialogs.",
+  "capabilities": [
+    "prompts.kind"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Dialog.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "patches": [
+    "webkit-dialog"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "option-framelocator-getbyrole-pressed",
+  "upstream": [
+    "method:FrameLocator.getByRole"
+  ],
+  "option": "pressed",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

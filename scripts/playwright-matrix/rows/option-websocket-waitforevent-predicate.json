@@ -1,0 +1,13 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-websocket-waitforevent-predicate",
+  "upstream": [
+    "method:WebSocket.waitForEvent"
+  ],
+  "option": "predicate",
+  "requirements": [],
+  "patches": []
+}

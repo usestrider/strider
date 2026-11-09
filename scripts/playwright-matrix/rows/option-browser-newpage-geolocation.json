@@ -1,0 +1,26 @@
+{
+  "id": "option-browser-newpage-geolocation",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "option": "geolocation",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "emulation.geolocation"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createPage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

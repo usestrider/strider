@@ -1,0 +1,17 @@
+{
+  "id": "method-browser-newbrowsercdpsession",
+  "upstream": [
+    "method:Browser.newBrowserCDPSession"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No matching Browser service member or browser event stream. The service exposes info, capabilities, pages, creation and its default context, not this contract.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

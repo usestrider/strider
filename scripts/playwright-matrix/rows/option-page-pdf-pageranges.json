@@ -1,0 +1,20 @@
+{
+  "id": "option-page-pdf-pageranges",
+  "upstream": [
+    "method:Page.pdf"
+  ],
+  "option": "pageRanges",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "PdfOptions",
+      "url": "/docs/api/browser/Page#PdfOptions"
+    }
+  ],
+  "notes": "Paper and margins are typed lengths; header and footer are explicit.",
+  "capabilities": [
+    "pdf"
+  ],
+  "requirements": []
+}

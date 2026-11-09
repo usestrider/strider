@@ -1,0 +1,31 @@
+{
+  "id": "method-browser-newpage",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "newPage",
+      "url": "/docs/api/browser/Browser#newPage"
+    }
+  ],
+  "notes": "Creation requires a scope.",
+  "capabilities": [
+    "userContexts"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createPage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

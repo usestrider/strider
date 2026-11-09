@@ -1,0 +1,11 @@
+{
+  "id": "method-androidwebview-pid",
+  "upstream": [
+    "method:AndroidWebView.pid"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

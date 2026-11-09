@@ -1,0 +1,24 @@
+{
+  "id": "option-browser-newpage-storagestate",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "option": "storageState",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Supply decoded StorageState; restore on context creation.",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createPage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

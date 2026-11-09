@@ -1,0 +1,18 @@
+{
+  "id": "option-browsercontext-storagestate-path",
+  "upstream": [
+    "method:BrowserContext.storageState"
+  ],
+  "option": "path",
+  "status": "has",
+  "api": [
+    {
+      "module": "StorageState",
+      "symbol": "StorageState",
+      "url": "/docs/api/browser/StorageState#StorageState"
+    }
+  ],
+  "notes": "Encode and write the exported state explicitly.",
+  "capabilities": [],
+  "requirements": []
+}

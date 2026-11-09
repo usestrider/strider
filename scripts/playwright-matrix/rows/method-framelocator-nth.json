@@ -1,0 +1,40 @@
+{
+  "id": "method-framelocator-nth",
+  "upstream": [
+    "method:FrameLocator.nth"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.nth",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.nth"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.frame",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.frame"
+    }
+  ],
+  "notes": "Select first, last or nth on the iframe element locator before entering its document. The selection remains lazy; no separate indexed FrameLocator method is needed.",
+  "capabilities": [
+    "frames.contentFrame"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-framelocator-nth-value-negative-index"
+  ],
+  "valueCoverage": [
+    {
+      "value": "negative index",
+      "status": "missing",
+      "gap": "method-framelocator-nth-value-negative-index"
+    }
+  ]
+}

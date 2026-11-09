@@ -113,3 +113,13 @@ Built through all three layers on Chromium (CDP), Firefox (WebDriver BiDi) and s
 - **The packages:** `@usestrider/browser`, with the agent toolkit; `@usestrider/cli`, the `strider` command to install globally; and `@usestrider/vitest`. None is published yet. All are under the MIT license ([LICENSE](../LICENSE)); `@usestrider/browser`'s generated protocol modules and keyboard layouts also carry their sources' notices ([THIRD_PARTY_NOTICES.md](../packages/browser/THIRD_PARTY_NOTICES.md)). `pnpm pack-check` checks what would be published.
 - **Tests:** `pnpm all` runs the checks that need no browser. `pnpm test:integration` runs the adapter conformance suite and the slices in the Nix environment (`flake.nix`), against Chromium 155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1. CI runs `pnpm all`, the build and the package check on every pull request and every push to `main`, and the integration tests every night, or on demand.
 - **Compared with Playwright:** `pnpm scenarios` runs the same scenarios with both libraries on the same stock Chromium and writes [packages/scenarios/RESULTS.md](../packages/scenarios/RESULTS.md). `pnpm bench` measures individual operations with warmups and raw samples; `pnpm bench --check` enforces a configurable per-case median ratio ([benchmark suite](../packages/scenarios/BENCHMARKS.md)).
+
+## Repository reference outputs
+
+API indexes and source-derived reference datasets are generated locally and during validation, rather than tracked.
+Package builds and packing regenerate the browser and vitest indexes so published packages include them. The
+Playwright comparison keeps classifications, requirements and provenance in one curated file per stable row ID;
+browser statuses and current evidence hashes are ignored output. PR validation checks evidence against current
+sources and built links, while tracked generated code retains freshness checks. Current hashes do not assert human
+semantic review. [The decision](decisions.md#generated-reference-outputs-and-curated-comparisons) records the tradeoffs;
+[the matrix instructions](../scripts/playwright-matrix.md#migrating-feature-branches) describe migration.

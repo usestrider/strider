@@ -1,0 +1,24 @@
+{
+  "id": "option-browser-newcontext-recordhar",
+  "upstream": [
+    "method:Browser.newContext"
+  ],
+  "option": "recordHar",
+  "status": "has",
+  "api": [
+    {
+      "module": "Har",
+      "symbol": "record",
+      "url": "/docs/api/browser/Har#record"
+    }
+  ],
+  "notes": "Explicit scoped recording; request bodies require an include option.",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

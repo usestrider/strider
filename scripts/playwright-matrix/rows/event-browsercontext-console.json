@@ -1,0 +1,25 @@
+{
+  "id": "event-browsercontext-console",
+  "upstream": [
+    "event:BrowserContext.console"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "stream",
+      "url": "/docs/api/browser/ConsoleMessage#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [
+    "console"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

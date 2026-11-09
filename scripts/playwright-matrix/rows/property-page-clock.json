@@ -1,0 +1,23 @@
+{
+  "id": "property-page-clock",
+  "upstream": [
+    "property:Page.clock"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.clock",
+      "url": "/docs/api/browser/Page#Page.clock"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

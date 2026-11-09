@@ -1,0 +1,28 @@
+{
+  "id": "event-page-domcontentloaded",
+  "upstream": [
+    "event:Page.DOMContentLoaded"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.status",
+      "url": "/docs/api/browser/Page#ObservedPage.status"
+    },
+    {
+      "module": "Watchable",
+      "symbol": "Watchable.changes",
+      "url": "/docs/api/browser/Watchable#Watchable.changes"
+    }
+  ],
+  "notes": "Observe page.status document readiness becoming interactive or complete; this yields state changes, not a dedicated DOMContentLoaded payload.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

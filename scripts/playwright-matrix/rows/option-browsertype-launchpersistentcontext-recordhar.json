@@ -1,0 +1,18 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-recordhar",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "recordHar",
+  "status": "has",
+  "api": [
+    {
+      "module": "Har",
+      "symbol": "record",
+      "url": "/docs/api/browser/Har#record"
+    }
+  ],
+  "notes": "Explicit scoped recording; request bodies require an include option.",
+  "capabilities": [],
+  "requirements": []
+}

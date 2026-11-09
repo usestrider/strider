@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-setoffline",
+  "upstream": [
+    "method:BrowserContext.setOffline"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.emulate",
+      "url": "/docs/api/browser/UserContext#UserContext.emulate"
+    }
+  ],
+  "notes": "Emulation lasts for the caller scope.",
+  "capabilities": [
+    "emulation.network.offline"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

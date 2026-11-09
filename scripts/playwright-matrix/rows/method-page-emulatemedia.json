@@ -1,0 +1,25 @@
+{
+  "id": "method-page-emulatemedia",
+  "upstream": [
+    "method:Page.emulateMedia"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.emulate",
+      "url": "/docs/api/browser/Page#Page.emulate"
+    }
+  ],
+  "notes": "Scoped emulation; see browser capability limits.",
+  "capabilities": [
+    "emulation.media"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

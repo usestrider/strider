@@ -1,0 +1,11 @@
+{
+  "id": "method-playwrightassertions-expectlocator",
+  "upstream": [
+    "method:PlaywrightAssertions.expectLocator"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,18 @@
+{
+  "id": "option-browsertype-launch-executablepath",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "executablePath",
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

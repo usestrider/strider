@@ -1,0 +1,18 @@
+{
+  "id": "option-clock-install-time",
+  "upstream": [
+    "method:Clock.install"
+  ],
+  "option": "time",
+  "status": "has",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "Mode",
+      "url": "/docs/api/browser/PageClock#Mode"
+    }
+  ],
+  "notes": "Use at in an explicit clock mode.",
+  "capabilities": [],
+  "requirements": []
+}

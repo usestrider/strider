@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-ischecked",
+  "upstream": [
+    "method:Frame.isChecked"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isChecked",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isChecked"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

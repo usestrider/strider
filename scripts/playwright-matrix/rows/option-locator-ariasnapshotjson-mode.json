@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-locator-ariasnapshotjson-mode",
+  "upstream": [
+    "method:Locator.ariaSnapshotJSON"
+  ],
+  "option": "mode",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "ai",
+      "status": "missing"
+    },
+    {
+      "value": "default",
+      "status": "missing"
+    }
+  ]
+}

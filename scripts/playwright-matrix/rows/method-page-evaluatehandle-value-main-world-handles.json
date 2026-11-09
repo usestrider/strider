@@ -1,0 +1,13 @@
+{
+  "id": "method-page-evaluatehandle-value-main-world-handles",
+  "upstream": [
+    "method:Page.evaluateHandle"
+  ],
+  "parent": "method-page-evaluatehandle",
+  "value": "main-world handles",
+  "status": "missing",
+  "api": [],
+  "notes": "Page.evaluateHandle creates isolated-world handles only; evaluateInMainWorld returns by value.",
+  "capabilities": [],
+  "requirements": []
+}

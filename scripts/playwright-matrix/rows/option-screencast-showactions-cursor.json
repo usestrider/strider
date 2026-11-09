@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-screencast-showactions-cursor",
+  "upstream": [
+    "method:Screencast.showActions"
+  ],
+  "option": "cursor",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "none",
+      "status": "missing"
+    },
+    {
+      "value": "pointer",
+      "status": "missing"
+    }
+  ]
+}

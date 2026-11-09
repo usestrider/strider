@@ -1,10 +1,32 @@
 import { describe, expect, it } from "@effect/vitest"
-import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { assertApiLink, assertDecision, assertValueGaps } from "../../tools/docs/src/matrix-evidence.ts"
 
 const root = fileURLToPath(new URL("../../../", import.meta.url))
-const matrix = JSON.parse(readFileSync(`${root}scripts/playwright-matrix/matrix.json`, "utf8"))
+const output = mkdtempSync(`${tmpdir()}/strider-matrix-capabilities-`)
+let matrix: any
+try {
+  execFileSync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `
+    import { capabilities } from "./packages/tools/docs/src/capabilities.mjs"
+    import { deriveMatrix, loadCuratedMatrix } from "./scripts/playwright-matrix/data.mjs"
+    import { readFileSync, writeFileSync } from "node:fs"
+    const output = process.argv[1]
+    await capabilities(process.cwd(), output)
+    writeFileSync(output + "/matrix.json", JSON.stringify(deriveMatrix(loadCuratedMatrix(),
+      JSON.parse(readFileSync(output + "/capabilities.json", "utf8")))))
+  `,
+    output
+  ], { cwd: root })
+  matrix = JSON.parse(readFileSync(`${output}/matrix.json`, "utf8"))
+} finally {
+  rmSync(output, { recursive: true, force: true })
+}
 const rows: Array<any> = matrix.rows
 const row = (id: string) => rows.find((row) => row.id === id)
 

@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-getattribute",
+  "upstream": [
+    "method:Locator.getAttribute"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.readAttribute",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.readAttribute"
+    }
+  ],
+  "notes": "Reads observe immediately and fail on no match; text is whitespace-normalized; attributes return Option.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

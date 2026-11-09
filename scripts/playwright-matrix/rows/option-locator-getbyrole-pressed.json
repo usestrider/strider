@@ -1,0 +1,18 @@
+{
+  "id": "option-locator-getbyrole-pressed",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "option": "pressed",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}
