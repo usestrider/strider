@@ -2,7 +2,6 @@
 import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
-import { browserLines } from "./firefoxPackets.ts"
 import { pipeObserver } from "./tracePipe.ts"
 import { stderrText } from "./traceStderr.ts"
 import { prepareChild } from "./traceTransfer.ts"
@@ -22,7 +21,6 @@ if (!prototype[patched]) {
     prepareChild(options)
     const result = spawn.call(this, options)
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
-    const packets = browserLines(this.pid)
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.
     if (this.stderr !== null) {
       trace("stderr-open", "Observing the existing stderr consumer")
@@ -31,7 +29,6 @@ if (!prototype[patched]) {
       this.stderr.emit = function(event: string, ...values: Array<unknown>) {
         if (event === "data") {
           const text = stderrText(values[0])
-          packets(text)
           observedBytes += Buffer.byteLength(text)
           trace("stderr", text)
         }
