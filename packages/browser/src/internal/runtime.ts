@@ -6,8 +6,9 @@
  * locator's frame boundaries lead to: each iframe on the way is found by the engine of
  * the document it is in, and the adapter names the frame it holds. The engine is installed in a document on first
  * use; when a document on the way changes under a request (a navigation committed, the realm went), the request
- * goes again from the page's document, within the operation's deadline. Nothing the engine does dispatches input,
- * so sending a request again is always safe. A frame that isn't there yet is a request that matches nothing.
+ * goes again from the page's document, within the operation's deadline. A round that may already have applied
+ * an action fails instead: its lost reply cannot establish whether the action happened. A frame that isn't there
+ * yet is a request that matches nothing.
  *
  * A dialog pauses its page, and on some backends every evaluation with it. A request waits for
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
@@ -322,7 +323,8 @@ const callEngine = (
   functionDeclaration: string,
   request: string | Effect.Effect<string>,
   id: Diagnostics.OperationId,
-  releaseResult?: boolean
+  releaseResult?: boolean,
+  replay = true
 ): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
   engineRealm(runtime, document).pipe(
     Effect.flatMap((realm) =>
@@ -334,7 +336,13 @@ const callEngine = (
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
-        return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none<Adapter.RemoteResult>())
+        return Cache.invalidate(runtime.engineRealms, document).pipe(
+          Effect.andThen(
+            replay
+              ? Effect.succeed(Option.none<Adapter.RemoteResult>())
+              : Effect.fail(fromAdapter(error, id, runtime.backend))
+          )
+        )
       }
       return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
@@ -593,7 +601,9 @@ export const sendRouted = (
               )
             )
           }),
-          id
+          id,
+          undefined,
+          request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
         ).pipe(
           Effect.flatMap(Option.match({
             onNone: () => Effect.succeedNone,

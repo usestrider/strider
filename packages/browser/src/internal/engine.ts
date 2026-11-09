@@ -134,6 +134,11 @@ export type Action =
   | { readonly _tag: "FileInput" }
   | { readonly _tag: "None" }
 
+/** Whether the action can change the element in its applying round, before native input dispatch. */
+export const appliesInRound = (action: Action): boolean =>
+  action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
+  action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
+
 /** A one-shot read of the one match. */
 export type Read =
   | { readonly _tag: "Text" }
