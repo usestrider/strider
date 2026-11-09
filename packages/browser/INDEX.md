@@ -1318,6 +1318,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *models*
 
+- `type ViewportSize = typeof ViewportSize.Type`
 - `type DocumentStatus = typeof DocumentStatus.Type`
 - `type Prompt = typeof Prompt.Type`
 - `type Status = typeof Status.Type`
@@ -1365,6 +1366,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>`
   - `readonly control: Effect.Effect<Page, PageError, Scope.Scope>`
 - `interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator>`
+  - `readonly viewportSize: Effect.Effect<Option.Option<ViewportSize>, PageError | Target.TargetGone | Deadline.Timeout>`
   - `frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator`
   - `readonly title: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readHtml: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1414,6 +1416,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *schemas*
 
+- `const ViewportSize = Schema.Struct({ width: Schema.Number, height: Schema.Number })`
 - `const DocumentStatus = Schema.Struct({ id: Target.DocumentId, readiness: Schema.Literals(["loading", "interactive", "complete"]), lifecycle: Schema.Literals(["active", "suspended"]) })`
 - `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
 - `const Status = Schema.Union([Schema.TaggedStruct("Open", { url: Url.Url, document: DocumentStatus, prompt: Schema.Option(Prompt) }), Schema.TaggedStruct("Closed", { reason: Target.CloseReason })])`

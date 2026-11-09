@@ -26838,39 +26838,47 @@
       "upstream": [
         "method:Page.viewportSize"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "ReadonlyPage.viewportSize",
+          "url": "/docs/api/browser/Page#ReadonlyPage.viewportSize"
+        }
+      ],
+      "notes": "Reads effective configured CSS width and height as an Effect of Option; None when unset. Uses declaration precedence and scoped release, not measured inner dimensions. Requires inspect access; closed pages fail with TargetGone. Only declarations made through this connection are known; attached stock WebKit cannot configure a viewport and returns None when unset.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Page.ts"
+          "packages/browser/src/Page.ts",
+          "packages/browser/src/internal/page.ts",
+          "packages/browser/src/internal/declarations.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
@@ -113335,7 +113343,7 @@
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
+    "packages/browser/src/Page.ts": "2c8df27ea3996d599d7ed79f80c7d08f18558dd188f0da288d819b131b20905d",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",
@@ -113348,9 +113356,9 @@
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
-    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
-    "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
+    "packages/browser/src/internal/bidiAdapter.ts": "ab68e7acfddf113dbddf37c0c5b38adb6bded2a010e63d48d4817afe628ca15d",
+    "packages/browser/src/internal/cdpAdapter.ts": "e9251697cc623b18a0c7106c48a2ac5dc1ce5c14bffbde2348b1280ce0e03f53",
+    "packages/browser/src/internal/webkitAdapter.ts": "0f6d08972f7b6415f159a96ccbd123e2a0b90ea1d10b449c51986434e0bb868c",
     "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
