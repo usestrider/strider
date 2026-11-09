@@ -244,6 +244,28 @@ export const contents = (
           assert.deepStrictEqual(yield* target.boundingBox, Option.none())
         }), timeout)
 
+      it.effect("refuses frame geometry scaled by a shadow wrapper around a slotted frame", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
+          )
+          yield* page.goto(fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+          ))
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "open" }).innerHTML =
+              `<div style="position:absolute;left:0;top:0;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#slotted")).locator("#target")
+          // The frame's content is drawn at (20, 20) and 40px wide; adding the iframe's origin alone gives (10, 10).
+          const exit = yield* Effect.exit(target.boundingBox)
+          assert.strictEqual(reasonOf(exit)?.reason?._tag, "Unsupported", JSON.stringify(exit))
+        }), timeout)
+
       // ── Evaluation and handles ──
 
       it.effect("evaluates by value in the isolated world, and in the main world when asked", () =>
