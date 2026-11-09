@@ -773,3 +773,12 @@ without using `Expect.toHaveRole`; Strider and Playwright must each return 100 e
 `click` and `visible` exercise the role engine on their default fixture, but do not directly stress presentation
 conflicts. `read-snapshot-100` and `read-snapshot-1000` evaluate a main-world input-property function; they measure
 DOM evaluation and value transfer, not ARIA role traversal or the accessibility snapshot API.
+
+For shared role-engine diagnosis, dispatch `benchmarks.yml` with `workload=roles`, `base` naming the original
+engine and `head` the reviewed engine. The driver supplies the optimized engine; when its engine is unchanged,
+the harness labels the combined candidate explicitly. Six serialized engine variants run interleaved on one
+page (use 24 measured rounds to balance its rotations) over focusable/non-focusable presentation headings and list/table inheritance. Every `engine.run` count
+query clears its caches. Original list/table outputs are recorded as incorrect and are excluded from
+old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
+hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
+but does not eliminate JIT, GC, scheduling, order or thermal effects.
