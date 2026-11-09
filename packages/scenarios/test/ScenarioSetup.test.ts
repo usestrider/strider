@@ -1,8 +1,8 @@
 import * as fs from "node:fs"
+import { stripTypeScriptTypes } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as vm from "node:vm"
-import { stripTypeScriptTypes } from "node:module"
 import { expect, it } from "vitest"
 import { recordingProblems } from "../src/replay.ts"
 import { scenarios } from "../src/scenarios.ts"
@@ -19,17 +19,28 @@ it("prepares a fresh scenario working directory before constructing browser laye
     const code = stripTypeScriptTypes(`${source}\nprocess.chdir(recordingsDirectory)`)
     const directory = path.join(root, ".data/scenarios")
     await vm.runInNewContext(`(async () => {${code}})()`, {
-      fs, os: { ...os, tmpdir: () => root }, path, chromium: {},
+      fs,
+      os: { ...os, tmpdir: () => root },
+      path,
+      chromium: {},
       process: {
         argv: ["node", "bin.ts", "--only", "login"],
-        env: { STRIDER_ENVIRONMENT: "nix-integration", STRIDER_CHROMIUM: process.execPath, STRIDER_FFMPEG: process.execPath },
-        chdir: (destination: string) => { expect(fs.statSync(destination).isDirectory()).toBe(true) }
+        env: {
+          STRIDER_ENVIRONMENT: "nix-integration",
+          STRIDER_CHROMIUM: process.execPath,
+          STRIDER_FFMPEG: process.execPath
+        },
+        chdir: (destination: string) => {
+          expect(fs.statSync(destination).isDirectory()).toBe(true)
+        }
       }
     })
     const recording = (name: string) => path.join(directory, `${name}.har`)
     expect(recordingProblems(scenarios.filter((scenario) => scenario.name === "login"), recording)).toEqual([])
     expect(recordingProblems(scenarios.filter((scenario) => scenario.name === "controls"), recording)).toEqual([
-      `No recording at ${recording("the-internet")}`
+      `No recording at ${
+        recording("the-internet")
+      }; required page URLs: https://the-internet.herokuapp.com/dynamic_controls`
     ])
     expect(fs.readdirSync(directory)).toEqual([])
   } finally {
