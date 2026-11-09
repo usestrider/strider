@@ -2105,6 +2105,55 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "guards native design-mode fill when focus changes after preparation",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) context.skip()
+            const { url } = yield* fixture(() =>
+              `<input id="other" value="other"><p id="target">old</p><script>document.designMode="on";
+            document.addEventListener("beforeinput", e => {
+              if (e.target.id === "other") document.body.dataset.wrong = "yes";
+            });</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.activate
+              const target = page.locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              for (const value of ["new", ""] as const) {
+                yield* page.evaluateInMainWorld(() => {
+                  document.getElementById("target")!.textContent = "old"
+                  delete document.body.dataset.wrong
+                })
+                let changed = false
+                const dispatchInput: typeof original = (...args) =>
+                  Effect.gen(function*() {
+                    if (!changed) {
+                      changed = true
+                      yield* page.evaluateInMainWorld(() =>
+                        (document.getElementById("other") as HTMLInputElement).focus()
+                      )
+                    }
+                    return yield* original(...args)
+                  })
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => target.fill(value),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                assert.strictEqual(yield* target.readText, value)
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.wrong), undefined)
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",
         (context) =>
           Effect.gen(function*() {
