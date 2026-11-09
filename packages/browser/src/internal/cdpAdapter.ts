@@ -64,8 +64,15 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),

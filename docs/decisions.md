@@ -1392,6 +1392,10 @@ those hide browser differences and make the library define DOM behavior. Missing
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
 
+## Shared DOM roles
+
+Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`. This keeps existing locator and snapshot meaning consistent even where Playwright omits generic roles. Presentation conflicts and required-child inheritance are resolved in that shared computation, including inherited-role exceptions on the child and cancellation on its parent. Tabindex focusability uses HTML integer parsing: skip ASCII whitespace, accept an optional sign and leading ASCII digits, and ignore trailing text. This agrees with native focus behavior for `0.5` and `2abc`; copying Playwright’s JavaScript number conversion would reject `2abc` and accept non-ASCII leading whitespace. Rejected: a matcher-specific role model that changes the meaning of the same element between querying, asserting and inspecting it, and copying upstream inheritance where it conflicts with ARIA's focusability or global-property exceptions.
+
 ## Retrying CSS assertion cardinality
 
 CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.

@@ -26,10 +26,13 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
+      entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
+      entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("isolatedWorlds", "unsupported", [
@@ -197,6 +200,10 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
 export const launchedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
+    "network.timing": ["partial", [
+      "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+    ]],
+    acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "userContexts.proxy": ["supported", [
       "isolated process environment; HTTP proxy endpoints only; loopback stays direct"

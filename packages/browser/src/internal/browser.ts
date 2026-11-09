@@ -526,6 +526,28 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           )
         )
       }
+      if (options?.requestTiming && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.timing",
+            backend: adapter.info.product,
+            hint: "Request timings must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
+      if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "acceptInsecureCerts",
+            backend: adapter.info.product,
+            hint: "Certificate acceptance can only be set when creating a context"
+          }),
+          id
+        ))
+      }
       const credentials = options?.httpCredentials
       if (
         credentials !== undefined && (typeof credentials.username !== "string" ||
@@ -658,7 +680,12 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
-          : adapter.createUserContext({ proxy, acceptInsecureCerts: false, reclaimable })).pipe(
+          : adapter.createUserContext({
+            proxy,
+            acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
+            reclaimable,
+            requestTiming: options?.requestTiming
+          })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)
           ),

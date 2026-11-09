@@ -390,6 +390,41 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  */
 export interface Options {
   /**
+   * Collects native request phase timings for this new context, read with `NetworkRequest.timing`.
+   * No timing state is collected when false or omitted. Cannot enable timings on an existing context.
+   *
+   * @default false
+   */
+  readonly requestTiming?: boolean | undefined
+
+  /**
+   * Accepts HTTPS certificate errors in this context alone.
+   *
+   * **Details**
+   *
+   * Firefox and launched stock WebKit support this when creating a context. Chromium refuses `true` with
+   * `Unsupported` because its certificate override affects the whole browser. Attached stock WebKit cannot
+   * create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
+   * be chosen at creation. Omitting it preserves the existing context's setting.
+   *
+   * **Example** (A local HTTPS test site)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const context = yield* Browser.newContext({ acceptInsecureCerts: true })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://localhost:8443")
+   * })
+   * ```
+   *
+   * @default false for new contexts
+   */
+  readonly acceptInsecureCerts?: boolean | undefined
+
+  /**
    * Answers website authentication challenges with these credentials. User auth routes run first;
    * falling through uses these credentials. The pair is submitted once per request, including its whole
    * redirect chain. A later challenge in that chain is canceled, even at another origin.
