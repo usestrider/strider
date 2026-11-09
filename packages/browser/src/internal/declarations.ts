@@ -139,11 +139,28 @@ export const make = (): Registry => {
     },
     overrides: (placement) => {
       const effective = new Map<Adapter.Override["_tag"], Adapter.Override>()
+      let headers: Map<number, Readonly<Record<string, string>>> | undefined
       // Least specific and oldest first, so the winner is written last
       for (const entry of inScope(placement).sort(byPrecedence)) {
         if (entry.declaration._tag === "Override") {
-          effective.set(entry.declaration.override._tag, entry.declaration.override)
+          const override = entry.declaration.override
+          effective.set(override._tag, override)
+          if (override._tag === "ExtraHeaders") {
+            headers ??= new Map()
+            headers.set(specificity(entry.scope), override.headers)
+          }
         }
+      }
+      if (headers !== undefined) {
+        // Replace within each scope, then merge broader scopes before more specific ones, as BiDi does natively.
+        effective.set("ExtraHeaders", {
+          _tag: "ExtraHeaders",
+          headers: Object.fromEntries(
+            [...headers.values()].flatMap((map) =>
+              Object.entries(map).map(([name, value]) => [name.toLowerCase(), value])
+            )
+          )
+        })
       }
       return effective
     },

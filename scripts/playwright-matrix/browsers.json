@@ -355,6 +355,11 @@
           ]
         },
         {
+          "name": "emulation.extraHTTPHeaders",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "emulation.touch",
           "status": "supported",
           "limitations": [
@@ -774,6 +779,11 @@
           "limitations": [
             "a document already loaded keeps running its scripts"
           ]
+        },
+        {
+          "name": "emulation.extraHTTPHeaders",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "emulation.touch",
@@ -1263,6 +1273,11 @@
           "limitations": [
             "Firefox doesn't implement emulation.setScriptingEnabled"
           ]
+        },
+        {
+          "name": "emulation.extraHTTPHeaders",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "emulation.touch",
@@ -1763,6 +1778,11 @@
           "limitations": [
             "Firefox doesn't implement emulation.setScriptingEnabled"
           ]
+        },
+        {
+          "name": "emulation.extraHTTPHeaders",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "emulation.touch",
@@ -2346,6 +2366,11 @@
           "limitations": []
         },
         {
+          "name": "emulation.extraHTTPHeaders",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "emulation.touch",
           "status": "unsupported",
           "limitations": [
@@ -2891,6 +2916,13 @@
         },
         {
           "name": "emulation.javaScript",
+          "status": "unsupported",
+          "limitations": [
+            "stock WebKit's inspector has no Emulation domain"
+          ]
+        },
+        {
+          "name": "emulation.extraHTTPHeaders",
           "status": "unsupported",
           "limitations": [
             "stock WebKit's inspector has no Emulation domain"
