@@ -12,6 +12,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import type * as ProtocolClient from "../protocolClient.ts"
 import * as Sizes from "../requestSizes.ts"
 import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
@@ -138,6 +139,18 @@ const webSocketFrame = (
     })
   })
 }
+
+/** Chunk accounting belongs only to live page/frame sessions in an opted-in context. */
+export const eventScopes = (state: State): NonNullable<ProtocolClient.Fold["eventScopes"]> =>
+  new Map([
+    [Network.dataReceived.method, (session: ProtocolClient.Session) => {
+      const target = state.targets.get(session)
+      const page = target?.page ?? target?.frame?.page
+      return target !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
+        page !== undefined && !page.ended && !page.context.disposed &&
+        page.context.requestSizes !== undefined
+    }]
+  ])
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -182,6 +182,8 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
     }
 
     const event = (ingest: Ingest, received: number, method: string, params: unknown, message: string): void => {
+      const accepts = fold?.eventScopes?.get(method)
+      if (accepts !== undefined && !accepts(ingest.session) && !ingest.subscribers.has(method)) return
       const bytes = utf8Length(message)
       ingest.queuedEvents++
       ingest.queuedBytes += bytes
@@ -281,6 +283,8 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
 
     // Folds one event; one that won't decode makes the session's model unavailable.
     const foldEvent = Effect.fnUntraced(function*(event: QueuedEvent) {
+      const accepts = fold?.eventScopes?.get(event.method)
+      if (accepts !== undefined && !accepts(event.ingest.session)) return undefined
       const decode = foldDecoders.get(event.method)
       if (decode === undefined || fold === undefined) return undefined
       const decoded = yield* Effect.result(decode(event.params))

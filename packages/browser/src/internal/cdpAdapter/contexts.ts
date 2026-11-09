@@ -157,6 +157,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       })
     ))
     context.disposed = true
+    context.requestSizes?.clear()
     // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
     // a budget of its own (`Model.remove`); they end with the connection at the latest
     state.buffer.start(Effect.gen(function*() {

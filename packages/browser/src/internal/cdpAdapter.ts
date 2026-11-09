@@ -222,6 +222,7 @@ Contexts.register(handlers)
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
+  eventScopes: Network.eventScopes(state),
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
       handlers.apply(method, params, {

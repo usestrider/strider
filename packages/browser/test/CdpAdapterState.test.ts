@@ -2509,3 +2509,31 @@ for (const boundary of ["cache", "304", "late headers", "failure", "invalid chun
       assert.strictEqual(page.context.requestSizes!.size, 0)
     }).pipe(Effect.scoped))
 }
+
+for (const outcome of ["success", "failure"] as const) {
+  it.effect(`ends size ingestion only after confirmed context disposal (${outcome})`, () =>
+    Effect.gen(function*() {
+      const mock = {
+        ...session,
+        ended: Effect.never,
+        send: () =>
+          outcome === "success"
+            ? Effect.succeed({})
+            : Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "detached" }) }))
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock, false, true)
+      const context = { ...page.context, isDefault: false, browserContextId: "enabled" }
+      const current = { ...page, context }
+      Object.assign(target, { page: current })
+      state.pages.set(page.id, current)
+      state.contexts.set(context.id, context)
+      state.targets.set(mock, target)
+      context.requestSizes!.set("hop", { owner: page.id, network: true, decoded: 65 })
+      const accepts = Network.eventScopes(state).get("Network.dataReceived")!
+      assert.isTrue(accepts(mock))
+      const result = yield* Contexts.removeUserContext(state, context.id).pipe(Effect.exit)
+      assert.strictEqual(Exit.isSuccess(result), outcome === "success")
+      assert.strictEqual(context.requestSizes!.size, outcome === "success" ? 0 : 1)
+      assert.strictEqual(accepts(mock), outcome !== "success")
+    }).pipe(Effect.scoped))
+}
