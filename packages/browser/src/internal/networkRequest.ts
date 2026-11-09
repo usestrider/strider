@@ -68,8 +68,8 @@ export const redirects: (
         owner = undefined
       })
     )
-    const read = (request: NetworkRequest.NetworkRequest, direction: -1 | 1) =>
-      Effect.gen(function*() {
+    const read = Effect.fnUntraced(
+      function*(request: NetworkRequest.NetworkRequest, direction: -1 | 1) {
         const fail = (why: NetworkRequest.RedirectUnavailable["why"]) =>
           Effect.fail(
             new NetworkRequest.RequestError({
@@ -112,9 +112,14 @@ export const redirects: (
         if (Option.isNone(response)) return yield* fail("unavailable")
         if ([301, 302, 303, 307, 308].includes(response.value.status)) return yield* fail("unavailable")
         return Option.none()
-      }).pipe(Operation.named(direction === -1 ? "NetworkRequest.redirects.from" : "NetworkRequest.redirects.to", {
-        attributes: { "browser.hop.id": request.hop }
-      }))
+      },
+      (effect, request, direction) =>
+        effect.pipe(
+          Operation.named(direction === -1 ? "NetworkRequest.redirects.from" : "NetworkRequest.redirects.to", {
+            attributes: { "browser.hop.id": request.hop }
+          })
+        )
+    )
     return {
       from: (request: NetworkRequest.NetworkRequest) => read(request, -1),
       to: (request: NetworkRequest.NetworkRequest) => read(request, 1)
