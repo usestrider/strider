@@ -360,7 +360,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         runtime.model.adapter.geometry(node, kind).pipe(
           Effect.mapError((error) => this.adapterFailure(operation, error, record.id))
         )
-      const target = yield* read(found.node, "border")
+      const target = yield* read(found.node, "bounds")
       if (target.data.quads.length === 0) return Option.none<Locator.BoundingBox>()
       let points = target.data.quads.flat()
       let space = target.document

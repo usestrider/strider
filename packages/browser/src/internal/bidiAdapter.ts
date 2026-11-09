@@ -67,6 +67,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),
+      entry("boundingBox.frameTransforms", "partial", [
+        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+      ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
         "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new document itself"

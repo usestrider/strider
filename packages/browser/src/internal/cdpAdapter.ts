@@ -72,6 +72,7 @@ export const capabilities = (
       entry("userContexts.proxy.credentials", "supported", [
         "proxy challenges only; one credential submission per request"
       ]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),

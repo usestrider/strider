@@ -325,11 +325,45 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("maps or refuses browser rects through a rotated closed-slot frame", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:20px;width:30px;height:40px"></div></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="frame" style="border:0" src="${child}"></iframe></div></body>`
+            )
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
+              `<div style="position:absolute;left:100px;top:100px;transform:rotate(90deg);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          for (const [key, expected] of Object.entries({ x: 40, y: 110, width: 40, height: 30 })) {
+            assert.closeTo(box[key as keyof typeof box], expected, .05, key)
+          }
+        }), timeout)
+
       for (
         const rule of [
           { name: "scaling", css: "transform:scale(2,3)", world: "" },
           { name: "rotation and skew", css: "transform:rotate(31deg) skew(17deg,-8deg)", world: "" },
           { name: "nested CSS zoom", css: "zoom:1.5;transform:scale(.8,1.2)", world: "zoom:1.25" },
+          { name: "reflection", css: "transform:scale(-1,1)", world: "" },
+          {
+            name: "auto-rotating motion path",
+            css: "offset-path:path('M 0 0 L 100 100');offset-distance:50%;offset-rotate:auto;offset-anchor:0 0",
+            world: ""
+          },
           {
             name: "3D and perspective",
             css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
@@ -379,7 +413,7 @@ export const contents = (
                 )
               }
               // The reference is rendered by the browser in the same parent transform, without a frame boundary.
-              // The approved contract reads the browser rect, including its camera clipping convention.
+              // The rect contract reads the browser rect, including its camera clipping convention.
               const expected = yield* page.evaluateInMainWorld(() => {
                 const r = document.querySelector("#expected")!.getBoundingClientRect()
                 return { x: r.x, y: r.y, width: r.width, height: r.height }

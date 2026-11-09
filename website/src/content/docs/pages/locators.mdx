@@ -265,9 +265,11 @@ const savePosition = Effect.fn("savePosition")(function*(page: Page.ReadonlyPage
 Coordinates are CSS pixels relative to the main frame's viewport, including child-frame borders and padding.
 Scrolling can make them negative. `None` means the matched element has no layout box, such as `display: none`;
 hidden, transparent and zero-size elements retain their boxes. A missing element fails with `NoMatch`, and
-several matches fail with `StrictViolation`. The box includes transforms on the target and its ancestor frames,
-including scaling, rotation, skew, CSS zoom and perspective. Nested frame transforms are composed before the
-axis-aligned box is taken.
+several matches fail with `StrictViolation`. The target's box follows the browser's own
+`getBoundingClientRect`, including its transforms, motion paths and camera clipping. It is composed through
+frames rather than reconstructing original corners or measuring painted pixels.
 
-Firefox still lacks CSS motion-path mapping and camera-clipped normal-flow geometry when the browser cannot
-expose the original layout position. These missing cases fail with `Unsupported`.
+Chromium and WebKit use native frame point conversion. Firefox supports positive axis-aligned scaling, CSS
+zoom and translation of frames. Rotation, skew, reflection, 3D, perspective or motion paths on a frame or its
+ancestors fail with descriptive typed `Unsupported` on Firefox. These frame limits do not prevent reading a
+top-level target's own browser rect. Browser defaults stay unchanged; no launch profile or preference is required.

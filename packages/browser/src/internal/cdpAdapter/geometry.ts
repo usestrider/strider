@@ -65,11 +65,13 @@ export const read = Effect.fnUntraced(function*(state: State, node: Adapter.Node
   const matrix = kind === "frame"
     ? Geometry.fromQuad(quad, data.width, data.height, data.contentX, data.contentY)
     : null
-  if (kind === "frame" && matrix === null) {
-    const local = yield* Evaluation.evaluate(state, realm, Geometry.call(node, kind)).pipe(
-      Effect.flatMap(Geometry.decode)
+  if (matrix === null) {
+    return yield* Effect.fail(
+      Kit.unsupported(
+        "Locator.boundingBox",
+        "Native CDP frame geometry does not define a reliable content-plane mapping"
+      )
     )
-    return { document: node.document, data: local }
   }
   return { document: root.document.id, data: { ...data, quads: [quad], matrix } }
 })
