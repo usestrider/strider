@@ -1343,6 +1343,13 @@ Snapshots and role filters use the same pressed, expanded and selected readers, 
 A route is in force for requests that start after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select the current routes by precedence. This follows the browser's selection of interception stages at request start while keeping later handler selection current. Requiring retroactive response interception was rejected because it would require pausing responses from the start even without response routes.
 
 
+## Pay for what you use
+
+Optional browser features do work only when requested, within the owning context or operation. Contexts that
+never request a feature gain no interception, injected instrumentation, per-action checks or retained request
+state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
+always-on preparation for optional features: unused capabilities must not slow existing automation.
+
 ## Explicit DOM event constructors
 
 DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.
@@ -1350,3 +1357,5 @@ Initialization crosses by value under the existing evaluation serialization cont
 constructs and dispatches the event. This keeps application events and native event fields explicit across
 browsers. Reject name-to-constructor inference tables and emulation of missing constructors or touch dictionaries:
 those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
+
+Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.

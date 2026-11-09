@@ -1,3 +1,4 @@
+import { remote, remoteSamples } from "./benchmarks/remote.ts"
 import { stats } from "./measure.ts"
 import type { Measurements, Outcome } from "./report.ts"
 import type { Scenario } from "./scenarios.ts"
@@ -47,7 +48,22 @@ export const runScenarios = async (
     const attempts = { strider: 0, playwright: 0 }
     const failures: Array<Result["failures"][number]> = []
     const samples: Array<Result["samples"][number]> = []
-    for (let i = 0; i < runs; i++) {
+    if (remote) {
+      if (run.playwright === undefined) throw new Error(`No Playwright twin for ${scenario.name}`)
+      await remoteSamples(scenario.name, async (library, repetition) => {
+        const started = performance.now()
+        const result = await outcomeOf(run[library]!, scenario.expected)
+        const ms = performance.now() - started
+        const sample = { library, repetition, ms, outcome: result }
+        samples.push(sample)
+        onAttempt(scenario.name, sample)
+        attempts[library]++
+        if (result._tag === "Failed") throw new Error(result.error)
+        times[library].push(ms)
+        return ms
+      })
+    }
+    for (let i = 0; !remote && i < runs; i++) {
       const order = i % 2 === 0 ? libraries : [...libraries].reverse()
       for (const library of order) {
         attempts[library]++

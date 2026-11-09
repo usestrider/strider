@@ -74,6 +74,7 @@ const playwrightType = engine === "firefox" ? playwrightFirefox : chromium
 const playwrightOptions = { executablePath: engine === "firefox" ? patchedFirefox! : executablePath, headless: true }
 const root = path.resolve(import.meta.dirname, "../../..")
 const recordingsDirectory = path.join(root, ".data/scenarios")
+fs.mkdirSync(recordingsDirectory, { recursive: true })
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "strider-scenarios-"))
 const files: Files = {
   temporary: (name) => path.join(temporary, name),
@@ -146,7 +147,6 @@ const onAttempt = (scenario: string, sample: Measurements["scenarios"][number]["
 // ── Recording the demo sites ──────────────────────────────────────────────────
 
 if (argv.includes("--record")) {
-  fs.mkdirSync(recordingsDirectory, { recursive: true })
   const runtime = ManagedRuntime.make(layer)
   for (const [name, record] of Object.entries(recordings)) {
     log(`recording ${name}, live`)
@@ -168,6 +168,9 @@ const chosen = scenarios.filter((scenario) =>
   (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
 )
 if (chosen.length === 0) throw new Error("No supported scenarios selected")
+if (process.env["STRIDER_PAIRED"] === "1" && chosen.some((scenario) => scenario.playwright === undefined)) {
+  throw new Error("Paired scenario comparisons require a Playwright twin for every selected case")
+}
 const problems = recordingProblems(chosen, files.recording)
 if (output !== undefined) {
   fs.writeFileSync(path.join(output, "recording-validation.json"), JSON.stringify({ problems }, null, 2))

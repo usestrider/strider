@@ -7,16 +7,27 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      retain_diagnostics:
+        description: Run macOS only and keep bounded diagnostic traces even on success
+        type: boolean
+        default: false
+      macos:
+        description: Run the macOS job too; a change that doesn't touch what differs on macOS can skip it
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One run at a time per branch, so branches validate side by side
 concurrency:
-  group: integration
+  group: integration-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   integration:
+    if: ${{ !inputs.retain_diagnostics }}
     name: integration (${{ matrix.job }})
     strategy:
       fail-fast: false
@@ -83,8 +94,8 @@ jobs:
         run: node scripts/integration-budget.ts
 
   integration-macos:
-    # Run independently of Linux; respect workflow cancellation.
-    if: ${{ !cancelled() }}
+    # Run independently of Linux; respect workflow cancellation. Every scheduled run includes macOS.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics) }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
@@ -105,15 +116,26 @@ jobs:
         run: pnpm install --frozen-lockfile
       # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
       # The entry point verifies pinned browser, ffmpeg and ffprobe downloads before running real video tests.
+      - name: Record investigation metadata
+        if: inputs.retain_diagnostics
+        run: |
+          git rev-parse HEAD > integration-macos-metadata.txt
+          sw_vers >> integration-macos-metadata.txt
+          uname -a >> integration-macos-metadata.txt
+          node --version >> integration-macos-metadata.txt
+          cat packages/browser/test/integration/browsers.macos.json >> integration-macos-metadata.txt
       - name: Install verified macOS browsers and video tools, then run integration tests
+        env:
+          STRIDER_TRACE_RETAIN_PASSES: ${{ inputs.retain_diagnostics && '1' || '0' }}
         run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
       - name: Keep the macOS log
-        if: failure() || cancelled()
+        if: always() && (failure() || cancelled() || inputs.retain_diagnostics)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-macos-log
           path: |
             integration-macos.log
+            integration-macos-metadata.txt
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14

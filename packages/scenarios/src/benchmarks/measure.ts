@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util"
 import { chromiumArgs } from "../../../browser/src/internal/profiles.ts"
+import { remote, remoteSamples } from "./remote.ts"
 
 export const options = (args: Array<string>) => {
   const { values } = parseArgs({
@@ -103,6 +104,14 @@ export const measure = async (
       previousPairIndex: number | null
       ms: number
     }>
+  }
+  if (remote) {
+    await remoteSamples("benchmark", async (library, _repetition, warmup) => {
+      const ms = await run[library]()
+      if (!warmup) samples[library].push(ms)
+      return ms
+    })
+    return samples
   }
   let previous: { library: Library; position: number; pairIndex: number } | undefined
   let sequenceIndex = 0
