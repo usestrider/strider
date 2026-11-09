@@ -3815,6 +3815,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       // checkableForAction selects a target before the action direction is considered. Exercise each targeting rule
       // once, with ordinary labels retaining both associations and directions. Own ARIA/native state and prevented
       // input retain both directions too; the other kinds sample the same targeting branch with check.
+      // Wrapping missing/plain also exercise native label.control: a dangling or empty for attribute overrides a
+      // nested checkbox, unlike an ordinary wrapping label with no for attribute.
       // `button` samples tag interactivity; `a`, `video` and `img` exercise attribute-based interactivity and their
       // inert counterparts. Slot and DOM/composed-boundary rules have their own cases below.
       for (const association of ["explicit", "wrapping"] as const) {
@@ -3843,7 +3845,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             "ancestor"
           ] as const
         ) {
-          if (association === "wrapping" && kind !== "ordinary") continue
+          if (association === "wrapping" && !["ordinary", "missing", "plain"].includes(kind)) continue
           const bothDirections = ["ordinary", "prevented", "own", "native"].includes(kind)
           for (const checked of bothDirections ? [true, false] : [true]) {
             it.effect(
