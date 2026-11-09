@@ -663,10 +663,13 @@ export function engine(render: (root: SnapNode) => string) {
     (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
     (element.getAttribute("title") ?? "").trim() !== ""
 
+  // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
+  // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
+  const HTML_INTEGER_PREFIX = /^[\t\n\f\r ]*[+-]?[0-9]/
   const focusable = (element: Element): boolean => {
     if (element.matches(":disabled")) return false
     const tabindex = element.getAttribute("tabindex")
-    return (tabindex !== null && tabindex.trim() !== "" && Number.isInteger(Number(tabindex))) ||
+    return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
       ((element.localName === "a" || element.localName === "area") && element.hasAttribute("href")) ||
       ["button", "details", "select", "textarea"].includes(element.localName) ||
       (element instanceof HTMLInputElement && element.type !== "hidden") ||

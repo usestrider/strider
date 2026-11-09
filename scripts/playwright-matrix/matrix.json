@@ -19861,7 +19861,7 @@
           "url": "/docs/api/browser/Expect#toHaveRole"
         }
       ],
-      "notes": "Exact computed role matching; missing and multiple matches retry until the deadline with typed ExpectationFailed evidence, while Playwright rejects multiple matches immediately. Plain div/span elements retain the shared HTML-AAM generic role; Playwright reports no role. ARIA presentation conflict exceptions also apply to inherited roles on the child, and required-child inheritance stops when parent presentation is cancelled; the pinned Playwright ancestor walk can retain presentation in those cases. Table captions inherit presentation as required by ARIA.",
+      "notes": "Exact computed role matching; missing and multiple matches retry until the deadline with typed ExpectationFailed evidence, while Playwright rejects multiple matches immediately. Plain div/span elements retain the shared HTML-AAM generic role; Playwright reports no role. ARIA presentation conflict exceptions also apply to inherited roles on the child, and required-child inheritance stops when parent presentation is cancelled; the pinned Playwright ancestor walk can retain presentation in those cases. Table captions inherit presentation as required by ARIA. Tabindex conflicts use HTML integer parsing: leading ASCII whitespace, optional sign and digits, ignoring trailing text. Thus 2abc counts as focusable and leading non-ASCII whitespace does not; pinned Playwright uses JavaScript number conversion and differs.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -19894,7 +19894,7 @@
         "file": "docs/decisions.md",
         "anchor": "shared-dom-roles",
         "quote": "Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`.",
-        "revision": "d61e7954037f98ba2745be1f223f4b30a97c1ad7"
+        "revision": "b453ed06b279413d1f432f6acbd873178b38980d"
       }
     },
     {
@@ -113247,7 +113247,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "659cdceb41860483c17f5f49131ba115716a8cdbd2213f7578fef45c86e3cc9c",
+    "docs/decisions.md": "e371f75f7ca7593abad806c24c220d8c4f449dc872ed7c94ae28462e02345bf0",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113258,7 +113258,7 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "f7a3bcd231b009f98b48df7dae243b4ae52f2083ae4f559d82db4913e0756402",
-    "packages/browser/src/Expect.ts": "aa0dce45e510a12c1a2755839f9cf72abfd6c6e5e66e463adcc1b9ad170e5ddc",
+    "packages/browser/src/Expect.ts": "0adce94126eaa8af57be6162106cffeaa0dd358a029ff4a4709722ac59d7a554",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",

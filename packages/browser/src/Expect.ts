@@ -293,7 +293,9 @@ export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string
  * does not follow the ARIA role hierarchy: a switch does not match `"checkbox"`. Hidden elements are included.
  * Plain elements such as `div` retain the shared engine's HTML-AAM `generic` role; Playwright reports no role
  * for them. Presentation conflicts and required-child inheritance follow the same rules as role locators and
- * snapshots. An element without a role is observed as an empty string. Failure history records the role or match count.
+ * snapshots. Tabindex focusability follows HTML integer parsing, so `"2abc"` counts and non-ASCII leading
+ * whitespace does not; pinned Playwright uses JavaScript number conversion and differs on those inputs.
+ * An element without a role is observed as an empty string. Failure history records the role or match count.
  *
  * **Example** (Checking a custom control's role)
  *

@@ -46,7 +46,10 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
 case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
 `generic` role; Playwright reports no role for them. Role assertions share presentation conflict resolution and
-required-child inheritance with role locators and snapshots. They include hidden elements and retry missing or
+required-child inheritance with role locators and snapshots. Tabindex focusability follows HTML integer parsing:
+ASCII whitespace, an optional sign and leading digits are accepted, with trailing text ignored. Thus `2abc` counts
+as focusable and non-ASCII leading whitespace does not, unlike pinned Playwright's number conversion.
+They include hidden elements and retry missing or
 multiple matches until the deadline, reporting the role or match count if they fail:
 
 ```ts
