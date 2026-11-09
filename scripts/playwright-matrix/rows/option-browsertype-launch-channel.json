@@ -1,0 +1,24 @@
+{
+  "id": "option-browsertype-launch-channel",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "channel",
+  "status": "different",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "Executable paths and explicit operations replace implicit browser selection and process defaults.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "explicit-browser-path",
+    "quote": "A launch takes an executable path. There are no channels, no default to an installed browser, and no lookup on `PATH`.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "requirements": []
+}

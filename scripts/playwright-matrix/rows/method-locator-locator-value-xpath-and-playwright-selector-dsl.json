@@ -1,0 +1,13 @@
+{
+  "id": "method-locator-locator-value-xpath-and-playwright-selector-dsl",
+  "upstream": [
+    "method:Locator.locator"
+  ],
+  "parent": "method-locator-locator",
+  "value": "XPath and Playwright selector DSL",
+  "status": "missing",
+  "api": [],
+  "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
+  "capabilities": [],
+  "requirements": []
+}

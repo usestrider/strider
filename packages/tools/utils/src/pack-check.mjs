@@ -119,6 +119,7 @@ export const packCheck = (root) => {
           fail(`${name}: ${file} is packed, which is the workspace's`)
         }
       }
+      if (pkg.files?.includes("INDEX.md") && !files.includes("INDEX.md")) fail(`${name}: INDEX.md isn't packed`)
       // Its license
       if (!files.includes("LICENSE")) fail(`${name}: LICENSE isn't packed`)
       if (pkg.license !== "MIT") fail(`${name}: license ${pkg.license}, not MIT`)

@@ -1,0 +1,17 @@
+{
+  "id": "method-browser-contexts",
+  "upstream": [
+    "method:Browser.contexts"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "The Browser service has pages and a defaultContext, but no Watchable collection of all contexts or context-added stream. Retaining contexts created by the caller does not discover other contexts.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

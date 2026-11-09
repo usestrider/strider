@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohavevalues",
+  "upstream": [
+    "method:LocatorAssertions.toHaveValues"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveValues",
+      "url": "/docs/api/browser/Expect#toHaveValues"
+    }
+  ],
+  "notes": "Ordered exact strings or regular expressions on one multiple select, including label retargeting. Invalid controls and multiple matches retry to a typed ExpectationFailed instead of throwing immediately.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-route-request",
+  "upstream": [
+    "method:Route.request"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "RequestPhase",
+      "url": "/docs/api/browser/Route#RequestPhase"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Route.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-serial",
+  "upstream": [
+    "method:AndroidDevice.serial"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

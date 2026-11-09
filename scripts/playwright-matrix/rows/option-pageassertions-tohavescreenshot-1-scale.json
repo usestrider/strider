@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-pageassertions-tohavescreenshot-1-scale",
+  "upstream": [
+    "method:PageAssertions.toHaveScreenshot#1"
+  ],
+  "option": "scale",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "css",
+      "status": "missing"
+    },
+    {
+      "value": "device",
+      "status": "missing"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-jshandle-dispose",
+  "upstream": [
+    "method:JSHandle.dispose"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "JSHandle",
+      "symbol": "JSHandle.release",
+      "url": "/docs/api/browser/JSHandle#JSHandle.release"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/JSHandle.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

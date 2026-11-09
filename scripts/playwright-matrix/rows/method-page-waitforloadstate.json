@@ -1,0 +1,38 @@
+{
+  "id": "method-page-waitforloadstate",
+  "upstream": [
+    "method:Page.waitForLoadState"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.status",
+      "url": "/docs/api/browser/Page#ObservedPage.status"
+    },
+    {
+      "module": "Watchable",
+      "symbol": "Watchable.waitFor",
+      "url": "/docs/api/browser/Watchable#Watchable.waitFor"
+    }
+  ],
+  "notes": "Wait on page.status for Open with document.readiness interactive or complete (complete also satisfies DOMContentLoaded). Current readiness may satisfy immediately; use PageNavigation.next before an action when waiting for a new navigation. No networkidle state.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-page-waitforloadstate-value-networkidle"
+  ],
+  "valueCoverage": [
+    {
+      "value": "networkidle",
+      "status": "missing",
+      "gap": "method-page-waitforloadstate-value-networkidle"
+    }
+  ]
+}

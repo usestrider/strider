@@ -1,0 +1,11 @@
+{
+  "id": "method-debugger-requestpause",
+  "upstream": [
+    "method:Debugger.requestPause"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public debugger controller or breakpoint API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "method-pageassertions-tomatchariasnapshot-2",
+  "upstream": [
+    "method:PageAssertions.toMatchAriaSnapshot#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

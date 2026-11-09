@@ -1,0 +1,12 @@
+{
+  "id": "option-browsertype-launch-tracesdir",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "tracesDir",
+  "status": "missing",
+  "api": [],
+  "notes": "Executable paths and explicit operations replace implicit browser selection and process defaults.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,12 @@
+{
+  "id": "option-browsertype-launch-env",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "env",
+  "status": "missing",
+  "api": [],
+  "notes": "No per-launch environment option in the public LaunchOptions.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,26 @@
+{
+  "id": "method-tracing-groupend",
+  "upstream": [
+    "method:Tracing.groupEnd"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Operation",
+      "symbol": "named",
+      "url": "/docs/api/browser/Operation#named"
+    }
+  ],
+  "notes": "The grouped operation ends when its wrapped effect completes, fails or is interrupted. There is no global imperative group stack.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

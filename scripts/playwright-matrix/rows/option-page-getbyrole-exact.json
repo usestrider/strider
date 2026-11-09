@@ -1,0 +1,18 @@
+{
+  "id": "option-page-getbyrole-exact",
+  "upstream": [
+    "method:Page.getByRole"
+  ],
+  "option": "exact",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

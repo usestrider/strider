@@ -1,0 +1,17 @@
+{
+  "id": "method-frame-goto",
+  "upstream": [
+    "method:Frame.goto"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public navigation operation on a frame locator. Page.goto navigates the top-level page; Locator.evaluate runs inside a frame but is not a general cross-origin frame navigation API.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

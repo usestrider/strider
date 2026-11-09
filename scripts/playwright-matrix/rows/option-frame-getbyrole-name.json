@@ -1,0 +1,18 @@
+{
+  "id": "option-frame-getbyrole-name",
+  "upstream": [
+    "method:Frame.getByRole"
+  ],
+  "option": "name",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-offline",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "offline",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "emulation.network.offline"
+  ],
+  "requirements": []
+}

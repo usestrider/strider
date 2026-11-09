@@ -1,0 +1,11 @@
+{
+  "id": "event-electronapplication-console",
+  "upstream": [
+    "event:ElectronApplication.console"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

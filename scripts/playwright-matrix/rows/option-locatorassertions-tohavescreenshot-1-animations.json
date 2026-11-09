@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tohavescreenshot-1-animations",
+  "upstream": [
+    "method:LocatorAssertions.toHaveScreenshot#1"
+  ],
+  "option": "animations",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "allow",
+      "status": "missing"
+    },
+    {
+      "value": "disabled",
+      "status": "missing"
+    }
+  ]
+}

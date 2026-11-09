@@ -1,0 +1,17 @@
+{
+  "id": "method-frame-evaluate",
+  "upstream": [
+    "method:Frame.evaluate"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No general main-world frame evaluation API. A frame-scoped locator can evaluate its element in the engine world by value, but that does not expose arbitrary main-world globals or a frame handle.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

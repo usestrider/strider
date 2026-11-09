@@ -1,0 +1,26 @@
+{
+  "id": "method-keyboard-up",
+  "upstream": [
+    "method:Keyboard.up"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Keyboard",
+      "symbol": "HeldKey",
+      "url": "/docs/api/browser/Keyboard#HeldKey"
+    }
+  ],
+  "notes": "Acquire a held key/button in a scope and release it explicitly or on scope exit.",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "method-consolemessage-type",
+  "upstream": [
+    "method:ConsoleMessage.type"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "Level",
+      "url": "/docs/api/browser/ConsoleMessage#Level"
+    }
+  ],
+  "notes": "Structured event data; not a remote Playwright object.",
+  "capabilities": [
+    "console"
+  ],
+  "requirements": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "event-browsercontext-page",
+  "upstream": [
+    "event:BrowserContext.page"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.pages",
+      "url": "/docs/api/browser/UserContext#UserContext.pages"
+    },
+    {
+      "module": "Watchable",
+      "symbol": "Watchable.changes",
+      "url": "/docs/api/browser/Watchable#Watchable.changes"
+    }
+  ],
+  "notes": "Observe context.pages changes and compare page ids for additions. Subscribe before the triggering action; entries are scoped page observations, not an EventEmitter callback.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

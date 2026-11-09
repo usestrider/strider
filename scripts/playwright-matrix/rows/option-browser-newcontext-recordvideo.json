@@ -1,0 +1,30 @@
+{
+  "id": "option-browser-newcontext-recordvideo",
+  "upstream": [
+    "method:Browser.newContext"
+  ],
+  "option": "recordVideo",
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    }
+  ],
+  "notes": "Explicit scoped recording with optional writer/polling configuration.",
+  "capabilities": [
+    "capability.video"
+  ],
+  "configuration": {
+    "chromium": "Provide a VideoWriter service.",
+    "webkit": "Provide polling options and a VideoWriter service."
+  },
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

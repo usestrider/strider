@@ -1,0 +1,18 @@
+{
+  "id": "option-locator-getbyrole-selected",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "option": "selected",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

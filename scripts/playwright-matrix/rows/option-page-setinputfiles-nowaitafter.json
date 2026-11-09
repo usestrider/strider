@@ -1,0 +1,26 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    }
+  ],
+  "notes": "Actions do not add an implicit navigation wait; request the required expectation explicitly.",
+  "capabilities": [],
+  "id": "option-page-setinputfiles-nowaitafter",
+  "upstream": [
+    "method:Page.setInputFiles"
+  ],
+  "option": "noWaitAfter",
+  "requirements": [
+    {
+      "unavailable": [
+        "webkit.attached"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "setInputFiles: refuse(\"fileChooser\", \"stock WebKit's inspector can't set a file input's files\")"
+    }
+  ]
+}

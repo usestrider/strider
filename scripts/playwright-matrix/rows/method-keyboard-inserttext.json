@@ -1,0 +1,26 @@
+{
+  "id": "method-keyboard-inserttext",
+  "upstream": [
+    "method:Keyboard.insertText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Keyboard",
+      "symbol": "Keyboard.insertText",
+      "url": "/docs/api/browser/Keyboard#Keyboard.insertText"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

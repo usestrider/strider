@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-isenabled",
+  "upstream": [
+    "method:Locator.isEnabled"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isEnabled",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isEnabled"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

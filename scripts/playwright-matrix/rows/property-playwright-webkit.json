@@ -1,0 +1,17 @@
+{
+  "id": "property-playwright-webkit",
+  "upstream": [
+    "property:Playwright.webkit"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "webkit/WebKit",
+      "symbol": "layer",
+      "url": "/docs/api/browser/webkit/WebKit#layer"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

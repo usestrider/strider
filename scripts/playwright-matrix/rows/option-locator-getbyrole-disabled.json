@@ -1,0 +1,18 @@
+{
+  "id": "option-locator-getbyrole-disabled",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "option": "disabled",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

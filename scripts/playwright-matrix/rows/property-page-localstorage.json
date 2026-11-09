@@ -1,0 +1,23 @@
+{
+  "id": "property-page-localstorage",
+  "upstream": [
+    "property:Page.localStorage"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.localStorage",
+      "url": "/docs/api/browser/Page#ReadonlyPage.localStorage"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

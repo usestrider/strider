@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-content-includeshadow",
+  "upstream": [
+    "method:Page.content"
+  ],
+  "option": "includeShadow",
+  "requirements": []
+}

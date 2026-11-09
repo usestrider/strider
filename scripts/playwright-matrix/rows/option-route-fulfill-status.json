@@ -1,0 +1,20 @@
+{
+  "id": "option-route-fulfill-status",
+  "upstream": [
+    "method:Route.fulfill"
+  ],
+  "option": "status",
+  "status": "has",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "fulfill",
+      "url": "/docs/api/browser/Route#fulfill"
+    }
+  ],
+  "notes": "Return a response decision; body and headers are explicit.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "requirements": []
+}

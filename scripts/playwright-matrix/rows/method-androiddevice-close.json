@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-close",
+  "upstream": [
+    "method:AndroidDevice.close"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}
