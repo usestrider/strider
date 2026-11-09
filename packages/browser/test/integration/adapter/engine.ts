@@ -150,10 +150,145 @@ const revalidate = Effect.fnUntraced(function*(
   return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
 })
 
+/** Execute the opt-in wire protocol in one evaluation to control frame ordering. */
+const cooperativeExercise = Effect.fnUntraced(function*(
+  call: Effect.Success<ReturnType<typeof open>>["call"],
+  script: string
+) {
+  const declaration = (Engine as unknown as { readonly cooperate: string }).cooperate
+  assert.strictEqual(typeof declaration, "string", "The engine must expose cooperative execution")
+  const result = yield* call(
+    `async () => {
+    const invoke = ${declaration}
+    const command = async (value) => JSON.parse(await invoke(JSON.stringify({
+      document: "test-document", operation: "test-operation", session: "test-session", ...value
+    })))
+    ${script}
+  }`,
+    []
+  )
+  assert(result._tag === "Value", result._tag === "Exception" ? result.text : "")
+  assert(result.value.type === "string")
+  return JSON.parse(result.value.value)
+})
+
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("cooperative expectation yields before checking an overlay arriving during a round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"done\" hidden>Done</div>",
+              countFrames(`
+              document.querySelector('#done').hidden = false
+              if (!document.querySelector('#overlay')) document.body.insertAdjacentHTML('beforeend', '<div id="overlay">Overlay</div>')
+            `)
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Visible" }, cap: 2000
+              } })
+              if (reply._tag !== "Check") throw Error("No initial check")
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              const overlayBeforeCheck = document.querySelector('#overlay') !== null
+              const yielded = reply._tag
+              document.querySelector('#overlay')?.remove()
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              return JSON.stringify({ yielded, overlayBeforeCheck, reply })
+            `
+            )
+            assert.strictEqual(result.yielded, "Check")
+            assert.isTrue(result.overlayBeforeCheck)
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.isTrue(result.reply.response.passed)
+          }), timeout)
+        it.effect("cooperative no-handler resumes preserve stable-frame sampling", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              let checks = 0
+              while (reply._tag === "Check" && checks++ < 10) {
+                reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              }
+              return JSON.stringify({ reply, checks, frames: globalThis.engineTestFrames })
+            `
+            )
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.strictEqual(result.reply.response._tag, "Ready")
+            assert.strictEqual(result.frames, 2)
+            assert.strictEqual(result.checks, 3)
+          }), timeout)
+        it.effect("cooperative invalidation discards earlier samples and resolved elements", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              document.querySelector('#go').outerHTML = '<button id="go" style="margin-left:80px">New</button>'
+              const before = globalThis.engineTestFrames
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              while (reply._tag === "Check") reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ reply, frames: globalThis.engineTestFrames - before })
+            `
+            )
+            assert.strictEqual(result.reply.response._tag, "Ready")
+            assert.include(result.reply.response.element, "New")
+            assert.strictEqual(result.frames, 2)
+          }), timeout)
+        it.effect("cooperative final checks restart before in-page application", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<input id=\"go\">")
+            const request = {
+              ...point(0),
+              checks: { ...all, rendered: false, stable: 0 },
+              action: { _tag: "Focus" },
+              apply: true
+            }
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+              const reply = await command({ command: "resume", token: first.token, left: 2000, decision: "restart" })
+              const replay = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ final: first.final, reply, replay, applied: document.activeElement.id === "go" })
+            `
+            )
+            assert.isTrue(result.final)
+            assert.strictEqual(result.reply._tag, "Restart")
+            assert.strictEqual(result.replay._tag, "Disposed")
+            assert.isFalse(result.applied)
+          }), timeout)
+        it.effect("cooperative tokens enforce ownership, single use and cancellation during a frame wait", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const foreign = await command({ command: "resume", operation: "other", token: first.token, left: 2000, decision: "continue" })
+              const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              const replay = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              await command({ command: "cancel" })
+              const canceled = await pending
+              await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              dispatchEvent(new Event("pagehide"))
+              const afterNavigation = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ foreign, replay, canceled, afterNavigation })
+            `
+            )
+            for (const response of Object.values(result)) {
+              assert.strictEqual((response as { _tag: string })._tag, "Disposed")
+            }
+          }), timeout)
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
