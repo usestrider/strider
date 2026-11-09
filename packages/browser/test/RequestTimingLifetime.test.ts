@@ -132,3 +132,39 @@ describe("request timing lifecycle", () => {
       assert.strictEqual(error.reason.why, "notRetained")
     }))
 })
+
+it.effect("refuses another live target and removes a detached frame's retained timing", () =>
+  Effect.gen(function*() {
+    const { fold, runtime, page, request, sent } = yield* setup()
+    const otherId = "other-page" as Target.NavigableId
+    yield* fold.sink({
+      _tag: "PageAdded",
+      page: otherId,
+      context: contextId,
+      kind: "tab",
+      origin: { _tag: "Created" },
+      url: "about:blank" as Url.Url
+    })
+    const other = {} as Page.ObservedPage
+    Handles.registerPage(other, { runtime, entry: Option.getOrThrow(fold.page(otherId)), grant: Option.none() })
+    const error = yield* NetworkRequest.timing(other, request).pipe(Effect.flip)
+    assert.strictEqual(error.reason.why, "foreignTarget")
+    const frame = "frame" as Target.NavigableId
+    yield* fold.sink({ _tag: "FrameAdded", frame, parent: pageId, page: pageId })
+    const child = sent("child", { _tag: "Document", navigable: frame, navigation: Option.none() })
+    yield* fold.sink({ _tag: "RequestSent", request: child })
+    yield* fold.sink({ _tag: "HopTiming", hop: child.hop, timing: empty() })
+    const context = Option.getOrThrow(Option.getOrThrow(fold.hop(child.hop)).context)
+    assert.strictEqual(context.timings?.size, 1)
+    yield* fold.sink({
+      _tag: "NavigableRemoved",
+      navigable: frame,
+      reason: new Target.FrameDetached({}),
+      evidence: "test"
+    })
+    assert.strictEqual(context.timings?.size, 0)
+    yield* fold.sink({ _tag: "HopTiming", hop: child.hop, timing: empty() })
+    assert.strictEqual(context.timings?.size, 0, "late facts cannot revive a removed owner's timing")
+    const unavailable = yield* NetworkRequest.timing(page, child).pipe(Effect.flip)
+    assert.strictEqual(unavailable.reason.why, "ownerLost")
+  }))

@@ -51,7 +51,7 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*(protocolSession = session) {
+const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
@@ -65,6 +65,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
     release: Responses.release
   })
   const context: State.ContextEntry = {
+    ...(requestTiming ? { requestTiming: new Map() } : {}),
     id: state.defaultContext,
     browserContextId: undefined,
     isDefault: true,
@@ -2047,4 +2048,60 @@ it.effect("does not register evaluation cleanup in the connection scope when it 
     assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
     assert.strictEqual(owner.state._tag, "Empty")
     yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))
+
+describe("CDP request timing opt-in dispatch", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`touches native timing only for an enabled context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, enabled)
+        const context = page.context
+        const event = { state, target }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        handlers.apply(
+          "Network.requestWillBeSent",
+          { ...sent(`${origin}/landed`), timestamp: 10, wallTime: 1000 },
+          event
+        )
+        assert.strictEqual(context.requestTiming?.size ?? 0, enabled ? 1 : 0)
+        let nativeReads = 0
+        const native = {
+          ...landed,
+          hasExtraInfo: false,
+          response: {
+            ...landed.response,
+            get timing() {
+              nativeReads++
+              return { requestTime: 10, sendStart: 2, receiveHeadersStart: 3 }
+            }
+          }
+        }
+        handlers.apply("Network.responseReceived", native, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 10.01, encodedDataLength: 0 }, event)
+        yield* state.buffer.flush
+        assert.strictEqual(nativeReads, enabled ? 1 : 0)
+        assert.strictEqual(facts.filter((fact) => fact._tag === "HopTiming").length, enabled ? 2 : 0)
+        assert.strictEqual(context.requestTiming?.size ?? 0, 0, "terminal completion releases the native collector")
+      }).pipe(Effect.scoped))
+  }
+})
+
+it.effect("bounds active native baselines and clears them when their frame closes", () =>
+  Effect.gen(function*() {
+    const { state, target, page } = yield* withPage(session, true)
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    for (let i = 0; i <= 1000; i++) {
+      handlers.apply("Network.requestWillBeSent", {
+        ...sent(`${origin}/landed`),
+        requestId: `timing-${i}`,
+        timestamp: 10 + i,
+        wallTime: 1000 + i
+      }, { state, target })
+    }
+    const store = page.context.requestTiming!
+    assert.strictEqual(store.size, 1000)
+    const oldest = state.requests.get(State.requestKey(target, "timing-0"))!
+    assert.isFalse(store.has(oldest.hop))
+    Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+    assert.strictEqual(store.size, 0)
   }).pipe(Effect.scoped))

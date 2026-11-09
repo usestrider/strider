@@ -21,6 +21,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
+import * as Diagnostics from "./Diagnostics.ts"
 import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
@@ -392,3 +393,115 @@ export const headersSent = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
+
+/**
+ * Reason a request's live observation is unavailable.
+ *
+ * **Details**
+ *
+ * `notRetained` includes unknown, evicted, copied or decoded request snapshots. `foreignTarget` means the
+ * request belongs to another page or context. `ownerLost` means its page, context, frame, worker or browser
+ * connection is gone. `timingNotEnabled` means its context did not opt into timing collection.
+ * None of these proves that the network request failed.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RequestUnavailable
+  extends Schema.Error<RequestUnavailable>("@usestrider/browser/NetworkRequest/RequestUnavailable")({
+    _tag: Schema.tag("RequestUnavailable"),
+    why: Schema.Literals(["notRetained", "foreignTarget", "ownerLost", "timingNotEnabled"])
+  })
+{
+  override get message(): string {
+    return `Request observation unavailable: ${this.why}`
+  }
+}
+
+/**
+ * Error for a request observation that cannot be read from its target.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class RequestError
+  extends Schema.TaggedError<RequestError>("~@usestrider/browser/NetworkRequest/RequestError")("RequestError", {
+    hop: HopId,
+    reason: Schema.Union([RequestUnavailable]),
+    diagnostics: Diagnostics.Diagnostics
+  })
+{
+  override get message(): string {
+    return this.reason.message
+  }
+}
+
+/**
+ * A snapshot of a request hop's native timings, with unavailable phases represented by `None`.
+ *
+ * **Details**
+ *
+ * `startTime` is milliseconds since the Unix epoch. Every other value is milliseconds from that same
+ * hop's native baseline. A missing value proves neither completion nor failure. Earlier snapshots never
+ * change. Connection reuse, cache responses and missing browser evidence can leave phases unavailable.
+ * `secureConnectionStart` is currently unavailable; TLS phase mapping is not advertised.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Timing extends Schema.Class<Timing>("@usestrider/browser/NetworkRequest/Timing")({
+  startTime: Schema.Option(Schema.Number),
+  domainLookupStart: Schema.Option(Schema.Number),
+  domainLookupEnd: Schema.Option(Schema.Number),
+  connectStart: Schema.Option(Schema.Number),
+  connectEnd: Schema.Option(Schema.Number),
+  secureConnectionStart: Schema.Option(Schema.Number),
+  requestStart: Schema.Option(Schema.Number),
+  responseStart: Schema.Option(Schema.Number),
+  responseEnd: Schema.Option(Schema.Number)
+}) {}
+
+/**
+ * Reads the timing observed so far for an original request, without waiting or sending browser commands.
+ *
+ * **Details**
+ *
+ * Create the context with `requestTiming: true` before opening its pages. Omitted or false configuration
+ * collects no timing state. Reads otherwise fail with `RequestError` / `RequestUnavailable`.
+ * The original request must remain in the bounded 1000-hop index with live page, context, frame or worker
+ * and connection owners. Copied, decoded, evicted and foreign requests refuse. Save the returned Schema
+ * snapshot to retain it beyond those owners. History does not pin timing observations.
+ *
+ * `responseEnd` appears only after successful transfer completion, including redirect hops. A failure after
+ * headers preserves earlier phases with no successful end. Redirect end can be an observation bound from
+ * the next request event. Response-header boundaries differ by backend; unknown origins leave dependent
+ * values unavailable. Chromium reports header start when present, Firefox its native response start, and
+ * stock WebKit its native response-header start. WebKit's ambiguous zero phases and redirect origins are
+ * unavailable. Worker requests without a page-attributed native timing collector have unavailable phases.
+ *
+ * **Example** (Opting into timings)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, NetworkRequest } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const inspect = Effect.fn("inspect")(function*() {
+ *   const context = yield* Browser.newContext({ requestTiming: true })
+ *   const page = yield* context.newPage
+ *   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com")
+ *   return yield* NetworkRequest.timing(page, yield* sent)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const timing = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Timing, RequestError> => NetworkRequestImpl.timing(target, request)

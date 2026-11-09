@@ -1,0 +1,55 @@
+---
+title: Request timings
+description: Opt into native request phase timings and read immutable snapshots with explicit missing phases.
+order: 4
+---
+
+A response can arrive long before its body finishes. Native request timings show which phases the browser measured
+and whether a successful transfer end has been observed.
+
+Create a context with `requestTiming: true` before opening its pages. Read a request with `NetworkRequest.timing`:
+
+```ts
+import { Browser, NetworkRequest } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const inspect = Effect.fn("inspect")(function*() {
+  const context = yield* Browser.newContext({ requestTiming: true })
+  const page = yield* context.newPage
+  const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+  yield* page.goto("https://example.com")
+  return yield* NetworkRequest.timing(page, yield* sent)
+})
+```
+
+The read returns immediately. It does not wait for body completion or enable collection after a request has started.
+Omitted or false configuration collects no timing state. Timings cannot be enabled on an existing context.
+
+`startTime` is an `Option<number>` in milliseconds since the Unix epoch. The remaining `Option<number>` fields are
+millisecond offsets from that hop's native baseline:
+
+| Field | Browser observation |
+| --- | --- |
+| `domainLookupStart`, `domainLookupEnd` | DNS lookup boundaries, when reported |
+| `connectStart`, `connectEnd` | Connection boundaries, when reported |
+| `secureConnectionStart` | Currently unavailable; TLS mapping is not exposed |
+| `requestStart` | Request sending begins |
+| `responseStart` | Native response-header boundary; precision differs by backend |
+| `responseEnd` | Successful transfer completion, including a completed redirect hop |
+
+A missing phase is `None`, not zero or -1. Missing values prove neither completion nor failure. A body that fails
+after headers keeps the earlier phases but has no successful `responseEnd`. Each read returns a snapshot; later
+observations do not change a value already returned.
+
+Chromium uses its native request-time baseline and header start when reported. Firefox uses each redirect hop's
+own request time and native response start. Stock WebKit uses fetch start and native response-header start; its
+ambiguous zero phases and redirect origins remain unavailable. Redirect completion can be an observation bound
+from the next request event. Stock WebKit's finish timestamp can fall back to when the inspector reports completion.
+Cache responses, reused connections and worker requests without a page-attributed collector may lack phases.
+Unknown origins leave dependent timings unavailable. These native timings do not change [HAR recordings](/docs/tools/recordings).
+
+Pass the original request instance and its page or context. The connection retains at most 1000 hops, dropping
+finished hops first. Copied or decoded requests, eviction, foreign targets and loss of the owning page, context,
+frame, worker or connection refuse with `NetworkRequest.RequestError` / `RequestUnavailable`. A context that did
+not opt in refuses with `timingNotEnabled`. Request history does not pin timing data. Save the returned `Timing`
+value if it must outlive the owner.

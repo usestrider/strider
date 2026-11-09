@@ -196,6 +196,7 @@ export const make = Effect.fnUntraced(function*(options: {
   const navigationHops = new Set<NetworkRequest.HopId>()
   const responses = NetworkIndex.bounded<NetworkRequest.HopId, NetworkResponse.NetworkResponse>(maxResponses)
   const hops = NetworkIndex.hops<Model.HopEntry, Model.HopEnd>(maxHops, { _tag: "Forgotten" }, (hop) => {
+    if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
     Deferred.doneUnsafe(hop.sentKnown, Effect.void)
   })
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
@@ -290,6 +291,7 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const hop of hops.values()) {
       const initiator = hop.request.initiator
       if (initiator._tag === "Document" && gone.has(initiator.navigable)) {
+        if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
         Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       }
     }
@@ -306,6 +308,7 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const hop of hops.values()) {
       const initiator = hop.request.initiator
       if (initiator._tag === "Worker" && initiator.realm === worker.realm) {
+        if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
         Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       }
     }
@@ -333,6 +336,11 @@ export const make = Effect.fnUntraced(function*(options: {
     )
 
   const endPage = Effect.fnUntraced(function*(page: Model.PageEntry, reason: Target.CloseReason) {
+    if (page.contextEntry.timings !== undefined) {
+      for (const hop of hops.values()) {
+        if (Option.getOrUndefined(hop.page) === page) page.contextEntry.timings.delete(hop.request.hop)
+      }
+    }
     pages.delete(page.id)
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
@@ -401,6 +409,7 @@ export const make = Effect.fnUntraced(function*(options: {
   })
 
   const endContext = Effect.fnUntraced(function*(entry: Model.ContextEntry, reason: Target.CloseReason) {
+    entry.timings?.clear()
     contexts.delete(entry.id)
     for (const hop of hops.values()) {
       if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
@@ -458,7 +467,8 @@ export const make = Effect.fnUntraced(function*(options: {
     Effect.gen(function*() {
       switch (fact._tag) {
         case "UserContextAdded": {
-          yield* ensureContext(fact.context, fact.isDefault)
+          const entry = yield* ensureContext(fact.context, fact.isDefault)
+          if (fact.requestTiming) entry.timings ??= new Map()
           return
         }
         case "UserContextRemoved": {
@@ -731,6 +741,24 @@ export const make = Effect.fnUntraced(function*(options: {
             context: owner.context
           })
           publish(owner, fact.request, (events) => events.request, (events) => events.request)
+          return
+        }
+        case "HopTiming": {
+          const found = hops.get(fact.hop)
+          if (Option.isSome(found) && Option.isSome(found.value.context)) {
+            const context = found.value.context.value
+            const current = ownerOfRequest(found.value.request)
+            if (
+              Option.getOrUndefined(current.context) !== context ||
+              Option.getOrUndefined(current.page) !== Option.getOrUndefined(found.value.page)
+            ) return
+            if (
+              !Deferred.isDoneUnsafe(context.closed) &&
+              !Option.exists(found.value.page, (page) => Deferred.isDoneUnsafe(page.closed))
+            ) {
+              context.timings?.set(fact.hop, fact.timing)
+            }
+          }
           return
         }
         case "ResponseReceived": {

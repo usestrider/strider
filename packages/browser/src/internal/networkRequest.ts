@@ -7,13 +7,14 @@ import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import type * as Deadline from "../Deadline.ts"
-import type * as NetworkRequest from "../NetworkRequest.ts"
+import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
 import * as Operation from "./operation.ts"
+import * as Timing from "./requestTiming.ts"
 
 export const { history, next, stream } = EventModule.make<
   Page.ObservedPage | UserContext.ObservedUserContext,
@@ -54,3 +55,64 @@ export const headersSent = (
     )
     return Option.getOrElse((yield* hop.value.state.get).sent, () => request.headers)
   }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))
+
+/** An immediate read of existing terminal facts, valid only while the original owner remains observable. */
+export const timing = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest.NetworkRequest
+): Effect.Effect<NetworkRequest.Timing, NetworkRequest.RequestError> => {
+  const owner = Handles.target(target)
+  return Effect.gen(function*() {
+    const { model } = owner.behind.runtime
+    const unavailable = (why: NetworkRequest.RequestUnavailable["why"]) =>
+      Effect.fail(
+        new NetworkRequest.RequestError({
+          hop: request.hop,
+          reason: new NetworkRequest.RequestUnavailable({ why }),
+          diagnostics: Operation.diagnosticsNow()
+        })
+      )
+    const found = model.hop(request.hop)
+    if (Option.isNone(found) || found.value.request !== request) return yield* unavailable("notRetained")
+    const hop = found.value
+    return yield* Effect.suspend(() => {
+      // Validate ownership at the read, even when phase data was retained before the owner ended.
+      if (Option.getOrUndefined(model.hop(request.hop)) !== hop) return unavailable("notRetained")
+      if (
+        owner._tag === "Page"
+          ? Option.getOrUndefined(hop.page) !== owner.behind.entry
+          : Option.getOrUndefined(hop.context) !== owner.behind.entry
+      ) return unavailable("foreignTarget")
+      if (
+        Deferred.isDoneUnsafe(model.lost) || Deferred.isDoneUnsafe(owner.behind.entry.closed) ||
+        Option.exists(hop.page, (page) => Deferred.isDoneUnsafe(page.closed)) ||
+        Option.exists(hop.context, (context) => Deferred.isDoneUnsafe(context.closed))
+      ) return unavailable("ownerLost")
+      const initiator = request.initiator
+      if (initiator._tag === "Document") {
+        const page = Option.getOrUndefined(hop.page)
+        if (
+          page === undefined || (page.id !== initiator.navigable &&
+            !page.state.getUnsafe().frames.some((frame) => frame.id === initiator.navigable))
+        ) return unavailable("ownerLost")
+      } else if (initiator._tag === "Worker") {
+        const workers = Option.isSome(hop.context)
+          ? hop.context.value.state.getUnsafe().workers
+          : Option.isSome(hop.page)
+          ? hop.page.value.state.getUnsafe().workers
+          : []
+        if (!workers.some((worker) => worker.realm === initiator.realm && !Deferred.isDoneUnsafe(worker.closed))) {
+          return unavailable("ownerLost")
+        }
+      }
+      const context = Option.getOrUndefined(hop.context)
+      if (context?.timings === undefined) return unavailable("timingNotEnabled")
+      return Effect.succeed(context.timings.get(request.hop) ?? Timing.empty())
+    })
+  }).pipe(Operation.named("NetworkRequest.timing", {
+    attributes: {
+      "browser.hop.id": request.hop,
+      [owner._tag === "Page" ? "browser.page.id" : "browser.context.id"]: owner.behind.entry.id
+    }
+  }))
+}

@@ -6,11 +6,14 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as http from "node:http"
+import { supports } from "./capabilities.ts"
 
 const site = Effect.gen(function*() {
   let release: (() => void) | undefined
   const server = http.createServer((request, response) => {
-    if (request.url === "/redirect") {
+    if (request.url === "/fail") {
+      request.socket.destroy()
+    } else if (request.url === "/redirect") {
       response.writeHead(302, { location: "/stream" })
       response.end()
     } else if (request.url === "/stream" || request.url === "/broken") {
@@ -75,9 +78,14 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
             const earlier = yield* NetworkRequest.timing(page, first)
             assert.isTrue(Option.isSome(after.responseEnd))
             assert.isAtLeast(Option.getOrThrow(after.responseEnd), Option.getOrThrow(after.responseStart))
-            assert.isTrue(Option.isSome(earlier.responseEnd))
+            if (yield* supports("network.timing.redirect")) {
+              assert.isTrue(Option.isSome(earlier.responseEnd))
+              assert.isAtMost(Option.getOrThrow(earlier.startTime), Option.getOrThrow(after.startTime))
+            } else {
+              assert.deepStrictEqual(earlier.startTime, Option.none())
+              assert.deepStrictEqual(earlier.responseEnd, Option.none())
+            }
             assert.notStrictEqual(first.hop, last.hop)
-            assert.isAtMost(Option.getOrThrow(earlier.startTime), Option.getOrThrow(after.startTime))
             assert.deepStrictEqual(before.responseEnd, Option.none())
             assert.deepStrictEqual(after.secureConnectionStart, Option.none())
           }).pipe(Effect.scoped),
@@ -111,9 +119,24 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
             const after = yield* NetworkRequest.timing(page, request)
             assert.deepStrictEqual(after.responseStart, before.responseStart)
             assert.deepStrictEqual(after.responseEnd, Option.none())
+            const failed = yield* NetworkRequest.next(page, { url: `${served.origin}/fail` })
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(async () => {
+                try {
+                  await fetch("/fail")
+                  return "success"
+                } catch {
+                  return "failed"
+                }
+              }),
+              "failed"
+            )
+            const absent = yield* NetworkRequest.timing(page, yield* failed)
+            assert.deepStrictEqual(absent.responseStart, Option.none())
+            assert.deepStrictEqual(absent.responseEnd, Option.none())
             const off = yield* Browser.newContext()
             const other = yield* off.newPage
-            const observed = yield* NetworkRequest.next(other, {})
+            const observed = yield* NetworkRequest.next(other, { url: served.origin + "/" })
             yield* other.goto(served.origin)
             const refused = yield* NetworkRequest.timing(other, yield* observed).pipe(Effect.flip)
             assert.strictEqual(refused.reason.why, "timingNotEnabled")
@@ -136,9 +159,13 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
                 body: (body) => body.text
               })
               yield* page.evaluateInMainWorld(async () => (await fetch("/cache")).text())
-              yield* full
+              const response = yield* full
               const timing = yield* NetworkRequest.timing(page, yield* sent)
               assert.deepStrictEqual(timing.secureConnectionStart, Option.none())
+              if (response.servedBy === "cache" || response.servedBy === "route") {
+                assert.deepStrictEqual(timing.domainLookupStart, Option.none())
+                assert.deepStrictEqual(timing.connectStart, Option.none())
+              }
               // Firefox reports zero-duration reused-connection boundaries; WebKit's zeros are ambiguous.
               if (Option.isSome(timing.connectStart) && Option.isSome(timing.connectEnd)) {
                 assert.isAtLeast(timing.connectEnd.value, timing.connectStart.value)

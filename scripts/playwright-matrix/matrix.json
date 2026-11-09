@@ -28996,43 +28996,84 @@
       "upstream": [
         "method:Request.timing"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "timing",
+          "url": "/docs/api/browser/NetworkRequest#timing"
+        },
+        {
+          "module": "NetworkRequest",
+          "symbol": "Timing",
+          "url": "/docs/api/browser/NetworkRequest#Timing"
+        }
+      ],
+      "notes": "Context-creation requestTiming opt-in; immediate immutable snapshot with Option epoch-millisecond origin and Option millisecond offsets. Original retained instance and live owners required. Successful-only responseEnd; backend header boundaries differ. Missing origins/phases, TLS and uncollected worker timings stay unavailable; stock WebKit redirects lack native origins. No terminal wait or retroactive collection.",
+      "capabilities": [
+        "network.timing"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "timing collection requires a newly created context"
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/NetworkRequest.ts"
+          "packages/browser/src/NetworkRequest.ts",
+          "packages/browser/src/internal/requestTiming.ts",
+          "packages/browser/test/integration/slice/requestTiming.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+      }
     },
     {
       "id": "method-request-url",
@@ -113332,7 +113373,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
+    "packages/browser/src/NetworkRequest.ts": "80cf912d0a1e25de387f11f6b203b7067eb91befee57a74e418a2aa2c65676d2",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
@@ -113344,14 +113385,14 @@
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "499fe81f688cf0f467f306d92463b08ab6166da2ca5f042a6549791786bffaca",
+    "packages/browser/src/UserContext.ts": "45be343ef8658c22857948044b0abfc6b37469aa8fd39bf526b18c55242dfffa",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
-    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
+    "packages/browser/src/internal/bidiAdapter.ts": "4f4364057f4af813240f7329fd22ac3db1bf1917565236513d34278726d657dc",
+    "packages/browser/src/internal/cdpAdapter.ts": "af4768370f65990a2fc4654ac7bf06ceea1ea44d8d9f9b93f1f33fe095dfa74f",
     "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "ad0263a885b9d11c962beee3649d841a7adbb0508255a0448e55e66f63f08442",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
