@@ -1,0 +1,31 @@
+{
+  "id": "method-route-fallback",
+  "upstream": [
+    "method:Route.fallback"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "fallthrough",
+      "url": "/docs/api/browser/Route#fallthrough"
+    }
+  ],
+  "notes": "A route handler returns one decision, rather than issuing it as an imperative side effect.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "effectful-handler-decisions",
+    "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Route.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

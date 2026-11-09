@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-jshandle-evaluate-exposefunctions",
+  "upstream": [
+    "method:JSHandle.evaluate"
+  ],
+  "option": "exposeFunctions",
+  "requirements": []
+}

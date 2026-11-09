@@ -1,0 +1,33 @@
+{
+  "status": "different",
+  "api": [
+    {
+      "module": "Deadline",
+      "symbol": "within",
+      "url": "/docs/api/browser/Deadline#within"
+    }
+  ],
+  "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "composable-operation-deadlines",
+    "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "id": "option-elementhandle-check-timeout",
+  "upstream": [
+    "method:ElementHandle.check"
+  ],
+  "option": "timeout",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

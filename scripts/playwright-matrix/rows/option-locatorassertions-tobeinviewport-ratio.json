@@ -1,0 +1,18 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeInViewport",
+      "url": "/docs/api/browser/Expect#toBeInViewport"
+    }
+  ],
+  "notes": "Native intersection ratio, default zero with positive intersection required; inViewport: false inverts the threshold and passes for a missing element. Multiple matches retry with typed count evidence, following other scalar expectations.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tobeinviewport-ratio",
+  "upstream": [
+    "method:LocatorAssertions.toBeInViewport"
+  ],
+  "option": "ratio",
+  "requirements": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "property-genericassertions-not",
+  "upstream": [
+    "property:GenericAssertions.not"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Generic value assertions belong to the chosen test framework; Strider does not export this matcher.",
+  "capabilities": [],
+  "requirements": []
+}

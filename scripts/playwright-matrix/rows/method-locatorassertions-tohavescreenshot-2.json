@@ -1,0 +1,11 @@
+{
+  "id": "method-locatorassertions-tohavescreenshot-2",
+  "upstream": [
+    "method:LocatorAssertions.toHaveScreenshot#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

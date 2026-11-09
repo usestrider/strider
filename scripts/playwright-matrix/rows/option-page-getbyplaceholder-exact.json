@@ -1,0 +1,18 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "TextOptions",
+      "url": "/docs/api/browser/Locator#TextOptions"
+    }
+  ],
+  "notes": "Text matching has an explicit exact option.",
+  "capabilities": [],
+  "id": "option-page-getbyplaceholder-exact",
+  "upstream": [
+    "method:Page.getByPlaceholder"
+  ],
+  "option": "exact",
+  "requirements": []
+}

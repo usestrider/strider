@@ -1,0 +1,23 @@
+{
+  "id": "method-page-addinitscript",
+  "upstream": [
+    "method:Page.addInitScript"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.addInitScript",
+      "url": "/docs/api/browser/Page#Page.addInitScript"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

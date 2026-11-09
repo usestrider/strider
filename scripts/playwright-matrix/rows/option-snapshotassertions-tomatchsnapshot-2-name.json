@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-snapshotassertions-tomatchsnapshot-2-name",
+  "upstream": [
+    "method:SnapshotAssertions.toMatchSnapshot#2"
+  ],
+  "option": "name",
+  "requirements": []
+}

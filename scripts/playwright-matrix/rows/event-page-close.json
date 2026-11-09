@@ -1,0 +1,23 @@
+{
+  "id": "event-page-close",
+  "upstream": [
+    "event:Page.close"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.closed",
+      "url": "/docs/api/browser/Page#ObservedPage.closed"
+    }
+  ],
+  "notes": "The closed effect gives the reason the target ended.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

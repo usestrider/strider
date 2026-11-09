@@ -87,16 +87,20 @@ test("independent public members and matrix rows validate and merge without gene
       assert.equal(run(dir, "git", ["status", "--porcelain"]), "")
     }
     for (
-      const [branch, module, id] of [["first", "Page", "method-page-pdf"], [
-        "second",
-        "Locator",
-        "method-locator-innertext"
-      ]]
+      const [branch, marker, id] of [
+        ["first", "RoleOptions", "method-locator-isdisabled"],
+        ["second", "TextOptions", "method-locator-innertext"]
+      ]
     ) {
+      const module = "Locator"
       run(dir, "git", ["checkout", "-b", branch, "main"])
-      fs.appendFileSync(
-        `${dir}/packages/browser/src/${module}.ts`,
-        `\nexport interface Independent${branch} { readonly ${branch}: string }\n`
+      const source = `${dir}/packages/browser/src/${module}.ts`
+      fs.writeFileSync(
+        source,
+        fs.readFileSync(source, "utf8").replace(
+          `export interface ${marker}`,
+          `export interface Independent${branch} { readonly ${branch}: string }\n\nexport interface ${marker}`
+        )
       )
       const file = `${dir}/scripts/playwright-matrix/rows/${id}.json`
       const row = json(file)
@@ -130,6 +134,16 @@ test("independent public members and matrix rows validate and merge without gene
       api: [{ module: "Page", symbol: "doesNotExist", url: "/docs/api/browser/Page#doesNotExist" }]
     })
     assert.throws(() => node(["scripts/playwright-matrix.mjs"]), /not a public declaration/)
+    write(file, {
+      ...row,
+      requirements: [{ file: "docs/decisions.md", quote: "absent evidence quotation", capability: "capability.video" }]
+    })
+    assert.throws(() => node(["scripts/playwright-matrix.mjs"]), /access evidence missing/)
+    write(file, row)
+    const metadataFile = `${dir}/scripts/playwright-matrix/metadata.json`
+    write(metadataFile, { ...metadata, evidence: { "docs/decisions.md": "stale hash" } })
+    assert.throws(() => node(["scripts/playwright-matrix.mjs"]), /not derived hashes/)
+    write(metadataFile, metadata)
     // Tracked code generation must still detect drift.
     fs.appendFileSync(`${dir}/packages/browser/src/index.ts`, "\n// stale\n")
     assert.throws(

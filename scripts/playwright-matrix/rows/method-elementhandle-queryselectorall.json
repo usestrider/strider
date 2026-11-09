@@ -1,0 +1,28 @@
+{
+  "id": "method-elementhandle-queryselectorall",
+  "upstream": [
+    "method:ElementHandle.querySelectorAll"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.locator",
+      "url": "/docs/api/browser/Locator#Locator.locator"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.all",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.all"
+    }
+  ],
+  "notes": "Use a scoped CSS locator, then all for multiple matches. Results are lazy locators, not fixed ElementHandles; selection re-resolves on use and all reads the current count without waiting. This uses a lazy locator instead of fixed ElementHandle identity.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

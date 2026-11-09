@@ -1,0 +1,17 @@
+{
+  "id": "method-browsertype-name",
+  "upstream": [
+    "method:BrowserType.name"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Playwright server-wire equivalent; native connection layers are separate and persistent profiles use explicit userDataDir.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

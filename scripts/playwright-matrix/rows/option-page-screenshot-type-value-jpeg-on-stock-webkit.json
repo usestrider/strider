@@ -1,0 +1,52 @@
+{
+  "id": "option-page-screenshot-type-value-jpeg-on-stock-webkit",
+  "upstream": [
+    "method:Page.screenshot"
+  ],
+  "status": "missing",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "capabilities": [
+    "screenshot.format"
+  ],
+  "requirements": [],
+  "parent": "option-page-screenshot-type",
+  "value": "jpeg",
+  "notes": "Stock WebKit screenshots are PNG-only.",
+  "option": "type",
+  "browserOverrides": {
+    "chromium.launched": {
+      "status": "has",
+      "limitations": []
+    },
+    "chromium.attached": {
+      "status": "has",
+      "limitations": []
+    },
+    "firefox.launched": {
+      "status": "has",
+      "limitations": []
+    },
+    "firefox.attached": {
+      "status": "has",
+      "limitations": []
+    },
+    "webkit.launched": {
+      "status": "missing",
+      "limitations": [
+        "Stock WebKit screenshots are PNG-only."
+      ]
+    },
+    "webkit.attached": {
+      "status": "missing",
+      "limitations": [
+        "Stock WebKit screenshots are PNG-only."
+      ]
+    }
+  }
+}

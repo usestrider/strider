@@ -1,0 +1,25 @@
+{
+  "id": "method-framelocator-framelocator",
+  "upstream": [
+    "method:FrameLocator.frameLocator"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.frame",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.frame"
+    }
+  ],
+  "notes": "Enter a nested iframe through a locator resolved inside the current frame.",
+  "capabilities": [
+    "frames.contentFrame"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

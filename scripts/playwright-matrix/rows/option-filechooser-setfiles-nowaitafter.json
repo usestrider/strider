@@ -1,0 +1,18 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    }
+  ],
+  "notes": "Actions do not add an implicit navigation wait; request the required expectation explicitly.",
+  "capabilities": [],
+  "id": "option-filechooser-setfiles-nowaitafter",
+  "upstream": [
+    "method:FileChooser.setFiles"
+  ],
+  "option": "noWaitAfter",
+  "requirements": []
+}

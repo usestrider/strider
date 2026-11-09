@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohaveattribute",
+  "upstream": [
+    "method:LocatorAssertions.toHaveAttribute"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAttribute",
+      "url": "/docs/api/browser/Expect#toHaveAttribute"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

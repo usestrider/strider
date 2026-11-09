@@ -301,7 +301,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 **Strider's pieces:**
 - `pnpm jsdocs` runs the vendored checker and writes `.data/jsdocs.json`.
 - `pnpm examples` type-checks every example from that model against the package's source.
-- `pnpm index` writes `packages/browser/INDEX.md` from the sources, by entry point, module and `@category`.
+- `pnpm index` writes ignored `packages/browser/INDEX.md` and `packages/vitest/INDEX.md` from the sources, by entry point, module and `@category`.
 - `pnpm api-reference` writes `.data/api-reference/`: a manifest (package, version, git revision, TypeDoc version, barrels, and per module its name, export path, source, JSON file with SHA-256, and barrel), one TypeDoc JSON per module, and `jsdocs.json`. Any site, Strider's included, can render it as effect.website renders Effect's.
 - `pnpm all` runs them all, and CI runs `pnpm all` on every pull request and every push to `main`.
 

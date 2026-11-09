@@ -1,0 +1,28 @@
+{
+  "id": "method-page-textcontent",
+  "upstream": [
+    "method:Page.textContent"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.readText",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.readText"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

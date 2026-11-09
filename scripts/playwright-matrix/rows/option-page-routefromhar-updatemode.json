@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-routefromhar-updatemode",
+  "upstream": [
+    "method:Page.routeFromHAR"
+  ],
+  "option": "updateMode",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "full",
+      "status": "missing"
+    },
+    {
+      "value": "minimal",
+      "status": "missing"
+    }
+  ]
+}

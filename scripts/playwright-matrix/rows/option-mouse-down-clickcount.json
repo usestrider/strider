@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "Held mouse buttons do not take a clickCount option.",
+  "capabilities": [],
+  "id": "option-mouse-down-clickcount",
+  "upstream": [
+    "method:Mouse.down"
+  ],
+  "option": "clickCount",
+  "requirements": []
+}

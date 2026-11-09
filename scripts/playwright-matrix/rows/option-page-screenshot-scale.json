@@ -1,0 +1,34 @@
+{
+  "id": "option-page-screenshot-scale",
+  "upstream": [
+    "method:Page.screenshot"
+  ],
+  "option": "scale",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
+  "capabilities": [
+    "screenshot.cssScale"
+  ],
+  "requirements": [],
+  "gaps": [
+    "option-page-screenshot-scale-value-css"
+  ],
+  "valueCoverage": [
+    {
+      "value": "css",
+      "status": "missing",
+      "gap": "option-page-screenshot-scale-value-css"
+    },
+    {
+      "value": "device",
+      "status": "has"
+    }
+  ]
+}

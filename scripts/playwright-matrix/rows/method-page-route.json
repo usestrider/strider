@@ -1,0 +1,25 @@
+{
+  "id": "method-page-route",
+  "upstream": [
+    "method:Page.route"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.route",
+      "url": "/docs/api/browser/Page#Page.route"
+    }
+  ],
+  "notes": "HAR replay uses Route.fromHar; request-phase routes can miss service-worker-controlled WebKit traffic. A route applies to requests starting after its declaration returns. On Chromium, requests already underway without response interception may miss a later response route; existing response pauses select current handlers by precedence.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

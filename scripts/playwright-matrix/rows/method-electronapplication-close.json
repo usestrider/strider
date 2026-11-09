@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-close",
+  "upstream": [
+    "method:ElectronApplication.close"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

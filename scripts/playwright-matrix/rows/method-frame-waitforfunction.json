@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-waitforfunction",
+  "upstream": [
+    "method:Frame.waitForFunction"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "that",
+      "url": "/docs/api/browser/Expect#that"
+    }
+  ],
+  "notes": "Use an explicit effect observation and condition, rather than a function string.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

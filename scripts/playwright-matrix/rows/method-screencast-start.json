@@ -1,0 +1,33 @@
+{
+  "id": "method-screencast-start",
+  "upstream": [
+    "method:Screencast.start"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Screencast",
+      "url": "/docs/api/browser/Capability#Screencast"
+    },
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    }
+  ],
+  "notes": "Native frame delivery uses Capability.Screencast and is Chromium-only. File recording is the separate Capability.Video acquisition; the path option below shows that supported subset on other browsers. A file recorder does not supply the full onFrame contract.",
+  "capabilities": [
+    "capability.screencast"
+  ],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

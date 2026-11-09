@@ -1,0 +1,23 @@
+{
+  "id": "property-page-sessionstorage",
+  "upstream": [
+    "property:Page.sessionStorage"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.sessionStorage",
+      "url": "/docs/api/browser/Page#ReadonlyPage.sessionStorage"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

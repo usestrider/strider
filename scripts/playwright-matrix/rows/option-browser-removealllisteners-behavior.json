@@ -1,0 +1,26 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-browser-removealllisteners-behavior",
+  "upstream": [
+    "method:Browser.removeAllListeners"
+  ],
+  "option": "behavior",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "default",
+      "status": "missing"
+    },
+    {
+      "value": "ignoreErrors",
+      "status": "missing"
+    },
+    {
+      "value": "wait",
+      "status": "missing"
+    }
+  ]
+}

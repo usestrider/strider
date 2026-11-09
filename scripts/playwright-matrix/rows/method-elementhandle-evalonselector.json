@@ -1,0 +1,28 @@
+{
+  "id": "method-elementhandle-evalonselector",
+  "upstream": [
+    "method:ElementHandle.evalOnSelector"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.locator",
+      "url": "/docs/api/browser/Locator#Locator.locator"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "Evaluate the CSS locator match in its isolated world. The read is immediate and fails NoMatch instead of waiting; page globals require explicit main-world evaluation. This uses a lazy locator instead of fixed ElementHandle identity.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

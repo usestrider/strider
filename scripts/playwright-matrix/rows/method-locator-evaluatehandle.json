@@ -1,0 +1,17 @@
+{
+  "id": "method-locator-evaluatehandle",
+  "upstream": [
+    "method:Locator.evaluateHandle"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

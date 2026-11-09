@@ -1,0 +1,11 @@
+{
+  "id": "method-debugger-resume",
+  "upstream": [
+    "method:Debugger.resume"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public debugger controller or breakpoint API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-clock-runfor",
+  "upstream": [
+    "method:Clock.runFor"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "PageClock.adjust",
+      "url": "/docs/api/browser/PageClock#PageClock.adjust"
+    }
+  ],
+  "notes": "Clock modes are explicit; adjust fires every due timer and setTime jumps to an absolute instant.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

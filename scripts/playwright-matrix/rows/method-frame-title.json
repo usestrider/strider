@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-title",
+  "upstream": [
+    "method:Frame.title"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "Evaluate the frame\u2019s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

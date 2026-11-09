@@ -1,0 +1,11 @@
+{
+  "id": "method-debugger-next",
+  "upstream": [
+    "method:Debugger.next"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public debugger controller or breakpoint API.",
+  "capabilities": [],
+  "requirements": []
+}

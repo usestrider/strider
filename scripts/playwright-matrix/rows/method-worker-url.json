@@ -1,0 +1,23 @@
+{
+  "id": "method-worker-url",
+  "upstream": [
+    "method:Worker.url"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "BrowserWorker",
+      "symbol": "ObservedBrowserWorker.url",
+      "url": "/docs/api/browser/BrowserWorker#ObservedBrowserWorker.url"
+    }
+  ],
+  "notes": "Dedicated workers; shared/service worker discovery has separate browser limits.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/BrowserWorker.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

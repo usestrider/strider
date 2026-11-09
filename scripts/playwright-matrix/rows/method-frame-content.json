@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-content",
+  "upstream": [
+    "method:Frame.content"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "Evaluate the frame\u2019s root locator and serialize its ownerDocument, including the doctype when needed. The read is immediate; no retained Frame object or load wait is supplied.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

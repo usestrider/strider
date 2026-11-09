@@ -1,0 +1,26 @@
+{
+  "id": "method-tracing-starthar",
+  "upstream": [
+    "method:Tracing.startHar"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Har",
+      "symbol": "record",
+      "url": "/docs/api/browser/Har#record"
+    }
+  ],
+  "notes": "Start Har.record on the page/context before requests. Recording is scoped; request bodies must be explicitly included when needed.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

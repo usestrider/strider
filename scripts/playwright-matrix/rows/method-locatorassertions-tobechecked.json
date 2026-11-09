@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobechecked",
+  "upstream": [
+    "method:LocatorAssertions.toBeChecked"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeChecked",
+      "url": "/docs/api/browser/Expect#toBeChecked"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}
