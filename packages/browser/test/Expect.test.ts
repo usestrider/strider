@@ -104,3 +104,10 @@ describe("Expect page-round scheduling", () => {
       assert.deepStrictEqual(caps, [])
     }))
 })
+
+describe("attachment matchers", () => {
+  it("provides value matchers for attachment and detachment", () => {
+    assert.strictEqual(typeof Expect.toBeAttached, "function")
+    assert.strictEqual(typeof Expect.toBeDetached, "function")
+  })
+})

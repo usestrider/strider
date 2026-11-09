@@ -157,6 +157,33 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("checks attachment independently of visibility and reports missing or multiple matches", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture("<div id=\"hidden\" style=\"display:none\"></div><i></i><i></i>")
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#hidden").pipe(Expect.toBeAttached)
+            yield* page.locator("#absent").pipe(Expect.toBeDetached)
+            for (
+              const [selector, matcher, matches] of [
+                ["#absent", Expect.toBeAttached, 0],
+                ["i", Expect.toBeAttached, 2],
+                ["i", Expect.toBeDetached, 2],
+                ["#hidden", Expect.toBeDetached, 1]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(matcher, Deadline.within("300 millis"), Effect.flip)
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.subject, `page.locator("${selector}")`)
+              for (const entry of error.history) {
+                assert.deepStrictEqual(entry.value, { matches })
+              }
+              assert.deepStrictEqual(error.last, Option.fromUndefinedOr(error.history.at(-1)))
+            }
+          }))
+        }), timeout)
+
       it.effect("fails an expectation that never holds, with what it saw", () =>
         Effect.gen(function*() {
           const url = yield* fixture(`<p>1 item</p><p>2 items</p>`)
