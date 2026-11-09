@@ -116,6 +116,93 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
 
+      it.effect(
+        "selectText selects control values and DOM contents without editing",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [id, text] of [["input", "Ada Lovelace"], ["area", "two lines"], ["editable", "nested text"], [
+                "plain",
+                "plain text"
+              ]] as const
+            ) {
+              const target = page.locator(`#${id}`)
+              yield* target.selectText()
+              const selected = yield* target.evaluate((element) => {
+                if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+                  return element.value.slice(element.selectionStart ?? 0, element.selectionEnd ?? 0)
+                }
+                return element.ownerDocument.getSelection()?.toString() ?? ""
+              })
+              assert.strictEqual(selected, text)
+              assert.isTrue(yield* target.evaluate((element) => element.ownerDocument.activeElement === element))
+            }
+            assert.strictEqual(yield* page.locator("#input").readValue, "Ada Lovelace")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText trial preserves focus and selection; visibility can be overridden",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" value="hello"><p id="hidden" style="display:none">hidden text</p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText({ trial: true })
+            assert.isFalse(yield* field.evaluate((element) => element.ownerDocument.activeElement === element))
+            assert.strictEqual(yield* field.evaluate((element) => (element as HTMLInputElement).selectionEnd), 0)
+            const hidden = page.locator("#hidden")
+            const error = yield* hidden.selectText().pipe(Deadline.within("150 millis"), Effect.flip)
+            assert(Deadline.isTimeout(error))
+            yield* hidden.selectText({ checks: { visible: false } })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText rejects ambiguous matches and unsupported input kinds",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="number" value="42"><p>one</p><p>two</p>`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (const [selector, reason] of [["p", "StrictMatch"], ["input", "WrongElement"]] as const) {
+              const error = yield* page.locator(selector).selectText().pipe(Effect.flip)
+              assert(Locator.isLocatorError(error))
+              assert.strictEqual(error.reason._tag, reason)
+            }
+            const missing = yield* page.locator("#missing").selectText().pipe(
+              Deadline.within("150 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect("selectText selects within the target frame document", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<iframe srcdoc='<p id="target" tabindex="0">frame text</p>'></iframe>`)
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("#target")
+          yield* target.selectText()
+          assert.strictEqual(
+            yield* target.evaluate((element) => element.ownerDocument.getSelection()?.toString()),
+            "frame text"
+          )
+          assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "")
+        })), timeout)
+
       // The guard itself: each thing a case can leave in the shared context is reported, and the cases after get a
       // new context. Each is left through a scope that is never closed, as a case's own leak would be. A popup closes
       // with its opener's scope where the backend knows its opener, so it can be left only where it doesn't
