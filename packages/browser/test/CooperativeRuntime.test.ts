@@ -24,6 +24,7 @@ const request: Engine.CooperativeRequest = {
 
 const scenario = () => {
   const commands: Array<Engine.CooperativeCommand> = []
+  const evaluations: Array<"install" | "run" | "cooperate"> = []
   const layer = BrowserImpl.layer((sink) =>
     Fake.connect([], {
       info: new Browser.Info(Fake.info),
@@ -34,8 +35,10 @@ const scenario = () => {
       evaluate: (_realm, call) =>
         Effect.sync(() => {
           if (call.functionDeclaration === Engine.install) {
+            evaluations.push("install")
             return { _tag: "Value", value: { type: "string", value: "installed" } } as const
           }
+          evaluations.push(call.functionDeclaration === Engine.cooperate ? "cooperate" : "run")
           const arg = call.arguments[0]
           assert(arg?._tag === "Value" && arg.value.type === "string")
           const command = JSON.parse(arg.value.value) as Engine.CooperativeCommand
@@ -58,7 +61,7 @@ const scenario = () => {
         })
     })))
   )
-  return { layer, commands }
+  return { layer, commands, evaluations }
 }
 
 const run = Effect.fnUntraced(function*<E, R>(
@@ -146,7 +149,7 @@ describe("cooperative runtime", () => {
 
   it.effect("does no cooperative browser work on ordinary requests", () =>
     Effect.gen(function*() {
-      const { layer, commands } = scenario()
+      const { layer, commands, evaluations } = scenario()
       yield* Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const { runtime, page: entry } = (page.locator("#ready") as LocatorImpl).owner
@@ -156,6 +159,7 @@ describe("cooperative runtime", () => {
           assert.strictEqual(response._tag, "Expected")
         }).pipe(Operation.named("Test.ordinary"))
         assert.deepStrictEqual(commands, [])
+        assert.deepStrictEqual(evaluations, ["install", "run"])
       }).pipe(Effect.scoped, Effect.provide(layer))
     }))
 })

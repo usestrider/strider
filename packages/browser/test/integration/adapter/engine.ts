@@ -454,6 +454,14 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(response.__rendering.events[0].winner, "callback")
             assert.strictEqual(response.__rendering.events[0].clock, "page-performance-ms")
             assert.isNumber(response.__rendering.events[0].callback)
+            const extension = yield* call(
+              `() => Object.prototype.hasOwnProperty.call(
+              globalThis, Symbol.for("@usestrider/browser/engine/cooperative/1")
+            )`,
+              []
+            )
+            assert(extension._tag === "Value" && extension.value.type === "boolean")
+            assert.isFalse(extension.value.value)
           }), timeout)
         for (const state of ["pressed", "expanded", "selected"] as const) {
           it.effect(`includes ASCII case-insensitive ${state} in snapshots as in role filters`, () =>
