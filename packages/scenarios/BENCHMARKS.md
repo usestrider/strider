@@ -782,3 +782,17 @@ query clears its caches. Original list/table outputs are recorded as incorrect a
 old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
 hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
 but does not eliminate JIT, GC, scheduling, order or thermal effects.
+
+## Storage tracking sibling diagnostic
+
+The hosted paired driver accepts `only=storage-tracking-sibling`. With identical full base/head SHAs,
+it measures the existing `resources` operation (a fresh untracked context loads 100 uncached images)
+with an idle `storageStateTracking: true` sibling in the head worker only. The sibling is created before
+sample readiness and released after all samples, outside timing; it has no page or ongoing activity.
+Both workers retain the ordinary untracked context/page setup, assertions and cleanup. Playwright is
+unchanged in both roles. `comparison.json` and worker reports record the treatment, and artifacts retain
+the overlaid driver. This measures sibling presence, not the cost of events from the tracked context.
+Use `only=storage-tracking-control` with the same identical SHAs for the matched no-sibling control;
+it executes the same resource workload without a sibling in either worker. Keep both runs and raw
+samples, and interpret their paired intervals against same-source runner variation. These diagnostics
+are opt-in and are excluded from the ordinary all-case benchmark.

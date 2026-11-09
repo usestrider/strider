@@ -17,8 +17,15 @@ import { start } from "../site.ts"
 import { captureCases, cases as ordinaryCases, viewport } from "./cases.ts"
 import { compare, elapsed, measure, options } from "./measure.ts"
 
-const cases = [...ordinaryCases, ...captureCases]
 const config = options(process.argv.slice(2))
+const siblingDiagnostic = config.only === "storage-tracking-sibling" || config.only === "storage-tracking-control"
+const cases = siblingDiagnostic
+  ? ordinaryCases.filter((entry) => entry.name === "resources").map((entry) => ({
+    ...entry,
+    name: config.only!,
+    description: "Untracked context loads 100 uncached images; sibling setup/cleanup excluded"
+  }))
+  : [...ordinaryCases, ...captureCases]
 const lifecycleNames = ["launch-first-page", "launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
 const networkNames = ["navigate", "resources", "response-body-small", "response-body-large"]
 const names = ["network", "lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
@@ -70,6 +77,7 @@ const results: Array<{
 }> = []
 const report = {
   schemaVersion: 2,
+  trackedSibling: siblingDiagnostic && process.env["STRIDER_TRACKED_SIBLING"] === "1",
   launchArguments: [] as Array<
     { library: string; pid: number; argv: ReadonlyArray<string>; renderers: ReadonlyArray<ReadonlyArray<string>> }
   >,
@@ -365,10 +373,15 @@ try {
     const site = await start()
     try {
       const runtime = makeRuntime()
+      const siblingScope = Scope.makeUnsafe()
       try {
         const info = await runtime.runPromise(Browser.Browser)
         assert.ok(info.info.product.includes(pins.chromium.version))
         captureArguments("strider")
+        if (siblingDiagnostic && process.env["STRIDER_TRACKED_SIBLING"] === "1") {
+          // Held until runtime disposal, before record() announces readiness or starts any timer.
+          await runtime.runPromise(Browser.newContext({ storageStateTracking: true }).pipe(Scope.provide(siblingScope)))
+        }
         const browser = await launchPlaywright()
         try {
           assert.equal(browser.version(), pins.chromium.version)
@@ -485,7 +498,11 @@ try {
           await browser.close()
         }
       } finally {
-        await runtime.dispose()
+        try {
+          await runtime.runPromise(Scope.close(siblingScope, Exit.void))
+        } finally {
+          await runtime.dispose()
+        }
       }
     } finally {
       await site.close()

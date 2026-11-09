@@ -41,6 +41,11 @@ const report = {
   status: "running",
   error: null as string | null,
   config: values,
+  trackedSibling: {
+    base: false,
+    head: values.only === "storage-tracking-sibling",
+    setupOutsideTiming: true
+  },
   provenance: {} as Record<string, unknown>,
   environment: {
     node: process.version,
@@ -161,7 +166,12 @@ try {
         const log = fs.openSync(path.join(output, role, "worker.log"), "w")
         const child = fork(path.join(target, entry), args, {
           cwd: root,
-          env: { ...process.env, STRIDER_PAIRED: "1" },
+          env: {
+            ...process.env,
+            STRIDER_PAIRED: "1",
+            // Diagnostic treatment changes only an untimed sibling, never the measured context.
+            STRIDER_TRACKED_SIBLING: values.only === "storage-tracking-sibling" && role === "head" ? "1" : "0"
+          },
           stdio: ["ignore", log, log, "ipc"]
         })
         fs.closeSync(log)
