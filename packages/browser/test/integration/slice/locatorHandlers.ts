@@ -4,14 +4,17 @@ import { Browser, Expect, FileInput } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import { site } from "../adapter/harness.ts"
+import * as SharedContext from "./sharedContext.ts"
+import { newPage } from "./sharedContext.ts"
 
 export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} locator handlers`, () => {
-    layer(backend, { excludeTestServices: true, timeout: 60_000 })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout: 60_000 })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("handles overlays for an already-created action and suppresses callback recursion", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent("<div id=\"overlay\"><input id=\"dismiss\"></div><input id=\"target\">")
@@ -36,7 +39,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("handles an overlay arriving during assertion retries and preserves callback error identity", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent(
@@ -57,7 +60,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("retries an action after an overlay appears and lets a handler navigate", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           const destination = `${served.origin}/fixture?html=${
             encodeURIComponent("<input id=\"target\"><div id=\"result\">done</div>")
           }`
@@ -82,7 +85,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("resumes a waiting assertion with fresh DOM after dismissing its trigger", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent(
@@ -106,7 +109,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("runs an unlimited body handler once per check without final-check restart loops", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<input id=\"target\">")}`)
           let calls = 0
           const registration = yield* page.addLocatorHandler(page.locator("body"), () =>
@@ -125,7 +128,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("dismisses an overlay before resolving a file input for upload", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent("<div id=\"overlay\">Overlay</div><input id=\"file\" type=\"file\">")
@@ -152,7 +155,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("handles overlays before initial and retrying URL assertions created before registration", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent(
@@ -183,7 +186,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
       it.effect("supports an always-visible trigger once without disappearance waiting", () =>
         Effect.gen(function*() {
           const served = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<input id=\"target\">")}`)
           let calls = 0
           yield* page.addLocatorHandler(page.locator("body"), () =>
