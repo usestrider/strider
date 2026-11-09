@@ -965,7 +965,7 @@ export const contents = (
             assert.deepStrictEqual(
               yield* pixel(
                 yield* page.screenshot({
-                  area: { _tag: "Clip", rect: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
+                  area: { clip: cssRect({ x: 20, y: 20, width: 20, height: 20 }) }
                 })
               ),
               [30, 170, 90, 255]
@@ -1001,21 +1001,21 @@ export const contents = (
             assert.deepStrictEqual(viewport, { width: Math.round(width * ratio), height: Math.round(height * ratio) })
             const clip = pngSize(
               yield* page.screenshot({
-                area: { _tag: "Clip", rect: cssRect({ x: 10, y: 2000, width: 100, height: 50 }) }
+                area: { clip: cssRect({ x: 10, y: 2000, width: 100, height: 50 }) }
               })
             )
             assert.deepStrictEqual(clip, { width: 100 * ratio, height: 50 * ratio })
-            const box = pngSize(yield* page.screenshot({ area: { _tag: "Element", locator: page.locator("#box") } }))
+            const box = pngSize(yield* page.screenshot({ area: { element: page.locator("#box") } }))
             assert.deepStrictEqual(box, { width: 120 * ratio, height: 80 * ratio })
             const frame = page.frame(page.locator("#frame"))
             yield* frame.locator("#inner").pipe(Expect.toBeVisible)
             const inner = pngSize(
-              yield* page.screenshot({ area: { _tag: "Element", locator: frame.locator("#inner") } })
+              yield* page.screenshot({ area: { element: frame.locator("#inner") } })
             )
             assert.deepStrictEqual(inner, { width: 50 * ratio, height: 40 * ratio })
-            const full = pngSize(yield* page.screenshot({ area: { _tag: "FullPage" } }))
+            const full = pngSize(yield* page.screenshot({ area: "fullPage" }))
             assert.strictEqual(full.height, (1500 + 80 + 200 + 1000) * ratio + (full.height % ratio))
-            const jpeg = yield* Effect.exit(page.screenshot({ format: { _tag: "Jpeg", quality: 50 } }))
+            const jpeg = yield* Effect.exit(page.screenshot({ format: "jpeg", quality: 50 }))
             if (yield* fullySupports("screenshot.format")) {
               assert(Exit.isSuccess(jpeg), String(jpeg))
               assert.deepStrictEqual([...jpeg.value.subarray(0, 2)], [0xff, 0xd8])
@@ -1027,7 +1027,7 @@ export const contents = (
               })
             }
             const missing = reasonOf(
-              yield* Effect.exit(page.screenshot({ area: { _tag: "Element", locator: page.locator("#none") } }))
+              yield* Effect.exit(page.screenshot({ area: { element: page.locator("#none") } }))
             )
             // A capture never waits: an element that isn't there is the locator's NoMatch (QUIRKS.md, Q126)
             assert.strictEqual((missing as unknown as Page.PageError).reason._tag, "NoMatch")
@@ -1045,7 +1045,7 @@ export const contents = (
               devicePixelRatio
             )
             const clip = pngSize(
-              yield* page.screenshot({ area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) } })
+              yield* page.screenshot({ area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) } })
             )
             assert.deepStrictEqual(clip, { width: 20 * ratio, height: 20 * ratio })
           }))
@@ -1064,7 +1064,7 @@ export const contents = (
             const clear = yield* Effect.exit(
               page.screenshot({
                 omitBackground: true,
-                area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
+                area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
               })
             )
             if (yield* supports("screenshot.cssScale")) {
@@ -1088,7 +1088,7 @@ export const contents = (
             }
             // The background is back afterwards
             const after = yield* page.screenshot({
-              area: { _tag: "Clip", rect: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
+              area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
             })
             assert.strictEqual(firstAlpha(after), 255)
           }))
@@ -1162,7 +1162,7 @@ export const contents = (
               yield* jar.set({
                 name: "token",
                 value: Redacted.make("secret"),
-                scope: { _tag: "Url", url: `${origin}/app/page` }
+                scope: { url: `${origin}/app/page` }
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
@@ -1181,12 +1181,12 @@ export const contents = (
             yield* jar.set({
               name: "token",
               value: Redacted.make("secret"),
-              scope: { _tag: "Url", url: `${origin}/app/page` }
+              scope: { url: `${origin}/app/page` }
             })
             yield* jar.set({
               name: "other",
               value: "2",
-              scope: { _tag: "Domain", domain: new URL(crossSite).hostname, path: "/" },
+              scope: { domain: new URL(crossSite).hostname, path: "/" },
               sameSite: "strict"
             })
             const all = yield* jar.list
@@ -1213,7 +1213,7 @@ export const contents = (
             const partitioned = yield* Effect.exit(jar.set({
               name: "chip",
               value: "1",
-              scope: { _tag: "Url", url: "https://shop.example/" },
+              scope: { url: "https://shop.example/" },
               secure: true,
               sameSite: "none",
               partitionKey: {
@@ -1238,7 +1238,7 @@ export const contents = (
             yield* jar.clear
             assert.deepStrictEqual(yield* jar.list, [])
             const invalid = reasonOf(
-              yield* Effect.exit(jar.set({ name: "a b", value: "1", scope: { _tag: "Url", url: origin } }))
+              yield* Effect.exit(jar.set({ name: "a b", value: "1", scope: { url: origin } }))
             )
             assert.strictEqual((invalid as unknown as CookieJar.CookieJarError).reason._tag, "InvalidInput")
           }))
