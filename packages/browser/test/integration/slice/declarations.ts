@@ -59,6 +59,46 @@ export const declarations = (
 ) =>
   describe(`${name} declarations`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("reads configured viewport precedence and releases without measuring the page", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const context = yield* Browser.newContext()
+          const page = yield* context.newPage
+          const read: Page.ReadonlyPage = page
+          assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          // A real window has dimensions even when no viewport was declared.
+          const measured = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
+          assert.isAbove(measured[0], 0)
+          assert.isAbove(measured[1], 0)
+          if (!(yield* supports("emulation.viewport"))) {
+            const error = yield* page.emulate({ viewport: { width: 640, height: 480 } }).pipe(Effect.flip)
+            assert.strictEqual(error._tag, "DeclarationError")
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          } else {
+            const inherited = yield* browser.defaultContext.emulate({ viewport: { width: 900, height: 700 } })
+            // The default context declaration does not reach this page.
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+            yield* inherited.remove
+            const base = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 640, height: 480 }))
+            const first = yield* page.emulate({ viewport: { width: 400, height: 300 } })
+            const latest = yield* page.emulate({ viewport: { width: 320, height: 240 } })
+            const contextLatest = yield* context.emulate({ viewport: { width: 800, height: 600 } })
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 320, height: 240 }))
+            yield* first.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 320, height: 240 }))
+            yield* latest.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 800, height: 600 }))
+            yield* contextLatest.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 640, height: 480 }))
+            yield* base.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          }
+          yield* page.close()
+          const gone = yield* read.viewportSize.pipe(Effect.flip)
+          assert.strictEqual(gone._tag, "TargetGone")
+        })), timeout)
+
       // ── Routes ──
 
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
@@ -192,7 +232,8 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
+            const blocked = yield* page.route(`${origin}/analytics/**`, () =>
+              Route.abort())
             const result = yield* run(
               page,
               origin,
