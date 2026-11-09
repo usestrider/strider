@@ -115,6 +115,78 @@ export const contents = (
 ) =>
   describe(`${name} contents`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("setContent replaces markup repeatedly without navigating and executes parser scripts", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Before</title><p>Old</p>"), { waitUntil: "load" })
+          const before = yield* page.evaluateInMainWorld(() => {
+            Reflect.set(window, "originalDocument", document)
+            return { url: location.href, history: history.length }
+          })
+          const status = yield* page.status
+          yield* page.setContent(
+            "<!doctype html><title>After</title><script>document.body</script><p>New</p><script>document.querySelector(\"p\").textContent += \" script\"</script>"
+          )
+          assert.strictEqual(yield* page.title, "After")
+          assert.strictEqual(yield* page.getByText("New script").readText, "New script")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => ({
+              url: location.href,
+              history: history.length
+            })),
+            before
+          )
+          assert.isTrue(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "originalDocument") === document
+            )
+          )
+          const after = yield* page.status
+          assert.strictEqual(after._tag, status._tag)
+          if (after._tag === "Open" && status._tag === "Open") {
+            assert.strictEqual(after.document.id, status.document.id)
+          }
+          yield* page.setContent("<title>Again</title><button>Again</button>")
+          assert.strictEqual(yield* page.getByRole("button").readText, "Again")
+          assert.strictEqual(yield* page.getByText("New script").count, 0)
+          yield* page.setContent("")
+          assert.strictEqual(yield* page.title, "")
+        }), timeout)
+
+      it.effect("setContent waits for resources by default and supports domcontentloaded", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          yield* page.setContent("<img src=\"/slow-image\"><script>document.title = \"Parsed\"</script>", {
+            waitUntil: "domContentLoaded"
+          })
+          assert.strictEqual(yield* page.title, "Parsed")
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
+          )
+          yield* page.setContent("<img src=\"/slow-image\">")
+          assert.isTrue(yield* page.evaluateInMainWorld(() => document.images[0]!.complete))
+        }), timeout)
+
+      it.effect("setContent deadline stops waiting and permits a subsequent replacement", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          const error = yield* page.setContent("<img src=\"/slow-image\">").pipe(
+            Deadline.within("100 millis"),
+            Effect.flip
+          )
+          assert.isTrue(Deadline.isTimeout(error))
+          if (Deadline.isTimeout(error)) assert.strictEqual(error.operation, "Page.setContent")
+          yield* page.setContent("<title>Recovered</title>")
+          assert.strictEqual(yield* page.title, "Recovered")
+        }), timeout)
+
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

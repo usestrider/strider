@@ -58,6 +58,14 @@ describe("access is typed", () => {
     expect(reader.evaluateInMainWorld(() => 1)).type.toRaiseError("Property 'evaluateInMainWorld' does not exist")
   })
 
+  it("replacing HTML needs control and returns a bounded typed effect", () => {
+    expect(reader.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(observed.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(page.setContent("<p>Hello</p>")).type.toBe<
+      Effect.Effect<void, Page.PageError | Target.TargetGone | Deadline.Timeout>
+    >()
+  })
+
   it("downloads need control", () => {
     expect(Download.next(observed)).type.toRaiseError()
   })
