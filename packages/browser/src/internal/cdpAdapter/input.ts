@@ -51,13 +51,14 @@ export const dispatchInput = Effect.fnUntraced(
     ) {
       // Move and press may overlap, but a modal mousedown handler can suspend the press while Chromium
       // acknowledges (and discards) a release. Wait for the press before sending the normal release.
-      // Each group writes uninterruptibly; a failed or interrupted press wait still releases the button,
-      // outside the action's deadline. Drags and frame routing keep their sequential path below.
+      // Keep the finalizer installed across both groups, including the boundary between successful press
+      // completion and the release write. Replies stay interruptible under the action's deadline; any failure
+      // or interruption releases again outside that deadline. Drags and frame routing stay sequential below.
       const release = Kit.protocol(page.target.session.sendOrdered([mouseCommand(click[2])]))
-      yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand))).pipe(
-        Effect.onError(() => release.pipe(Operation.detached, Effect.ignore))
-      )
-      yield* release
+      yield* Effect.gen(function*() {
+        yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
+        yield* release
+      }).pipe(Effect.onError(() => release.pipe(Operation.detached, Effect.ignore)))
       return
     }
     for (const event of events) {
