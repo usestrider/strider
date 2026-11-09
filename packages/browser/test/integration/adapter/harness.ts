@@ -193,6 +193,18 @@ self.addEventListener("fetch", (event) => {
       response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
     }, 500)
   },
+  // A deferred parser script: interactive readiness alone is too early to observe its effect.
+  "/set-content-deferred.js": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/javascript" })
+      response.end("document.title = \"Deferred\"")
+    }, 200)
+  },
+  // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
+  "/pending-image": (_request, response) => {
+    response.writeHead(200, { "content-type": "image/svg+xml" })
+    response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
+  },
   // An event stream that never ends
   "/events": (_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })

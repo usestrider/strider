@@ -20,6 +20,7 @@ import {
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -119,6 +120,8 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* Browser.newPage()
+          yield* page.setContent("<title>Fresh</title>")
+          assert.strictEqual(yield* page.title, "Fresh")
           yield* page.goto(fixtureUrl(origin, "<title>Before</title><p>Old</p>"), { waitUntil: "load" })
           const before = yield* page.evaluateInMainWorld(() => {
             Reflect.set(window, "originalDocument", document)
@@ -126,7 +129,7 @@ export const contents = (
           })
           const status = yield* page.status
           yield* page.setContent(
-            "<!doctype html><title>After</title><script>document.body</script><p>New</p><script>document.querySelector(\"p\").textContent += \" script\"</script>"
+            "<!doctype html><title>After</title><p>New</p><script>document.querySelector(\"p\").textContent += \" script\"</script>"
           )
           assert.strictEqual(yield* page.title, "After")
           assert.strictEqual(yield* page.getByText("New script").readText, "New script")
@@ -159,17 +162,29 @@ export const contents = (
           const { origin } = yield* site
           const page = yield* Browser.newPage()
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
-          yield* page.setContent("<img src=\"/slow-image\"><script>document.title = \"Parsed\"</script>", {
-            waitUntil: "domContentLoaded"
-          })
-          assert.strictEqual(yield* page.title, "Parsed")
-          assert.isFalse(
+          const child = fixtureUrl(origin, "<img src=\"/slow-image\">")
+          yield* page.setContent(`<img src="/slow-image"><iframe src="${child}"></iframe>`)
+          assert.isTrue(
+            yield* page.evaluateInMainWorld(() => {
+              const child = document.querySelector("iframe")!.contentDocument!
+              return child.readyState === "complete" && child.querySelector("img")!.complete
+            })
+          )
+          assert.isTrue(
             yield* page.evaluateInMainWorld(() =>
               document.images[0]!.complete
             )
           )
-          yield* page.setContent("<img src=\"/slow-image\">")
-          assert.isTrue(yield* page.evaluateInMainWorld(() => document.images[0]!.complete))
+          yield* page.setContent(
+            "<img src=\"/pending-image\"><script defer src=\"/set-content-deferred.js\"></script>",
+            {
+              waitUntil: "domContentLoaded"
+            }
+          )
+          assert.strictEqual(yield* page.title, "Deferred")
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() => document.images[0]!.complete)
+          )
         }), timeout)
 
       it.effect("setContent deadline stops waiting and permits a subsequent replacement", () =>
@@ -177,14 +192,51 @@ export const contents = (
           const { origin } = yield* site
           const page = yield* Browser.newPage()
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
-          const error = yield* page.setContent("<img src=\"/slow-image\">").pipe(
-            Deadline.within("100 millis"),
+          const error = yield* page.setContent("<img src=\"/pending-image\">").pipe(
+            Deadline.within("500 millis"),
             Effect.flip
           )
           assert.isTrue(Deadline.isTimeout(error))
-          if (Deadline.isTimeout(error)) assert.strictEqual(error.operation, "Page.setContent")
-          yield* page.setContent("<title>Recovered</title>")
+          if (Deadline.isTimeout(error)) {
+            assert.strictEqual(error.operation, "Page.setContent")
+            assert.strictEqual(error.phase, "postcondition")
+            assert.strictEqual(error.diagnostics.cleanup._tag, "Completed")
+          }
+          yield* page.setContent("<title>Recovered</title>", { waitUntil: "domContentLoaded" })
           assert.strictEqual(yield* page.title, "Recovered")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("setContent commit skips readiness and interruption leaves the page reusable", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+          yield* page.setContent("<img src=\"/pending-image\">", { waitUntil: "commit" })
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() =>
+              document.images[0]!.complete
+            )
+          )
+          const replacing = yield* page.setContent("<h1>Waiting</h1><img src=\"/pending-image\">").pipe(
+            Effect.forkScoped
+          )
+          yield* page.getByRole("heading", { name: "Waiting" }).pipe(Expect.toBeVisible)
+          assert.isUndefined(replacing.pollUnsafe())
+          yield* Fiber.interrupt(replacing)
+          yield* page.setContent("<title>After interruption</title>", { waitUntil: "domContentLoaded" })
+          assert.strictEqual(yield* page.title, "After interruption")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+            ),
+            []
+          )
         }), timeout)
 
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
@@ -269,7 +321,9 @@ export const contents = (
             )
             // The isolated world doesn't see the page's globals; the main world does
             assert.strictEqual(
-              yield* page.evaluate(() => typeof (window as unknown as { secret?: number }).secret),
+              yield* page.evaluate(() =>
+                typeof (window as unknown as { secret?: number }).secret
+              ),
               "undefined"
             )
             assert.strictEqual(

@@ -1,7 +1,8 @@
 /** Replacement failures retain the page operation and typed evaluation reason. */
 import { assert, it } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, Target } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as Fake from "../src/internal/fake.ts"
 
@@ -15,12 +16,15 @@ it.effect("setContent names evaluation exceptions and does no work on unused pag
       })(sink),
       (fake) => ({
         ...fake,
+        realm: () => Effect.succeed(Target.RealmId.make("replacement-realm")),
         evaluate: () => {
           evaluations++
+          if (evaluations > 1) return Effect.succeed({ _tag: "Value" as const, value: { type: "undefined" as const } })
           return Effect.succeed({
             _tag: "Exception" as const,
             text: "Uncaught Error: blocked replacement",
-            stack: undefined
+            exception: { type: "undefined" as const },
+            stack: Option.none()
           })
         }
       })
@@ -35,6 +39,6 @@ it.effect("setContent names evaluation exceptions and does no work on unused pag
       assert.strictEqual(error.operation, "Page.setContent")
       assert.strictEqual(error.reason._tag, "EvaluationThrown")
     }
-    assert.strictEqual(evaluations, 1)
+    assert.strictEqual(evaluations, 2)
   })).pipe(Effect.provide(backend))
 })
