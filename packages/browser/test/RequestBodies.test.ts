@@ -245,12 +245,14 @@ describe("Request body subscriptions", () => {
       yield* Stream.runHead(stream)
       assert.deepStrictEqual(names, ["NetworkRequest.body", "NetworkRequest.where"])
     })))
-  it.live("bounds a stream decoder that never completes by the captured browser deadline", () => Effect.scoped(Effect.gen(function*() {
-    const world = setup(bytes("pending"))
-    const stream = yield* NetworkRequest.stream(world.page, { body: () => Effect.never }).pipe(Deadline.withDefaultBudget("20 millis"))
-    Events.publish(world.channel, sent())
-    const error = yield* Stream.runHead(stream).pipe(Effect.flip)
-    assert.isTrue(Deadline.isTimeout(error))
-  })))
-
+  it.live("bounds a stream decoder that never completes by the captured browser deadline", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const world = setup(bytes("pending"))
+      const stream = yield* NetworkRequest.stream(world.page, { body: () => Effect.never }).pipe(
+        Deadline.withDefaultBudget("20 millis")
+      )
+      Events.publish(world.channel, sent())
+      const error = yield* Stream.runHead(stream).pipe(Effect.flip)
+      assert.isTrue(Deadline.isTimeout(error))
+    })))
 })

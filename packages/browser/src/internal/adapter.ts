@@ -564,6 +564,8 @@ export type Declaration =
     readonly bodies: ReadonlyArray<"request" | "response">
     /** Bytes kept per body, at most; larger ones aren't kept. */
     readonly maxBytes: number
+    /** Reserve native encoding overhead for decoded request-byte subscriptions; legacy collectors keep their encoded limit. */
+    readonly decodedRequestBytes?: true | undefined
   }
 
 /** A decision for an obligation. */

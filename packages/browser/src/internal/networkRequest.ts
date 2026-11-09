@@ -220,7 +220,13 @@ const delivery = (
     }
     const body = yield* Effect.provideContext(decoder(new Message(request, result)), context)
     return new Captured(request, Option.some(body))
-  }, Operation.apart("NetworkRequest.body", budget)),
+  }, (self) =>
+    Effect.flatMap(Operation.record, (record) =>
+      record.bound(
+        self,
+        () => Option.some("The request body could not be collected and decoded before the deadline"),
+        "resolving"
+      )), Operation.apart("NetworkRequest.body", budget)),
   unfinished: () => "A request matched, but its body has not been collected and decoded"
 })
 
@@ -243,7 +249,12 @@ const collect = (found: ReturnType<typeof Handles.target>, limit: number, operat
   const scope: Adapter.DeclarationScope = found._tag === "Page"
     ? { _tag: "Page", page: (entry as Model.PageEntry).id }
     : { _tag: "UserContext", context: (entry as Model.ContextEntry).id }
-  return runtime.model.adapter.declare(scope, { _tag: "BodyCollection", bodies: ["request"], maxBytes: limit }).pipe(
+  return runtime.model.adapter.declare(scope, {
+    _tag: "BodyCollection",
+    bodies: ["request"],
+    maxBytes: limit,
+    decodedRequestBytes: true
+  }).pipe(
     Effect.asVoid,
     Effect.mapError((error) => {
       const mapped = Operation.fromAdapter(error, Operation.idNow(), runtime.backend)

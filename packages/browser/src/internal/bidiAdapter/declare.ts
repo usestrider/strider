@@ -387,7 +387,7 @@ export const declare = Effect.fnUntraced(
         const { collector } = yield* Kit.protocol(state.send(Network.addDataCollector({
           dataTypes: [...declaration.bodies],
           // Request binary data can be counted as base64 by Firefox; L1 enforces the decoded byte limit.
-          maxEncodedDataSize: declaration.bodies.includes("request")
+          maxEncodedDataSize: declaration.decodedRequestBytes === true
             ? Math.ceil(declaration.maxBytes / 3) * 4
             : declaration.maxBytes,
           ...scopeParams(state, scope)
