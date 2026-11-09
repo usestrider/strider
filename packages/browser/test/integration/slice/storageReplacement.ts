@@ -207,6 +207,23 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
               Exit.isFailure(ambiguous),
               "An incoming same-site partition cannot recreate an unrepresented cross-site ancestor"
             )
+            const mismatched = yield* context.setStorageState(
+              new StorageState.StorageState({
+                cookies: [],
+                origins: [{
+                  origin: Url.Origin.make("http://other.invalid"),
+                  topLevelOrigin: Url.Origin.make("http://example.com"),
+                  partition: {
+                    _tag: "Partitioned",
+                    topLevelSite: Url.Site.make("http://localhost"),
+                    crossSiteAncestor: Option.some(true)
+                  },
+                  localStorage: [],
+                  indexedDb: []
+                }]
+              })
+            ).pipe(Effect.exit)
+            assert.isTrue(Exit.isFailure(mismatched))
             assert.equal(clear.mock.calls.length, 0)
             assert.lengthOf(yield* context.pages, 0)
           })),

@@ -919,6 +919,27 @@ export const replaceState = (
                 operation
               ))
             }
+            if (origin.partition._tag === "Partitioned") {
+              const site = new URL(origin.partition.topLevelSite)
+              const top = new URL(origin.topLevelOrigin ?? origin.partition.topLevelSite)
+              const child = new URL(origin.origin)
+              const within = (host: string) => host === site.hostname || host.endsWith(`.${site.hostname}`)
+              if (
+                top.protocol !== site.protocol || !within(top.hostname) ||
+                (child.protocol === site.protocol && within(child.hostname))
+              ) {
+                return yield* Effect.fail(contextError(
+                  new Reason.Unsupported({
+                    capability: "storageState.partition",
+                    backend: runtime.backend,
+                    hint:
+                      "The top-level origin must match its declared site, and a same-site partition needs an ancestor chain the saved format does not carry"
+                  }),
+                  id,
+                  operation
+                ))
+              }
+            }
             if (
               origin.partition._tag === "Partitioned" && Option.isSome(origin.partition.crossSiteAncestor) &&
               !origin.partition.crossSiteAncestor.value

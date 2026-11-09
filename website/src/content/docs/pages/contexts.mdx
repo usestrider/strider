@@ -278,7 +278,8 @@ Untracked contexts and contexts with acquired virtual authenticators refuse befo
 authenticator's scope before replacement. Tracking is chosen at creation and cannot be added when reclaiming a
 context. Non-HTTP(S) storage and opaque ancestor partitions cannot be replayed. Those histories and unreproducible incoming
 metadata refuse before mutation, including a partition explicitly marked
-`crossSiteAncestor: false`; nested partition history is replayed with its ancestor origins. No storage history is
+`crossSiteAncestor: false`. A top-level origin must belong to its declared site, and incoming same-site partitions
+requiring a cross-site ancestor refuse because the saved format carries no ancestor chain. Nested partition history is replayed with its ancestor origins. No storage history is
 collected for contexts that omit the option.
 
 This is **not full Playwright equivalence**: it requires opt-in, preserves cache and service-worker registrations,
