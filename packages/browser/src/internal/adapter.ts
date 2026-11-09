@@ -909,6 +909,8 @@ export interface AdapterConnection {
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
   ) => Effect.Effect<void, AdapterError>
+  /** Reads the viewport declaration in force, without measuring the browser window. */
+  readonly viewportSize: (page: Target.NavigableId) => Effect.Effect<Option.Option<Page.ViewportSize>, AdapterError>
   readonly activatePage: (page: Target.NavigableId) => Effect.Effect<void, AdapterError>
 
   // Navigation

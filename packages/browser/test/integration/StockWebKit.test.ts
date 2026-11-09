@@ -102,6 +102,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const second = yield* byTitle(browser, "Second")
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
+              assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
               assert.strictEqual(yield* reader.getByRole("heading").readText, "First")
               const snapshot = yield* reader.locator("body").snapshot()
               assert.include(snapshot.text, `heading "First"`)
@@ -250,9 +251,14 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           assert.strictEqual(opened?.reason?._tag, "Unsupported")
           yield* Effect.scoped(Effect.gen(function*() {
             const tab = yield* (yield* byTitle(browser, "Refusals")).control
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const viewport = reasonOf(yield* Effect.exit(tab.emulate({ viewport: { width: 640, height: 480 } })))
+            assert.strictEqual(viewport?.reason?.capability, "emulation.viewport")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
             const headers = reasonOf(yield* Effect.exit(tab.emulate({ extraHTTPHeaders: { "x-test": "value" } })))
             assert.strictEqual(headers?.reason?._tag, "Unsupported")
             assert.strictEqual(headers?.reason?.capability, "emulation.extraHTTPHeaders")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
             // Refused before anything was sent
             const clicked = reasonOf(yield* Effect.exit(tab.getByRole("button", { name: "Refresh" }).click()))
             assert.strictEqual(clicked?.reason?.capability, "input.native")
