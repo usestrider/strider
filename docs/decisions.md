@@ -311,9 +311,16 @@ input permit, so a queued action never uses the preliminary check's stale geomet
 
 - **Why.** Waiting for rendering before taking the baseline adds one frame to each of the two checks without
   adding a rendering update between samples. A changed rectangle or replacement element still resets stability.
-- **Rejected:** removing the rendering wait entirely when stability is disabled, since a browser may drop input
-  before rendering; and skipping the check under the input permit, since another action may change the target
+- **Rejected:** skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
+
+**Readiness waits for a drawn frame by default only for pointer actions.** Per-call `checks.rendered` keeps
+pointer routing aligned with what was drawn, while fill and other non-pointer actions check current layout
+immediately. Stability sampling, retry waits and the check under the input permit remain independent. A frame
+is no hydration guarantee; callers can wait for application readiness or opt one action into rendering. With
+rendering disabled, timeouts retain readiness reasons rather than a no-frame hint. Rejected: a uniform default
+on, which delays ready fills; a uniform default off, which risks pointer routing; and a suite-wide switch, which
+hides the choice from the action that needs it.
 
 **An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
 single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
