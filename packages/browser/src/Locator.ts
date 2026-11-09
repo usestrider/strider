@@ -655,6 +655,38 @@ export interface ReadonlyLocator
    */
   readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Whether the one match is editable now, using the same rules as fill and toBeEditable.
+   *
+   * **Details**
+   *
+   * Text inputs, settable inputs (date, datetime-local, month, week, time, color and range),
+   * textareas and inherited contenteditable elements qualify when enabled and not read-only.
+   * Native disabled state, including disabled fieldsets, and aria-disabled="true" on the element
+   * or an ancestor disable editing. Native readOnly or aria-readonly="true" on the element
+   * prevent editing. ARIA tokens are case-sensitive. Visibility and inertness are not checked.
+   * Other kinds, including selects, checkboxes and ARIA-only textboxes, return false.
+   *
+   * **Gotchas**
+   *
+   * Fails with NoMatch or StrictViolation unless exactly one element matches; never waits.
+   * Unlike Playwright, unsupported kinds return false, and only kinds supported by Strider's
+   * editing actions qualify. Strider also honors aria-readonly on native inputs and contenteditable
+   * elements, and aria-disabled on ancestors regardless of role. Use toBeEditable when the state
+   * needs time to change.
+   *
+   * **Example** (Reading whether a name can be changed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const canRename = Effect.fn("canRename")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("textbox", { name: "Name" }).isEditable
+   * })
+   * ```
+   */
+  readonly isEditable: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Whether the one match is enabled now.
    *
    * **Example** (Reading whether checkout is available)

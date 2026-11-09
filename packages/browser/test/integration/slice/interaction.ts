@@ -3827,6 +3827,45 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("reads isEditable using the action and expectation rules", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="text"><input id="date" type="date"><textarea id="readonly" readonly></textarea>
+             <fieldset disabled><input id="disabled"></fieldset>
+             <div contenteditable><span id="inherited">edit</span><span id="off" contenteditable="false">off</span></div>
+             <input id="aria" aria-readonly="true"><input id="case" aria-readonly="TRUE">
+             <div aria-readonly="true"><input id="readonlyAncestor"></div>
+             <div aria-disabled="true"><input id="ariaDisabled"></div>
+             <input id="inert" inert><input id="hidden" hidden>
+             <div id="inertEdit" contenteditable inert>edit</div><div id="hiddenEdit" contenteditable hidden>edit</div>
+             <select id="select"></select><input id="checkbox" type="checkbox"><div id="role" role="textbox"></div>
+             <p class="two">a</p><p class="two">b</p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (const id of ["text", "date", "inherited", "case", "inert", "hidden", "readonlyAncestor"]) {
+              assert.isTrue(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            // The engine follows the native property: WebKit can suppress editability here.
+            for (const id of ["inertEdit", "hiddenEdit"]) {
+              const native = yield* page.evaluateInMainWorld((id) => document.getElementById(id)!.isContentEditable, id)
+              assert.strictEqual(yield* page.locator(`#${id}`).isEditable, native, id)
+            }
+            for (const id of ["readonly", "disabled", "off", "aria", "ariaDisabled", "select", "checkbox", "role"]) {
+              assert.isFalse(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            for (const [selector, tag] of [["#absent", "NoMatch"], [".two", "StrictViolation"]] as const) {
+              const error = yield* page.locator(selector).isEditable.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === tag, String(error))
+            }
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#text")!.readOnly = true
+            })
+            assert.isFalse(yield* page.locator("#text").isEditable)
+          }))
+        }), timeout)
+
       it.effect("reads one match at once: text, value, html, attributes, states", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

@@ -936,6 +936,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isEditable: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isChecked: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`

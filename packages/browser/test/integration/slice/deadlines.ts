@@ -57,6 +57,7 @@ export const deadlines = (name: string, backend: Layer.Layer<Browser.Browser, un
                 "dispatchedUnconfirmed"
               ],
               ["Page.title", page.title, "resolving"],
+              ["Locator.isEditable", page.getByRole("button", { name: "Pay" }).isEditable, "resolving"],
               ["Locator.count", page.getByRole("button", { name: "Pay" }).count, "resolving"],
               ["Locator.click", page.getByRole("button", { name: "Pay" }).click(), "resolving"]
             ]
