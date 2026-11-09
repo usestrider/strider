@@ -46890,7 +46890,7 @@
         "method:Browser.newContext"
       ],
       "option": "httpCredentials",
-      "status": "has",
+      "status": "different",
       "api": [
         {
           "module": "UserContext",
@@ -46898,25 +46898,25 @@
           "url": "/docs/api/browser/UserContext#Options"
         }
       ],
-      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted.",
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted. Chromium intercepts requests only in the configured context, which can affect request timing.",
       "capabilities": [
         "interception.auth"
       ],
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
@@ -48546,7 +48546,7 @@
         "method:Browser.newPage"
       ],
       "option": "httpCredentials",
-      "status": "has",
+      "status": "different",
       "api": [
         {
           "module": "UserContext",
@@ -48554,25 +48554,25 @@
           "url": "/docs/api/browser/UserContext#Options"
         }
       ],
-      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted.",
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted. Chromium intercepts requests only in the configured context, which can affect request timing.",
       "capabilities": [
         "interception.auth"
       ],
       "browsers": {
         "chromium.launched": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "has",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
