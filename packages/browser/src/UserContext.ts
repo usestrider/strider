@@ -640,7 +640,7 @@ export type UserContextErrorReason = typeof UserContextErrorReason.Type
 const UserContextErrorTypeId = "~@usestrider/browser/UserContext/UserContextError"
 
 /**
- * Error for a context that couldn't be created or controlled, or whose storage couldn't be read.
+ * Error for a context that couldn't be created or controlled, or whose storage couldn't be read or replaced.
  *
  * **Example** (Falling back where focus can't be emulated)
  *
