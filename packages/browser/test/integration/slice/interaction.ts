@@ -2195,16 +2195,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>${record}`)
             )
             yield* page.activate
-            const target = page.frame(page.locator("iframe")).locator("#target")
+            const frame = page.frame(page.locator("iframe"))
+            const target = frame.locator("#target")
             yield* target.fill("new")
             const parentEvents = yield* page.evaluateInMainWorld(() =>
               JSON.parse(document.documentElement.dataset.nativeEvents!) as Array<{ type: string; target: string }>
             )
-            const childEvents = yield* target.evaluate(() =>
-              JSON.parse(document.documentElement.dataset.nativeEvents!) as Array<
-                { type: string; target: string; data: string | null }
-              >
-            )
+            const childEvents = JSON.parse(
+              Option.getOrThrow(yield* frame.locator("html").readAttribute("data-native-events"))
+            ) as Array<{ type: string; target: string; data: string | null }>
             console.info("native design-mode frame evidence", JSON.stringify({ parentEvents, childEvents }))
             assert(childEvents.some((event) => event.type === "beforeinput"))
             assert(childEvents.some((event) => event.type === "input"))
