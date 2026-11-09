@@ -2169,6 +2169,51 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("retains native design-mode events in the prepared child document", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const record = `<script>
+            const nativeEvents = [];
+            document.documentElement.dataset.nativeEvents = "[]";
+            for (const type of ["keydown", "keypress", "keyup", "beforeinput", "input"]) {
+              window.addEventListener(type, event => {
+                if (event.isTrusted) {
+                  nativeEvents.push({ type, target: event.target.tagName,
+                    inputType: event.inputType || null, data: event.data || null });
+                  document.documentElement.dataset.nativeEvents = JSON.stringify(nativeEvents);
+                }
+              }, true);
+            }
+          </script>`
+          const child = fixtureUrl(
+            crossSite,
+            `<p id="target">old</p>${record}<script>document.designMode="on";</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>${record}`)
+            )
+            yield* page.activate
+            const target = page.frame(page.locator("iframe")).locator("#target")
+            yield* target.fill("new")
+            const parentEvents = yield* page.evaluateInMainWorld(() =>
+              JSON.parse(document.documentElement.dataset.nativeEvents!) as Array<{ type: string; target: string }>
+            )
+            const childEvents = yield* target.evaluate(() =>
+              JSON.parse(document.documentElement.dataset.nativeEvents!) as Array<
+                { type: string; target: string; data: string | null }
+              >
+            )
+            console.info("native design-mode frame evidence", JSON.stringify({ parentEvents, childEvents }))
+            assert(childEvents.some((event) => event.type === "beforeinput"))
+            assert(childEvents.some((event) => event.type === "input"))
+            assert(!parentEvents.some((event) => event.type === "beforeinput" || event.type === "input"))
+            assert.strictEqual(yield* target.readText, "new")
+            assert.strictEqual(yield* page.locator("#other").readValue, "other")
+          }))
+        }), timeout)
+
       it.effect(
         "guards design-mode insertion when focus moves into an ancestor document",
         () =>
@@ -2301,6 +2346,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const original = adapter.evaluate
               const armed = yield* Deferred.make<void>()
               const failed = yield* Deferred.make<void>()
+              let cleanupAttempts = 0
               const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
                 const argument = call.arguments[0]
                 const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
@@ -2308,7 +2354,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   ? JSON.parse(argument.value.value) as Engine.Request :
                   undefined
                 if (request?.op === "fillDisarm") {
-                  yield* Deferred.succeed(failed, undefined)
+                  cleanupAttempts++
+                  if (cleanupAttempts === 2) yield* Deferred.succeed(failed, undefined)
                   return yield* Effect.die("injected cleanup failure in a still-live document")
                 }
                 const result = yield* original(realm, call)
@@ -2333,6 +2380,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     })
                     const exit = yield* page.keyboard.insertText("x").pipe(Deadline.within("100 millis"), Effect.exit)
                     assert(Exit.isFailure(exit), "unconfirmed cleanup must prevent native input from being sent")
+                    assert.strictEqual(cleanupAttempts, 2, "cleanup must attempt every document after a failure")
                     assert.strictEqual(yield* page.locator("#other").readValue, "other")
                     assert.strictEqual(yield* target.readText, "old")
                   }),

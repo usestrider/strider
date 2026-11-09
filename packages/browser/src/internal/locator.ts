@@ -16,6 +16,7 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -1246,27 +1247,35 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             : { retry: { _tag: "PreparingFocus", from: blocked } as Engine.NotReady }
         }),
       () =>
-        released ? Effect.void : this.owner.page.input.withPermit(
-          Effect.gen({ self: this }, function*() {
+        released ? Effect.void : Effect.gen({ self: this }, function*() {
+          // Close the permit while we still own it. Taking it again in the cleanup fiber would queue
+          // behind already waiting input, which must not run through the guard we are removing.
+          yield* this.owner.page.input.resize(0)
+          yield* Effect.gen({ self: this }, function*() {
             const cleanup = yield* Operation.record
-            yield* Effect.forEach(documents, (document) =>
+            const outcomes = yield* Effect.forEach(documents, (document) =>
               Runtime.releaseInDocument(
                 this.owner.runtime,
                 document,
                 { op: "fillDisarm" },
                 cleanup.id
-              ), { discard: true })
+              ).pipe(Effect.exit))
+            const failed = outcomes.find(Exit.isFailure)
+            if (failed !== undefined) return yield* Effect.failCause(failed.cause)
+            yield* this.owner.page.input.resize(1)
           }).pipe(
             Operation.named(`${operation}.guardCleanup`, { attributes: { "browser.page.id": this.owner.page.id } }),
             Operation.detached,
-            Effect.ignore
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Native insertion guard cleanup failed; page input remains blocked. Close this page before sending more input.",
+                { pageId: this.owner.page.id, cause }
+              )
+            ),
+            // The interrupted caller returns promptly, including when a dialog holds the browser command.
+            Effect.forkIn(this.owner.runtime.model.scope, { startImmediately: true })
           )
-        ).pipe(
-          // Queue before releasing the action's input permit. Later input waits for this cleanup, while
-          // interruption returns promptly even when a dialog prevents the document from executing it.
-          Effect.forkIn(this.owner.runtime.model.scope, { startImmediately: true }),
-          Effect.asVoid
-        )
+        })
     )
   }
 

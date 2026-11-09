@@ -654,7 +654,20 @@ export const releaseInDocument = (
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>
     Option.isSome(runtime.model.document(document))
-      ? Effect.asVoid(callEngine(runtime, document, Engine.run, JSON.stringify(request), id))
+      ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        Effect.flatMap((value) =>
+          Effect.gen(function*() {
+            if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
+            if (
+              Option.isSome(value) && value.value.type === "string" &&
+              (yield* decode(value.value.value))._tag === "FillGuard"
+            ) {
+              return
+            }
+            return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
+          })
+        )
+      )
       : Effect.void
   )
 

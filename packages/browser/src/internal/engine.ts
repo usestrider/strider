@@ -1810,15 +1810,6 @@ export function engine(render: (root: SnapNode) => string) {
     const handler = (event: Event) => {
       if (!event.isTrusted || (event.type === "keyup" && current.blocked === null)) return
       const recipient = event.composedPath()[0]
-      // MiniBrowser can deliver keys to the ancestor body while inserting in a selected child frame.
-      // Let those keys retain native behavior, but remember that page handlers may already have run.
-      if (
-        steps === null && event.type !== "beforeinput" &&
-        (recipient === document.body || recipient === document.documentElement)
-      ) {
-        current.accepted = true
-        return
-      }
       const elsewhere = ancestor ?
         (recipient instanceof Element ? describe(recipient) : "another document")
         : recipient instanceof Element && element !== null &&
