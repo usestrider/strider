@@ -4,6 +4,7 @@
  * the network received for them, in whatever order the browser's events come; a realm that ended takes its handles.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
@@ -24,6 +25,7 @@ import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
+import * as CdpInput from "../src/internal/cdpAdapter/input.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
@@ -32,6 +34,7 @@ import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
@@ -94,6 +97,67 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP click cleanup", () => {
+  it.effect("releases a successful press when interruption arrives before release dispatch", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
+          Effect.suspend(() => {
+            calls++
+            // The press has succeeded, but cancellation wins before the normal release can write.
+            if (calls === 2) return Effect.interrupt
+            sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
+            return Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const exit = yield* CdpInput.dispatchInput(
+        state,
+        page.id,
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
+      ).pipe(Effect.exit)
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }).pipe(Effect.scoped))
+
+  it.effect("doesn't release again when interruption arrives after the release was written", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
+          Effect.suspend(() => {
+            calls++
+            sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
+            // The release has been written; cancellation arrives while its reply is outstanding.
+            return calls === 2 ? Effect.interrupt : Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const exit = yield* CdpInput.dispatchInput(
+        state,
+        page.id,
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
+      ).pipe(Effect.exit)
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }).pipe(Effect.scoped))
 })
 
 // ── A redirect's headers ──

@@ -322,6 +322,8 @@ describe("ProtocolClient", () => {
       const entered = yield* Deferred.make<void>()
       const proceed = yield* Deferred.make<void>()
       const attempts: Array<string> = []
+      const written = yield* Deferred.make<void>()
+      let notified = false
       const client = yield* ProtocolClient.make({
         ...browser.transport,
         send: Effect.fnUntraced(function*(message: string) {
@@ -334,10 +336,14 @@ describe("ProtocolClient", () => {
           yield* browser.transport.send(message)
         })
       }, CdpWire.wire)
-      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const fiber = yield* client.root.sendOrdered(click(), () => {
+        notified = true
+        Deferred.doneUnsafe(written, Effect.void)
+      }).pipe(Effect.forkChild)
       yield* Deferred.await(entered)
       yield* Effect.yieldNow
       assert.deepStrictEqual(attempts, ["mouseMoved"])
+      assert.isFalse(notified)
       yield* Deferred.succeed(proceed, undefined)
       const sent = [yield* browser.next, yield* browser.next, yield* browser.next]
       assert.deepStrictEqual(sent.map((message) => message.params?.type), [
@@ -345,6 +351,8 @@ describe("ProtocolClient", () => {
         "mousePressed",
         "mouseReleased"
       ])
+      yield* Deferred.await(written)
+      assert.isTrue(notified)
       for (const message of sent.slice(1).reverse()) yield* browser.receive({ id: message.id, result: {} })
       yield* browser.delivered
       assert.isUndefined(fiber.pollUnsafe())
@@ -385,6 +393,7 @@ describe("ProtocolClient", () => {
     Effect.gen(function*() {
       const browser = yield* makeBrowser
       const attempts: Array<string> = []
+      let notified = false
       const client = yield* ProtocolClient.make({
         ...browser.transport,
         send: Effect.fnUntraced(function*(message: string) {
@@ -400,9 +409,12 @@ describe("ProtocolClient", () => {
           yield* browser.transport.send(message)
         })
       }, CdpWire.wire)
-      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const fiber = yield* client.root.sendOrdered(click(), () => {
+        notified = true
+      }).pipe(Effect.forkChild)
       const first = yield* browser.next
       assert.strictEqual(reasonOf(yield* Fiber.await(fiber))._tag, "SessionEnded")
+      assert.isFalse(notified)
       assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
       yield* browser.receive({ id: first.id, result: {} })
       yield* browser.delivered
@@ -427,7 +439,9 @@ describe("ProtocolClient", () => {
           yield* browser.transport.send(message)
         })
       }, CdpWire.wire)
-      const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
+      const fiber = yield* client.root.sendOrdered(click(), () => {
+        attempts.push("written")
+      }).pipe(Effect.forkChild)
       yield* Deferred.await(entered)
       const interrupted = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
       yield* Effect.yieldNow
@@ -435,7 +449,7 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed"])
       yield* Deferred.succeed(proceed, undefined)
       yield* Fiber.join(interrupted)
-      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased"])
+      assert.deepStrictEqual(attempts, ["mouseMoved", "mousePressed", "mouseReleased", "written"])
     }))
 
   it.effect("interruption while waiting for replies abandons them all without poisoning the next command", () =>

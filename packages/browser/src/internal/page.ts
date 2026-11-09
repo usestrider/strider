@@ -449,7 +449,7 @@ export const make = (owner: PageOwner): Page.Page => {
           const keyed = yield* Evaluation.toLocal([key], realm)
           return yield* record.bound(
             Effect.gen(function*() {
-              yield* call(
+              yield* entry.input.withPermit(call(
                 (html: string, waitUntil: string, key: string) => {
                   document.open()
                   if (waitUntil !== "commit") {
@@ -470,7 +470,7 @@ export const make = (owner: PageOwner): Page.Page => {
                 },
                 args,
                 true
-              )
+              ))
               if (waitUntil !== "commit") {
                 // Await in the same realm: a later navigation cannot satisfy this replacement's readiness.
                 yield* call((key: string) => Reflect.get(globalThis, key).ready, keyed, false)
