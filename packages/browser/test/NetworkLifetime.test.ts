@@ -221,6 +221,16 @@ describe("Request response lifetime", () => {
       assert.deepStrictEqual(yield* wait, Option.none())
     })))
 
+  it.effect("first waits after failure and closure use the hop outcome rather than browser error text", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, target, sent } = yield* responseFixture
+      const wait = yield* NetworkRequest.response(target, sent)
+      yield* fold.sink({ _tag: "RequestFailed", hop: sent.hop, error: "connection lost", canceled: false, at: sent.at })
+      yield* fold.sink({ _tag: "UserContextRemoved", context })
+      assert.deepStrictEqual(yield* wait, Option.none())
+      assert.deepStrictEqual(yield* wait, Option.none())
+    })))
+
   it.effect("wakes when the target closes before arrival", () =>
     Effect.scoped(Effect.gen(function*() {
       const { fold, target, sent } = yield* responseFixture
