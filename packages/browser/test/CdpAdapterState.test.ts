@@ -30,12 +30,14 @@ import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
 
@@ -1662,3 +1664,109 @@ describe("CdpAdapter node arguments under interruption", () => {
       assert.deepStrictEqual(released.sort(), ["node-1", "node-2"])
     }).pipe(Effect.scoped))
 })
+
+it.effect("releases a callback reply lost to interruption during node cleanup", () =>
+  Effect.gen(function*() {
+    const cleaning = yield* Deferred.make<void>()
+    const finishCleanup = yield* Deferred.make<void>()
+    const released: Array<string> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: { objectId?: string } }) => {
+        if (command.method === "DOM.resolveNode") {
+          return Effect.succeed({ object: { type: "object", objectId: "node" } })
+        }
+        if (command.method === "Runtime.callFunctionOn") {
+          return Effect.succeed({
+            result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } }
+          })
+        }
+        assert.strictEqual(command.method, "Runtime.releaseObject")
+        return Effect.gen(function*() {
+          if (command.params.objectId === "node") {
+            yield* Deferred.succeed(cleaning, undefined)
+            yield* Deferred.await(finishCleanup)
+          }
+          released.push(command.params.objectId!)
+          return {}
+        })
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "reply",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "() => []",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    yield* Deferred.await(cleaning)
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(finishCleanup, undefined)
+    yield* Fiber.join(interrupting)
+    assert.deepStrictEqual(released.sort(), ["node", "result"])
+  }).pipe(Effect.scoped))
+
+for (const command of ["resolve", "callback"] as const) {
+  it.effect(`releases late ${command} objects after interruption while the browser reply is pending`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "pending",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "async () => await new Promise(() => {})",
+        arguments: command === "resolve"
+          ? [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }]
+          : [],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.method, command === "resolve" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+      // No reply exists yet: interrupt must finish without waiting for the page's promise.
+      yield* Fiber.interrupt(waiting)
+      assert.strictEqual(yield* browser.pending, 0)
+      // The page finishes later. Cleanup must be triggered by these newly-created ids, not an earlier group release.
+      yield* browser.receive({
+        id: sent.id,
+        result: command === "resolve"
+          ? { object: { type: "object", objectId: "late-node" } }
+          : {
+            result: { type: "object", objectId: "late-result" },
+            exceptionDetails: { text: "late", exception: { type: "object", objectId: "late-exception" } }
+          }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, command === "resolve" ? "late-node" : "late-result")
+      yield* browser.receive({ id: first.id, result: {} })
+      if (command === "callback") {
+        const second = yield* browser.next
+        assert.strictEqual(second.method, "Runtime.releaseObject")
+        assert.strictEqual(second.params?.objectId, "late-exception")
+        yield* browser.receive({ id: second.id, result: {} })
+      }
+      yield* browser.delivered
+      assert.strictEqual(state.handles.size, 0)
+    }).pipe(Effect.scoped))
+}
