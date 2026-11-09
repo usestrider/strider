@@ -650,15 +650,16 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const { origin } = yield* fixture(() => "")
             const page = yield* Browser.newPage()
             const links = yield* NetworkRequest.redirects(page)
-            // Its body, which has no location to follow, arrives only once the hop has ended
-            const completed = yield* NetworkResponse.next(page, {
-              url: `${origin}/redirect-unfollowed`,
-              status: 302,
-              body: (message) => message.text
-            })
+            const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
             yield* page.goto(`${origin}/redirect-unfollowed`)
-            assert.strictEqual((yield* completed).body, "<title>unfollowed</title>")
-            const [request] = (yield* NetworkRequest.history(page, { url: `${origin}/redirect-unfollowed` })).entries
+            const request = yield* sent
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            // The model's completion signal avoids depending on response-body collection to test links.
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.head.innerHTML),
+              "<title>unfollowed</title>"
+            )
             assert.isTrue(Option.isNone(yield* links.from(request!)))
             assert.isTrue(Option.isNone(yield* links.to(request!)))
           })),

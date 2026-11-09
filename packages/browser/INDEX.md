@@ -1193,6 +1193,7 @@ The requests a page or context sends, as events and as the data routes and respo
 *reasons*
 
 - `class RedirectUnavailable: Schema.Error { why }`
+- `class RedirectUnknown: Schema.Error { why }`
 
 ### NetworkResponse
 

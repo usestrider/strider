@@ -11,6 +11,7 @@ import type * as Deadline from "../Deadline.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as Adapter from "./adapter.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
@@ -68,6 +69,7 @@ export const redirects: (
         owner = undefined
       })
     )
+    const ids = Adapter.makeIds()
     const read = Effect.fnUntraced(
       function*(request: NetworkRequest.NetworkRequest, direction: -1 | 1) {
         const fail = (why: NetworkRequest.RedirectUnavailable["why"]) =>
@@ -75,6 +77,14 @@ export const redirects: (
             new NetworkRequest.RequestError({
               hop: request.hop,
               reason: new NetworkRequest.RedirectUnavailable({ why }),
+              diagnostics: Operation.diagnosticsNow()
+            })
+          )
+        const unknown = (why: NetworkRequest.RedirectUnknown["why"]) =>
+          Effect.fail(
+            new NetworkRequest.RequestError({
+              hop: request.hop,
+              reason: new NetworkRequest.RedirectUnknown({ why }),
               diagnostics: Operation.diagnosticsNow()
             })
           )
@@ -89,28 +99,37 @@ export const redirects: (
             ? Option.exists(hop.page, (page) => page === current.behind.entry)
             : Option.exists(hop.context, (context) => context === current.behind.entry)
         const source = runtime.model.hop(request.hop)
-        if (Option.isNone(source) || source.value.request !== request || !owned(source.value)) {
-          return yield* fail("unavailable")
-        }
+        if (Option.isNone(source)) return yield* fail("evicted")
+        if (source.value.request !== request) return yield* fail("unavailable")
+        if (!owned(source.value)) return yield* fail("foreignTarget")
         const separator = request.hop.lastIndexOf(".")
-        const ordinal = Number(request.hop.slice(separator + 1))
+        const ordinal = ids.redirectsOf(request.hop)
         if (direction === -1 && ordinal === 0) return Option.none()
         const adjacent = runtime.model.hop(
-          `${request.hop.slice(0, separator)}.${ordinal + direction}` as NetworkRequest.HopId
+          ids.hop(request.hop.slice(0, separator) as NetworkRequest.Id, ordinal + direction)
         )
         if (Option.isSome(adjacent)) {
-          if (!owned(adjacent.value)) return yield* fail("unavailable")
+          if (!owned(adjacent.value)) return yield* fail("foreignTarget")
           return Option.some(adjacent.value.request)
         }
-        if (direction === -1) return yield* fail("unavailable")
+        if (direction === -1) return yield* fail("evicted")
         const end = yield* Deferred.poll(source.value.end)
-        if (Option.isNone(end)) return yield* fail("pending")
+        if (Option.isNone(end)) return yield* unknown("inFlight")
         const terminal = yield* end.value
-        if (terminal._tag === "Forgotten") return yield* fail("unavailable")
+        if (terminal._tag === "Forgotten") return yield* fail("evicted")
         if (terminal._tag === "Failed") return Option.none()
         const response = (yield* source.value.state.get).response
         if (Option.isNone(response)) return yield* fail("unavailable")
-        if ([301, 302, 303, 307, 308].includes(response.value.status)) return yield* fail("unavailable")
+        if ([301, 302, 303, 307, 308].includes(response.value.status)) {
+          const navigation = request.initiator._tag === "Document" ? request.initiator.navigation : Option.none()
+          const committed = Option.isSome(navigation) && Option.isSome(source.value.page) &&
+            source.value.page.value.events.navigation.entries.some(({ value }) =>
+              value.navigation === navigation.value && value.outcome._tag === "Committed" &&
+              Option.contains(value.outcome.response, request.hop)
+            )
+          if (committed) return Option.none()
+          return yield* unknown("completedRedirect")
+        }
         return Option.none()
       },
       (effect, request, direction) =>

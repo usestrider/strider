@@ -161,43 +161,54 @@ describe("Scoped redirect evidence", () => {
 
   it.effect("proves a redirect navigation boundary only from the exact committed hop", () =>
     Effect.gen(function*() {
-      const { page, send, fold } = yield* setup()
-      const links = yield* NetworkRequest.redirects(page)
-      const navigation = "navigation" as PageNavigation.Id
-      yield* fold.sink({
-        _tag: "NavigationStarted",
-        navigation,
-        navigable: "page" as Target.NavigableId,
-        url: "https://example.com/repeated" as Url.Url,
-        initiatedAs: "command"
-      })
-      const first = yield* send("navigation.0", Option.some(navigation))
-      yield* fold.sink({
-        _tag: "ResponseReceived",
-        response: new NetworkResponse.NetworkResponse({
-          hop: first.hop,
-          url: first.url,
-          status: 302 as NetworkResponse.StatusCode,
-          statusText: "Found",
-          httpVersion: Option.none(),
-          headers: Headers.empty,
-          servedBy: "network",
-          at: first.at
+      for (const mismatch of ["none", "navigation", "hop", "notRetained"] as const) {
+        const { page, send, fold } = yield* setup()
+        const links = yield* NetworkRequest.redirects(page)
+        if (mismatch === "notRetained") {
+          const context = yield* fold.context("context" as UserContext.Id, false)
+          yield* fold.configure(context, { ...(yield* context.state.get).settings, eventLog: 0 })
+        }
+        const navigation = "navigation" as PageNavigation.Id
+        const endedNavigation = (mismatch === "navigation" ? "other-navigation" : navigation) as PageNavigation.Id
+        yield* fold.sink({
+          _tag: "NavigationStarted",
+          navigation: endedNavigation,
+          navigable: "page" as Target.NavigableId,
+          url: "https://example.com/repeated" as Url.Url,
+          initiatedAs: "crossDocument"
         })
-      })
-      yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
-      const unknown = yield* Effect.flip(links.to(first))
-      assert.strictEqual(unknown.reason._tag, "RedirectUnknown")
-      yield* fold.sink({
-        _tag: "NavigationEnded",
-        navigation,
-        outcome: { _tag: "Committed", document: "document" as Target.DocumentId, response: Option.some(first.hop) },
-        evidence: "test"
-      })
-      assert.isTrue(Option.isNone(yield* links.to(first)))
-      // An observed link remains authoritative even if older terminal evidence is retained.
-      const second = yield* send("navigation.1", Option.some(navigation))
-      assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
+        const first = yield* send("navigation.0", Option.some(navigation))
+        yield* fold.sink({
+          _tag: "ResponseReceived",
+          response: new NetworkResponse.NetworkResponse({
+            hop: first.hop,
+            url: first.url,
+            status: 302 as NetworkResponse.StatusCode,
+            statusText: "Found",
+            httpVersion: Option.none(),
+            headers: Headers.empty,
+            servedBy: "network",
+            at: first.at
+          })
+        })
+        yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+        assert.strictEqual((yield* Effect.flip(links.to(first))).reason._tag, "RedirectUnknown")
+        yield* fold.sink({
+          _tag: "NavigationEnded",
+          navigation: endedNavigation,
+          outcome: {
+            _tag: "Committed",
+            document: "document" as Target.DocumentId,
+            response: Option.some(mismatch === "hop" ? "other.0" as NetworkRequest.HopId : first.hop)
+          },
+          evidence: "test"
+        })
+        if (mismatch === "none") assert.isTrue(Option.isNone(yield* links.to(first)))
+        else assert.strictEqual((yield* Effect.flip(links.to(first))).reason._tag, "RedirectUnknown")
+        // An observed link remains authoritative even when terminal navigation evidence is retained.
+        const second = yield* send("navigation.1", Option.some(navigation))
+        assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
+      }
     }))
 
   it.effect("collapses only unknown with catchReason and preserves ownership, eviction and lifetime errors", () =>

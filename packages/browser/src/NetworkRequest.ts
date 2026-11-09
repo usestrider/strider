@@ -400,9 +400,9 @@ export const headersSent = (
  *
  * **Details**
  *
- * `pending` means the next hop is not known yet; `unavailable` means the request or its neighbor is no longer
- * retained, is reconstructed, or belongs to another target. `released` ends scoped access and `targetClosed`
- * ends access through a closed page, context or connection.
+ * `evicted` means the request or its neighbor is not retained. `foreignTarget` means the retained hop belongs
+ * to another page or context. `unavailable` means the snapshot was reconstructed or required response evidence
+ * is missing. `released` ends scoped access and `targetClosed` ends access through a closed target or connection.
  *
  * @stability unstable
  * @category reasons
@@ -411,11 +411,35 @@ export const headersSent = (
 export class RedirectUnavailable
   extends Schema.Error<RedirectUnavailable>("@usestrider/browser/NetworkRequest/RedirectUnavailable")({
     _tag: Schema.tag("RedirectUnavailable"),
-    why: Schema.Literals(["pending", "unavailable", "released", "targetClosed"])
+    why: Schema.Literals(["evicted", "foreignTarget", "unavailable", "released", "targetClosed"])
   })
 {
   override get message(): string {
     return `Redirect evidence is ${this.why}`
+  }
+}
+
+/**
+ * Reason the browser has not proved whether a request has a successor or ends its chain.
+ *
+ * **Details**
+ *
+ * `inFlight` means the hop has not ended. `completedRedirect` means a redirect response ended but no successor
+ * or retained terminal navigation outcome proves what follows. This is distinct from missing request evidence.
+ * It can persist for a manual fetch on Firefox or WebKit. Neither case waits or infers an absent link.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RedirectUnknown
+  extends Schema.Error<RedirectUnknown>("@usestrider/browser/NetworkRequest/RedirectUnknown")({
+    _tag: Schema.tag("RedirectUnknown"),
+    why: Schema.Literals(["inFlight", "completedRedirect"])
+  })
+{
+  override get message(): string {
+    return `Redirect successor is unknown: ${this.why}`
   }
 }
 
@@ -430,7 +454,7 @@ export class RequestError extends Schema.TaggedError<RequestError>("@usestrider/
   "RequestError",
   {
     hop: HopId,
-    reason: Schema.Union([RedirectUnavailable]),
+    reason: Schema.Union([RedirectUnavailable, RedirectUnknown]),
     diagnostics: Diagnostics.Diagnostics
   }
 ) {
@@ -444,7 +468,8 @@ export class RequestError extends Schema.TaggedError<RequestError>("@usestrider/
  *
  * **Details**
  *
- * Both members read immediately. `None` means a known boundary; unavailable or unfinished evidence fails.
+ * Both members read immediately. `None` means a proven boundary; insufficient terminal evidence fails with
+ * `RedirectUnknown`, separately from `RedirectUnavailable`.
  * Pass the original snapshot received from this target, rather than a decoded or copied request.
  *
  * @stability unstable
@@ -454,7 +479,7 @@ export class RequestError extends Schema.TaggedError<RequestError>("@usestrider/
 export interface Redirects {
   /** Reads the preceding hop, or `None` for the first hop. */
   readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>
-  /** Reads the following hop, or `None` after a terminal non-redirect response or failure. */
+  /** Reads an observed successor, or `None` with terminal proof; insufficient proof fails with `RedirectUnknown`. */
   readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, RequestError>
 }
 
@@ -469,10 +494,16 @@ export interface Redirects {
  * closing the target or connection also prevents reads. Access may read requests sent before it opened.
  *
  * `from` and `to` use chain identity and hop ordinal, including when URLs repeat. They require the exact original
- * snapshot and its owning page or context. Missing retained evidence fails with `unavailable`; a successor not
- * yet established fails with `pending` while the hop is unfinished. A completed redirect whose successor is absent
- * fails with `unavailable`:
- * no terminal boundary can be inferred from a redirect response alone. Neither member waits.
+ * snapshot and its owning page or context. Missing hops fail with `RedirectUnavailable` (`evicted`), and a retained
+ * hop owned by another target fails with `foreignTarget`. `to` gives observed links first, including Chromium's
+ * canceled successor attempt for a manual fetch. Otherwise a completed failure or non-redirect response proves
+ * the end. A retained committed navigation outcome naming this exact response hop also proves the end, including
+ * a 302 without Location. This navigation proof comes from the page's bounded event log (`Options.eventLog`).
+ *
+ * Without terminal proof, `to` fails with `RedirectUnknown`: `inFlight` before completion or `completedRedirect`
+ * after a redirect response. Firefox reports redirect completion before its next request, and does not expose
+ * fetch redirect mode. Firefox and WebKit manual fetches can therefore remain unknown. A missing retained
+ * navigation outcome cannot prove a boundary either. Neither member waits, installs tracking or sends commands.
  *
  * **Example** (Reading a redirect's predecessor)
  *
@@ -484,6 +515,25 @@ export interface Redirects {
  *   function*(page: Page.ObservedPage, request: NetworkRequest.NetworkRequest) {
  *     const redirects = yield* NetworkRequest.redirects(page)
  *     return yield* redirects.from(request)
+ *   }
+ * )
+ * ```
+ *
+ * **Example** (Treating unknown as no successor seen)
+ *
+ * This handles only uncertainty. Other errors remain failures. Here `None` means no successor was seen,
+ * rather than proof that none exists.
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const successorSeen = Effect.fn("successorSeen")(
+ *   function*(page: Page.ObservedPage, request: NetworkRequest.NetworkRequest) {
+ *     const links = yield* NetworkRequest.redirects(page)
+ *     return yield* links.to(request).pipe(
+ *       Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+ *     )
  *   }
  * )
  * ```

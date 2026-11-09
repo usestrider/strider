@@ -1,42 +1,57 @@
 ---
 title: Redirect chains
-description: Read neighboring request hops using scoped access to bounded browser evidence.
+description: Read request neighbors and handle explicit uncertainty using bounded browser evidence.
 order: 4
 ---
 
 A redirect can visit the same URL more than once, so matching URLs cannot reconstruct its path.
-Scoped redirect access reads each hop's predecessor or successor by identity.
+Scoped redirect access reads neighboring hops by identity and distinguishes a proven end from an unknown successor.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
 import { Effect, Option } from "effect"
 
-const redirectedFrom = Effect.fn("redirectedFrom")(function*(page: Page.Page) {
+const successorSeen = Effect.fn("successorSeen")(function*(page: Page.Page) {
   const redirects = yield* NetworkRequest.redirects(page)
   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/start" })
   yield* page.goto("https://example.com/start")
   const first = yield* sent
-  const next = yield* redirects.to(first)
+  const next = yield* redirects.to(first).pipe(
+    Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+  )
   return Option.map(next, (request) => request.url)
 })
 ```
 
+This one-step recovery handles only `RedirectUnknown`. Its `None` means no successor was seen; it does not prove
+that the chain ended. Eviction, foreign ownership, copied snapshots, release and target closure remain errors.
+Omit the recovery when the difference between a proven boundary and uncertainty matters.
+
 The handle's `from(request)` and `to(request)` read immediately and never wait. Pass the original snapshot from
 that page's or context's [request events](/docs/events/network). A copied or decoded snapshot cannot establish
-ownership. `from` returns `None` for the first hop; `to` returns `None` after a terminal non-redirect response or
-failure. Earlier hops and repeated URLs retain their distinct identities on Chromium, Firefox and WebKit.
+ownership. `from` returns `None` for the first hop. `to` returns observed successors first, including canceled
+attempts. Otherwise `None` requires a completed failure, a completed non-redirect response, or a retained committed
+navigation outcome naming this exact response hop. That last proof covers a navigation to a 302 without Location.
 
-Access reuses the existing connection-wide index of at most 1000 hops. It adds no request cache, event listener or
-protocol command. Completed hops are evicted oldest first, then unfinished hops if necessary; requests in another
-context can evict evidence too. Access can read retained requests from before it opened.
+The browser protocols have different limits:
 
-A lookup fails with `RequestError`, whose `RedirectUnavailable` reason has a `why`:
+- Chromium can report a canceled successor attempt for a manual fetch. The lookup preserves that observed link,
+  as Playwright does on the same pinned Chromium.
+- Firefox reports redirect completion before reporting its successor and exposes no fetch redirect mode.
+  Its completed manual fetch can remain unknown.
+- WebKit's manual fetch can have no reported successor. Without retained terminal navigation proof it also
+  remains unknown.
 
-- `pending`: the hop is unfinished and its successor is not established. Finish the action that causes the request before inspecting it.
-  A completed redirect without a retained successor is `unavailable`; it does not prove that the chain ended.
-- `unavailable`: a snapshot or neighbor was evicted, belongs to another target, was copied, or lacks terminal evidence.
-- `released`: the scope that opened access has ended.
-- `targetClosed`: the page, context or browser connection has closed.
+A lookup fails with `RequestError`, whose reason is one of:
 
-These failures preserve uncertainty instead of reporting an absent link. Retain snapshots you need as ordinary
-data, but closing the scope revokes further lookups through its handle.
+- `RedirectUnknown`: `inFlight` before the hop ends, or `completedRedirect` after a redirect response when neither
+  a successor nor terminal navigation proof is retained. Completion, status and Location alone cannot prove an end.
+- `RedirectUnavailable`: `evicted` for a request or neighbor outside retention, `foreignTarget` for a retained hop
+  owned by another page or context, `unavailable` for a copied snapshot or missing response evidence, `released`
+  when the acquiring scope ends, or `targetClosed` when the target or connection closes.
+
+Access reuses the existing connection-wide index of at most 1000 hops. Completed hops are evicted oldest first,
+then unfinished hops if necessary; another context can evict evidence too. Navigation proof reuses the page's
+bounded [event history](/docs/events/events#next-stream-and-history); an omitted or evicted navigation outcome
+cannot establish a boundary. The handle can inspect retained requests from before it opened. It adds no request
+cache, event listener or protocol command, and closing its scope revokes further lookups.
