@@ -955,7 +955,13 @@ export const make = Effect.fnUntraced(function*(options: {
       Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       Deferred.doneUnsafe(
         hop.end,
-        Effect.succeed({ _tag: "Failed", error: "connection lost", canceled: false, at: Adapter.now() })
+        Effect.succeed({
+          _tag: "Failed",
+          error: "connection lost",
+          connectionLost: true,
+          canceled: false,
+          at: Adapter.now()
+        })
       )
     }
     yield* Deferred.succeed(lost, undefined)
