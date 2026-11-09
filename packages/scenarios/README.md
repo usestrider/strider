@@ -23,10 +23,8 @@ intermittent failure.
 The report contains:
 
 - **Scenarios:** API.md's call sites that both libraries can do, each written twice, as each library's own
-  documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. The documentation site's
-  Scenarios section shows each Strider program, read from its `#region <name>/strider` markers, with its title and
-  `description`. A scenario that only shows Strider, such as the video one, has no Playwright twin, and its
-  Playwright columns are `–`;
+  documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. A scenario that only shows
+  Strider, such as the video one, has no Playwright twin, and its Playwright columns are `–`;
 - **Chromium-only controls:** waiting-expectation renderer CPU (Q82) and retained Fetch interception (Q103).
   The public page layer pauses document requests to handle authentication challenges even without a user route;
   the historical description of a no-match-only interceptor is stale for this workload. These grouped sequential
@@ -43,8 +41,7 @@ pnpm scenarios --only login # one scenario, and no measurements, printed: RESULT
 
 The video scenario encodes Chromium's screencast with ffmpeg, which the integration environment provides, and
 writes `dynamic-controls.webm` where it runs, which for the runner is `.data/scenarios/`. Its Firefox counterpart runs on the environment's Firefox, which
-writes the video itself (`Capability.Video`), copied to `dynamic-controls-firefox.webm` beside it. The
-documentation site shows a copy of one run of each, in `website/public/videos/`.
+writes the video itself (`Capability.Video`), copied to `dynamic-controls-firefox.webm` beside it.
 
 `pnpm scenarios` enters the integration environment (`flake.nix`, `devShells.integration`), as
 `pnpm test:integration` does, and fails anywhere else.
