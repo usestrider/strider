@@ -1,6 +1,6 @@
 /** Built-site layout regression. First run pnpm reference && pnpm website:build. */
 import { NodeServices } from "@effect/platform-node"
-import { Browser } from "@usestrider/browser"
+import { Browser, type Declaration } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Effect } from "effect"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
@@ -167,11 +167,16 @@ for (const javaScript of ["enabled", "disabled"] as const) {
         const page = yield* context.newPage
         // The changelog's notes carry long unbroken flag lists and qualified calls
         for (const path of ["/docs/", "/docs/playwright/", "/changelog/"]) {
-          yield* page.goto(`${base}${path}`, { waitUntil: "load" })
-          yield* page.evaluateInMainWorld(() => document.fonts.ready.then(() => true))
-          for (let width = 320; width <= 640; width++) {
-            yield* Effect.scoped(Effect.gen(function*() {
-              yield* page.emulate({ viewport: { width, height: 800 } })
+          // Restore the baseline at every path boundary, including failure. Adjacent widths keep the override:
+          // layout has no resize-driven animation, so an intermediate resize to baseline adds no coverage here.
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* page.goto(`${base}${path}`, { waitUntil: "load" })
+            yield* page.evaluateInMainWorld(() => document.fonts.ready.then(() => true))
+            let previous: Declaration.Registration | undefined
+            for (let width = 320; width <= 640; width++) {
+              const current = yield* page.emulate({ viewport: { width, height: 800 } })
+              if (previous !== undefined) yield* previous.remove
+              previous = current
               const measurement = yield* page.evaluateInMainWorld(() => {
                 const header = document.querySelector("header")!.getBoundingClientRect()
                 return {
@@ -198,8 +203,8 @@ for (const javaScript of ["enabled", "disabled"] as const) {
                 expect(control.height).toBeGreaterThan(0)
                 expect(control.insideHeader).toBe(true)
               }
-            }))
-          }
+            }
+          }))
         }
         console.log(`Checked all 321 widths on the three pages (${javaScript} JavaScript)`)
       })).pipe(
