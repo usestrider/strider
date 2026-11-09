@@ -1021,6 +1021,49 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("resolves callback globals and arrow arguments in the page realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                // The arrow must not inherit adapter arguments
+                return typeof arguments
+              }),
+              "undefined"
+            )
+            yield* page.evaluateInMainWorld(() => {
+              for (const name of ["kinds", "args", "decode", "helper", "fn", "arguments"]) {
+                Object.defineProperty(globalThis, name, { value: `page:${name}`, configurable: true })
+              }
+            })
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(async (value) => [
+                // @ts-expect-error: these free names refer to page globals
+                kinds,
+                // @ts-expect-error: these free names refer to page globals
+                args,
+                // @ts-expect-error: these free names refer to page globals
+                decode,
+                // @ts-expect-error: these free names refer to page globals
+                helper,
+                // @ts-expect-error: these free names refer to page globals
+                fn,
+                // The arrow reads the page global
+                arguments,
+                value
+              ], 7),
+              ["page:kinds", "page:args", "page:decode", "page:helper", "page:fn", "page:arguments", 7]
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(function(value) {
+                return [arguments.length, arguments[0], value]
+              }, 7),
+              [1, 7, 7]
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

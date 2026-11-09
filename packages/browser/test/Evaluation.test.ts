@@ -4,11 +4,13 @@ import { Protocol } from "@usestrider/browser/protocol"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { runInNewContext } from "node:vm"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as Evaluation from "../src/internal/evaluation.ts"
 import * as Argument from "../src/internal/evaluationArgument.ts"
 import * as Operation from "../src/internal/operation.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
+import * as Utility from "../src/internal/webkitUtility.ts"
 import * as Target from "../src/Target.ts"
 
 const runtime = (evaluate: Adapter.AdapterConnection["evaluate"]) =>
@@ -110,6 +112,27 @@ describe("Evaluation dispatch evidence", () => {
 })
 
 describe("Evaluation argument reconstruction", () => {
+  it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
+    const call = runInNewContext(
+      `(${
+        Utility.callBeside(
+          "() => [kinds, args, helper, fn, arguments]",
+          "handle",
+          false
+        )
+      })`,
+      {
+        kinds: "page:kinds",
+        args: "page:args",
+        helper: "page:helper",
+        fn: "page:fn",
+        arguments: "page:arguments"
+      }
+    )
+    const result = call({ run: (fn: () => unknown) => fn() }, [])
+    assert.deepStrictEqual(Array.from(result), ["page:kinds", "page:args", "page:helper", "page:fn", "page:arguments"])
+  })
+
   it("copies own __proto__ keys as data without changing the object prototype", () => {
     const call = new Function(`return (${Argument.call("value => value")})`)()
     const value = call(["v"], {
