@@ -1,5 +1,33 @@
 # @usestrider/browser
 
+## 0.8.0
+
+### Breaking changes
+
+- **Options you write take no `_tag`** (#210). A screenshot's `area` is `"viewport"`, `"fullPage"`, `{ clip }` or `{ element }`, and its format `"png"` or `"jpeg"` with `quality` beside it: `page.screenshot({ area: "fullPage", format: "jpeg", quality: 80 })`. A cookie's `scope` is `{ url }` or `{ domain, path }`, and `TestRun.attach` takes `{ trace }`, `{ har }` or `{ screenshot }`. To migrate, replace `{ _tag: "FullPage" }` with `"fullPage"`, `{ _tag: "Clip", rect }` with `{ clip: rect }`, `{ _tag: "Element", locator }` with `{ element: locator }`, `format: { _tag: "Jpeg", quality }` with `format: "jpeg", quality`, drop `_tag` from a cookie's `scope`, and replace `attach({ _tag: "Trace", path })` with `attach({ trace: path })`. The screenshot span's `browser.screenshot.area` and `browser.screenshot.format` attributes use the same lowercase names.
+- **Only pointer actions wait for a drawn frame** (#213). A new per-action check, `checks.rendered`, is on by default for click, double-click, tap, hover, drag, check and uncheck, and off for fill, focus, press, type, select, file inputs and scrolling. Those now check the element's current layout at once and wait only while it isn't ready. If your app hydrates late and resets an early fill, wait for an app-defined readiness condition, or pass `checks: { rendered: true }` for that call. Actions with `rendered` off no longer give the "rendered no frame" hint.
+
+### Performance
+
+- **Fill-heavy sessions run about twice as fast** (#213). On Chromium, a 300-action session takes 5.3 s instead of 10.2 s, level with Playwright, and four parallel tests sharing a browser take 29% less time. Firefox sessions are about half as long as before.
+
+### Added
+
+- **`Locator.blur`** (#200): removes focus from the one matched element, without keyboard or pointer input.
+- **`Locator.dispatchEvent`** (#204): dispatches an untrusted DOM event. You choose the event class (`Event` by default) and pass its initialization data.
+- **`Locator.isEditable`** (#205): reads whether the element is editable, by the same rules fill and `toBeEditable` use. Unsupported kinds of element read `false`.
+- **`Locator.selectText`** (#206): selects an input's value or an element's contents, following labels, with trial mode and frames.
+- **`Locator.evaluateAll`** (#211): evaluates a function over all current matches at once, including none.
+- **`Page.setContent`** (#209): replaces a document's HTML through the browser's parser, keeping its URL and history. It waits for `load` by default.
+- **`Expect.toHaveClass`** (#215): a retrying assertion on an element's class, as a whole string, a regular expression or an ordered list.
+- **Extra request headers** (#212): set headers on every request from a page or a context, through emulation. A page's headers override its context's.
+
+### Fixed
+
+- **Fill re-checks its target after focus** (#198): if a focus or selection handler hides the field or makes it inert, fill waits instead of typing into it.
+- **Fill in design-mode documents** (#213): a focus change between selecting and inserting no longer sends text to the wrong place, and partly inserted text is never typed again.
+- **A Chromium click whose mousedown opens a dialog** (#216) now delivers its mouseup and click. It was finishing without them. Clicks are no slower.
+
 ## 0.7.0
 
 ### Breaking changes
