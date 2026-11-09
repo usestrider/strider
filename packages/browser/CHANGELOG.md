@@ -1,5 +1,41 @@
 # @usestrider/browser
 
+## 0.8.1
+
+### Added
+
+**Locators and pages**
+
+- **`Locator.boundingBox`** (#221): the element's box in the top-level viewport's CSS pixels, from the browser's own measurements and carried through frames, or `None` for an element without a layout box.
+- **`page.viewportSize`** (#214): the page's configured viewport, or `None` when none is set.
+
+**Assertions**
+
+- **`Expect.toHaveRole`** (#220) and **`Expect.toHaveAccessibleName`** (#218), with a regular-expression form and `ignoreCase`.
+- **`Expect.toHaveCSS`** (#217): a computed style, as a string or a regular expression, including pseudo-elements.
+- **`Expect.toBeAttached`** and **`Expect.toBeDetached`** (#225), independent of visibility.
+- **`Expect.toBeEmpty`** (#223): an empty field value, or element text that's empty once trimmed.
+- **`Expect.toBeInViewport`** (#226), with an optional minimum ratio.
+- **`Expect.toHaveValues`** (#224): a multiple select's selected values, in order.
+
+**Network details**, each opt-in and costing nothing when unused:
+
+- **Request bodies** (#229): decoders on `NetworkRequest.next` and `stream` read what a request sent: text, JSON, forms or bytes.
+- **The response a request got** (#231), with a bounded wait.
+- **`NetworkRequest.failure`** (#227): why a request failed, read at once.
+- **`NetworkRequest.timing`** (#234): the browser's timing phases, for contexts created with `requestTiming: true`.
+- **`NetworkRequest.redirects`** (#235): a request's predecessor and successor in a redirect chain. Where a browser can't tell whether a successor is coming, it says so with a typed outcome instead of guessing.
+
+**Contexts**
+
+- **`UserContext.Options.httpCredentials`** (#233): website authentication for a context on Chromium and Firefox, with a `Redacted` password and an optional origin.
+- **`UserContext.Options.acceptInsecureCerts`** (#228): accept HTTPS certificate errors in one context, on Firefox and launched stock WebKit. Chromium refuses it, because its setting would apply to the whole browser.
+
+### Fixed
+
+- **Role and accessible-name computation** (#220, #218): presentation-role conflicts, required structural parents, and roles that prohibit a name now match the ARIA rules. This affects `getByRole` and snapshots.
+- **Waits interrupted by a navigation** (#230 Chromium, #232 WebKit): a wait that a navigation cut off now follows the new document within its deadline, instead of failing or hanging. An action that may already have happened is never run twice.
+
 ## 0.8.0
 
 ### Breaking changes
