@@ -1870,8 +1870,8 @@ it.effect("interruption doesn't wait for a busy page to acknowledge node release
     assert.isDefined(interrupting.pollUnsafe(), "interrupting the caller waited for the busy page's release reply")
   }).pipe(Effect.scoped))
 
-for (const finish of ["reply", "shutdown"] as const) {
-  it.effect(`evaluation cleanup survives caller interruption and finishes on ${finish}`, () =>
+for (const finish of ["reply", "shutdown", "success", "shutdown-success"] as const) {
+  it.effect(`evaluation cleanup waits and remains owned on ${finish}`, () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
       const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
@@ -1908,17 +1908,25 @@ for (const finish of ["reply", "shutdown"] as const) {
         id: callback.id,
         result: {
           result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } },
-          exceptionDetails: { text: "failed", exception: { type: "object", objectId: "exception" } }
+          exceptionDetails: {
+            exceptionId: 1,
+            text: "failed",
+            lineNumber: 0,
+            columnNumber: 0,
+            exception: { type: "object", objectId: "exception" }
+          }
         }
       })
       const first = yield* browser.next
       assert.strictEqual(first.method, "Runtime.releaseObject")
       assert.strictEqual(first.params?.objectId, "node-1")
       assert.isUndefined(waiting.pollUnsafe(), "successful completion must still wait for its cleanup")
-      const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
-      for (let i = 0; i < 100; i++) yield* Effect.yieldNow
-      assert.isDefined(interrupting.pollUnsafe(), "caller interruption must not wait for a release acknowledgment")
-      if (finish === "reply") {
+      if (finish === "reply" || finish === "shutdown") {
+        const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(interrupting.pollUnsafe(), "caller interruption must not wait for a release acknowledgment")
+      }
+      if (finish === "reply" || finish === "success") {
         // Resuming the page drains every id already owned before interruption, including the received result.
         yield* browser.receive({ id: first.id, result: {} })
         for (const id of ["node-2", "result", "exception"]) {
@@ -1929,11 +1937,17 @@ for (const finish of ["reply", "shutdown"] as const) {
         }
         yield* browser.delivered
         assert.strictEqual(yield* browser.pending, 0)
+        if (finish === "success") assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
         yield* Scope.close(owner, Exit.void)
       } else {
         const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild)
         for (let i = 0; i < 100; i++) yield* Effect.yieldNow
         assert.isDefined(closing.pollUnsafe(), "shutdown must interrupt an unanswered cleanup request")
+        if (finish === "shutdown-success") {
+          for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+          assert.isDefined(waiting.pollUnsafe(), "closing the cleanup owner must end a successful caller's wait")
+          assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
+        }
         // An acknowledgment after shutdown cannot restart cleanup in an unowned fiber.
         yield* browser.receive({ id: first.id, result: {} })
         yield* browser.delivered
