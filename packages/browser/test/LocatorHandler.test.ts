@@ -178,25 +178,32 @@ describe("locator handler execution", () => {
 import * as Browser from ${JSON.stringify(new URL("../src/Browser.ts", import.meta.url).href)}
 import * as Effect from 'effect/Effect'
 import * as Context from 'effect/Context'
+import * as ManagedRuntime from 'effect/ManagedRuntime'
+import * as Scope from 'effect/Scope'
+import * as Exit from 'effect/Exit'
 import assert from 'node:assert/strict'
 class Service extends Context.Service()('retention/service') {}
 let retained
+const runtime = ManagedRuntime.make(Browser.layerTest(''))
+const scope = Effect.runSync(Scope.make())
 async function acquire() {
   const value = { marker: 'callback-only service' }
   const weak = new WeakRef(value)
-  retained = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+  retained = await runtime.runPromise(Effect.gen(function*() {
     const page = yield* Browser.newPage()
     const registration = yield* page.addLocatorHandler(page.locator('body'), () => Effect.asVoid(Service)).pipe(Effect.provideService(Service, value))
     yield* registration.remove
     return registration
-  })).pipe(Effect.provide(Browser.layerTest(''))))
+  }).pipe(Scope.provide(scope)))
   return weak
 }
 const weak = await acquire()
 for (let i=0; i<20; i++) { global.gc(); await new Promise(resolve => setImmediate(resolve)) }
 assert.ok(retained)
 assert.equal(weak.deref(), undefined, 'removed registration retains callback services')
-console.log('callback-only service released while registration retained')
+console.log('callback-only service released while registration and open scope retained')
+await runtime.runPromise(Scope.close(scope, Exit.void))
+await runtime.dispose()
 
     `
     const output = execFileSync(process.execPath, ["--expose-gc", "--input-type=module", "--eval", script], {
@@ -214,6 +221,7 @@ console.log('callback-only service released while registration retained')
       yield* page.addLocatorHandler(page.locator("#overlay"), () =>
         Effect.gen(function*() {
           operation = (yield* Operation.record).name
+          assert.strictEqual((yield* Effect.currentSpan).name, "Locator.focus")
           value = (yield* CallbackService).value
           yield* Effect.forkChild(page.locator("#inside").focus()).pipe(Effect.flatMap(Fiber.join))
           f.hide()
