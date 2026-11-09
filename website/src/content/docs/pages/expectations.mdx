@@ -260,3 +260,23 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 - The result comes back by value, typed as what arrives.
 - A DOM node can't come back by value: [`evaluateHandle`](/docs/api/browser/Page#Page.evaluateHandle) gives a
   handle, released with its scope.
+
+To read every locator match together, use `evaluateAll`. It passes an empty array when nothing matches:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const names = Effect.fn("names")(function*(page: Page.ReadonlyPage) {
+  return yield* page.getByRole("listitem").evaluateAll((items) =>
+    items.map((item) => item.textContent)
+  )
+})
+```
+
+Membership is resolved once before the callback is dispatched, without waiting for matches. The elements remain
+live: they may change or detach before the callback runs. Synchronous callback code runs in one JavaScript turn;
+changes can occur across an async callback's awaits. The promise is awaited within the operation's deadline, but
+a timeout cannot stop code already running in the page. Arguments and results cross by value as with `evaluate`;
+no array handle is retained. This needs inspect access and isolated-world support; stock WebKit refuses it with
+`Unsupported`.

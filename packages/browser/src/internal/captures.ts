@@ -107,21 +107,24 @@ export const screenshot = (
   options: Page.ScreenshotOptions | undefined
 ): Effect.Effect<Uint8Array, Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const operation = "Page.screenshot"
-  const area = options?.area ?? { _tag: "Viewport" as const }
-  const format = options?.format ?? { _tag: "Png" as const }
+  const area = options?.area ?? "viewport"
+  const areaName = typeof area === "string" ? area : area.element !== undefined ? "element" : "clip"
+  const format = options?.format ?? "png"
   return Effect.gen(function*() {
     const record = yield* Operation.record
     const id = record.id
     const budget = record.budget
-    if (format._tag === "Jpeg" && !(Number.isInteger(format.quality) && format.quality >= 0 && format.quality <= 100)) {
+    const quality = options?.quality
+    const validQuality = quality !== undefined && Number.isInteger(quality) && quality >= 0 && quality <= 100
+    if (format === "jpeg" && !validQuality) {
       return yield* Effect.fail(
-        invalid(operation, id, "format", "a JPEG quality from 0 to 100", `${format.quality} isn't one`)
+        invalid(operation, id, "quality", "a JPEG quality from 0 to 100", `${quality} isn't one`)
       )
     }
     const capture = Effect.gen(function*() {
       let clip = Option.none<Box>()
-      if (area._tag === "Clip") {
-        const { height, width, x, y } = area.rect
+      if (typeof area !== "string" && area.clip !== undefined) {
+        const { height, width, x, y } = area.clip
         if (!(width > 0 && height > 0 && Number.isFinite(x) && Number.isFinite(y))) {
           return yield* Effect.fail(
             invalid(operation, id, "area", "a clip with a positive width and height", `${width}×${height} isn't one`)
@@ -129,8 +132,8 @@ export const screenshot = (
         }
         clip = Option.some({ x, y, width, height })
       }
-      if (area._tag === "Element") {
-        const locator = area.locator
+      if (typeof area !== "string" && area.element !== undefined) {
+        const locator = area.element
         if (!(locator instanceof LocatorImpl.LocatorImpl) || locator.owner.page.id !== page.id) {
           return yield* Effect.die(new Error("Page.screenshot: the element's locator belongs to another page"))
         }
@@ -146,10 +149,10 @@ export const screenshot = (
         clip = box
       }
       const captureOptions: Adapter.ScreenshotOptions = {
-        format: format._tag === "Png" ? "png" : "jpeg",
-        quality: format._tag === "Jpeg" ? Option.some(format.quality) : Option.none(),
+        format,
+        quality: format === "jpeg" && quality !== undefined ? Option.some(quality) : Option.none(),
         clip,
-        fullPage: area._tag === "FullPage",
+        fullPage: area === "fullPage",
         scale: options?.scale ?? "device",
         omitBackground: options?.omitBackground ?? false
       }
@@ -179,8 +182,8 @@ export const screenshot = (
     Operation.named(operation, {
       attributes: {
         "browser.page.id": page.id,
-        "browser.screenshot.area": area._tag,
-        "browser.screenshot.format": format._tag,
+        "browser.screenshot.area": areaName,
+        "browser.screenshot.format": format,
         "browser.screenshot.scale": options?.scale ?? "device"
       }
     })

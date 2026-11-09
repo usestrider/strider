@@ -108,7 +108,7 @@ const fromInput = (input: CookieJar.Input): Adapter.Cookie | Reason.InvalidInput
   }
   let domain: string
   let path: string
-  if (input.scope._tag === "Url") {
+  if (input.scope.url !== undefined) {
     const parsed = HttpUrl.fromString(input.scope.url)
     if (Result.isFailure(parsed)) {
       return invalid("scope", "an absolute URL", `${JSON.stringify(input.scope.url)} doesn't parse`)

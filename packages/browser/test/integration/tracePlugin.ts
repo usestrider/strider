@@ -50,13 +50,13 @@ export const instrument = (source: string, id: string) => {
   if (runtime) {
     source = "let __roundSequence = 0;" + source
     replace(
-      "(encoded) => call(runtime, realm, functionDeclaration, [string(encoded)])",
+      "(encoded) => call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)",
       [
         "(encoded) => { const __trace = __failureConnection(\"engine-round\"); const parsed = JSON.parse(encoded);",
         "const metadata = { round: ++__roundSequence, operationId: id, document, realm, op: parsed.op, cap: parsed.cap ?? null };",
         "__trace(\"engine-round-start\", metadata);",
         "const diagnostic = { ...metadata, events: [], omitted: 0 };",
-        "return call(runtime, realm, functionDeclaration, [string(JSON.stringify({ ...parsed, __rendering: diagnostic }))]).pipe(Effect.tap((reply) => Effect.sync(() => {",
+        "return call(runtime, realm, functionDeclaration, [string(JSON.stringify({ ...parsed, __rendering: diagnostic }))], releaseResult).pipe(Effect.tap((reply) => Effect.sync(() => {",
         "let rendering = null; let response = null; try { const value = JSON.parse((reply as any).value.value); rendering = value.__rendering ?? null; response = { tag: value._tag, reason: value.reason ?? null, checked: value.checked ?? null } } catch {}",
         "__trace(\"engine-round-reply\", { ...metadata, rendering, response }); }))); }"
       ].join(" "),

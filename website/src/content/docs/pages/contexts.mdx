@@ -192,7 +192,7 @@ const asReturningBetaUser = Effect.fn("asReturningBetaUser")(
     yield* page.context.cookies.set({
       name: "beta",
       value: "1",
-      scope: { _tag: "Url", url: "https://app.example.com" }
+      scope: { url: "https://app.example.com" }
     })
     yield* page.localStorage.set("theme", "dark")
     yield* page.sessionStorage.set("tourDone", "true")

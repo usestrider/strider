@@ -223,12 +223,12 @@ describe("Stock WebKit, attached through its remote inspector", () => {
               "number"
             )
             const context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             const cookies = yield* context.cookies.list
             assert.isTrue(cookies.some((cookie) => cookie.name === "who"))
             yield* tab.evaluateInMainWorld(() => localStorage.setItem("kept", "yes"))
             assert.deepStrictEqual(yield* tab.localStorage.entries, [["kept", "yes"]])
-            const full = yield* tab.screenshot({ area: { _tag: "FullPage" } })
+            const full = yield* tab.screenshot({ area: "fullPage" })
             assert.deepStrictEqual([...full.subarray(1, 4)], [0x50, 0x4e, 0x47])
           }))
         }).pipe(Effect.provide(attach(endpoint)))
@@ -261,7 +261,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const evaluated = reasonOf(yield* Effect.exit(tab.evaluate(() => document.title)))
             assert.strictEqual(evaluated?.reason?.capability, "isolatedWorlds")
             assert.strictEqual(yield* tab.evaluateInMainWorld(() => document.title), "Refusals")
-            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: { _tag: "Jpeg", quality: 80 } })))
+            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: "jpeg", quality: 80 })))
             assert.strictEqual(jpeg?.reason?.capability, "screenshot.format")
             // Bringing a page forward is refused as an error, not a defect
             const activated = reasonOf(yield* Effect.exit(tab.activate))
