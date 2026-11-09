@@ -3,6 +3,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Capability, Expect, Route, StorageState, Url, type UserContext } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
@@ -187,6 +188,25 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             ).pipe(Effect.flip)
             if (nonHttp._tag !== "UserContextError") return yield* Effect.die(nonHttp)
             assert.equal(nonHttp.reason._tag, "Unsupported")
+            const ambiguous = yield* context.setStorageState(
+              new StorageState.StorageState({
+                cookies: [],
+                origins: [{
+                  origin: Url.Origin.make("http://example.com"),
+                  partition: {
+                    _tag: "Partitioned",
+                    topLevelSite: Url.Site.make("http://example.com"),
+                    crossSiteAncestor: Option.some(true)
+                  },
+                  localStorage: [],
+                  indexedDb: []
+                }]
+              })
+            ).pipe(Effect.exit)
+            assert.isTrue(
+              Exit.isFailure(ambiguous),
+              "An incoming same-site partition cannot recreate an unrepresented cross-site ancestor"
+            )
             assert.equal(clear.mock.calls.length, 0)
             assert.lengthOf(yield* context.pages, 0)
           })),
