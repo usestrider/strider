@@ -663,11 +663,67 @@ export function engine(render: (root: SnapNode) => string) {
     (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
     (element.getAttribute("title") ?? "").trim() !== ""
 
-  const focusable = (element: Element): boolean =>
-    element.hasAttribute("tabindex") ||
-    (element instanceof HTMLAnchorElement && element.hasAttribute("href")) ||
-    ((element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
-      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) && !element.disabled)
+  const focusable = (element: Element): boolean => {
+    if (element.matches(":disabled")) return false
+    const tabindex = element.getAttribute("tabindex")
+    return (tabindex !== null && tabindex.trim() !== "" && Number.isInteger(Number(tabindex))) ||
+      ((element.localName === "a" || element.localName === "area") && element.hasAttribute("href")) ||
+      ["button", "details", "select", "textarea"].includes(element.localName) ||
+      (element instanceof HTMLInputElement && element.type !== "hidden") ||
+      (element instanceof HTMLElement && element.isContentEditable)
+  }
+
+  // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
+  const GLOBAL_ARIA = [
+    "aria-atomic",
+    "aria-busy",
+    "aria-controls",
+    "aria-current",
+    "aria-describedby",
+    "aria-details",
+    "aria-dropeffect",
+    "aria-flowto",
+    "aria-grabbed",
+    "aria-hidden",
+    "aria-keyshortcuts",
+    "aria-live",
+    "aria-owns",
+    "aria-relevant"
+  ]
+  const NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "superscript"
+  ])
+  const presentationConflict = (element: Element, implicit: string | null): boolean =>
+    focusable(element) || GLOBAL_ARIA.some((attribute) => element.hasAttribute(attribute)) ||
+    (!NAME_PROHIBITED.has(implicit ?? "") &&
+      (element.hasAttribute("aria-label") || element.hasAttribute("aria-labelledby"))) ||
+    (implicit !== "generic" && element.hasAttribute("aria-roledescription"))
+
+  // Only required structural children inherit presentation, never arbitrary descendants or nested lists/tables.
+  // https://www.w3.org/TR/wai-aria-1.2/#presentation
+  const PRESENTATION_PARENTS = new Map<string, ReadonlyArray<string>>([
+    ["dd", ["dl", "div"]],
+    ["div", ["dl"]],
+    ["dt", ["dl", "div"]],
+    ["li", ["ol", "ul"]],
+    ["caption", ["table"]],
+    ["tbody", ["table"]],
+    ["tfoot", ["table"]],
+    ["thead", ["table"]],
+    ["td", ["tr"]],
+    ["th", ["tr"]],
+    ["tr", ["thead", "tbody", "tfoot", "table"]]
+  ])
 
   const inputRole = (input: HTMLInputElement): string | null => {
     const list = input.hasAttribute("list")
@@ -842,18 +898,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const roleCache = new Map<Element, string | null>()
-  /** An element's role: the first role token the engine knows, or its implicit role. */
+  /** Shared role computation, including ARIA presentation conflict resolution and required-child inheritance. */
   const roleOf = (element: Element): string | null => {
     if (roleCache.has(element)) return roleCache.get(element)!
-    let role: string | null = null
+    let explicit: string | null = null
     for (const token of (element.getAttribute("role") ?? "").split(/\s+/)) {
       if (!KNOWN_ROLES.has(token)) continue
-      // A focusable element can't be presentational (ARIA 1.2, presentational roles conflict resolution)
-      if ((token === "none" || token === "presentation") && focusable(element)) continue
-      role = token
+      explicit = token
       break
     }
-    if (role === null) role = implicitRole(element)
+    let role = explicit
+    if (explicit === null || explicit === "none" || explicit === "presentation") {
+      const implicit = implicitRole(element)
+      role = explicit ?? implicit
+      if (explicit !== null) {
+        // A conflict cancels the first recognized presentation token, not advances to a fallback token.
+        if (presentationConflict(element, implicit)) role = implicit
+      } else if (implicit !== null) {
+        const parents = PRESENTATION_PARENTS.get(element.localName)
+        const parent = parents === undefined ? null : composedParent(element)
+        if (parent !== null && parents!.includes(parent.localName)) {
+          const inherited = roleOf(parent)
+          if ((inherited === "none" || inherited === "presentation") && !presentationConflict(element, implicit)) {
+            role = inherited
+          }
+        }
+      }
+    }
     roleCache.set(element, role)
     return role
   }

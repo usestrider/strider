@@ -4216,6 +4216,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
             yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+            yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
+            yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
+            const snapshot = yield* page.locator("#described").snapshot()
+            assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "heading" })
           }))
         }), timeout)
 
@@ -4225,7 +4229,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             `<p id="description">Details</p>
             <ul role="presentation"><li id="plain">Flattened<button>Nested button</button><ul><li id="nested">Nested item</li></ul></li><li id="explicit" role="treeitem">Explicit</li><li id="focus" tabindex="-1">Focusable</li><li id="global" aria-describedby="description">Described</li><li id="local" aria-level="2">Local</li></ul>
             <ul role="presentation" aria-label="Named list"><li id="named">Named child</li></ul>
-            <table role="none"><tbody><tr><td id="cell">Flat cell</td></tr></tbody></table>
+            <table role="none"><caption id="caption">Flat caption</caption><tbody><tr><td id="cell">Flat cell</td></tr></tbody></table>
             <h2 id="local-heading" role="presentation" aria-level="2">Flat heading</h2>
             <p id="prohibited" role="none" aria-label="Ignored">Paragraph</p>
             <h2 id="deprecated" role="none" aria-disabled="true">Deprecated global</h2>
@@ -4245,6 +4249,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 ["local", "presentation"],
                 ["named", "listitem"],
                 ["cell", "none"],
+                ["caption", "none"],
                 ["local-heading", "presentation"],
                 ["prohibited", "none"],
                 ["deprecated", "none"],
@@ -4266,6 +4271,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.isFalse(nodes.some((node) =>
               node.role._tag === "Aria" && ["cell", "row", "rowgroup", "table", "heading"].includes(node.role.role)
             ))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#plain")!.parentElement!.setAttribute("aria-describedby", "description")
+            })
+            yield* page.locator("#plain").pipe(Expect.toHaveRole("listitem"))
+            const changed = yield* page.locator("#plain").snapshot()
+            assert.deepStrictEqual(changed.root.role, { _tag: "Aria", role: "listitem" })
           }))
         }), timeout)
 

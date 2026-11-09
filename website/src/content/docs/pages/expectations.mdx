@@ -44,7 +44,9 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
 
 Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
-case-sensitive strings, so `switch` does not match `checkbox`. They include hidden elements and retry missing or
+case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
+`generic` role; Playwright reports no role for them. Role assertions share presentation conflict resolution and
+required-child inheritance with role locators and snapshots. They include hidden elements and retry missing or
 multiple matches until the deadline, reporting the role or match count if they fail:
 
 ```ts
@@ -53,6 +55,7 @@ import { Effect } from "effect"
 
 const saveRole = Effect.fn("saveRole")(function*(page: Page.ReadonlyPage) {
   yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+  yield* page.locator("div#container").pipe(Expect.toHaveRole("generic"))
 })
 ```
 
