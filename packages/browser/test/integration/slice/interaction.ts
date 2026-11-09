@@ -4269,11 +4269,32 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             <p id="prohibited" role="none" aria-label="Ignored">Paragraph</p>
             <h2 id="deprecated" role="none" aria-disabled="true">Deprecated global</h2>
             <button id="disabled" disabled tabindex="0" role="none">Disabled</button>
-            <h2 id="invalid-tabindex" tabindex="invalid" role="none">Invalid tabindex</h2>`
+            <h2 id="invalid-tabindex" tabindex="invalid" role="none">Invalid tabindex</h2>
+            <fieldset id="role-fieldset" disabled><legend><button id="legend-control" role="none" tabindex="0">Legend control</button></legend><button id="fieldset-control" role="none" tabindex="0">Fieldset control</button><x-role-control id="fieldset-custom" role="none" tabindex="0"></x-role-control></fieldset>
+            <x-role-control id="custom-disabled" disabled role="none" tabindex="0"></x-role-control>
+            <x-role-control id="custom-enabled" role="none" tabindex="0"></x-role-control>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
+            yield* page.evaluateInMainWorld(() => {
+              customElements.define(
+                "x-role-control",
+                class extends HTMLElement {
+                  static formAssociated = true
+                  constructor() {
+                    super()
+                    this.attachInternals()
+                  }
+                }
+              )
+            })
+            const disabled = yield* page.evaluateInMainWorld(() =>
+              ["legend-control", "fieldset-control", "fieldset-custom", "custom-disabled", "custom-enabled"].map((id) =>
+                document.getElementById(id)!.matches(":disabled")
+              )
+            )
+            assert.deepStrictEqual(disabled, [false, true, true, true, false])
             for (
               const [id, role] of [
                 ["plain", "presentation"],
@@ -4289,7 +4310,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 ["prohibited", "none"],
                 ["deprecated", "none"],
                 ["disabled", "none"],
-                ["invalid-tabindex", "none"]
+                ["invalid-tabindex", "none"],
+                ["legend-control", "button"],
+                ["fieldset-control", "none"],
+                ["fieldset-custom", "none"],
+                ["custom-disabled", "none"],
+                ["custom-enabled", ""]
               ] as const
             ) {
               yield* page.locator(`#${id}`).pipe(Expect.toHaveRole(role), Deadline.within("1 second"))
@@ -4312,6 +4338,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#plain").pipe(Expect.toHaveRole("listitem"))
             const changed = yield* page.locator("#plain").snapshot()
             assert.deepStrictEqual(changed.root.role, { _tag: "Aria", role: "listitem" })
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLFieldSetElement>("#role-fieldset")!.disabled = false
+              document.querySelector("#custom-enabled")!.setAttribute("disabled", "")
+            })
+            yield* page.locator("#fieldset-control").pipe(Expect.toHaveRole("button"))
+            yield* page.locator("#fieldset-custom").pipe(Expect.toHaveRole(""))
+            yield* page.locator("#custom-enabled").pipe(Expect.toHaveRole("none"))
           }))
         }), timeout)
 
