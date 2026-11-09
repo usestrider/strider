@@ -149,6 +149,36 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
           )
         }).pipe(Effect.scoped))
 
+      it.effect("handles overlays before initial and retrying URL assertions created before registration", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(
+            `${served.origin}/fixture?html=${
+              encodeURIComponent(
+                "<div id=\"overlay\" hidden>Overlay</div><script>setTimeout(() => document.querySelector(\"#overlay\").hidden=false,100)</script>"
+              )
+            }`
+          )
+          const assertion = Expect.toHaveURL(page, /#done$/)
+          let calls = 0
+          yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+            Effect.gen(function*() {
+              calls++
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector<HTMLElement>("#overlay")!.hidden = true
+                location.hash = "done"
+              })
+            }))
+          yield* assertion
+          yield* page.addLocatorHandler(page.locator("body"), () =>
+            Effect.sync(() => {
+              calls++
+            }), { times: 1, noWaitAfter: true })
+          yield* Expect.toHaveURL(page, /#done$/)
+          assert.strictEqual(calls, 2)
+        }).pipe(Effect.scoped))
+
       it.effect("supports an always-visible trigger once without disappearance waiting", () =>
         Effect.gen(function*() {
           const served = yield* site
