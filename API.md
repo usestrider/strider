@@ -854,6 +854,14 @@ Each module has the most specific accurate name, with a prefix only where a bare
 
 ## Network
 
+`NetworkRequest.failure(target, request): Effect<Option<NetworkRequest.Failure>, NetworkRequest.RequestError>`
+reads an original request observation immediately from the existing bounded hop index. `None` means pending or
+successfully finished, including HTTP error statuses and redirect hops. `Some` preserves `errorText` and
+`canceled: Option<boolean>`: Chromium and WebKit report a cancellation flag; BiDi leaves it unknown. Text alone
+does not establish cancellation. Unknown, copied/decoded, evicted or foreign requests are `RequestUnavailable`.
+Owner or connection loss takes precedence even over a completed failure; save a returned value for later use.
+The read adds no retention or instrumentation and follows [Pay for what you use](docs/decisions.md#pay-for-what-you-use).
+
 ```ts
 // Route
 type Phase = "request" | "response" | "auth"

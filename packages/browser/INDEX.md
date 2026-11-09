@@ -1168,6 +1168,7 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `class Failure: Schema.Class { errorText, canceled }`
 - `class Timing: Schema.Class { startTime, domainLookupStart, domainLookupEnd, connectStart, connectEnd, secureConnectionStart, requestStart, responseStart, responseEnd }`
 
 *schemas*
@@ -1189,6 +1190,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
 - `const timing: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Timing, RequestError>`
+- `const failure: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Option.Option<Failure>, RequestError>`
 
 *converting*
 

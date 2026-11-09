@@ -10,6 +10,7 @@ response an action causes checks what the server said, and decoding its body giv
 ## Request and response events
 
 `NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
+Read a transfer's reported failure with [request failures](/docs/events/request-failures).
 
 - A request is reported when sent and a response when it arrives, one of each per redirect hop.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.

@@ -1373,6 +1373,15 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Request failure observations
+
+Request failure reads inspect the existing bounded hop index immediately, using the original request instance
+and its live owner. Missing retention and owner loss are unavailable observations, never evidence of network
+failure; returned data can be saved independently. This preserves bounded memory and avoids new work in unused
+contexts. Waiting, automatic retention and replaying decoded snapshots were rejected for this read; scoped
+retention belongs to operations that explicitly request it. Cancellation is known only from protocol evidence,
+not inferred from error text, so BiDi leaves it unknown.
+
 ## Editability reads share editing rules
 
 `isEditable` reads the same predicate as editing actions and `toBeEditable`: an enabled text or settable
