@@ -6,6 +6,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -130,6 +131,9 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       yield* Fiber.join(opening)
       assert.strictEqual(before, "connecting")
       assert.isTrue(Exit.isFailure(earlySend))
+      const error = Option.getOrThrow(Exit.findErrorOption(earlySend))
+      assert(WebSocketRoute.isWebSocketRouteError(error))
+      assert.strictEqual(error.reason._tag, "InvalidState")
       assert.strictEqual(yield* socket.status, "open")
       yield* registration.remove
     }).pipe(Effect.provide(backend), Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))

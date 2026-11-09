@@ -363,7 +363,7 @@ export const register = <E, R>(
             // Both grants must reach the realm before author code can see open.
             yield* command(connection, { type: "grant", direction: "page", bytes: MiB, serial: 1 })
             yield* command(connection, { type: "grant", direction: "server", bytes: MiB, serial: 1 })
-            yield* SubscriptionRef.set(status, "open")
+            if (mode === "mock") yield* SubscriptionRef.set(status, "open")
             yield* command(connection, { type: mode === "mock" ? "open" : "connect", protocol })
             return mode === "mock" ? "" : yield* Deferred.await(opened)
           }
@@ -427,6 +427,7 @@ export const register = <E, R>(
           return
         }
         if (envelope.type === "opened") {
+          yield* SubscriptionRef.set(connection.status, "open")
           yield* Deferred.succeed(connection.opened, envelope.protocol ?? "")
           return
         }
