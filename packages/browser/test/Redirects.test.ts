@@ -211,6 +211,66 @@ describe("Scoped redirect evidence", () => {
       }
     }))
 
+  it.effect("preserves unavailable terminal history instead of collapsing its eviction to unknown", () =>
+    Effect.gen(function*() {
+      const { page, send, fold } = yield* setup()
+      const links = yield* NetworkRequest.redirects(page)
+      const navigation = "retained-navigation" as PageNavigation.Id
+      yield* fold.sink({
+        _tag: "NavigationStarted",
+        navigation,
+        navigable: "page" as Target.NavigableId,
+        url: "https://example.com/repeated" as Url.Url,
+        initiatedAs: "crossDocument"
+      })
+      const request = yield* send("retained.0", Option.some(navigation))
+      yield* fold.sink({
+        _tag: "ResponseReceived",
+        response: new NetworkResponse.NetworkResponse({
+          hop: request.hop,
+          url: request.url,
+          status: 302 as NetworkResponse.StatusCode,
+          statusText: "Found",
+          httpVersion: Option.none(),
+          headers: Headers.empty,
+          servedBy: "network",
+          at: request.at
+        })
+      })
+      yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
+      yield* fold.sink({
+        _tag: "NavigationEnded",
+        navigation,
+        outcome: { _tag: "Committed", document: "document" as Target.DocumentId, response: Option.some(request.hop) },
+        evidence: "test"
+      })
+      assert.isTrue(Option.isNone(yield* links.to(request)))
+      for (let i = 0; i < 100; i++) {
+        const next = `later-navigation-${i}` as PageNavigation.Id
+        yield* fold.sink({
+          _tag: "NavigationStarted",
+          navigation: next,
+          navigable: "page" as Target.NavigableId,
+          url: "https://example.com/later" as Url.Url,
+          initiatedAs: "crossDocument"
+        })
+        yield* fold.sink({
+          _tag: "NavigationEnded",
+          navigation: next,
+          outcome: { _tag: "Committed", document: `later-document-${i}` as Target.DocumentId, response: Option.none() },
+          evidence: "test"
+        })
+      }
+      assert.isTrue(Option.isSome(fold.hop(request.hop)), "the request itself remains retained")
+      const error = yield* Effect.flip(
+        links.to(request).pipe(
+          Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+        )
+      )
+      assert.strictEqual(error.reason._tag, "RedirectUnavailable")
+      assert.strictEqual(error.reason.why, "unavailable")
+    }))
+
   it.effect("collapses only unknown with catchReason and preserves ownership, eviction and lifetime errors", () =>
     Effect.gen(function*() {
       const { page, send, fold } = yield* setup()
