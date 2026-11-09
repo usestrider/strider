@@ -16,6 +16,7 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as Hash from "effect/Hash"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -67,6 +68,7 @@ interface Ready {
 
 /** The checks each action documents (API.md, Locators, actions and actionability). */
 const pointerChecks: CheckSet = {
+  rendered: true,
   visible: true,
   enabled: true,
   editable: false,
@@ -76,6 +78,7 @@ const pointerChecks: CheckSet = {
   receivesPointer: true
 }
 const editChecks: CheckSet = {
+  rendered: false,
   visible: true,
   enabled: true,
   editable: true,
@@ -90,6 +93,7 @@ const selectChecks: CheckSet = { ...editChecks, editable: false, notInert: false
 const noChecks: CheckSet = { ...focusChecks, visible: false, notInert: false }
 
 const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engine.Checks => ({
+  rendered: checks?.rendered ?? defaults.rendered,
   visible: checks?.visible ?? defaults.visible,
   enabled: checks?.enabled ?? defaults.enabled,
   editable: checks?.editable ?? defaults.editable,
@@ -860,7 +864,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       (state, point, targetPoint) => Input.drag(state, point, targetPoint!, steps, options?.modifiers ?? []),
       {
-        target: Effect.suspend(() => to.pointOf(options?.targetPosition)),
+        target: Effect.suspend(() => to.pointOf(options?.targetPosition, options?.checks?.rendered)),
         draggable: (record, io) =>
           html === "native"
             // An HTML drag is a capability: Firefox never drops one, and WebKit's protocol can't
@@ -1172,7 +1176,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /** A drag target's point, with visibility/viewport checks and without pointer coverage or stability checks. */
-  pointOf(position: Mouse.Point | undefined) {
+  pointOf(position: Mouse.Point | undefined, rendered?: boolean | undefined) {
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(this.owner.grant)
       // A drag's target, found inside the drag: its record, and its deadline
@@ -1184,7 +1188,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         {
           op: "act",
           steps: this.steps,
-          checks: checksFor(pointerChecks, { stable: false, receivesPointer: false }),
+          checks: checksFor(pointerChecks, { rendered, stable: false, receivesPointer: false }),
           cap: Runtime.roundCap(record.left()),
           action: {
             _tag: "Point",
@@ -1269,17 +1273,15 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       editChecks,
       { _tag: "Fill", value: text },
-      (ready, io) =>
-        ready.fill === "set"
-          ? Effect.succeed("done" as const)
-          : Effect.as(
-            io.send(
-              text === ""
-                ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
-                : [{ _tag: "InsertText", text }]
-            ),
-            "done" as const
-          ),
+      (ready, io) => {
+        if (ready.fill === "set") return Effect.succeed("done" as const)
+        const insert = io.send(
+          text === ""
+            ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
+            : [{ _tag: "InsertText", text }]
+        )
+        return ready.fill === "guarded" ? io.guardFill(insert) : Effect.as(insert, "done" as const)
+      },
       { redacted: Redacted.isRedacted(value) }
     )
   }
@@ -1350,6 +1352,108 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           // A guard left armed would stop the page's next gesture: any failure after arming it removes it
           Effect.onError(() => guard ? Effect.ignore(io.disarm) : Effect.void)
         )
+    )
+  }
+
+  /** Brackets a design-mode insertion, including interruption while its guard is being installed. */
+  private guardFill(
+    operation: string,
+    routed: Runtime.Routed,
+    record: Operation.Record,
+    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+  ) {
+    const targets = [
+      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false }
+    ]
+    const documents = targets.map((target) => target.document)
+    const call = (document: Target.DocumentId, request: Engine.Request) =>
+      Runtime.sendToDocument(this.owner.runtime, this.owner.page, document, request, record.id).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record)),
+        Effect.flatMap((response) =>
+          Option.isSome(response) && response.value._tag === "FillGuard"
+            ? Effect.succeed(response.value)
+            : Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "fill guard",
+                hint: "The insertion guard could not confirm the native input"
+              }),
+              record.id,
+              record.dispatch
+            ))
+        )
+      )
+    let released = false
+    const disarm = Effect.forEach(documents, (document) => call(document, { op: "fillDisarm" })).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          released = true
+        })
+      )
+    )
+    return Effect.acquireUseRelease(
+      Effect.void,
+      () =>
+        Effect.gen({ self: this }, function*() {
+          const guards = yield* Effect.forEach(targets, (target) =>
+            call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
+          if (
+            guards.every((guard) =>
+              guard.blocked === null
+            )
+          ) yield* insert
+          const outcomes = yield* disarm
+          const blocked = outcomes.find((guard) => guard.blocked !== null)?.blocked ?? null
+          if (
+            outcomes.some((guard) => guard.unsafe) || (blocked !== null && outcomes.some((guard) => guard.accepted))
+          ) {
+            return yield* Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "native insertion",
+                hint: "Focus or selection changed; native input may already have changed the page"
+              }),
+              record.id,
+              record.dispatch
+            ))
+          }
+          return blocked === null
+            ? "done" as const
+            : { retry: { _tag: "PreparingFocus", from: blocked } as Engine.NotReady }
+        }),
+      () =>
+        released ? Effect.void : Effect.gen({ self: this }, function*() {
+          // Close the permit while we still own it. Taking it again in the cleanup fiber would queue
+          // behind already waiting input, which must not run through the guard we are removing.
+          yield* this.owner.page.input.resize(0)
+          yield* Effect.gen({ self: this }, function*() {
+            const cleanup = yield* Operation.record
+            const outcomes = yield* Effect.forEach(documents, (document) =>
+              Runtime.releaseInDocument(
+                this.owner.runtime,
+                document,
+                { op: "fillDisarm" },
+                cleanup.id
+              ).pipe(Effect.exit))
+            const failed = outcomes.find(Exit.isFailure)
+            if (failed !== undefined) return yield* Effect.failCause(failed.cause)
+            yield* this.owner.page.input.resize(1)
+          }).pipe(
+            Operation.named(`${operation}.guardCleanup`, { attributes: { "browser.page.id": this.owner.page.id } }),
+            Operation.detached,
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Native insertion guard cleanup failed; page input remains blocked. Close this page before sending more input.",
+                { pageId: this.owner.page.id, cause }
+              )
+            ),
+            // The interrupted caller returns promptly, including when a dialog holds the browser command.
+            Effect.forkIn(this.owner.runtime.model.scope, { startImmediately: true })
+          )
+        })
     )
   }
 
@@ -1433,6 +1537,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
+        readonly guardFill: (
+          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+        ) => Effect.Effect<
+          "done" | { readonly retry: Engine.NotReady },
+          Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+        >
       },
       record: Operation.Record
     ) => Effect.Effect<
@@ -1639,7 +1749,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             if (Option.isNone(again)) return "again" as const
             // A trial stops at the last check, holding the permit as the action would
             if (options?.trial === true) return "done" as const
-            const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
+            const done = yield* perform(again.value.response, {
+              send: send(again.value),
+              disarm,
+              guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
+            }, record)
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()

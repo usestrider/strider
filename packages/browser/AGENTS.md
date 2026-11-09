@@ -81,8 +81,8 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
 - **Reads are strict.** `readText`, `readValue` and the other reads need exactly one match and never wait: none is
   `NoMatch`, several `StrictViolation`. To wait for a value, expect it: `field.pipe(Expect.toHaveValue("Ada"))`.
 - **Held input is scoped.** `yield* page.keyboard.hold("Shift")` inside `Effect.scoped`; the scope releases it.
-- **A popup's opener on Chromium renders nothing while the popup is in front,** so actions on it time out: call
-  `page.activate` on it first, or make the context with `newContext({ focus: "emulated" })` when many pages act
+- **A popup's opener on Chromium renders nothing while the popup is in front,** so rendering and stability waits
+  can time out: call `page.activate` on it first, or make the context with `newContext({ focus: "emulated" })` when many pages act
   at once. Firefox opens every page, popups too, as a window, which keeps rendering; WebKit renders them all.
 - **A route has one phase.** `page.route(pattern, handler)` sees requests before they are sent; pass
   `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it

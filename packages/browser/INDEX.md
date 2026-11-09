@@ -944,6 +944,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
   - `evaluateAll<Args extends ReadonlyArray<unknown>, B>(fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Ser…`
 - `interface Checks`
+  - `readonly rendered?: boolean | undefined`
   - `readonly visible?: boolean | undefined`
   - `readonly enabled?: boolean | undefined`
   - `readonly editable?: boolean | undefined`

@@ -791,6 +791,9 @@ export interface Page extends ReadonlyPage {
    * for parsing and deferred scripts, while `"commit"` returns after writing and closing, without waiting for
    * readiness. This does not perform a navigation or produce a `PageNavigation`.
    *
+   * The HTML write waits for exclusive page input access, so it cannot remove listeners protecting an
+   * in-flight native action. Resource-readiness waiting releases that access.
+   *
    * **Gotchas**
    *
    * Interruption or a deadline stops waiting; it does not undo the replacement or stop scripts and requests
