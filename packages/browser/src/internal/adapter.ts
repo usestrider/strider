@@ -179,6 +179,7 @@ export type ObligationSubject =
     readonly request: NetworkRequest.NetworkRequest
     readonly phase: "request" | "response" | "auth"
     readonly response: Option.Option<NetworkResponse.NetworkResponse>
+    readonly authSource?: "server" | "proxy" | undefined
     readonly challenge: Option.Option<{ readonly origin: string; readonly scheme: string; readonly realm: string }>
   }
   | {
@@ -598,7 +599,12 @@ export type Decision =
    * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
-  | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
+  | {
+    readonly _tag: "ProvideCredentials"
+    readonly username: string
+    readonly password: string
+    readonly once?: boolean | undefined
+  }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
   | { readonly _tag: "Accept"; readonly promptText: Option.Option<string> }

@@ -390,6 +390,64 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  */
 export interface Options {
   /**
+   * Accepts HTTPS certificate errors in this context alone.
+   *
+   * **Details**
+   *
+   * Firefox and launched stock WebKit support this when creating a context. Chromium refuses `true` with
+   * `Unsupported` because its certificate override affects the whole browser. Attached stock WebKit cannot
+   * create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
+   * be chosen at creation. Omitting it preserves the existing context's setting.
+   *
+   * **Example** (A local HTTPS test site)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const context = yield* Browser.newContext({ acceptInsecureCerts: true })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://localhost:8443")
+   * })
+   * ```
+   *
+   * @default false for new contexts
+   */
+  readonly acceptInsecureCerts?: boolean | undefined
+
+  /**
+   * Answers website authentication challenges with these credentials. User auth routes run first;
+   * falling through uses these credentials. The pair is submitted once per request, including its whole
+   * redirect chain. A later challenge in that chain is canceled, even at another origin.
+   * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname and effective port.
+   * An omitted origin permits any website. Proxy challenges never receive these credentials.
+   * Chromium and Firefox support this option; stock WebKit refuses it with `Unsupported`.
+   * Chromium enables request interception for this context, which can affect request timing.
+   *
+   * **Example** (Website credentials)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Config, Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const password = yield* Config.Redacted("HTTP_PASSWORD")
+   *   return yield* Browser.newContext({
+   *     httpCredentials: { origin: "https://example.com", username: "automation", password }
+   *   })
+   * })
+   * ```
+   *
+   * @default no automatic website credentials or additional interception
+   */
+  readonly httpCredentials?: {
+    readonly origin?: string | undefined
+    readonly username: string
+    readonly password: Redacted.Redacted<string>
+  } | undefined
+
+  /**
    * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
    * `host:port`, without credentials, path, query or fragment. An omitted port is 80.
    *
