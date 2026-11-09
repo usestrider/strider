@@ -221,6 +221,19 @@ describe("Request response lifetime", () => {
       assert.strictEqual(unavailableWhy(yield* Effect.flip(Fiber.join(fiber))), "targetClosed")
     })))
 
+  for (const running of [false, true]) {
+    it.effect(`reports connection loss ${running ? "during" : "before"} waiting as target closure`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { fold, target, sent } = yield* responseFixture
+        const wait = yield* NetworkRequest.response(target, sent)
+        const fiber = running ? yield* wait.pipe(Effect.forkScoped) : undefined
+        if (running) yield* Effect.yieldNow
+        yield* fold.loseConnection
+        const error = yield* Effect.flip(fiber === undefined ? wait : Fiber.join(fiber))
+        assert.strictEqual(unavailableWhy(error), "targetClosed")
+      })))
+  }
+
   it.effect("clears retention and wakes a pending wait when its scope closes", () =>
     Effect.scoped(Effect.gen(function*() {
       const { target, sent } = yield* responseFixture
