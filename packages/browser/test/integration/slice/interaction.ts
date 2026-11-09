@@ -4206,18 +4206,51 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       it.effect("computes roles with presentational conflict resolution and inheritance", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
-            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul><h3 id="decimal-tabindex" role="none" tabindex="0.5">Decimal</h3>`
+            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul><h3 id="decimal-tabindex" role="none" tabindex="0.5" data-tabindex-case>Decimal</h3>
+            <h3 id="trailing-tabindex" role="none" tabindex="2abc" data-tabindex-case>Trailing</h3>
+            <h3 id="ascii-tabindex" role="none" tabindex="&#9;&#10;&#12;&#13; +2abc" data-tabindex-case>ASCII</h3>
+            <h3 id="negative-tabindex" role="none" tabindex="-2tail" data-tabindex-case>Negative</h3>
+            <h3 id="nbsp-tabindex" role="none" tabindex="&#160;2" data-tabindex-case>NBSP</h3>
+            <h3 id="empty-tabindex" role="none" tabindex="" data-tabindex-case>Empty</h3>
+            <h3 id="blank-tabindex" role="none" tabindex="&#9; " data-tabindex-case>Blank</h3>
+            <h3 id="sign-tabindex" role="none" tabindex="+" data-tabindex-case>Sign</h3>
+            <h3 id="sign-space-tabindex" role="none" tabindex="- 2" data-tabindex-case>Sign space</h3>
+            <h3 id="no-digits-tabindex" role="none" tabindex=".5" data-tabindex-case>No digits</h3>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
+            // Native parsing and focus are checked independently of the role expectation.
+            const focus = yield* page.evaluateInMainWorld(() =>
+              Array.from(document.querySelectorAll<HTMLElement>("[data-tabindex-case]"), (element) => {
+                element.focus()
+                const focused = document.activeElement === element
+                element.blur()
+                return { id: element.id, tabIndex: element.tabIndex, focused }
+              })
+            )
+            assert.deepStrictEqual(focus, [
+              { id: "decimal-tabindex", tabIndex: 0, focused: true },
+              { id: "trailing-tabindex", tabIndex: 2, focused: true },
+              { id: "ascii-tabindex", tabIndex: 2, focused: true },
+              { id: "negative-tabindex", tabIndex: -2, focused: true },
+              ...["nbsp", "empty", "blank", "sign", "sign-space", "no-digits"].map((id) => ({
+                id: `${id}-tabindex`,
+                tabIndex: -1,
+                focused: false
+              }))
+            ])
+            for (const { id, focused } of focus) {
+              yield* page.locator(`#${id}`).pipe(
+                Expect.toHaveRole(focused ? "heading" : "none"),
+                Deadline.within("1 second")
+              )
+            }
             // A global ARIA attribute or focusability overrides a presentational role with the implicit one, and
             // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
             yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
             yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
-            // HTML parses tabindex="0.5" as 0, so the element is focusable and keeps its implicit role.
-            yield* page.locator("#decimal-tabindex").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
             yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
             const snapshot = yield* page.locator("#described").snapshot()
