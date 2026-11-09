@@ -1754,6 +1754,110 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
     }))
 }
 
+describe("CdpAdapter navigation-interrupted evaluation", () => {
+  for (const outcome of ["retired", "closed", "deadline", "unrelated"] as const) {
+    it.effect(`waits for lifecycle confirmation without replay (${outcome})`, () =>
+      Effect.gen(function*() {
+        const rejected = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
+        let calls = 0
+        const error = new Protocol.ProtocolError({
+          reason: new Protocol.Rejected({
+            method: "Runtime.callFunctionOn",
+            reason: "Unrecognized",
+            code: -32000,
+            description: outcome === "unrelated" ? "Something else failed" : "Inspected target navigated or closed"
+          })
+        })
+        const mock = {
+          ...session,
+          send: Effect.fnUntraced(function*() {
+            calls++
+            yield* Deferred.await(reply)
+            yield* Deferred.succeed(rejected, undefined)
+            return yield* Effect.fail(error)
+          })
+        } as unknown as ProtocolClient.Session
+        const { state, target, page } = yield* withPage(mock)
+        const frame = state.frames.get("T1")!
+        const document = Tree.commit(
+          state,
+          frame,
+          {
+            loaderId: "initial",
+            url: "about:blank",
+            origin: "://"
+          },
+          () => ({ _tag: "InitialBlank" }),
+          undefined,
+          "test"
+        )
+        const realm = Tree.addRealm(state, {
+          uniqueId: "interrupted",
+          contextId: 1,
+          target,
+          frame,
+          world: { _tag: "Main" },
+          origin: "://"
+        })
+        document.realms.add(realm)
+        const at = yield* BrowserClock.after(100)
+        // The call may have mutated the page before its reply was cut off. It must run exactly once.
+        const waiting = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => { globalThis.applied = true; return new Promise(() => {}) }",
+          arguments: [],
+          awaitPromise: true,
+          result: "value",
+          userActivation: false
+        }).pipe(
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("40 millis")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Deferred.await(rejected)
+        yield* TestClock.adjust("0 millis")
+        if (outcome === "unrelated") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          assert.strictEqual(calls, 1)
+          return
+        }
+        assert.isUndefined(waiting.pollUnsafe(), "rejection alone must not claim the realm ended")
+        yield* TestClock.adjust("59 millis")
+        assert.isUndefined(waiting.pollUnsafe())
+        if (outcome === "deadline") {
+          yield* TestClock.adjust("1 millis")
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          if (result.reason._tag === "Protocol") assert.strictEqual(result.reason.error.reason._tag, "NoReply")
+          // A later lifecycle event cannot restart an expired evaluation.
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        } else if (outcome === "closed") {
+          Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test closure")
+        } else {
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        }
+        yield* state.buffer.flush
+        if (outcome !== "deadline") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Gone")
+          if (result.reason._tag === "Gone") {
+            assert.deepStrictEqual(result.reason.target, { _tag: "Realm", id: realm.id })
+          }
+        }
+        assert.strictEqual(calls, 1)
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          BrowserClock.CurrentClock,
+          Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+        )
+      ))
+  }
+})
+
 describe("CdpAdapter transient evaluation results", () => {
   for (const releaseResult of [false, true]) {
     for (const thrown of [false, true]) {
