@@ -1410,3 +1410,13 @@ context headers. This matches BiDi's native header merging and Playwright's cont
 whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
+
+## Scoped overlay dispatch
+
+Locator handlers replace execution dispatch on their page, following [Pay for what you use](#pay-for-what-you-use),
+so existing locators observe activation without a registry probe on ordinary pages. A page-local semaphore and
+inherited suppression serialize callbacks without recursion. Final checks restart before input; explicit removal
+prevents new selections, while scope release interrupts selected work. Dispatch restores only after outstanding
+invocations and hidden waits drain, including the last finite invocation. Rejected: a global registry lookup on
+every action, which charges unused pages; and restoring immediately at the last selection, which lets concurrent
+actions bypass its callback or disappearance wait.
