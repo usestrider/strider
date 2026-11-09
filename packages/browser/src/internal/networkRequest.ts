@@ -59,9 +59,9 @@ export const headersSent = (
 export const failure = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest.NetworkRequest
-): Effect.Effect<Option.Option<NetworkRequest.Failure>, NetworkRequest.RequestError> =>
-  Effect.gen(function*() {
-    const owner = Handles.target(target)
+): Effect.Effect<Option.Option<NetworkRequest.Failure>, NetworkRequest.RequestError> => {
+  const owner = Handles.target(target)
+  return Effect.gen(function*() {
     const { model } = owner.behind.runtime
     const unavailable = (why: NetworkRequest.RequestUnavailable["why"]) =>
       Effect.fail(
@@ -123,4 +123,10 @@ export const failure = (
         )
       })
     })
-  }).pipe(Operation.named("NetworkRequest.failure", { attributes: { "browser.hop.id": request.hop } }))
+  }).pipe(Operation.named("NetworkRequest.failure", {
+    attributes: {
+      "browser.hop.id": request.hop,
+      [owner._tag === "Page" ? "browser.page.id" : "browser.context.id"]: owner.behind.entry.id
+    }
+  }))
+}
