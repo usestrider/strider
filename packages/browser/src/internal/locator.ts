@@ -36,6 +36,7 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Devices from "./devices.ts"
 import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -596,6 +597,105 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           "done" as const
         ),
       { redacted: Redacted.isRedacted(text) }
+    )
+  }
+  dispatchEvent(type: string, options?: Locator.DispatchEventOptions) {
+    const operation = "Locator.dispatchEvent"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const hint = () =>
+        record.dispatch._tag === "MayHaveBeenSent"
+          ? Option.some("The event may have been dispatched; it will not be sent again")
+          : Option.some("Waiting for one element to match the locator")
+      const attempt = Effect.gen({ self: this }, function*() {
+        if (record.left() <= 0) return yield* Effect.fail(record.timeout(hint()))
+        const id = record.id
+        const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, record.budget.at).pipe(
+          Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+        )
+        if (found._tag === "Response") {
+          if (found.response._tag === "NoMatch") return { retry: { _tag: "NoMatch" } } as const
+          return yield* this.unmatched(operation, found.response, id)
+        }
+        if (options?.trial === true) return "done" as const
+        const result = yield* Effect.gen(function*() {
+          // A frame may commit while its engine is installed; the node identifies the document that returned it.
+          const realm = yield* Evaluation.documentRealm(
+            owner.runtime,
+            found.node.document,
+            yield* Runtime.ownWorld(owner.runtime, Evaluation.isolatedWorld),
+            id
+          )
+          const args = yield* Evaluation.toLocal([{
+            type,
+            eventClass: options?.eventClass ?? "Event",
+            init: options?.init ?? {}
+          }], realm)
+          if (record.left() <= 0) return yield* Effect.fail({ _tag: "Deadline" } as const)
+          const remote = yield* Evaluation.call(owner.runtime, {
+            dispatch: record,
+            realm,
+            functionDeclaration: dispatchDOMEvent.toString(),
+            arguments: [{ _tag: "Node", node: found.node }, ...args],
+            result: "value",
+            userActivation: false,
+            page: Option.some(owner.page),
+            at: record.budget.at,
+            id
+          })
+          return yield* Evaluation.fromRemote(remote)
+        }).pipe(Effect.mapError((failure) =>
+          failure._tag === "Gone" ?
+            failure.error
+            : failure._tag === "Deadline" ?
+            record.timeout(hint())
+            : this.error(operation, failure.reason, id, record.dispatch)
+        ))
+        if (result === "detached") {
+          record.markNotSent()
+          return { retry: { _tag: "NoMatch" } } as const
+        }
+        if (result === "unsupported") {
+          record.markNotSent()
+          return yield* Effect.fail(this.error(
+            operation,
+            new Reason.Unsupported({
+              capability: "dom.eventConstructor",
+              backend: owner.runtime.backend,
+              hint: "The target document does not provide the requested native event constructor"
+            }),
+            id
+          ))
+        }
+        if (result === "invalid") {
+          record.markNotSent()
+          return yield* Effect.fail(this.error(
+            operation,
+            new Reason.InvalidInput({
+              input: "event initialization",
+              expected: "initialization accepted by the native event constructor",
+              hint: "Use fields supported by the selected event class; DOM references cannot cross by value"
+            }),
+            id
+          ))
+        }
+        record.markConfirmed()
+        return "done" as const
+      })
+      while (true) {
+        const outcome = yield* record.bound(owner.page.input.withPermit(attempt), hint)
+        if (outcome === "done") return
+        record.observe(outcome.retry)
+        yield* record.bound(BrowserClock.sleep(50), hint)
+      }
+    }).pipe(
+      Effect.raceFirst(Runtime.pageEnded(owner.page)),
+      Operation.named(operation, {
+        attributes: { "browser.page.id": owner.page.id, "browser.locator": this.description }
+      }),
+      Effect.provideService(Recorders.CurrentSubject, Option.some({ steps: this.steps, secret: false }))
     )
   }
   selectOption(choice: Locator.SelectOption | ReadonlyArray<Locator.SelectOption>, options?: Locator.ActionOptions) {
@@ -1572,4 +1672,40 @@ export const pageFrame = (owner: Owner, iframe: Locator.ReadonlyLocator): Locato
     throw new Error("Page.frame: the iframe's locator belongs to another page")
   }
   return frameLocator(owner, iframe.steps)
+}
+
+/** Sent only by dispatchEvent; no constructor lookup or event state is added to engine installation. */
+function dispatchDOMEvent(element: Element, data: {
+  readonly type: string
+  readonly eventClass: string
+  readonly init: Readonly<Record<string, unknown>>
+}) {
+  const { type, eventClass, init } = data
+  if (!element.isConnected) return "detached"
+  const constructors = {
+    Event: globalThis.Event,
+    CustomEvent: globalThis.CustomEvent,
+    MouseEvent: globalThis.MouseEvent,
+    KeyboardEvent: globalThis.KeyboardEvent,
+    PointerEvent: globalThis.PointerEvent,
+    FocusEvent: globalThis.FocusEvent,
+    WheelEvent: globalThis.WheelEvent,
+    InputEvent: globalThis.InputEvent,
+    DragEvent: globalThis.DragEvent,
+    TouchEvent: globalThis.TouchEvent,
+    DeviceOrientationEvent: globalThis.DeviceOrientationEvent,
+    DeviceMotionEvent: globalThis.DeviceMotionEvent
+  }
+  const Constructor = Object.prototype.hasOwnProperty.call(constructors, eventClass)
+    ? constructors[eventClass as keyof typeof constructors] :
+    undefined
+  if (typeof Constructor !== "function") return "unsupported"
+  let event: Event
+  try {
+    event = new Constructor(type, { bubbles: true, cancelable: true, composed: true, ...init })
+  } catch {
+    return "invalid"
+  }
+  element.dispatchEvent(event)
+  return "sent"
 }

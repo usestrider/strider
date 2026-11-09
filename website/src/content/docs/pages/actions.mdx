@@ -41,6 +41,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `press(key)`                  | focuses the element and presses a key                                      |
 | `pressSequentially(text)`     | focuses the element and types the text key by key                         |
 | `selectOption(choice)`        | chooses a `<select>`'s option by `value`, `label` or `index`                |
+| [`dispatchEvent(type, options)`](/docs/api/browser/Locator#Locator.dispatchEvent) | dispatches an untrusted DOM event without focus or scrolling |
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
@@ -333,3 +334,33 @@ const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
 A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
 gesture at a time, so two fibers acting on one page never interleave their presses: the second
 [waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
+
+
+## DOM events
+
+A component may listen for an application event that keyboard or pointer input cannot produce. Dispatch an
+untrusted DOM event on one attached element with `dispatchEvent`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const notifySaved = Effect.fn("notifySaved")(function*(page: Page.Page) {
+  yield* page.locator("#editor").dispatchEvent("saved", {
+    eventClass: "CustomEvent",
+    init: { detail: { revision: 3 }, bubbles: false }
+  })
+})
+```
+
+The constructor is explicit: the default is `Event`, even for a name such as `click`. Choose
+[`eventClass`](/docs/api/browser/Locator#DispatchEventOptions) for fields belonging to another native event
+class. Bubbles, cancelable and composed default to true. Initialization crosses by value using the
+[evaluation serialization rules](/docs/api/browser/JSHandle#Serialized), without nested handles or DOM nodes.
+The browser must provide the constructor: missing constructors fail with `Unsupported`, rejected initialization
+with `InvalidInput`, and values that cannot cross with `NotSerializable`.
+
+The action polls for attachment every 50 milliseconds, requires a single match and shares the operation deadline. It performs no
+readiness checks, focus or scrolling. Listener cancellation
+still succeeds. A trial resolves and checks without constructing or dispatching. After dispatch may have
+started, a failure reports its dispatch state and the action never sends the event again.
