@@ -146,6 +146,13 @@ export type Read =
 
 /** What an expectation waits for. */
 export type Expectation =
+  | {
+    readonly _tag: "CSS"
+    readonly name: string
+    readonly expected: TextMatcher
+    readonly not: boolean
+    readonly pseudo: "before" | "after" | null
+  }
   | { readonly _tag: "Visible" }
   | { readonly _tag: "Hidden" }
   | { readonly _tag: "Enabled" }
@@ -2339,6 +2346,15 @@ export function engine(render: (root: SnapNode) => string) {
               : value === matcher.value),
           observed: value === null ? "not a form control" : value
         }
+      }
+      case "CSS": {
+        const value = getComputedStyle(element, expectation.pseudo === null ? undefined : `::${expectation.pseudo}`)
+          .getPropertyValue(expectation.name)
+        const matcher = expectation.expected
+        const matches = matcher._tag === "RegExp"
+          ? new RegExp(matcher.source, matcher.flags).test(value)
+          : value === matcher.value
+        return { passed: expectation.not ? !matches : matches, observed: value }
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })

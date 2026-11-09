@@ -613,6 +613,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
+- `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
 - `const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>`
 - `const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
