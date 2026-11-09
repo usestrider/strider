@@ -4,7 +4,9 @@
  * by `uniqueContextId`. Values come back in WebDriver BiDi's serialization, which CDP produces with
  * `serialization: "deep"`.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as DOM from "../../cdp/DOM.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -325,13 +327,35 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
   // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()
   const resultIds = new Set<string>()
-  const release = Effect.suspend(() =>
-    Effect.forEach(
-      new Set([...nodes.values(), ...resultIds]),
+  let cleanup: Fiber.Fiber<void> | undefined
+  const handoff = Effect.suspend(() => {
+    const ids = new Set([...nodes.values(), ...resultIds])
+    // A closing connection owns teardown of its realms; never start unowned work or wait here.
+    if (ids.size === 0 || state.cleanupScope.state._tag === "Closed") return Effect.void
+    const work = Effect.forEach(
+      ids,
       (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
       { discard: true }
+    ).pipe(
+      Operation.detached,
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logWarning("CDP evaluation object cleanup failed", cause)
+      ),
+      Effect.interruptible
     )
-  ).pipe(Operation.detached, Effect.provideService(ProtocolClient.CommandDeadline, Option.none()))
+    return work.pipe(
+      Effect.forkIn(state.cleanupScope, { startImmediately: true }),
+      Effect.tap((fiber) =>
+        Effect.sync(() => {
+          cleanup = fiber
+        })
+      ),
+      Effect.asVoid
+    )
+  })
   return yield* Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       for (const argument of call.arguments) {
@@ -398,7 +422,15 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
         } satisfies Adapter.RemoteResult
       }
       return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
-    }).pipe(Effect.ensuring(release))
+    }).pipe(
+      // Ownership transfers while masked; the caller's finalizer never waits for the browser.
+      Effect.ensuring(handoff),
+      Effect.flatMap((result) =>
+        cleanup === undefined
+          ? Effect.succeed(result)
+          : restore(Fiber.await(cleanup)).pipe(Effect.as(result))
+      )
+    )
   )
 })
 
