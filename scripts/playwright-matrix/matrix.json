@@ -28668,33 +28668,39 @@
       "upstream": [
         "method:Request.redirectedFrom"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "redirects",
+          "url": "/docs/api/browser/NetworkRequest#redirects"
+        }
+      ],
+      "notes": "Scoped redirects(target).from(request) and .to(request) read original snapshots from the existing 1000-hop connection-wide index. None identifies a known boundary; typed failures distinguish pending, unavailable, released and closed evidence. No additional request tracking. Copied, foreign or evicted snapshots cannot be navigated.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -28704,40 +28710,52 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "bounded-redirect-evidence",
+        "quote": "Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle.",
+        "revision": "cb252415d63d94a65649d7be2a211ae7cb26ab95"
+      }
     },
     {
       "id": "method-request-redirectedto",
       "upstream": [
         "method:Request.redirectedTo"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "redirects",
+          "url": "/docs/api/browser/NetworkRequest#redirects"
+        }
+      ],
+      "notes": "Scoped redirects(target).from(request) and .to(request) read original snapshots from the existing 1000-hop connection-wide index. None identifies a known boundary; typed failures distinguish pending, unavailable, released and closed evidence. No additional request tracking. Copied, foreign or evicted snapshots cannot be navigated.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -28747,7 +28765,13 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "bounded-redirect-evidence",
+        "quote": "Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle.",
+        "revision": "cb252415d63d94a65649d7be2a211ae7cb26ab95"
+      }
     },
     {
       "id": "method-request-resourcetype",
@@ -113313,7 +113337,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "b69e58d7444bd5f16dac9486a6f5b54a48ee2947e010c3c9c9fa06e8a5182b7c",
+    "docs/decisions.md": "ad4075f0fa0d7856249d5d7c1e5e7e5ea9fab1f44fd9b450143512bd4c4781ff",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113332,7 +113356,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
+    "packages/browser/src/NetworkRequest.ts": "c708d0c56f039ce3497773716a0a5830088ca1e77d770cea9b27e207963c6119",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",

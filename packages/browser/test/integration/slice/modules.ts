@@ -596,6 +596,52 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect(
+        "reads scoped redirect neighbors across repeated URLs without tracking other contexts",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const other = yield* Browser.newPage()
+            const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const links = yield* NetworkRequest.redirects(page).pipe(Scope.provide(scope))
+            const firstSent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-repeat` })
+            const completed = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-repeat`,
+              status: 200,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-repeat`)
+            yield* completed
+            const first = yield* firstSent
+            const second = Option.getOrThrow(yield* links.to(first))
+            const third = Option.getOrThrow(yield* links.to(second))
+            assert.strictEqual(first.url, third.url)
+            assert.notStrictEqual(first.hop, third.hop)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(third)), second)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(second)), first)
+            assert.isTrue(Option.isNone(yield* links.from(first)))
+            assert.isTrue(Option.isNone(yield* links.to(third)))
+            const foreign = yield* NetworkRequest.redirects(other)
+            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "Unavailable")
+            yield* other.goto(`${origin}/redirect-repeat`)
+            const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
+            assert.strictEqual(otherRequests.length, 3)
+            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "Unavailable")
+            const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/events")
+            })
+            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "Pending")
+            yield* Scope.close(scope, Exit.void)
+            assert.strictEqual((yield* Effect.flip(links.from(first))).reason.why, "Released")
+            const live = yield* NetworkRequest.redirects(page)
+            yield* page.close()
+            assert.strictEqual((yield* Effect.flip(live.from(first))).reason.why, "TargetClosed")
+          })),
+        timeout
+      )
+
       it.effect("says a redirect hop has no body, and filters responses by status", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Go", "fetch('/redirect')"))

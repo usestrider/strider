@@ -6,8 +6,9 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
+import type * as Scope from "effect/Scope"
 import type * as Deadline from "../Deadline.ts"
-import type * as NetworkRequest from "../NetworkRequest.ts"
+import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as EventModule from "./eventModule.ts"
@@ -54,3 +55,66 @@ export const headersSent = (
     )
     return Option.getOrElse((yield* hop.value.state.get).sent, () => request.headers)
   }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))
+
+/** Reads existing evidence only; creating access must never start background tracking. */
+export const redirects: (
+  target: Page.ObservedPage | UserContext.ObservedUserContext
+) => Effect.Effect<NetworkRequest.Redirects, never, Scope.Scope> = Effect.fnUntraced(
+  function*(target: Page.ObservedPage | UserContext.ObservedUserContext) {
+    let owner: ReturnType<typeof Handles.target> | undefined = Handles.target(target)
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        owner = undefined
+      })
+    )
+    const read = (request: NetworkRequest.NetworkRequest, direction: -1 | 1) =>
+      Effect.gen(function*() {
+        const fail = (why: NetworkRequest.RedirectUnavailable["why"]) =>
+          Effect.fail(
+            new NetworkRequest.NetworkRequestError({
+              reason: new NetworkRequest.RedirectUnavailable({ why })
+            })
+          )
+        const current = owner
+        if (current === undefined) return yield* fail("Released")
+        const { entry, runtime } = current.behind
+        if (Deferred.isDoneUnsafe(entry.closed) || Deferred.isDoneUnsafe(runtime.model.lost)) {
+          return yield* fail("TargetClosed")
+        }
+        const owned = (hop: import("./model.ts").HopEntry) =>
+          current._tag === "Page"
+            ? Option.exists(hop.page, (page) => page === current.behind.entry)
+            : Option.exists(hop.context, (context) => context === current.behind.entry)
+        const source = runtime.model.hop(request.hop)
+        if (Option.isNone(source) || source.value.request !== request || !owned(source.value)) {
+          return yield* fail("Unavailable")
+        }
+        const separator = request.hop.lastIndexOf(".")
+        const ordinal = Number(request.hop.slice(separator + 1))
+        if (direction === -1 && ordinal === 0) return Option.none()
+        const adjacent = runtime.model.hop(
+          `${request.hop.slice(0, separator)}.${ordinal + direction}` as NetworkRequest.HopId
+        )
+        if (Option.isSome(adjacent)) {
+          if (!owned(adjacent.value)) return yield* fail("Unavailable")
+          return Option.some(adjacent.value.request)
+        }
+        if (direction === -1) return yield* fail("Unavailable")
+        const end = yield* Deferred.poll(source.value.end)
+        if (Option.isNone(end)) return yield* fail("Pending")
+        const terminal = yield* end.value
+        if (terminal._tag === "Forgotten") return yield* fail("Unavailable")
+        if (terminal._tag === "Failed") return Option.none()
+        const response = (yield* source.value.state.get).response
+        if (Option.isNone(response)) return yield* fail("Unavailable")
+        if ([301, 302, 303, 307, 308].includes(response.value.status)) return yield* fail("Unavailable")
+        return Option.none()
+      }).pipe(Operation.named(direction === -1 ? "NetworkRequest.redirects.from" : "NetworkRequest.redirects.to", {
+        attributes: { "browser.hop.id": request.hop }
+      }))
+    return {
+      from: (request: NetworkRequest.NetworkRequest) => read(request, -1),
+      to: (request: NetworkRequest.NetworkRequest) => read(request, 1)
+    }
+  }
+)

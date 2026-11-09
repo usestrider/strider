@@ -1,0 +1,42 @@
+---
+title: Redirect chains
+description: Read neighboring request hops using scoped access to bounded browser evidence.
+order: 4
+---
+
+A redirect can visit the same URL more than once, so matching URLs cannot reconstruct its path.
+Scoped redirect access reads each hop's predecessor or successor by identity.
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const redirectedFrom = Effect.fn("redirectedFrom")(function*(page: Page.Page) {
+  const redirects = yield* NetworkRequest.redirects(page)
+  const sent = yield* NetworkRequest.next(page, { url: "https://example.com/start" })
+  yield* page.goto("https://example.com/start")
+  const first = yield* sent
+  const next = yield* redirects.to(first)
+  return Option.map(next, (request) => request.url)
+})
+```
+
+The handle's `from(request)` and `to(request)` read immediately and never wait. Pass the original snapshot from
+that page's or context's [request events](/docs/events/network). A copied or decoded snapshot cannot establish
+ownership. `from` returns `None` for the first hop; `to` returns `None` after a terminal non-redirect response or
+failure. Earlier hops and repeated URLs retain their distinct identities on Chromium, Firefox and WebKit.
+
+Access reuses the existing connection-wide index of at most 1000 hops. It adds no request cache, event listener or
+protocol command. Completed hops are evicted oldest first, then unfinished hops if necessary; requests in another
+context can evict evidence too. Access can read retained requests from before it opened.
+
+A lookup fails with `NetworkRequestError`, whose `RedirectUnavailable` reason has a `why`:
+
+- `Pending`: the hop is unfinished and its successor is not established. Finish the action that causes the request before inspecting it.
+  A completed redirect without a retained successor is `Unavailable`; it does not prove that the chain ended.
+- `Unavailable`: a snapshot or neighbor was evicted, belongs to another target, was copied, or lacks terminal evidence.
+- `Released`: the scope that opened access has ended.
+- `TargetClosed`: the page, context or browser connection has closed.
+
+These failures preserve uncertainty instead of reporting an absent link. Retain snapshots you need as ordinary
+data, but closing the scope revokes further lookups through its handle.

@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
+import type * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -392,3 +393,100 @@ export const headersSent = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
+
+/**
+ * Reason redirect evidence cannot be read at this time.
+ *
+ * **Details**
+ *
+ * `Pending` means the next hop is not known yet; `Unavailable` means the request or its neighbor is no longer
+ * retained, is reconstructed, or belongs to another target. `Released` ends scoped access and `TargetClosed`
+ * ends access through a closed page, context or connection.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RedirectUnavailable
+  extends Schema.Error<RedirectUnavailable>("@usestrider/browser/NetworkRequest/RedirectUnavailable")({
+    _tag: Schema.tag("RedirectUnavailable"),
+    why: Schema.Literals(["Pending", "Unavailable", "Released", "TargetClosed"])
+  })
+{
+  override get message(): string {
+    return `Redirect evidence is ${this.why}`
+  }
+}
+
+/**
+ * Error reading a request's redirect links.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class NetworkRequestError
+  extends Schema.TaggedError<NetworkRequestError>("@usestrider/browser/NetworkRequest/NetworkRequestError")(
+    "NetworkRequestError",
+    {
+      reason: RedirectUnavailable
+    }
+  )
+{}
+
+/**
+ * Scoped access to neighboring request snapshots in the browser's bounded hop index.
+ *
+ * **Details**
+ *
+ * Both members read immediately. `None` means a known boundary; unavailable or unfinished evidence fails.
+ * Pass the original snapshot received from this target, rather than a decoded or copied request.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface Redirects {
+  /** Reads the preceding hop, or `None` for the first hop. */
+  readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>
+  /** Reads the following hop, or `None` after a terminal non-redirect response or failure. */
+  readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>
+}
+
+/**
+ * Opens scoped access to a page's or context's redirect links without enabling additional request tracking.
+ *
+ * **Details**
+ *
+ * All backends reuse the existing connection-wide index of at most 1000 hops. Completed hops are evicted
+ * oldest first, then unfinished hops if necessary. Other contexts can therefore evict evidence. This retains
+ * no additional requests, installs no listeners and sends no protocol commands. Closing the scope revokes access;
+ * closing the target or connection also prevents reads. Access may read requests sent before it opened.
+ *
+ * `from` and `to` use chain identity and hop ordinal, including when URLs repeat. They require the exact original
+ * snapshot and its owning page or context. Missing retained evidence fails with `Unavailable`; a successor not
+ * yet established fails with `Pending` while the hop is unfinished. A completed redirect whose successor is absent
+ * fails with `Unavailable`:
+ * no terminal boundary can be inferred from a redirect response alone. Neither member waits.
+ *
+ * **Example** (Reading a redirect's predecessor)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const predecessor = Effect.fn("predecessor")(
+ *   function*(page: Page.ObservedPage, request: NetworkRequest.NetworkRequest) {
+ *     const redirects = yield* NetworkRequest.redirects(page)
+ *     return yield* redirects.from(request)
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const redirects = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext
+): Effect.Effect<Redirects, never, Scope.Scope> => NetworkRequestImpl.redirects(target)

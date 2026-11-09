@@ -1159,6 +1159,9 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `interface Redirects`
+  - `readonly from: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>`
+  - `readonly to: (request: NetworkRequest) => Effect.Effect<Option.Option<NetworkRequest>, NetworkRequestError>`
 
 *schemas*
 
@@ -1177,10 +1180,19 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
+- `const redirects: (target: Page.ObservedPage | UserContext.ObservedUserContext) => Effect.Effect<Redirects, never, Scope.Scope>`
 
 *converting*
 
 - `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+*errors*
+
+- `class NetworkRequestError: Schema.TaggedError "NetworkRequestError" { reason }`
+
+*reasons*
+
+- `class RedirectUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
 
