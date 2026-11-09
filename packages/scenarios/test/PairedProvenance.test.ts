@@ -33,7 +33,7 @@ const compare = (base: string, head: string, env: NodeJS.ProcessEnv) => {
   temporary.push(output)
   const result = spawnSync(
     process.execPath,
-    [driver, "--base", base, "--head", head, "--output", output, "--runs", "2"],
+    [driver, "--base", base, "--head", head, "--output", output, "--runs", "4"],
     { encoding: "utf8", env, timeout: 60_000 }
   )
   const report = path.join(output, "comparison.json")
@@ -58,18 +58,21 @@ it("rejects refs whose browser pins differ, not only flake.lock, before starting
       { file: "packages/browser/test/integration/browsers.json", text: "{}\n" }
     ]
   ) {
-    const { result, started } = compare(checkout(), checkout(changed), browser())
+    const { result, started, report } = compare(checkout(), checkout(changed), browser())
     expect(started, changed.file).toBe(false)
     expect(result.status, changed.file).toBe(1)
+    expect(report?.status).toBe("failed")
+    expect(report?.error).toContain(`Environment pin mismatch: head ${changed.file} differs from driver`)
   }
 })
 
 it("rejects refs whose pins differ from the environment that supplies the browser", () => {
   // Both refs agree with each other, but not with the driver's Nix environment the workers run in.
   const changed = { file: "flake.lock", text: "{\"nodes\":{},\"root\":\"root\",\"version\":7}\n" }
-  const { result, started } = compare(checkout(changed), checkout(changed), browser())
+  const { result, started, report } = compare(checkout(changed), checkout(changed), browser())
   expect(started).toBe(false)
   expect(result.status).toBe(1)
+  expect(report?.error).toContain("Environment pin mismatch: base flake.lock differs from driver")
 })
 
 it("records a failed comparison, without starting workers, when the browser is not named", () => {
@@ -79,4 +82,5 @@ it("records a failed comparison, without starting workers, when the browser is n
   expect(started).toBe(false)
   expect(result.status).toBe(1)
   expect(report?.status).toBe("failed")
+  expect(report?.error).toContain("STRIDER_CHROMIUM must name the pinned browser executable")
 }, 70_000)
