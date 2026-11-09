@@ -61,6 +61,22 @@ const routes: Record<string, Route> = {
     })
     response.end("hello, download")
   },
+  // Three hops at the same URL; cookies advance the server-side redirect sequence.
+  "/redirect-repeat": (request, response) => {
+    const step = Number(/striderRedirectStep=(\d+)/.exec(request.headers.cookie ?? "")?.[1] ?? 0)
+    if (step < 2) {
+      response.writeHead(302, { location: "/redirect-repeat", "set-cookie": `striderRedirectStep=${step + 1}; Path=/` })
+      response.end()
+    } else {
+      response.setHeader("set-cookie", "striderRedirectStep=; Max-Age=0; Path=/")
+      html(response, "<title>redirected</title>")
+    }
+  },
+  // A redirect status with no location, which the browser doesn't follow: the response is the request's last
+  "/redirect-unfollowed": (_request, response) => {
+    response.writeHead(302, { "content-type": "text/html" })
+    response.end("<title>unfollowed</title>")
+  },
   "/redirect": (_request, response) => {
     response.writeHead(302, { location: "/landed" })
     response.end()

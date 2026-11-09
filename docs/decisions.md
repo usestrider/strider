@@ -1424,6 +1424,21 @@ whole inherited map, which BiDi cannot implement natively; interception solely t
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
 
+## Bounded redirect evidence
+
+Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle. It
+adds no request tracking or cache, following [Pay for what you use](#pay-for-what-you-use). Original snapshots
+and model ownership establish which target can read a link. Observed links are authoritative, including canceled
+successor attempts. An absent link is a boundary only with terminal evidence; a committed navigation naming the
+exact hop can supply that evidence from the existing bounded event log. Insufficient proof is an explicit typed
+unknown outcome, separately recoverable from retention, ownership and lifetime errors. Missing terminal navigation
+evidence in disabled or incomplete history is an unavailable-evidence error, so unknown recovery cannot hide
+retention loss. Completion alone cannot
+settle a redirect on BiDi, which reports it before its successor and exposes no fetch redirect mode. Inferring a
+boundary from status, Location or elapsed time was rejected because it can invent an end. Unlimited object links
+were rejected for unbounded retention; another opt-in cache or injected fetch wrapper was rejected because it
+would add tracking without supplying the missing native request identity or terminal signal.
+
 ## Context HTTP credentials
 
 Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different
