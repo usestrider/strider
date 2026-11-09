@@ -8,6 +8,18 @@ import * as Option from "effect/Option"
 import * as http from "node:http"
 import { supports } from "./capabilities.ts"
 
+const timingFields = [
+  "startTime",
+  "domainLookupStart",
+  "domainLookupEnd",
+  "connectStart",
+  "connectEnd",
+  "secureConnectionStart",
+  "requestStart",
+  "responseStart",
+  "responseEnd"
+] as const
+
 const site = Effect.gen(function*() {
   const hits = new Map<string, number>()
   let release: (() => void) | undefined
@@ -153,25 +165,78 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
         60_000
       )
 
-      it.effect("reuses a cacheable script without a second server request", () =>
-        Effect.gen(function*() {
-          const served = yield* site
-          const context = yield* Browser.newContext({ requestTiming: true })
-          const page = yield* context.newPage
-          yield* page.goto(served.origin)
-          for (let i = 0; i < 2; i++) {
-            yield* page.evaluateInMainWorld(async () => {
-              await new Promise<void>((resolve, reject) => {
-                const script = document.createElement("script")
-                script.src = "/cache-script"
-                script.onload = () => resolve()
-                script.onerror = () => reject(new Error("script failed"))
-                document.head.append(script)
+      it.effect(
+        "checks timing observations for server-counted cache reuse without waiting for omitted events",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const context = yield* Browser.newContext({ requestTiming: true })
+            const page = yield* context.newPage
+            yield* page.goto(served.origin)
+            const firstResponse = yield* NetworkResponse.next(page, { url: `${served.origin}/cache-script` })
+            let first: NetworkRequest.Timing | undefined
+            let firstHop: NetworkRequest.HopId | undefined
+            for (let i = 0; i < 2; i++) {
+              const loads = yield* page.evaluateInMainWorld(async () => {
+                await new Promise<void>((resolve, reject) => {
+                  const script = document.createElement("script")
+                  script.src = "/cache-script"
+                  script.onload = () => resolve()
+                  script.onerror = () => reject(new Error("script failed"))
+                  document.head.append(script)
+                })
+                return (globalThis as typeof globalThis & { cacheLoads: number }).cacheLoads
               })
-            })
-            assert.strictEqual(served.hits("/cache-script"), 1, "the second script must come from cache")
-          }
-        }).pipe(Effect.scoped), 60_000)
+              if (i === 0) yield* firstResponse
+              assert.strictEqual(loads, i + 1)
+              assert.strictEqual(served.hits("/cache-script"), 1, "both loads use one server response")
+              // Memory-cache reuse can omit the second request entirely. Read the retained observations,
+              // rather than subscribing to an event which the browser may never send.
+              const requests = yield* NetworkRequest.history(page, { url: `${served.origin}/cache-script` })
+              const responses = yield* NetworkResponse.history(page, { url: `${served.origin}/cache-script` })
+              assert.strictEqual(requests.dropped, 0)
+              assert.isAtLeast(requests.entries.length, 1)
+              assert.isAtMost(requests.entries.length, i + 1)
+              for (const request of requests.entries) {
+                const timing = yield* NetworkRequest.timing(page, request)
+                const response = responses.entries.find((response) => response.hop === request.hop)
+                assert.deepStrictEqual(timing.secureConnectionStart, Option.none())
+                for (const field of timingFields) {
+                  const value = timing[field]
+                  if (Option.isSome(value)) {
+                    assert.isTrue(Number.isFinite(value.value), field)
+                    assert.isAtLeast(value.value, 0, field)
+                    if (field !== "startTime") assert.isTrue(Option.isSome(timing.startTime), field)
+                  }
+                }
+                if (Option.isSome(timing.connectStart) && Option.isSome(timing.connectEnd)) {
+                  assert.isAtLeast(timing.connectEnd.value, timing.connectStart.value)
+                }
+                if (Option.isSome(timing.responseStart) && Option.isSome(timing.responseEnd)) {
+                  assert.isAtLeast(timing.responseEnd.value, timing.responseStart.value)
+                }
+                if (response?.servedBy === "cache") {
+                  assert.isTrue(
+                    timingFields.every((field) => Option.isNone(timing[field])),
+                    "ordinary Chromium cache phases are unavailable"
+                  )
+                }
+                if (i === 0) {
+                  assert.isTrue(Option.isSome(timing.startTime), "the first network load has a native origin")
+                  first = timing
+                  firstHop = request.hop
+                } else if (request.hop !== firstHop && Option.isSome(timing.startTime)) {
+                  assert.isAbove(
+                    timing.startTime.value,
+                    Option.getOrThrow(first!.startTime),
+                    "cache access has its own origin"
+                  )
+                }
+              }
+            }
+          }).pipe(Effect.scoped),
+        60_000
+      )
 
       if (name === "Chromium") {
         it.effect(
@@ -182,6 +247,7 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
               const context = yield* Browser.newContext({ requestTiming: true })
               const page = yield* context.newPage
               yield* page.goto(served.origin)
+              let previous: NetworkRequest.Timing | undefined
               for (let i = 0; i < 2; i++) {
                 const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/cached-redirect` })
                 const full = yield* NetworkResponse.next(page, {
@@ -196,42 +262,27 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
                 const timing = yield* NetworkRequest.timing(page, yield* sent)
                 assert.strictEqual(served.hits("/cached-redirect"), 1)
                 assert.strictEqual(served.hits("/cache"), 1)
-                console.log("REDIRECT_CACHE_EVIDENCE", JSON.stringify({ iteration: i, timing }))
+                const start = Option.getOrThrow(timing.startTime)
+                const sending = Option.getOrThrow(timing.requestStart)
+                const headers = Option.getOrThrow(timing.responseStart)
+                const end = Option.getOrThrow(timing.responseEnd)
+                assert.isAtLeast(sending, 0)
+                assert.isAtLeast(headers, sending)
+                assert.isAtLeast(end, headers)
+                assert.deepStrictEqual(timing.domainLookupStart, Option.none())
+                assert.deepStrictEqual(timing.connectStart, Option.none())
+                if (previous !== undefined) {
+                  assert.isAbove(
+                    start,
+                    Option.getOrThrow(previous.startTime) + Option.getOrThrow(previous.responseEnd),
+                    "the cached redirect uses a fresh origin after the first redirect completed"
+                  )
+                }
+                previous = timing
               }
             }).pipe(Effect.scoped),
           60_000
         )
       }
-
-      it.effect(
-        "leaves unavailable connection phases absent on reused and cached requests",
-        () =>
-          Effect.gen(function*() {
-            const served = yield* site
-            const context = yield* Browser.newContext({ requestTiming: true })
-            const page = yield* context.newPage
-            yield* page.goto(served.origin)
-            for (let i = 0; i < 2; i++) {
-              const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/cache` })
-              const full = yield* NetworkResponse.next(page, {
-                url: `${served.origin}/cache`,
-                body: (body) => body.text
-              })
-              yield* page.evaluateInMainWorld(async () => (await fetch("/cache")).text())
-              const response = yield* full
-              const timing = yield* NetworkRequest.timing(page, yield* sent)
-              assert.deepStrictEqual(timing.secureConnectionStart, Option.none())
-              if (response.servedBy === "cache" || response.servedBy === "route") {
-                assert.deepStrictEqual(timing.domainLookupStart, Option.none())
-                assert.deepStrictEqual(timing.connectStart, Option.none())
-              }
-              // Firefox reports zero-duration reused-connection boundaries; WebKit's zeros are ambiguous.
-              if (Option.isSome(timing.connectStart) && Option.isSome(timing.connectEnd)) {
-                assert.isAtLeast(timing.connectEnd.value, timing.connectStart.value)
-              }
-            }
-          }).pipe(Effect.scoped),
-        60_000
-      )
     })
   })

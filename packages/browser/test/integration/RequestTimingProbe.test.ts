@@ -114,16 +114,6 @@ describe("Request timing wire evidence", () => {
             ".data/request-timing-probe/firefox.ndjson",
             evidence.map((e) => JSON.stringify(e)).join("\n") + "\n"
           )
-          console.log(
-            "TIMING_PROBE",
-            JSON.stringify(evidence.map((e) => ({
-              method: e.method,
-              url: e.params.request.url,
-              redirectCount: e.params.redirectCount,
-              timestamp: e.params.timestamp,
-              timings: e.params.request.timings
-            })))
-          )
           assert.isAbove(
             completed.params.request.timings.responseEnd,
             headers.params.request.timings.responseEnd,

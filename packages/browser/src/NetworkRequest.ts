@@ -446,6 +446,8 @@ export class RequestError
  * `startTime` is milliseconds since the Unix epoch. Every other value is milliseconds from that same
  * hop's native baseline. A missing value proves neither completion nor failure. Earlier snapshots never
  * change. Connection reuse, cache responses and missing browser evidence can leave phases unavailable.
+ * `requestStart` can describe browser-reported cache access as well as request sending. Cache reuse can omit
+ * a second observable request entirely. Source labels alone do not establish whether the server was contacted.
  * `secureConnectionStart` is currently unavailable; TLS phase mapping is not advertised.
  *
  * @stability unstable
