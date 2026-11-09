@@ -156,6 +156,10 @@ export const attaching = (
             assert.deepStrictEqual((viewport as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const editable = reasonOf(yield* Effect.exit(kept!.getByRole("heading").isEditable))
             assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            for (const matcher of [Expect.toBeAttached, Expect.toBeDetached]) {
+              const attachment = reasonOf(yield* Effect.exit(kept!.getByRole("heading").pipe(matcher)))
+              assert.deepStrictEqual((attachment as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            }
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const replaced = reasonOf(yield* Effect.exit(kept!.setContent("<title>Forbidden</title>")))

@@ -1,7 +1,18 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeAttached",
+      "url": "/docs/api/browser/Expect#toBeAttached"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toBeDetached",
+      "url": "/docs/api/browser/Expect#toBeDetached"
+    }
+  ],
+  "notes": "Value matchers toBeAttached and toBeDetached select presence or absence instead of an attached option.",
   "capabilities": [],
   "id": "option-locatorassertions-tobeattached-attached",
   "upstream": [

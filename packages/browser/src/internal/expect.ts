@@ -186,7 +186,8 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
     const failed = () =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
+        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Detached" ||
+          expectation._tag === "Title"
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
@@ -367,11 +368,24 @@ export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) 
 
 // ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
 
-const stateOf =
-  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable" | "Empty") =>
-  (matcherName: string, condition: string) =>
-  (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
+const stateOf = (
+  tag:
+    | "Attached"
+    | "Detached"
+    | "Visible"
+    | "Hidden"
+    | "Enabled"
+    | "Disabled"
+    | "Checked"
+    | "Focused"
+    | "Editable"
+    | "Empty"
+) =>
+(matcherName: string, condition: string) =>
+(locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
 
+export const toBeAttached = stateOf("Attached")("toBeAttached", "to be attached")
+export const toBeDetached = stateOf("Detached")("toBeDetached", "to be detached")
 export const toBeVisible = stateOf("Visible")("toBeVisible", "to be visible")
 export const toBeHidden = stateOf("Hidden")("toBeHidden", "to be hidden")
 export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")

@@ -151,6 +151,8 @@ export type Read =
 
 /** What an expectation waits for. */
 export type Expectation =
+  | { readonly _tag: "Attached" }
+  | { readonly _tag: "Detached" }
   | { readonly _tag: "Viewport"; readonly ratio: number; readonly inViewport: boolean }
   | {
     readonly _tag: "CSS"
@@ -2387,6 +2389,10 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const found = resolve(steps)
     switch (expectation._tag) {
+      case "Attached":
+        return { passed: found.length === 1, observed: { matches: found.length } }
+      case "Detached":
+        return { passed: found.length === 0, observed: { matches: found.length } }
       case "Visible": {
         const visibleCount = found.filter(visible).length
         return {

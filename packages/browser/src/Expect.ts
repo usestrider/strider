@@ -52,6 +52,58 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
 }
 
 /**
+ * Expects the locator to match exactly one element connected to the document, including a shadow tree.
+ *
+ * **Details**
+ *
+ * Hidden elements count as attached. Missing or multiple matches retry until the deadline.
+ * A failure is an `ExpectationFailed` with observed `{ matches: number }` entries.
+ * Uses the locator's page and access grant; a closed page fails with `TargetGone`.
+ *
+ * **Example** (Waiting for document attachment)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const wait = Effect.fn("wait")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.locator("#status").pipe(Expect.toBeAttached)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeAttached: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeAttached(locator)
+
+/**
+ * Expects the locator to match no elements in the document, including its shadow trees.
+ *
+ * **Details**
+ *
+ * Hidden elements remain attached. One or multiple matches retry until the deadline.
+ * A failure is an `ExpectationFailed` with observed `{ matches: number }` entries.
+ * Uses the locator's page and access grant; a closed page fails with `TargetGone`.
+ *
+ * **Example** (Waiting for document attachment)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const wait = Effect.fn("wait")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.locator("#status").pipe(Expect.toBeDetached)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeDetached: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeDetached(locator)
+
+/**
  * Expects the one match to be visible.
  *
  * **Details**

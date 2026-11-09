@@ -3,9 +3,20 @@
   "upstream": [
     "method:LocatorAssertions.toBeAttached"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeAttached",
+      "url": "/docs/api/browser/Expect#toBeAttached"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toBeDetached",
+      "url": "/docs/api/browser/Expect#toBeDetached"
+    }
+  ],
+  "notes": "Attachment ignores visibility. toBeDetached supplies the negative form; multiple matches retry and report counts under Strider expectation semantics rather than fail immediately with Playwright strictness. Uses the enclosing deadline and Effect interruption.",
   "capabilities": [],
   "requirements": []
 }
