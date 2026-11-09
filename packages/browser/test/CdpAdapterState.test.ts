@@ -1619,7 +1619,12 @@ describe("CdpAdapter node arguments under interruption", () => {
       const resolving = yield* Deferred.make<void>()
       const mock = {
         ...session,
-        send: (command: { readonly method: string; readonly params: { readonly backendNodeId?: number; readonly objectId?: string } }) => {
+        send: (
+          command: {
+            readonly method: string
+            readonly params: { readonly backendNodeId?: number; readonly objectId?: string }
+          }
+        ) => {
           if (command.method === "Runtime.releaseObject") {
             released.push(command.params.objectId!)
             return Effect.succeed({})
