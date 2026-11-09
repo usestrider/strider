@@ -2,6 +2,7 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Runtime from "../../cdp/Runtime.ts"
@@ -9,6 +10,8 @@ import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Declarations from "../declarations.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import { contextKey, placement, type RealmEntry, type State, type TargetEntry } from "./state.ts"
 
 const origin = (realm: RealmEntry): import("../../WebSocketRoute.ts").Origin =>
@@ -74,7 +77,8 @@ export const prepare = Effect.fnUntraced(
       const known = new Map<string, import("../../Target.ts").RealmId>()
       const holder = { bridge, events: [] as Array<Runtime.BindingCalledParams>, known, overflow: false }
       deferred.set(bridge.name, holder)
-      const events = yield* target.session.subscribe(Runtime.bindingCalled).pipe(Scope.provide(bridge.scope))
+      const lifetime = yield* Scope.fork(bridge.scope)
+      const events = yield* target.session.subscribe(Runtime.bindingCalled).pipe(Scope.provide(lifetime))
       yield* events.pipe(
         Stream.runForEach((event) =>
           Effect.sync(() => {
@@ -97,6 +101,8 @@ export const prepare = Effect.fnUntraced(
             Effect.void :
             Target.getTargets().pipe(
               Protocol.on(state.root()),
+              Operation.detached,
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
               Effect.match({
                 onFailure: () => {
                   for (const realm of known.values()) bridge.failed(realm)
@@ -110,10 +116,11 @@ export const prepare = Effect.fnUntraced(
               })
             )
         ),
-        Effect.forkIn(bridge.scope)
+        Effect.ensuring(Scope.close(lifetime, Exit.void)),
+        Effect.forkIn(lifetime)
       )
       const destroyed = yield* target.session.subscribe(Runtime.executionContextDestroyed).pipe(
-        Scope.provide(bridge.scope)
+        Scope.provide(lifetime)
       )
       yield* destroyed.pipe(
         Stream.runForEach((event) =>
@@ -125,10 +132,10 @@ export const prepare = Effect.fnUntraced(
             }
           })
         ),
-        Effect.forkIn(bridge.scope)
+        Effect.forkIn(lifetime)
       )
       const cleared = yield* target.session.subscribe(Runtime.executionContextsCleared).pipe(
-        Scope.provide(bridge.scope)
+        Scope.provide(lifetime)
       )
       yield* cleared.pipe(
         Stream.runForEach(() =>
@@ -137,11 +144,11 @@ export const prepare = Effect.fnUntraced(
             known.clear()
           })
         ),
-        Effect.forkIn(bridge.scope)
+        Effect.forkIn(lifetime)
       )
       commands.push(Runtime.addBinding({ name: bridge.name }))
       yield* Scope.addFinalizer(
-        bridge.scope,
+        lifetime,
         Runtime.removeBinding({ name: bridge.name }).pipe(
           Protocol.on(target.session),
           Effect.ignore,

@@ -38,7 +38,7 @@ const WireMessage = Schema.Union([
 ])
 const Envelope = Schema.Struct({
   token: Schema.String,
-  type: Schema.Literals(["ready", "create", "message", "opened", "closed", "close", "fault"]),
+  type: Schema.Literals(["ready", "create", "message", "opened", "closed", "close", "fault", "error"]),
   id: Schema.String,
   sequence: Schema.optional(Schema.Number),
   url: Schema.optional(Schema.String),
@@ -422,6 +422,10 @@ export const register = <E, R>(
         if (envelope.type === "create") return yield* create(realm, envelope, origin)
         const connection = connections.get(`${realm}:${envelope.id}`)
         if (connection === undefined) return
+        if (envelope.type === "error") {
+          Events.publish(connection.events, { _tag: "Error", message: "Native WebSocket error" })
+          return
+        }
         if (envelope.type === "opened") {
           yield* Deferred.succeed(connection.opened, envelope.protocol ?? "")
           return
@@ -556,6 +560,10 @@ export const register = <E, R>(
             else yield* terminate(connection, "bridge overflow")
           }
           if (event.destroyed) {
+            for (const lease of unconfirmed.get(event.realm) ?? []) {
+              accounting.destroy(lease.owner, lease.generation)
+            }
+            unconfirmed.delete(event.realm)
             blocked.delete(event.realm)
             realms.delete(event.realm)
           }

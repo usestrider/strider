@@ -318,7 +318,10 @@ export const install = (name: string, token: string, pattern: string, transport:
         socket.opened(socket.native.protocol)
       }
       socket.native.onmessage = (event: any) => socket.enqueue("server", event.data)
-      socket.native.onerror = () => socket.fire("error", new global.Event("error"))
+      socket.native.onerror = () => {
+        emit(socket.route, { type: "error", id: socket.id })
+        socket.fire("error", new global.Event("error"))
+      }
       socket.native.onclose = (event: any) => {
         socket.queues.server.chain = socket.queues.server.chain.then(() => {
           emit(socket.route, {
