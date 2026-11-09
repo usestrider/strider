@@ -614,6 +614,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
+- `const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
 - `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
@@ -1166,6 +1167,7 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly body: Option.Option<B>`
 - `type BodyDecoder<B, DE, DR> = (message: HttpIncomingMessage.HttpIncomingMessage<RequestError>) => Effect.Effect<B, DE, DR>`
 - `type RequestErrorReason = typeof RequestErrorReason.Type`
+- `class Timing: Schema.Class { startTime, domainLookupStart, domainLookupEnd, connectStart, connectEnd, secureConnectionStart, requestStart, responseStart, responseEnd }`
 
 *schemas*
 
@@ -1174,7 +1176,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `const ResourceType = Schema.Literals(["document", "stylesheet", "image", "media", "font", "script", "fetch", "xhr", "webSocket", "eventSource", "manifest", "ping", "other"])`
 - `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))) }), Schema.TaggedS…`
 - `const Method = Schema.Literals(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "QUERY"] as const satisfies ReadonlyArray<HttpMethod.HttpMethod>)`
-- `const RequestErrorReason = Schema.Union([BodyUnavailable, ResponseUnavailable, BodyTruncated, MalformedBody, Reason.BackendFailure, Reason.Unsupported])`
+- `const RequestErrorReason = Schema.Union([BodyUnavailable, RequestUnavailable, ResponseUnavailable, BodyTruncated, MalformedBody, Reason.BackendFailure, Reason.Unsupported])`
 
 *combinators*
 
@@ -1196,6 +1198,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
+- `const timing: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Timing, RequestError>`
 
 *converting*
 
@@ -1214,6 +1217,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `class BodyUnavailable: Schema.Error { why, hint }`
 - `class BodyTruncated: Schema.Error { why, hint }`
 - `class MalformedBody: Schema.Error { expected, hint }`
+- `class RequestUnavailable: Schema.Error { why }`
 - `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
@@ -1959,6 +1963,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly requestTiming?: boolean | undefined`
   - `readonly acceptInsecureCerts?: boolean | undefined`
   - `readonly httpCredentials?: { readonly origin?: string | undefined readonly username: string readonly password: Redacted.Redacted<string> } | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`

@@ -210,7 +210,12 @@ export interface NodeBinding {
  * `evidence`: the events behind them.
  */
 export type Fact =
-  | { readonly _tag: "UserContextAdded"; readonly context: UserContext.Id; readonly isDefault: boolean }
+  | {
+    readonly _tag: "UserContextAdded"
+    readonly context: UserContext.Id
+    readonly isDefault: boolean
+    readonly requestTiming?: boolean | undefined
+  }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
@@ -300,6 +305,7 @@ export type Fact =
     readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
+  | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
   | {
     readonly _tag: "RequestFinished"
@@ -735,6 +741,7 @@ export interface ProxyOptions {
 
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly requestTiming?: boolean | undefined
   readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean

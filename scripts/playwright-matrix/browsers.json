@@ -6,6 +6,20 @@
       "layers": "Chromium.layer, Chromium.layerConnect",
       "launched": [
         {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "supported",
           "limitations": []
@@ -478,6 +492,20 @@
         }
       ],
       "attached": [
+        {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
         {
           "name": "input.topLevelDesignMode",
           "status": "supported",
@@ -958,6 +986,20 @@
       "label": "Firefox",
       "layers": "Firefox.layer, Firefox.layerConnect, Bidi.layerConnect",
       "launched": [
+        {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
         {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",
@@ -1510,6 +1552,20 @@
         }
       ],
       "attached": [
+        {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
         {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",
@@ -2067,6 +2123,20 @@
       "label": "WebKit",
       "layers": "WebKit.layer, WebKit.layerAttach",
       "launched": [
+        {
+          "name": "network.timing.redirect",
+          "status": "unsupported",
+          "limitations": [
+            "redirect responses omit native timing origins"
+          ]
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+          ]
+        },
         {
           "name": "input.topLevelDesignMode",
           "status": "supported",
@@ -2660,6 +2730,20 @@
         }
       ],
       "attached": [
+        {
+          "name": "network.timing.redirect",
+          "status": "unsupported",
+          "limitations": [
+            "redirect responses omit native timing origins"
+          ]
+        },
+        {
+          "name": "network.timing",
+          "status": "unsupported",
+          "limitations": [
+            "timing collection requires a newly created context"
+          ]
+        },
         {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",

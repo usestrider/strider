@@ -57,6 +57,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
       entry("input.topLevelDesignMode", "unsupported", [
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),

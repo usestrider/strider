@@ -165,6 +165,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         ))
       )
       const entry: ContextEntry = {
+        ...(options.requestTiming ? { requestTiming: true } : {}),
         id: state.ids.userContext(),
         bidi: userContext,
         removing: false,
@@ -175,7 +176,12 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       state.contextsByBidi.set(userContext, entry)
       // Announce before setup: any pages observed during setup must have a known parent context.
       yield* state.buffer.run(() =>
-        state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })
+        state.buffer.emit({
+          _tag: "UserContextAdded",
+          context: entry.id,
+          isDefault: false,
+          ...(options.requestTiming ? { requestTiming: true } : {})
+        })
       )
       // Seed only this context; every failure, including interruption, attempts rollback under a fresh budget.
       yield* Effect.gen(function*() {

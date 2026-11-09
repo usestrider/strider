@@ -168,6 +168,7 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
@@ -710,11 +711,84 @@ export function engine(render: (root: SnapNode) => string) {
     (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
     (element.getAttribute("title") ?? "").trim() !== ""
 
-  const focusable = (element: Element): boolean =>
-    element.hasAttribute("tabindex") ||
-    (element instanceof HTMLAnchorElement && element.hasAttribute("href")) ||
-    ((element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
-      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) && !element.disabled)
+  // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
+  // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
+  const HTML_INTEGER_PREFIX = /^[\t\n\f\r ]*[+-]?[0-9]/
+  const DISABLABLE_TAGS = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
+  const NATIVE_FOCUSABLE_TAGS = new Set(["button", "details", "select", "textarea"])
+  const focusable = (element: Element): boolean => {
+    const tag = element.localName
+    // Custom-element definitions live in the main world. A hyphen conservatively includes form-associated hosts.
+    // Keep the native selector for these and built-in controls: it includes disabled fieldsets and legend exceptions.
+    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && element.matches(":disabled")) return false
+    const tabindex = element.getAttribute("tabindex")
+    return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
+      ((tag === "a" || tag === "area") && element.hasAttribute("href")) ||
+      NATIVE_FOCUSABLE_TAGS.has(tag) ||
+      (element instanceof HTMLInputElement && element.type !== "hidden") ||
+      (element instanceof HTMLElement && element.isContentEditable)
+  }
+
+  // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
+  const GLOBAL_ARIA = new Set([
+    "aria-atomic",
+    "aria-busy",
+    "aria-controls",
+    "aria-current",
+    "aria-describedby",
+    "aria-details",
+    "aria-dropeffect",
+    "aria-flowto",
+    "aria-grabbed",
+    "aria-hidden",
+    "aria-keyshortcuts",
+    "aria-live",
+    "aria-owns",
+    "aria-relevant"
+  ])
+  // Presentation conflicts retain the pinned role-query naming exceptions, distinct from accname root rules.
+  const PRESENTATION_NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "superscript"
+  ])
+  const presentationConflict = (element: Element, implicit: string | null): boolean => {
+    if (focusable(element)) return true
+    // One attribute snapshot avoids probing every possible global property on every presentation candidate.
+    for (const attribute of element.getAttributeNames()) {
+      if (GLOBAL_ARIA.has(attribute)) return true
+      if (
+        (attribute === "aria-label" || attribute === "aria-labelledby") &&
+        !PRESENTATION_NAME_PROHIBITED.has(implicit ?? "")
+      ) return true
+      if (attribute === "aria-roledescription" && implicit !== "generic") return true
+    }
+    return false
+  }
+
+  // Only required structural children inherit presentation, never arbitrary descendants or nested lists/tables.
+  // https://www.w3.org/TR/wai-aria-1.2/#presentation
+  const PRESENTATION_PARENTS = new Map<string, ReadonlyArray<string>>([
+    ["dd", ["dl", "div"]],
+    ["div", ["dl"]],
+    ["dt", ["dl", "div"]],
+    ["li", ["ol", "ul"]],
+    ["caption", ["table"]],
+    ["tbody", ["table"]],
+    ["tfoot", ["table"]],
+    ["thead", ["table"]],
+    ["td", ["tr"]],
+    ["th", ["tr"]],
+    ["tr", ["thead", "tbody", "tfoot", "table"]]
+  ])
 
   const inputRole = (input: HTMLInputElement): string | null => {
     const list = input.hasAttribute("list")
@@ -889,18 +963,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const roleCache = new Map<Element, string | null>()
-  /** An element's role: the first role token the engine knows, or its implicit role. */
+  /** Shared role computation, including ARIA presentation conflict resolution and required-child inheritance. */
   const roleOf = (element: Element): string | null => {
     if (roleCache.has(element)) return roleCache.get(element)!
-    let role: string | null = null
+    let explicit: string | null = null
     for (const token of (element.getAttribute("role") ?? "").split(/\s+/)) {
       if (!KNOWN_ROLES.has(token)) continue
-      // A focusable element can't be presentational (ARIA 1.2, presentational roles conflict resolution)
-      if ((token === "none" || token === "presentation") && focusable(element)) continue
-      role = token
+      explicit = token
       break
     }
-    if (role === null) role = implicitRole(element)
+    let role = explicit
+    if (explicit === null || explicit === "none" || explicit === "presentation") {
+      const implicit = implicitRole(element)
+      role = explicit ?? implicit
+      if (explicit !== null) {
+        // A conflict cancels the first recognized presentation token, not advances to a fallback token.
+        if (presentationConflict(element, implicit)) role = implicit
+      } else if (implicit !== null) {
+        const parents = PRESENTATION_PARENTS.get(element.localName)
+        const parent = parents === undefined ? null : composedParent(element)
+        if (parent !== null && parents!.includes(parent.localName)) {
+          const inherited = roleOf(parent)
+          if ((inherited === "none" || inherited === "presentation") && !presentationConflict(element, implicit)) {
+            role = inherited
+          }
+        }
+      }
+    }
     roleCache.set(element, role)
     return role
   }
@@ -2357,6 +2446,10 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
+      }
+      case "Role": {
+        const role = roleOf(element) ?? ""
+        return { passed: role === expectation.expected, observed: role }
       }
       case "AccessibleName": {
         // Resolving an includeHidden role locator may have cached a name with different visibility rules.
