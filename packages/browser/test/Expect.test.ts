@@ -16,7 +16,11 @@ const observed = { matches: 2, visible: 2 }
 
 /** Real routing, engine cache and bounded adapter; only page execution is simulated. */
 const scenario = Effect.fnUntraced(
-  function*(setup: number, matcher: Expect.Matcher<Locator.ReadonlyLocator> = Expect.toBeVisible) {
+  function*(
+    setup: number,
+    matcher: Expect.Matcher<Locator.ReadonlyLocator> = Expect.toBeVisible,
+    value: unknown = observed
+  ) {
     const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
     const caps: Array<number> = []
     let installs = 0
@@ -39,7 +43,13 @@ const scenario = Effect.fnUntraced(
           if (request.op === "expect") {
             assert.strictEqual(
               request.expectation._tag,
-              matcher === Expect.toBeAttached ? "Attached" : matcher === Expect.toBeDetached ? "Detached" : "Visible"
+              matcher === Expect.toBeAttached
+                ? "Attached"
+                : matcher === Expect.toBeDetached
+                ? "Detached"
+                : matcher === Expect.toBeVisible
+                ? "Visible"
+                : "AccessibleName"
             )
             caps.push(request.cap)
             // Simulate the page's never-passing round, using the actual transmitted cap.
@@ -48,7 +58,7 @@ const scenario = Effect.fnUntraced(
               _tag: "Value",
               value: {
                 type: "string",
-                value: JSON.stringify({ _tag: "Expected", passed: false, observed, changed: true })
+                value: JSON.stringify({ _tag: "Expected", passed: false, observed: value, changed: true })
               }
             } as const
           }
@@ -108,6 +118,68 @@ describe("Expect page-round scheduling", () => {
       assert.deepStrictEqual(error.history, [])
       assert.deepStrictEqual(error.last, Option.none())
       assert.deepStrictEqual(caps, [])
+    }))
+})
+
+describe("Expect accessible-name opt-in", () => {
+  it.effect("retains an accessible-name mismatch in typed last and history evidence", () =>
+    Effect.gen(function*() {
+      const { error } = yield* scenario(0, Expect.toHaveAccessibleName("Expected"), "Actual")
+      assert.strictEqual(error.condition, "to have the accessible name \"Expected\"")
+      assert.deepStrictEqual(error.history.map((entry) => entry.value), ["Actual"])
+      assert.deepStrictEqual(error.last, Option.some(error.history[0]!))
+    }))
+
+  it.effect("sends no engine work for unused contexts before or after another context opts in", () =>
+    Effect.gen(function*() {
+      const calls: Array<{ realm: Target.RealmId; install: boolean }> = []
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: (document) => Effect.succeed(String(document) as Target.RealmId),
+          evaluate: (realm, call) =>
+            Effect.sync(() => {
+              const install = call.functionDeclaration === Engine.install
+              calls.push({ realm, install })
+              if (!install) {
+                const argument = call.arguments[0]
+                assert(argument?._tag === "Value" && argument.value.type === "string")
+                const request = JSON.parse(argument.value.value) as Engine.Request
+                assert(request.op === "expect" && request.expectation._tag === "AccessibleName")
+              }
+              return {
+                _tag: "Value",
+                value: {
+                  type: "string",
+                  value: install ? "installed" : JSON.stringify({
+                    _tag: "Expected",
+                    passed: true,
+                    observed: "Save",
+                    changed: false
+                  })
+                }
+              } as const
+            })
+        })))
+      )
+      yield* Effect.scoped(Effect.gen(function*() {
+        const unused = yield* Browser.newContext()
+        yield* unused.newPage
+        assert.deepStrictEqual(calls, [])
+        const active = yield* Browser.newContext()
+        const page = yield* active.newPage
+        const check = page.locator("button").pipe(Expect.toHaveAccessibleName("Save"))
+        assert.deepStrictEqual(calls, [])
+        yield* check
+        assert.deepStrictEqual(calls.map((call) => call.install), [true, false])
+        const snapshot = [...calls]
+        yield* unused.newPage
+        yield* Browser.newPage()
+        assert.deepStrictEqual(calls, snapshot)
+      })).pipe(Effect.provide(layer))
     }))
 })
 

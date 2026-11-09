@@ -14,7 +14,8 @@ import {
   Page,
   PageClock,
   Route,
-  UncaughtException
+  UncaughtException,
+  UserContext
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -384,15 +385,192 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
+        Effect.gen(function*() {
+          const error = yield* Browser.newContext({
+            httpCredentials: {
+              origin: "https://user:do-not-print@example.com/path",
+              username: "strider",
+              password: Redacted.make("do-not-print")
+            }
+          }).pipe(Effect.flip)
+          assert(UserContext.isUserContextError(error) && error.reason._tag === "InvalidInput", String(error))
+          assert.notInclude(JSON.stringify(error), "do-not-print")
+        }), timeout)
+
+      it.effect(
+        "uses context HTTP credentials for navigation and subresources with route precedence and isolation",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const configured = Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            if (name === "WebKit") {
+              const error = yield* Effect.flip(configured)
+              assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            const context = yield* configured
+            const page = yield* context.newPage
+            assert.include(String(yield* run(page, origin, `return fetch('/auth').then(r => r.text())`)), "signed in")
+            yield* page.goto(`${origin}/auth`)
+            yield* page.getByText("signed in").pipe(Expect.toBeVisible)
+            const canceled = yield* Browser.newPage({
+              httpCredentials: {
+                origin: origin.toUpperCase() + "/",
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            yield* canceled.context.route("**", () =>
+              Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () =>
+              Route.continue, { phase: "auth" })
+            yield* canceled.goto(`${origin}/auth`)
+            yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
+            yield* cancel.remove
+            yield* canceled.goto(`${origin}/auth`)
+            yield* canceled.getByText("signed in").pipe(Expect.toBeVisible)
+            const isolated = yield* Browser.newPage()
+            yield* isolated.goto(`${origin}/auth`)
+            yield* isolated.getByText("who are you?").pipe(Expect.toBeVisible)
+            const refused = yield* Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("wrong")
+              }
+            })
+            const denied = yield* refused.newPage
+            yield* denied.goto(`${origin}/auth`).pipe(Deadline.within("5 seconds"))
+            yield* denied.getByText("who are you?").pipe(Expect.toBeVisible)
+            const mismatch = yield* Browser.newContext({
+              httpCredentials: {
+                origin: "https://example.com",
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            const unmatched = yield* mismatch.newPage
+            yield* unmatched.goto(`${origin}/auth`)
+            yield* unmatched.getByText("who are you?").pipe(Expect.toBeVisible)
+            const overridden = yield* Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("wrong")
+              }
+            })
+            yield* overridden.route("**", () =>
+              Route.provideCredentials({
+                username: "strider",
+                password: Redacted.make("secret")
+              }), { phase: "auth" })
+            const routed = yield* overridden.newPage
+            yield* routed.goto(`${origin}/auth`)
+            yield* routed.getByText("signed in").pipe(Expect.toBeVisible)
+          }),
+        timeout
+      )
+
+      it.effect("authenticates a dedicated worker request with context HTTP credentials", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") {
+            return
+          }
+          const { origin } = yield* site
+          const page = yield* Browser.newPage({
+            httpCredentials: {
+              origin,
+              username: "strider",
+              password: Redacted.make("secret")
+            }
+          })
+          const result = yield* run(
+            page,
+            origin,
+            `
+            const source = URL.createObjectURL(new Blob([\`fetch('${origin}/auth', { signal: AbortSignal.timeout(5000) }).then(r => r.text()).then(postMessage, e => postMessage(e.message))\`], { type: 'text/javascript' }));
+            return await new Promise((resolve) => {
+              const worker = new Worker(source);
+              worker.onmessage = (event) => { worker.terminate(); URL.revokeObjectURL(source); resolve(event.data) };
+            });
+          `
+          ).pipe(Deadline.within("10 seconds"))
+          assert.include(String(result), "signed in")
+        }), timeout)
+
+      it.effect("bounds automatic credentials across an authenticated redirect chain", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") {
+            return
+          }
+          let origin = ""
+          let first = 0
+          let second = 0
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              new Promise<http.Server>((resolve, reject) => {
+                const server = http.createServer((request, response) => {
+                  const authorized =
+                    request.headers.authorization === `Basic ${Buffer.from("strider:secret").toString("base64")}`
+                  if (!authorized) {
+                    response.writeHead(401, {
+                      "www-authenticate": `Basic realm="${request.url}"`,
+                      "content-type": "text/html"
+                    })
+                    response.end("<title>denied</title>")
+                  } else if (request.url === "/first") {
+                    first++
+                    response.writeHead(302, { location: origin.replace("127.0.0.1", "localhost") + "/second" })
+                    response.end()
+                  } else {
+                    second++
+                    response.end("<title>signed in</title>")
+                  }
+                })
+                server.once("error", reject)
+                server.listen(0, "127.0.0.1", () =>
+                  resolve(server))
+              })
+            ),
+            (server) =>
+              Effect.promise(() =>
+                new Promise<void>((resolve) => {
+                  server.close(() =>
+                    resolve()
+                  )
+                  server.closeAllConnections()
+                })
+              )
+          )
+          origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+          const page = yield* Browser.newPage({
+            httpCredentials: { username: "strider", password: Redacted.make("secret") }
+          })
+          yield* page.goto(`${origin}/first`).pipe(Deadline.within("5 seconds"))
+          assert.strictEqual(yield* page.title, "denied")
+          assert.strictEqual(first, 1)
+          assert.strictEqual(second, 0)
+        }), timeout)
+
       it.effect("answers an authentication challenge where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const registered = page.route(`${origin}/auth`, () =>
-              Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }), {
-              phase: "auth"
-            })
+            const registered = page.route(
+              `${origin}/auth`,
+              () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              {
+                phase: "auth"
+              }
+            )
             if (name === "WebKit") {
               const error = yield* Effect.flip(registered)
               assert(Route.isRouteError(error) && error.reason._tag === "Unsupported", String(error))
@@ -412,8 +590,7 @@ export const declarations = (
           }
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.route(`${origin}/auth`, () =>
-              Route.continue, { phase: "auth" })
+            yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))
