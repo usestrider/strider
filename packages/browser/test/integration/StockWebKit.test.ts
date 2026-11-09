@@ -250,6 +250,9 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           assert.strictEqual(opened?.reason?._tag, "Unsupported")
           yield* Effect.scoped(Effect.gen(function*() {
             const tab = yield* (yield* byTitle(browser, "Refusals")).control
+            const headers = reasonOf(yield* Effect.exit(tab.emulate({ extraHTTPHeaders: { "x-test": "value" } })))
+            assert.strictEqual(headers?.reason?._tag, "Unsupported")
+            assert.strictEqual(headers?.reason?.capability, "emulation.extraHTTPHeaders")
             // Refused before anything was sent
             const clicked = reasonOf(yield* Effect.exit(tab.getByRole("button", { name: "Refresh" }).click()))
             assert.strictEqual(clicked?.reason?.capability, "input.native")

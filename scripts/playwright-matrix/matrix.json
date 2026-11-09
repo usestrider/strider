@@ -3982,43 +3982,60 @@
       "upstream": [
         "method:BrowserContext.setExtraHTTPHeaders"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Emulation",
+          "symbol": "Emulation",
+          "url": "/docs/api/browser/Emulation#Emulation"
+        }
+      ],
+      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the whole map; page maps replace rather than merge context maps. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
+      "capabilities": [
+        "emulation.extraHTTPHeaders"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Emulation domain"
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/UserContext.ts"
+          "packages/browser/src/Emulation.ts",
+          "packages/browser/src/internal/emulation.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "extra-request-header-ownership",
+        "quote": "Each registration replaces the whole map, with page scope taking precedence over context scope; removal restores the preceding map.",
+        "revision": "1e577ef91fdd01d5d9dffc5ace4cb0c14adb3f71"
+      }
     },
     {
       "id": "method-browsercontext-setgeolocation",
@@ -25973,43 +25990,60 @@
       "upstream": [
         "method:Page.setExtraHTTPHeaders"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Emulation",
+          "symbol": "Emulation",
+          "url": "/docs/api/browser/Emulation#Emulation"
+        }
+      ],
+      "notes": "Use scoped page/context emulate({ extraHTTPHeaders }) or context creation emulation. Registrations replace the whole map; page maps replace rather than merge context maps. Removal restores the previous map. Request route overrides take precedence; invalid headers fail with InvalidInput.",
+      "capabilities": [
+        "emulation.extraHTTPHeaders"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Emulation domain"
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Page.ts"
+          "packages/browser/src/Emulation.ts",
+          "packages/browser/src/internal/emulation.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "extra-request-header-ownership",
+        "quote": "Each registration replaces the whole map, with page scope taking precedence over context scope; removal restores the preceding map.",
+        "revision": "1e577ef91fdd01d5d9dffc5ace4cb0c14adb3f71"
+      }
     },
     {
       "id": "method-page-setinputfiles",
@@ -113200,7 +113234,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "ea89f15bd6a349b0cb0b864cb2666f3d2123fef2a9c1c79ef2a583bdbc74db5f",
+    "docs/decisions.md": "80a71be6937f5722620d7f08dede468f08c590c11e1ba7b97871a1eb8f962723",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113210,7 +113244,7 @@
     "packages/browser/src/Declaration.ts": "252d1067442dc26e93b94f8c988af9ef9a0574d3e864406bf9cadf16f2d67e56",
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
-    "packages/browser/src/Emulation.ts": "f7a3bcd231b009f98b48df7dae243b4ae52f2083ae4f559d82db4913e0756402",
+    "packages/browser/src/Emulation.ts": "4f015af8927d568b418311019bba0319efcad641cd069c5057690a77fa92c621",
     "packages/browser/src/Expect.ts": "0aeacd3e3a5da894f23795f3ab2a4093a1bc0fcb6ec19b65f32ddbaeca819dec",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
@@ -113235,10 +113269,10 @@
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "3dbbdd53f7c5f29c3745b3d2612605b342e96fbf267f5a6a719550c8deb6bebe",
-    "packages/browser/src/internal/cdpAdapter.ts": "c9b262db5ec66087824f582215c24c8513dcc638008bb0d93bd0d38f32c43288",
+    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
+    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
     "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a8ee2a4f501fcd7af88dfc14d2dae4744b16dcf0702146674cde8fc8e5f373b8",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
