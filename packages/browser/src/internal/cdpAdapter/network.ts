@@ -405,3 +405,47 @@ export const requestBody = Effect.fnUntraced(function*(state: State, hop: Networ
   )
   return Option.some(yield* Kit.bodyBytes(postData, base64Encoded === true, "Network.getRequestPostData"))
 })
+
+/** Exact event bytes, or a guarded current-hop native read; legacy recording reads remain unchanged. */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    const page = request.target.page
+    if (page === undefined || Option.isNone(state.registry.bodyLimit(placement(page), "request"))) {
+      return { _tag: "Unavailable", why: "notCollected" }
+    }
+    const sent = request.sentBodies[state.ids.redirectsOf(snapshot.hop)]
+    if (sent === undefined) return { _tag: "Unavailable", why: "unavailable" }
+    if (!sent.hasBody) return { _tag: "Absent" }
+    if (Option.isSome(sent.carried)) {
+      return sent.carried.value.length > limit
+        ? { _tag: "OverLimit" }
+        : { _tag: "Bytes", bytes: sent.carried.value }
+    }
+    // A multipart fallback can silently omit files. No partial input reaches a decoder.
+    if (/^multipart\//i.test(snapshot.headers["content-type"] ?? "")) return { _tag: "Incomplete" }
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    const result = yield* Kit.protocol(
+      Network.getRequestPostData({ requestId: request.requestId as Network.RequestId }).pipe(
+        Protocol.on(request.target.session)
+      )
+    ).pipe(Effect.result)
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    if (result._tag === "Failure") {
+      if (result.failure.reason._tag === "Protocol" && result.failure.reason.error.reason._tag === "Rejected") {
+        return { _tag: "Unavailable", why: "unavailable" }
+      }
+      return yield* Effect.fail(result.failure)
+    }
+    const bytes = yield* Kit.bodyBytes(
+      result.success.postData,
+      result.success.base64Encoded === true,
+      "Network.getRequestPostData"
+    )
+    return bytes.length > limit ? { _tag: "OverLimit" } : { _tag: "Bytes", bytes }
+  }
+)

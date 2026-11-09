@@ -1017,6 +1017,10 @@ export interface AdapterConnection {
    * The body a hop's request sent; `None` without one (Q164). Kept only where `BodyCollection` was
    * declared before the request started; `Unsupported` (`body.notCollected`, `body.redirect`) where it wasn't kept.
    */
+  readonly captureRequestBody: (
+    request: NetworkRequest.NetworkRequest,
+    maxBytes: number
+  ) => Effect.Effect<RequestBody, AdapterError>
   readonly requestBody: (hop: NetworkRequest.HopId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
   /** The body of a paused request, as it was sent; `None` without one. */
   readonly pausedRequestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
@@ -1048,3 +1052,12 @@ export const pngSize = (bytes: Uint8Array): { readonly width: number; readonly h
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
 }
+
+/** A request's native report, without confusing missing, incomplete or text-only data with exact bytes. */
+export type RequestBody =
+  | { readonly _tag: "Absent" }
+  | { readonly _tag: "Bytes"; readonly bytes: Uint8Array }
+  | { readonly _tag: "ReportedText"; readonly text: string }
+  | { readonly _tag: "Incomplete" }
+  | { readonly _tag: "OverLimit" }
+  | { readonly _tag: "Unavailable"; readonly why: "notCollected" | "redirect" | "unavailable" }

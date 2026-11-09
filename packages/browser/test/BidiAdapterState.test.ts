@@ -8,6 +8,7 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -29,6 +30,7 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as MonotonicInstant from "../src/MonotonicInstant.ts"
+import * as Request from "../src/NetworkRequest.ts"
 import type * as PageNavigation from "../src/PageNavigation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
@@ -2989,3 +2991,58 @@ for (const kind of ["InvalidArgument", "Encode", "Decode", "Unrecognized"] as co
       }
     }))
 }
+
+describe("BiDi request body identity", () => {
+  it.effect("refuses a redirect during getData and does not read ambiguous later-hop data", () =>
+    Effect.gen(function*() {
+      const called = yield* Deferred.make<void>()
+      const reply = yield* Deferred.make<{ bytes: { type: string; value: string } }>()
+      const { page, state, sent } = yield* withPage({
+        "network.getData": Deferred.succeed(called, undefined).pipe(Effect.andThen(Deferred.await(reply)))
+      })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const params = {
+        context: "C1",
+        userContext: "default",
+        navigation: null,
+        timestamp: 1,
+        redirectCount: 0,
+        isBlocked: false,
+        request: {
+          request: "body",
+          url: "http://site.test/send",
+          method: "POST",
+          headers: [],
+          destination: "",
+          bodySize: 3
+        }
+      }
+      handlers.apply("network.beforeRequestSent", params, { state })
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: "http://site.test/send" as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      const reading = yield* Network.captureRequestBody(state, snapshot, 100).pipe(Effect.forkChild)
+      yield* Deferred.await(called)
+      handlers.apply("network.beforeRequestSent", { ...params, redirectCount: 1 }, { state })
+      yield* Deferred.succeed(reply, { bytes: { type: "base64", value: "bmV3" } })
+      assert.deepStrictEqual(yield* Fiber.join(reading), { _tag: "Unavailable", why: "redirect" })
+      const later = new Request.NetworkRequest({ ...snapshot, hop: entry.hop })
+      assert.deepStrictEqual(yield* Network.captureRequestBody(state, later, 100), {
+        _tag: "Unavailable",
+        why: "redirect"
+      })
+      assert.deepStrictEqual(sent, ["network.getData"])
+    }))
+})

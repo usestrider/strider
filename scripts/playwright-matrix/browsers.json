@@ -139,6 +139,39 @@
           "limitations": []
         },
         {
+          "name": "network.requestBody.redirects",
+          "status": "partial",
+          "limitations": [
+            "earlier hops require complete event-carried data"
+          ]
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "unsupported",
+          "limitations": [
+            "multipart file completeness cannot be established from the native report"
+          ]
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "partial",
+          "limitations": [
+            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
+        },
+        {
           "name": "network.headersSent",
           "status": "supported",
           "limitations": []
@@ -563,6 +596,39 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.requestBody.redirects",
+          "status": "partial",
+          "limitations": [
+            "earlier hops require complete event-carried data"
+          ]
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "unsupported",
+          "limitations": [
+            "multipart file completeness cannot be established from the native report"
+          ]
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "partial",
+          "limitations": [
+            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -1004,6 +1070,39 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.requestBody.redirects",
+          "status": "unsupported",
+          "limitations": [
+            "redirected hops cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "unsupported",
+          "limitations": [
+            "empty payload and no payload both report zero body size"
+          ]
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "partial",
+          "limitations": [
+            "requires collection before the request; redirected bodies cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -1509,6 +1608,39 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.requestBody.redirects",
+          "status": "unsupported",
+          "limitations": [
+            "redirected hops cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "unsupported",
+          "limitations": [
+            "empty payload and no payload both report zero body size"
+          ]
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "partial",
+          "limitations": [
+            "requires collection before the request; redirected bodies cannot be addressed independently"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -2220,6 +2352,37 @@
           ]
         },
         {
+          "name": "network.requestBody.redirects",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "unsupported",
+          "limitations": [
+            "multipart file completeness cannot be established from the native report"
+          ]
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "unsupported",
+          "limitations": [
+            "stock WebKit exposes decoded text, not original bytes"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+          ]
+        },
+        {
           "name": "network.headersSent",
           "status": "partial",
           "limitations": [
@@ -2769,6 +2932,37 @@
           "status": "supported",
           "limitations": [
             "a script or stylesheet reused from the memory cache within one document produces no request"
+          ]
+        },
+        {
+          "name": "network.requestBody.redirects",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.empty",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.requestBody.multipart",
+          "status": "unsupported",
+          "limitations": [
+            "multipart file completeness cannot be established from the native report"
+          ]
+        },
+        {
+          "name": "network.requestBody.bytes",
+          "status": "unsupported",
+          "limitations": [
+            "stock WebKit exposes decoded text, not original bytes"
+          ]
+        },
+        {
+          "name": "network.requestBody.text",
+          "status": "partial",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
           ]
         },
         {

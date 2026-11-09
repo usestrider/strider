@@ -33,7 +33,7 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
 })
 ```
 
-## Decoding bodies
+## Decoding response bodies
 
 A status says the call went through, not what came back. A body decoded with a Schema gives the data the server
 returned, typed, and fails if it isn't that shape. A body is collected only when a subscription asks with `body`: a
@@ -94,6 +94,9 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
   )
 })
 ```
+
+A request can also be captured with a decoder; see [Request bodies](/docs/events/request-bodies) for submitted
+text, JSON, forms, byte limits and browser restrictions.
 
 ## Streams and history
 

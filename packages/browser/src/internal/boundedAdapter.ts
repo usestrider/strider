@@ -80,6 +80,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   grantPermissions: write("the grant"),
   resetPermissions: release,
   responseBody: read("the response body"),
+  captureRequestBody: read("the request body"),
   requestBody: read("the request body"),
   pausedRequestBody: read("the paused request's body"),
   pausedResponseBody: read("the paused response's body"),

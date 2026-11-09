@@ -13,7 +13,7 @@ import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
 import { pause, requestSnapshot } from "./obligations.ts"
-import { type Event, navigableOf, type RequestEntry, type State } from "./state.ts"
+import { type Event, navigableOf, placement, type RequestEntry, type State } from "./state.ts"
 import { endNavigation } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -179,3 +179,41 @@ export const requestBody = Effect.fnUntraced(function*(state: State, hop: Networ
   )
   return Option.some(yield* bytesOf(bytes, "network.getData"))
 })
+
+/** BiDi's native data belongs to a request id, not an independently addressable redirect hop. */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    if (
+      request.navigable === undefined ||
+      Option.isNone(state.registry.bodyLimit(placement(request.navigable), "request"))
+    ) return { _tag: "Unavailable", why: "notCollected" }
+    const size = request.bodySizes[state.ids.redirectsOf(snapshot.hop)]
+    if (size === 0) return { _tag: "Absent" }
+    // Firefox reports the base64 representation length for binary bodies, not their decoded byte count.
+    if (size !== null && size !== undefined && size > Math.ceil(limit / 3) * 4) return { _tag: "OverLimit" }
+    // Firefox can retain the first body's data even after a later hop changes it (Q183).
+    if (request.hop !== snapshot.hop || request.redirects !== 0) return { _tag: "Unavailable", why: "redirect" }
+    const result = yield* state.send(Network.getData({ dataType: "request", request: request.bidi })).pipe(
+      Effect.mapError(Kit.protocolError),
+      Effect.result
+    )
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    if (result._tag === "Failure") {
+      if (result.failure.reason._tag === "Protocol" && result.failure.reason.error.reason._tag === "Rejected") {
+        return {
+          _tag: "Unavailable",
+          why: "unavailable"
+        }
+      }
+      return yield* Effect.fail(result.failure)
+    }
+    const bytes = yield* bytesOf(result.success.bytes, "network.getData")
+    if (bytes.length > limit) return { _tag: "OverLimit" }
+    return { _tag: "Bytes", bytes }
+  }
+)

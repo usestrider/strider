@@ -1,0 +1,64 @@
+---
+title: Request bodies
+description: Capture submitted text, bytes, JSON and URL-encoded forms with scoped request subscriptions.
+order: 4
+---
+
+A request event tells you where data went, but leaves out what was submitted. Giving its subscription a body
+decoder collects that data and returns an owned result without waiting for the response.
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const submittedForm = Effect.fn("submittedForm")(function*(page: Page.Page) {
+  const submitted = yield* NetworkRequest.next(page, {
+    url: "**/submit",
+    method: "POST",
+    body: (message) => message.urlParamsBody
+  }).pipe(NetworkRequest.withBodyLimit("1 MiB"))
+  yield* page.getByRole("button", { name: "Submit" }).click()
+  return Option.getOrThrow((yield* submitted).body)
+})
+```
+
+The decoder receives an Effect `HttpIncomingMessage`: use `text` for text, `arrayBuffer` for bytes, `json` for
+JSON or `urlParamsBody` for URL-encoded forms. URL parameters preserve repeated keys. For schema validation, use
+Effect's `HttpIncomingMessage.schemaBodyJson`, as with [response bodies](/docs/events/network#decoding-response-bodies).
+Text honors the declared charset and defaults to UTF-8; unknown charsets fall back to UTF-8, with invalid
+sequences replaced.
+
+The result's `body` is an `Option`. `None` means the browser reported no payload; Firefox also reports an empty
+payload this way. Unavailable data fails with `RequestError` whose reason is `BodyUnavailable`. An over-limit or
+incomplete body fails with `BodyTruncated` before the decoder runs. Invalid JSON produces `MalformedBody`, and
+schema failures remain the decoder's own errors.
+
+Collection needs [read access](/docs/pages/attaching#access-levels), starts before the subscription returns, and
+ends with its scope. The limit defaults to 10 MiB and applies separately to each subscription. Decoder results
+outlive the scope and page. Without a decoder, request subscriptions and history collect no bodies.
+
+`stream` accepts the same decoder and begins capturing before the returned stream is consumed:
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
+
+const watchSubmissions = Effect.fn("watchSubmissions")(
+  function*(page: Page.ReadonlyPage) {
+    const requests = yield* NetworkRequest.stream(page, {
+      method: "POST",
+      body: (message) => message.text
+    })
+    yield* Stream.runForEach(requests, (request) => Effect.log(request.body))
+  }
+)
+```
+
+Each capture and decoder uses the deadline budget in force when subscribing. A failed capture fails the stream.
+The subscriber's scope owns outstanding reads, and results remain bounded by the subscription's buffers.
+
+Stock WebKit supplies the browser's reported text, which may differ from the original binary payload. Exact-byte
+reads fail there; its text limit counts the UTF-8 representation. WebKit multipart reports and Chromium's multipart
+fallback can omit file contents, so those incomplete reports are refused. No multipart file reconstruction is
+performed. Redirected bodies that the browser cannot independently address fail rather than returning another
+hop's payload; Firefox's native request-data identifier cannot distinguish those hops.

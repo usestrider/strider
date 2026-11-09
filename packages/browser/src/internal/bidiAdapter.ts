@@ -93,6 +93,15 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),
+      entry("network.requestBody.empty", "unsupported", ["empty payload and no payload both report zero body size"]),
+      entry("network.requestBody.multipart", "supported", []),
+      entry("network.requestBody.bytes", "partial", [
+        "requires collection before the request; redirected bodies cannot be addressed independently"
+      ]),
+      entry("network.requestBody.text", "partial", [
+        "requires a complete collected body; redirected bodies cannot be addressed independently"
+      ]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -375,6 +384,7 @@ export const connect: (
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       downloadPath: (download) => Contexts.downloadPath(state, download),
       cancelDownload: (download) => Contexts.cancelDownload(state, download)

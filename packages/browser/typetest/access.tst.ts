@@ -12,11 +12,21 @@ import {
   NetworkResponse,
   Page,
   Snapshot,
+  Subscription,
   Target
 } from "@usestrider/browser"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Schema, Scope } from "effect"
 import { HttpIncomingMessage } from "effect/http"
 import { describe, expect, it } from "tstyche"
+
+class RequestDecoderService extends Context.Service<RequestDecoderService, {}>()("RequestDecoderService") {}
+class RequestPredicateService extends Context.Service<RequestPredicateService, {}>()("RequestPredicateService") {}
+declare const requestDecoder: NetworkRequest.BodyDecoder<string, "decoder-error", RequestDecoderService>
+declare const requestPredicate: Subscription.Where<
+  NetworkRequest.CapturedRequest<string>,
+  "predicate-error",
+  RequestPredicateService
+>
 
 declare const observed: Page.ObservedPage
 declare const reader: Page.ReadonlyPage
@@ -85,6 +95,38 @@ describe("access is typed", () => {
         body: HttpIncomingMessage.schemaBodyJson(Schema.String)
       })
     ).type.toRaiseError()
+  })
+
+  it("request body collection needs inspect access, including filters stored in variables", () => {
+    const filter = {
+      url: "https://example.com/**",
+      body: (message: Parameters<NetworkRequest.BodyDecoder<string, never, never>>[0]) => message.text
+    }
+    expect(NetworkRequest.next(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.stream(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.next(reader, filter)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Deadline.Timeout,
+        Scope.Scope
+      >
+    >()
+  })
+
+  it("request body subscriptions preserve decoder and predicate requirements and errors", () => {
+    expect(NetworkRequest.next(reader, { url: "**/submit", body: requestDecoder }, requestPredicate)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          "decoder-error" | "predicate-error" | NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Deadline.Timeout,
+        Scope.Scope | RequestDecoderService | RequestPredicateService
+      >
+    >()
   })
 
   it("kind guards never narrow access", () => {

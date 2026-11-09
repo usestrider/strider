@@ -11,20 +11,26 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Context from "effect/Context"
+import * as ByteSize from "effect/ByteSize"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
 import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import type * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import type * as HttpMethod from "effect/http/HttpMethod"
+import * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
+import * as Diagnostics from "./Diagnostics.ts"
 import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
+import * as Reason from "./Reason.ts"
 import type * as Subscription from "./Subscription.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
@@ -216,7 +222,16 @@ export interface Filter {
  *
  * **Details**
  *
- * `url` is required here, unlike in `stream` and `history`.
+ * `url` is required here, unlike in `stream` and `history`. A `body` decoder declares scoped collection before
+ * this returns and needs inspect access. Capture starts when a matching request arrives, without waiting for
+ * its response. The decoded result is owned and available as `Option`; `None` means no body was reported.
+ * Firefox reports both an empty payload and no payload that way. Missing or incomplete data fails instead.
+ * Without `body`, this collects no body data.
+ *
+ * Text uses the declared charset, or UTF-8 by default; unknown charsets fall back to UTF-8 and invalid sequences
+ * are replaced. Stock WebKit preserves its protocol-reported text and refuses exact-byte reads; its multipart
+ * reports can omit files and are refused. Chromium's multipart fallback can also omit files. A redirected hop
+ * whose bytes cannot be addressed independently fails with `BodyUnavailable`, rather than reading another hop.
  *
  * **Example** (Waiting for the order request)
  *
@@ -239,18 +254,35 @@ export interface Filter {
  * @category subscriptions
  * @since 0.1.0
  */
-export const next = <PE = never, PR = never>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter: Filter & { readonly url: Url.Pattern | string },
-  where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
-): Effect.Effect<
-  Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>,
-  Subscription.SubscriptionError,
-  Scope.Scope | PR
-> => NetworkRequestImpl.next(target, filter, where)
+export const next: {
+  <B, DE, DR, PE = never, PR = never>(
+    target: Page.ReadonlyPage | UserContext.UserContext,
+    filter: Filter & { readonly url: Url.Pattern | string; readonly body: BodyDecoder<B, DE, DR> },
+    where?: Subscription.Where<CapturedRequest<B>, PE, PR> | undefined
+  ): Effect.Effect<
+    Effect.Effect<CapturedRequest<B>, DE | PE | RequestError | Target.TargetGone | Deadline.Timeout>,
+    Subscription.SubscriptionError | Deadline.Timeout,
+    Scope.Scope | DR | PR
+  >
+  <PE = never, PR = never>(
+    target: Page.ObservedPage | UserContext.ObservedUserContext,
+    filter: Filter & { readonly url: Url.Pattern | string; readonly body?: never },
+    where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
+  ): Effect.Effect<
+    Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>,
+    Subscription.SubscriptionError,
+    Scope.Scope | PR
+  >
+} = NetworkRequestImpl.next as typeof next
 
 /**
- * Subscribes to requests and emits every match from now on.
+ * Subscribes to requests and emits every match from now on, decoding bodies when requested.
+ *
+ * **Details**
+ *
+ * With `body`, capture starts when this returns, even before consumption. Its scope owns collection and
+ * outstanding reads. Each body read and decoder uses the `Deadline.DefaultBudget` read at acquisition;
+ * failures fail the stream. Without `body`, only immutable request metadata is delivered.
  *
  * **Example** (Logging fetches until the page closes)
  *
@@ -271,15 +303,29 @@ export const next = <PE = never, PR = never>(
  * @category subscriptions
  * @since 0.1.0
  */
-export const stream = <PE = never, PR = never>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  filter?: Filter | undefined,
-  where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
-): Effect.Effect<
-  Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>,
-  Subscription.SubscriptionError,
-  Scope.Scope | PR
-> => NetworkRequestImpl.stream(target, filter, where)
+export const stream: {
+  <B, DE, DR, PE = never, PR = never>(
+    target: Page.ReadonlyPage | UserContext.UserContext,
+    filter: Filter & { readonly body: BodyDecoder<B, DE, DR> },
+    where?: Subscription.Where<CapturedRequest<B>, PE, PR> | undefined
+  ): Effect.Effect<
+    Stream.Stream<
+      CapturedRequest<B>,
+      DE | PE | RequestError | Subscription.EventOverflow | Target.TargetGone | Deadline.Timeout
+    >,
+    Subscription.SubscriptionError | Deadline.Timeout,
+    Scope.Scope | DR | PR
+  >
+  <PE = never, PR = never>(
+    target: Page.ObservedPage | UserContext.ObservedUserContext,
+    filter?: (Filter & { readonly body?: never }) | undefined,
+    where?: Subscription.Where<NetworkRequest, PE, PR> | undefined
+  ): Effect.Effect<
+    Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>,
+    Subscription.SubscriptionError,
+    Scope.Scope | PR
+  >
+} = NetworkRequestImpl.stream as typeof stream
 
 /**
  * Reads the requests the target's event log kept (`UserContext.Options.eventLog`); never waits.
@@ -392,3 +438,179 @@ export const headersSent = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
+
+/**
+ * A request whose collected body has been decoded; `None` means no body was reported.
+ *
+ * **Details**
+ *
+ * The decoder result is owned by the caller and outlives the subscription and page. Browsers can conflate an
+ * empty body with no body; unavailable or incomplete data fails instead of producing `None`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface CapturedRequest<B> extends NetworkRequest {
+  readonly body: Option.Option<B>
+}
+
+/**
+ * Reads collected request data with Effect's HTTP decoders, using `text`, `arrayBuffer`, `json` or `urlParamsBody`.
+ *
+ * **Gotchas**
+ *
+ * Stock WebKit supplies reported text only: exact-byte reads (`arrayBuffer` and `stream`) fail. Multipart bodies
+ * whose completeness cannot be established fail before decoding. URL-encoded forms retain duplicate keys.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type BodyDecoder<B, DE, DR> = (
+  message: HttpIncomingMessage.HttpIncomingMessage<RequestError>
+) => Effect.Effect<B, DE, DR>
+
+/**
+ * Reference to the largest request body a subscription collects; 10 MiB unless set.
+ *
+ * **Details**
+ *
+ * Read when a subscription with `body` starts. Each subscription enforces its own limit. For stock WebKit's
+ * reported text, the limit counts its UTF-8 representation; the protocol does not expose the original bytes.
+ *
+ * @stability unstable
+ * @category references
+ * @since 0.1.0
+ */
+export const BodyLimit: Context.Reference<ByteSize.ByteSize> = Context.Reference<ByteSize.ByteSize>(
+  "@usestrider/browser/NetworkRequest/BodyLimit",
+  { defaultValue: () => ByteSize.mebibytes(10) }
+)
+
+/**
+ * Sets the collection limit for request body subscriptions acquired inside an effect.
+ *
+ * **Example** (Bounding a submitted form)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const submittedForm = (page: Page.ReadonlyPage) =>
+ *   NetworkRequest.next(page, {
+ *     url: "https://example.com/submit",
+ *     body: (message) => message.urlParamsBody
+ *   }).pipe(NetworkRequest.withBodyLimit("1 MiB"))
+ * ```
+ *
+ * @see {@link BodyLimit} for the reference it sets
+ * @stability unstable
+ * @category combinators
+ * @since 0.1.0
+ */
+export const withBodyLimit: {
+  (limit: ByteSize.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, limit: ByteSize.Input): Effect.Effect<A, E, R>
+} = dual(
+  2,
+  <A, E, R>(self: Effect.Effect<A, E, R>, limit: ByteSize.Input): Effect.Effect<A, E, R> =>
+    Effect.provideService(self, BodyLimit, ByteSize.fromInputUnsafe(limit))
+)
+
+/**
+ * Reason for a body the browser cannot supply, including a redirect hop whose data has been replaced.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class BodyUnavailable
+  extends Schema.Error<BodyUnavailable>("@usestrider/browser/NetworkRequest/BodyUnavailable")({
+    _tag: Schema.tag("BodyUnavailable"),
+    why: Schema.Literals(["notCollected", "redirect", "unavailable", "unsupportedRepresentation"]),
+    hint: Schema.String
+  })
+{
+  override get message(): string {
+    return `Request body unavailable: ${this.why} (${this.hint})`
+  }
+}
+
+/**
+ * Reason for request data that exceeds its collection limit or is incomplete; no partial data reaches a decoder.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class BodyTruncated extends Schema.Error<BodyTruncated>("@usestrider/browser/NetworkRequest/BodyTruncated")({
+  _tag: Schema.tag("BodyTruncated"),
+  why: Schema.Literals(["overLimit", "incomplete"]),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Request body incomplete: ${this.why} (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a collected request body that cannot be parsed as JSON.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class MalformedBody extends Schema.Error<MalformedBody>("@usestrider/browser/NetworkRequest/MalformedBody")({
+  _tag: Schema.tag("MalformedBody"),
+  expected: Schema.Literal("json"),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Request body is not ${this.expected}: ${this.hint}`
+  }
+}
+
+/**
+ * Schema for the reasons collecting or decoding a request body can fail.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const RequestErrorReason = Schema.Union([
+  BodyUnavailable,
+  BodyTruncated,
+  MalformedBody,
+  Reason.BackendFailure,
+  Reason.Unsupported
+])
+
+/**
+ * The reasons collecting or decoding a request body can fail.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type RequestErrorReason = typeof RequestErrorReason.Type
+
+/**
+ * Error for a request body that could not be collected or decoded.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class RequestError
+  extends Schema.TaggedError<RequestError>("@usestrider/browser/NetworkRequest/RequestError")("RequestError", {
+    hop: HopId,
+    url: Url.Url,
+    reason: RequestErrorReason,
+    diagnostics: Diagnostics.Diagnostics
+  })
+{
+  override get message(): string {
+    return this.reason.message
+  }
+}

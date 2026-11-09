@@ -104,6 +104,15 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
+      entry("network.requestBody.redirects", "supported", []),
+      entry("network.requestBody.empty", "supported", []),
+      entry("network.requestBody.multipart", "unsupported", [
+        "multipart file completeness cannot be established from the native report"
+      ]),
+      entry("network.requestBody.bytes", "unsupported", ["stock WebKit exposes decoded text, not original bytes"]),
+      entry("network.requestBody.text", "partial", [
+        "protocol-reported text; multipart bodies may omit file bytes and are refused"
+      ]),
       entry("network.headersSent", "partial", [
         "without the Cookie header, which WebKitGTK's network process doesn't report"
       ]),

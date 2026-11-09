@@ -1159,6 +1159,10 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `interface CapturedRequest<B> extends NetworkRequest`
+  - `readonly body: Option.Option<B>`
+- `type BodyDecoder<B, DE, DR> = (message: HttpIncomingMessage.HttpIncomingMessage<RequestError>) => Effect.Effect<B, DE, DR>`
+- `type RequestErrorReason = typeof RequestErrorReason.Type`
 
 *schemas*
 
@@ -1167,11 +1171,22 @@ The requests a page or context sends, as events and as the data routes and respo
 - `const ResourceType = Schema.Literals(["document", "stylesheet", "image", "media", "font", "script", "fetch", "xhr", "webSocket", "eventSource", "manifest", "ping", "other"])`
 - `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))) }), Schema.TaggedS…`
 - `const Method = Schema.Literals(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "QUERY"] as const satisfies ReadonlyArray<HttpMethod.HttpMethod>)`
+- `const RequestErrorReason = Schema.Union([BodyUnavailable, BodyTruncated, MalformedBody, Reason.BackendFailure, Reason.Unsupported])`
+
+*combinators*
+
+- `const withBodyLimit`
+  - `(limit: ByteSize.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>`
+  - `<A, E, R>(self: Effect.Effect<A, E, R>, limit: ByteSize.Input): Effect.Effect<A, E, R>`
 
 *subscriptions*
 
-- `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
-- `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const next`
+  - `<B, DE, DR, PE = never, PR = never>(target: Page.ReadonlyPage | UserContext.UserContext, filter: Filter & { readonly url: Url.Pattern | string; readonly body: …`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string; readonly body?: ne…`
+- `const stream`
+  - `<B, DE, DR, PE = never, PR = never>(target: Page.ReadonlyPage | UserContext.UserContext, filter: Filter & { readonly body: BodyDecoder<B, DE, DR> }, where?: Su…`
+  - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: (Filter & { readonly body?: never }) | undefined, where?: Subscr…`
 
 *getters*
 
@@ -1181,6 +1196,20 @@ The requests a page or context sends, as events and as the data routes and respo
 *converting*
 
 - `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+*references*
+
+- `const BodyLimit: Context.Reference<ByteSize.ByteSize>`
+
+*errors*
+
+- `class RequestError: Schema.TaggedError "RequestError" { hop, url, reason, diagnostics }`
+
+*reasons*
+
+- `class BodyUnavailable: Schema.Error { why, hint }`
+- `class BodyTruncated: Schema.Error { why, hint }`
+- `class MalformedBody: Schema.Error { expected, hint }`
 
 ### NetworkResponse
 

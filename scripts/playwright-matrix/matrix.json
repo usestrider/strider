@@ -28539,34 +28539,59 @@
       "upstream": [
         "method:Request.postData"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "next",
+          "url": "/docs/api/browser/NetworkRequest#next"
+        },
+        {
+          "module": "NetworkRequest",
+          "symbol": "stream",
+          "url": "/docs/api/browser/NetworkRequest#stream"
+        }
+      ],
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.text; stock WebKit returns native reported text.",
+      "capabilities": [
+        "network.requestBody.text"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+          ]
         }
       },
       "audit": {
@@ -28575,41 +28600,72 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "1355f0fc36330c95e7aae4b012f55db079543b8c"
+      }
     },
     {
       "id": "method-request-postdatabuffer",
       "upstream": [
         "method:Request.postDataBuffer"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "next",
+          "url": "/docs/api/browser/NetworkRequest#next"
+        },
+        {
+          "module": "NetworkRequest",
+          "symbol": "stream",
+          "url": "/docs/api/browser/NetworkRequest#stream"
+        }
+      ],
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.arrayBuffer; stock WebKit cannot report original bytes.",
+      "capabilities": [
+        "network.requestBody.bytes"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires collection before the request; redirected bodies cannot be addressed independently"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires collection before the request; redirected bodies cannot be addressed independently"
+          ]
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit exposes decoded text, not original bytes"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit exposes decoded text, not original bytes"
+          ]
         }
       },
       "audit": {
@@ -28618,41 +28674,72 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "1355f0fc36330c95e7aae4b012f55db079543b8c"
+      }
     },
     {
       "id": "method-request-postdatajson",
       "upstream": [
         "method:Request.postDataJSON"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "next",
+          "url": "/docs/api/browser/NetworkRequest#next"
+        },
+        {
+          "module": "NetworkRequest",
+          "symbol": "stream",
+          "url": "/docs/api/browser/NetworkRequest#stream"
+        }
+      ],
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.json or schemaBodyJson, or message.urlParamsBody for URL-encoded forms with repeated keys; select decoding explicitly rather than guessing from media type.",
+      "capabilities": [
+        "network.requestBody.text"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; multipart fallback is refused"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "requires a complete collected body; redirected bodies cannot be addressed independently"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "protocol-reported text; multipart bodies may omit file bytes and are refused"
+          ]
         }
       },
       "audit": {
@@ -28661,7 +28748,13 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "1355f0fc36330c95e7aae4b012f55db079543b8c"
+      }
     },
     {
       "id": "method-request-redirectedfrom",
@@ -113332,7 +113425,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
+    "packages/browser/src/NetworkRequest.ts": "59e985508de6ceecbc690cf6f2700d574ce0548acb4032fe89562f0a8657d39d",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
@@ -113348,10 +113441,10 @@
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
-    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
-    "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
+    "packages/browser/src/internal/bidiAdapter.ts": "e0f511a953ecd165dda969f20e143da19f87f48afbb86b4c6da84d4d238834c1",
+    "packages/browser/src/internal/cdpAdapter.ts": "b94d2ed7bd08dcd9ae5ba5cdf73d97bc520c80464d4deecb91997eaf696c0654",
+    "packages/browser/src/internal/webkitAdapter.ts": "3c2ad76e787f787ce28b25bd08611747d94543020e42352bc9d6bf7cc8808883",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "c5e0da301a74a7a71151a263517fda50a2bb9c1afeb4de31076660d1537ada5c",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",

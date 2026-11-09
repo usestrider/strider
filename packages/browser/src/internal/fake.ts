@@ -409,6 +409,7 @@ export const connect = (
       grantPermissions: () => Effect.void,
       resetPermissions: () => Effect.void,
       responseBody: () => Effect.succeed(new Uint8Array()),
+      captureRequestBody: () => Effect.succeed({ _tag: "Unavailable", why: "notCollected" }),
       requestBody: () => Effect.succeedNone,
       pausedRequestBody: () => Effect.succeedNone,
       pausedResponseBody: () => unsupported("interception.responseBody", "the timeline's requests are never paused"),

@@ -408,3 +408,24 @@ export const beforeNavigation = (state: State, page: PageEntry) => {
     return true
   })
 }
+
+/** Stock WebKit supplies decoded text, with no lossless way back to the original bytes (Q221). */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    const page = request.frame?.page ?? request.worker?.target.page
+    if (page === undefined || Option.isNone(state.registry.bodyLimit(placement(page), "request"))) {
+      return { _tag: "Unavailable", why: "notCollected" }
+    }
+    // Multipart reports may silently omit files (Q184); the protocol cannot establish completeness.
+    if (/^multipart\//i.test(snapshot.headers["content-type"] ?? "")) return { _tag: "Incomplete" }
+    const text = request.postData[state.ids.redirectsOf(snapshot.hop)]
+    if (text === undefined) return { _tag: "Absent" }
+    if (new TextEncoder().encode(text).length > limit) return { _tag: "OverLimit" }
+    return { _tag: "ReportedText", text }
+  }
+)
