@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
+import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Browser from "../Browser.ts"
@@ -536,6 +537,40 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      const credentials = options?.httpCredentials
+      if (
+        credentials !== undefined && (typeof credentials.username !== "string" ||
+          !Redacted.isRedacted(credentials.password) || typeof Redacted.value(credentials.password) !== "string")
+      ) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "httpCredentials",
+            expected: "a username and a Redacted string password",
+            hint: "Supply website credentials separately from proxy credentials"
+          }),
+          id
+        ))
+      }
+      let credentialOrigin: string | undefined
+      if (credentials?.origin !== undefined) {
+        const url = URL.parse(credentials.origin)
+        if (
+          url === null || !["http:", "https:"].includes(url.protocol) || url.username !== "" ||
+          url.password !== "" || url.pathname !== "/" || url.search !== "" || url.hash !== ""
+        ) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.InvalidInput({
+              input: "httpCredentials.origin",
+              expected: "an HTTP(S) origin (scheme://host:port)",
+              hint: "Supply an origin without credentials, path, query or fragment"
+            }),
+            id
+          ))
+        }
+        credentialOrigin = url.origin
+      }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
       const adopt = mode !== undefined && "context" in mode && mode.adopt === true
@@ -575,6 +610,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const capabilities = (yield* SubscriptionRef.get(model.adapter.capabilities)).entries
       const reports = (name: string) =>
         capabilities.every((entry) => entry.name !== name || entry.status !== "unsupported")
+      if (credentials !== undefined && !reports("interception.auth")) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "interception.auth",
+            backend: runtime.backend,
+            hint: "This backend cannot answer website authentication challenges"
+          }),
+          id
+        ))
+      }
       const reportsDownloads = reports("downloads")
       const asked = options?.downloads ?? (!adopt && reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
@@ -658,6 +704,28 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (!adopt && reports("fileChooser")) {
         yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+      }
+      if (credentials !== undefined) {
+        yield* model.route(entry, {
+          phase: "auth",
+          matches: () => true,
+          ask: (_obligation, paused) =>
+            Effect.succeed({
+              _tag: "Decided",
+              decision: paused.authSource === "server" &&
+                  (credentialOrigin === undefined || URL.parse(paused.request.url)?.origin === credentialOrigin)
+                ? {
+                  _tag: "ProvideCredentials",
+                  username: credentials.username,
+                  password: Redacted.value(credentials.password),
+                  once: true
+                }
+                : { _tag: "CancelAuth" }
+            })
+        })
+        yield* adapter.declare(scope, { _tag: "Intercept", patterns: ["*"], phases: ["auth"] }).pipe(
+          Effect.catch(failed)
+        )
       }
       // A challenge no route answers gets the server's response, never the browser's prompt, which nothing answers
       // headless, wherever the backend can pause one (QUIRKS.md, Q95 and Q252)

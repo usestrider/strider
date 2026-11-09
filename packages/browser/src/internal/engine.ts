@@ -134,6 +134,11 @@ export type Action =
   | { readonly _tag: "FileInput" }
   | { readonly _tag: "None" }
 
+/** Whether the action can change the element in its applying round, before native input dispatch. */
+export const appliesInRound = (action: Action): boolean =>
+  action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
+  action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
+
 /** A one-shot read of the one match. */
 export type Read =
   | { readonly _tag: "Text" }
@@ -146,6 +151,13 @@ export type Read =
 
 /** What an expectation waits for. */
 export type Expectation =
+  | {
+    readonly _tag: "CSS"
+    readonly name: string
+    readonly expected: TextMatcher
+    readonly not: boolean
+    readonly pseudo: "before" | "after" | null
+  }
   | { readonly _tag: "Visible" }
   | { readonly _tag: "Hidden" }
   | { readonly _tag: "Enabled" }
@@ -155,6 +167,7 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
@@ -647,6 +660,26 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
+  /** Roles that prohibit a name for the element itself (accname 1.2, step 1). */
+  const NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "mark",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "suggestion",
+    "superscript",
+    "term",
+    "time"
+  ])
+
   /** Roles whose name comes from their content (accname 1.2, step 2F). */
   const NAME_FROM_CONTENT = new Set([
     "button",
@@ -1074,7 +1107,9 @@ export function engine(render: (root: SnapNode) => string) {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
-    const name = collapse(
+    const role = roleOf(element)
+    // This restriction is on the root, not on descendants or references contributing to another element's name.
+    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
       nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
@@ -2319,6 +2354,21 @@ export function engine(render: (root: SnapNode) => string) {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
       }
+      case "AccessibleName": {
+        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
+        nameCache.delete(element)
+        const name = accessibleName(element, false)
+        const matcher = expectation.expected
+        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
+        return {
+          passed: matcher._tag === "RegExp"
+            ? new RegExp(matcher.source, matcher.flags).test(name)
+            : expectation.ignoreCase
+            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+            : normalize(name) === normalize(matcher.value),
+          observed: name
+        }
+      }
       case "ContainsText": {
         const text = textOf(element)
         const matcher = expectation.expected
@@ -2339,6 +2389,15 @@ export function engine(render: (root: SnapNode) => string) {
               : value === matcher.value),
           observed: value === null ? "not a form control" : value
         }
+      }
+      case "CSS": {
+        const value = getComputedStyle(element, expectation.pseudo === null ? undefined : `::${expectation.pseudo}`)
+          .getPropertyValue(expectation.name)
+        const matcher = expectation.expected
+        const matches = matcher._tag === "RegExp"
+          ? new RegExp(matcher.source, matcher.flags).test(value)
+          : value === matcher.value
+        return { passed: expectation.not ? !matches : matches, observed: value }
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })

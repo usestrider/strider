@@ -231,6 +231,10 @@ export interface Queries<L> {
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
    * `includeHidden` is set.
    *
+   * Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an author
+   * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
+   * nameable role overrides the implicit role.
+   *
    * **Example** (Clicking Save, not Save draft)
    *
    * ```ts import.meta.vitest

@@ -1,5 +1,11 @@
 # @usestrider/vitest
 
+## 0.2.1
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.8.0, whose `TestRun.attach` takes `{ trace }`, `{ har }` or `{ screenshot }` (#210). Reporters see the same artifact kinds as before.
+
 ## 0.2.0
 
 ### Breaking changes
