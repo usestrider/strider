@@ -1,0 +1,12 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-extrahttpheaders",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "extraHTTPHeaders",
+  "status": "missing",
+  "api": [],
+  "notes": "No launch-time context emulation option. A controlled default context can emulate extraHTTPHeaders after launch, but this does not configure requests sent before that registration.",
+  "capabilities": [],
+  "requirements": []
+}

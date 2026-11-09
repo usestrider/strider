@@ -1,0 +1,17 @@
+{
+  "id": "method-frame-waitforloadstate",
+  "upstream": [
+    "method:Frame.waitForLoadState"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding retained Frame operation. Page.frames exposes the observed tree and page.frame enters by iframe locator; these do not implement this contract.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

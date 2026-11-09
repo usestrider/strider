@@ -1,0 +1,17 @@
+{
+  "id": "method-elementhandle-boundingbox",
+  "upstream": [
+    "method:ElementHandle.boundingBox"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No ElementHandle interface with this contract. Lazy Locator methods and evaluation handles are separate capabilities, not fixed-node ElementHandle operations.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

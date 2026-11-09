@@ -1,0 +1,13 @@
+{
+  "id": "method-page-getbytestid-value-regexp-test-id",
+  "upstream": [
+    "method:Page.getByTestId"
+  ],
+  "parent": "method-page-getbytestid",
+  "value": "RegExp test id",
+  "status": "missing",
+  "api": [],
+  "notes": "Strider getByTestId takes a string, not a RegExp.",
+  "capabilities": [],
+  "requirements": []
+}

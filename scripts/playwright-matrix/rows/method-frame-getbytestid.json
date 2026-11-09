@@ -1,0 +1,33 @@
+{
+  "id": "method-frame-getbytestid",
+  "upstream": [
+    "method:Frame.getByTestId"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.getByTestId",
+      "url": "/docs/api/browser/Locator#Locator.getByTestId"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-frame-getbytestid-value-regexp-test-id"
+  ],
+  "valueCoverage": [
+    {
+      "value": "RegExp test id",
+      "status": "missing",
+      "gap": "method-frame-getbytestid-value-regexp-test-id"
+    }
+  ]
+}

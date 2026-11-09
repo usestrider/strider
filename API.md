@@ -1,6 +1,6 @@
 # API: the ergonomic layer (L2)
 
-*Revision 5.25, 2026-10-19. Every member this document declares is built, on Chromium, Firefox and stock WebKit, with the agent toolkit and the `strider` command (CLI.md, Built); what a backend can't do fails with `Unsupported`, naming its capability. Not built: inferred click listeners in snapshots (Agents), and backend layers that carry their capabilities in their types, whose mechanism is open (Modules and backends). A member declared before it is built fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.1.2 and passes Effect's own JSDoc checker, and the API reference is generated from it ([packages/browser/INDEX.md](packages/browser/INDEX.md) lists every declaration and member). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
+*Revision 5.25, 2026-10-19. Every member this document declares is built, on Chromium, Firefox and stock WebKit, with the agent toolkit and the `strider` command (CLI.md, Built); what a backend can't do fails with `Unsupported`, naming its capability. Not built: inferred click listeners in snapshots (Agents), and backend layers that carry their capabilities in their types, whose mechanism is open (Modules and backends). A member declared before it is built fails as the defect `NotBuilt`, and [PROTOCOL.md](PROTOCOL.md) (Status) lists what is. The full signatures live in the package's source, [packages/browser/src/](packages/browser/src/), declarations where nothing is built yet (the sketch), with each declaration's own contract in its JSDoc. It type-checks against Effect 4.1.2 and passes Effect's own JSDoc checker, and the API reference is generated from it (run `pnpm index` to list every declaration and member in the local `packages/browser/INDEX.md`). This document keeps the design: the contracts that span declarations, and the excerpts that explain them. Where an excerpt and the sketch differ, the sketch is right. Every behavior here must be expressible in [CONCEPTS.md](CONCEPTS.md).*
 
 ## Purpose
 
@@ -725,6 +725,7 @@ declare const toHaveAccessibleName: DualMatcher<Locator.ReadonlyLocator, [expect
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
@@ -852,6 +853,14 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll. An event log is not state: its changes are just the events again, and a level-triggered wait on it would match old events.
 
 ## Network
+
+`NetworkRequest.failure(target, request): Effect<Option<NetworkRequest.Failure>, NetworkRequest.RequestError>`
+reads an original request observation immediately from the existing bounded hop index. `None` means pending or
+successfully finished, including HTTP error statuses and redirect hops. `Some` preserves `errorText` and
+`canceled: Option<boolean>`: Chromium and WebKit report a cancellation flag; BiDi leaves it unknown. Text alone
+does not establish cancellation. Unknown, copied/decoded, evicted or foreign requests are `RequestUnavailable`.
+Owner or connection loss takes precedence even over a completed failure; save a returned value for later use.
+The read adds no retention or instrumentation and follows [Pay for what you use](docs/decisions.md#pay-for-what-you-use).
 
 ```ts
 // Route

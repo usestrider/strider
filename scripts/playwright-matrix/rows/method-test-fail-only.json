@@ -1,0 +1,11 @@
+{
+  "id": "method-test-fail-only",
+  "upstream": [
+    "method:Test.fail.only"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Strider Playwright Test runner/reporter integration for this member. The Vitest integration does not implement this contract.",
+  "capabilities": [],
+  "requirements": []
+}

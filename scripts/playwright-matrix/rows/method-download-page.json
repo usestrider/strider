@@ -1,0 +1,17 @@
+{
+  "id": "method-download-page",
+  "upstream": [
+    "method:Download.page"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Download exposes bytes, status, completion, saveAs and cancellation. It does not expose this file-path, deletion or originating Page operation.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Download.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

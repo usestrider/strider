@@ -1,0 +1,30 @@
+{
+  "id": "method-request-serviceworker",
+  "upstream": [
+    "method:Request.serviceWorker"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "Initiator",
+      "url": "/docs/api/browser/NetworkRequest#Initiator"
+    },
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.workers",
+      "url": "/docs/api/browser/UserContext#UserContext.workers"
+    }
+  ],
+  "notes": "For a Worker initiator, match its realm to context.workers and inspect kind=service. Unattributed requests cannot name a worker. Worker discovery is capability-limited; no retained serviceWorker getter is supplied.",
+  "capabilities": [
+    "workers.service"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

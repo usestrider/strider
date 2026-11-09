@@ -126,6 +126,7 @@ export const capabilities = (
       entry("network.requestBody.text", "partial", [
         "requires a complete collected body; multipart and empty fallback reports are refused"
       ]),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),

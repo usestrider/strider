@@ -1,75 +1,25 @@
 import assert from "node:assert/strict"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { assertApiLink, assertDecision, assertValueGaps } from "../packages/tools/docs/src/matrix-evidence.ts"
-import { commit, extract, hash } from "./playwright-reference.mjs"
+import { commit, extract } from "./playwright-reference.mjs"
+
+import { deriveMatrix, loadCuratedMatrix } from "./playwright-matrix/data.mjs"
 
 const root = "scripts/playwright-matrix/"
 const read = (file) => JSON.parse(readFileSync(file, "utf8"))
 const upstream = read(`${root}upstream.json`)
-const matrix = read(`${root}matrix.json`)
-const browserSnapshot = read(`${root}browsers.json`)
+const curated = loadCuratedMatrix()
 const currentBrowsers = read(".data/api-reference/capabilities.json")
+const matrix = deriveMatrix(curated, currentBrowsers)
 const members = new Map(upstream.members.map((member) => [member.id, member]))
 const statuses = new Set(["has", "different", "missing"])
 const args = process.argv.slice(2)
 const argument = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined
-const write = (name, data) => writeFileSync(`${root}${name}.json`, `${JSON.stringify(data, null, 2)}\n`)
-
-// Browser statuses are derived from explicit capability requirements, with the inspector-only access boundary.
-const browserStatuses = (row) => {
-  const result = {}
-  for (const backend of currentBrowsers.backends) {
-    for (const mode of ["launched", "attached"]) {
-      const entries = new Map((backend[mode] ?? []).map((entry) => [entry.name, entry]))
-      let status = row.status
-      const limitations = []
-      const requirements = [...row.capabilities.map((capability) => ({ capability })), ...(row.requirements ?? [])]
-      for (const requirement of requirements) {
-        if (requirement.unavailable) {
-          if (requirement.unavailable.includes(`${backend.id}.${mode}`)) {
-            status = "missing"
-            limitations.push(requirement.quote)
-          }
-          continue
-        }
-        const capability = requirement.capability
-        const candidates = [capability, ...(requirement.alternatives ?? [])].map((name) => entries.get(name)).filter(
-          Boolean
-        )
-        const entry = candidates.find((entry) => entry.status === "supported") ?? candidates.find((entry) =>
-          entry.status === "partial"
-        ) ?? candidates[0]
-        if (!entry) {
-          limitations.push(`Capability ${capability} is not reported.`)
-          status = "missing"
-        } else {
-          limitations.push(...entry.limitations)
-          if (
-            ["unsupported", "unknown"].includes(entry.status) &&
-            !(capability === "capability.video" && row.configuration?.[backend.id])
-          ) status = "missing"
-          if (entry.status === "partial" && entry.limitations.length === 0) limitations.push("Partial adapter support.")
-        }
-      }
-      result[`${backend.id}.${mode}`] = row.browserOverrides?.[`${backend.id}.${mode}`] ??
-        { status, limitations: [...new Set(limitations)] }
-    }
-  }
-  return result
-}
-
-if (args.includes("--refresh-browsers")) {
-  for (const row of matrix.rows) row.browsers = browserStatuses(row)
-  write("browsers", currentBrowsers)
-  write("matrix", matrix)
-  process.stdout.write("Refreshed browser statuses; review the diff before accepting new evidence.\n")
-}
-if (args.includes("--refresh-evidence")) {
-  for (const file of Object.keys(matrix.evidence)) matrix.evidence[file] = hash(readFileSync(file))
-  write("matrix", matrix)
-  process.stdout.write("Refreshed evidence hashes; classifications require human review.\n")
-}
+assert.ok(
+  !args.includes("--refresh-browsers") && !args.includes("--refresh-evidence"),
+  "Refresh flags were removed: review curated rows; current statuses and hashes are generated automatically"
+)
 
 assert.equal(upstream.commit, commit)
 assert.equal(upstream.version, matrix.upstreamVersion)
@@ -123,7 +73,6 @@ for (const row of matrix.rows) {
     (row.valueCoverage ?? []).every((entry) => statuses.has(entry.status)),
     `${row.id}: invalid value classification`
   )
-  assert.deepEqual(row.browsers, browserStatuses(row), `${row.id}: browser statuses drifted; review and refresh`)
   for (const requirement of row.requirements ?? []) {
     assert.ok(
       (requirement.capability || requirement.unavailable?.length) && requirement.file && requirement.quote,
@@ -156,17 +105,6 @@ for (const member of members.values()) {
   }
 }
 assert.deepEqual([...covered].sort(), [...members.keys()].sort(), "Reference completeness failure")
-if (!args.includes("--refresh-browsers")) {
-  assert.deepEqual(browserSnapshot, currentBrowsers, "Adapter capability snapshot drifted")
-}
-for (const [file, digest] of Object.entries(matrix.evidence)) {
-  assert.equal(
-    hash(readFileSync(file)),
-    digest,
-    `${file}: source changed; review classifications before refreshing evidence`
-  )
-}
-
 const checkout = argument("--upstream")
 if (checkout) {
   assert.deepEqual(extract(checkout), upstream, "Upstream inventory differs from the pinned checkout")
@@ -198,6 +136,9 @@ if (args.includes("--built")) {
   }
   process.stdout.write(`Checked ${urls.size} built API reference links.\n`)
 }
+mkdirSync(".data/playwright-matrix", { recursive: true })
+writeFileSync(".data/playwright-matrix/matrix.json", `${JSON.stringify(matrix, null, 2)}\n`)
+writeFileSync(".data/playwright-matrix/browsers.json", `${JSON.stringify(currentBrowsers, null, 2)}\n`)
 process.stdout.write(
   `Playwright ${upstream.version}: ${upstream.classes.length} classes, ${members.size} members covered by ${matrix.rows.length} rows; provenance, API links, decisions and browser statuses valid.\n`
 )

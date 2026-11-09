@@ -1,0 +1,23 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "package": "effect",
+      "module": "Fiber",
+      "symbol": "interrupt",
+      "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+      "source": {
+        "file": "node_modules/effect/src/Fiber.ts",
+        "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+      }
+    }
+  ],
+  "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
+  "capabilities": [],
+  "id": "option-frame-ischecked-signal",
+  "upstream": [
+    "method:Frame.isChecked"
+  ],
+  "option": "signal",
+  "requirements": []
+}

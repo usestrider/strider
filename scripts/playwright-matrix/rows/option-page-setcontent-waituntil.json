@@ -1,0 +1,40 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.setContent",
+      "url": "/docs/api/browser/Page#Page.setContent"
+    }
+  ],
+  "notes": "Defaults to load; commit skips readiness, domContentLoaded waits for parsing/deferred scripts, load waits for resources and child frames. No networkidle.",
+  "capabilities": [],
+  "id": "option-page-setcontent-waituntil",
+  "upstream": [
+    "method:Page.setContent"
+  ],
+  "option": "waitUntil",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "commit",
+      "status": "has"
+    },
+    {
+      "value": "domcontentloaded",
+      "status": "has"
+    },
+    {
+      "value": "load",
+      "status": "has"
+    },
+    {
+      "value": "networkidle",
+      "status": "missing",
+      "gap": "option-page-setcontent-waituntil-value-networkidle"
+    }
+  ],
+  "gaps": [
+    "option-page-setcontent-waituntil-value-networkidle"
+  ]
+}

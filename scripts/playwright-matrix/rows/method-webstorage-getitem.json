@@ -1,0 +1,17 @@
+{
+  "id": "method-webstorage-getitem",
+  "upstream": [
+    "method:WebStorage.getItem"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "OriginStorage",
+      "symbol": "ReadonlyOriginStorage.get",
+      "url": "/docs/api/browser/OriginStorage#ReadonlyOriginStorage.get"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

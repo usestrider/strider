@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohavevalue",
+  "upstream": [
+    "method:LocatorAssertions.toHaveValue"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveValue",
+      "url": "/docs/api/browser/Expect#toHaveValue"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

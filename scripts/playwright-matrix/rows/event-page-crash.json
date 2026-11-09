@@ -1,0 +1,23 @@
+{
+  "id": "event-page-crash",
+  "upstream": [
+    "event:Page.crash"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.closed",
+      "url": "/docs/api/browser/Page#ObservedPage.closed"
+    }
+  ],
+  "notes": "Wait for page.closed and inspect the close reason. This is lifetime evidence, not a crash stack or an immediate boolean status.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

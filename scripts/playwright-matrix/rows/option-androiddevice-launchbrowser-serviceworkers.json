@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-androiddevice-launchbrowser-serviceworkers",
+  "upstream": [
+    "method:AndroidDevice.launchBrowser"
+  ],
+  "option": "serviceWorkers",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "allow",
+      "status": "missing"
+    },
+    {
+      "value": "block",
+      "status": "missing"
+    }
+  ]
+}

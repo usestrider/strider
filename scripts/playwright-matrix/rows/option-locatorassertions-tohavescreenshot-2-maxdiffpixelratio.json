@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tohavescreenshot-2-maxdiffpixelratio",
+  "upstream": [
+    "method:LocatorAssertions.toHaveScreenshot#2"
+  ],
+  "option": "maxDiffPixelRatio",
+  "requirements": []
+}

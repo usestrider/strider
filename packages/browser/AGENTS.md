@@ -1,6 +1,6 @@
 # Using @usestrider/browser
 
-Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member.
+Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member. In a source checkout, run `pnpm index` first; the generated file is ignored.
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
 Strider is pre-release, and the API can still change before 1.0. Launching,

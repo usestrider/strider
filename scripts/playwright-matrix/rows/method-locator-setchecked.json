@@ -1,0 +1,37 @@
+{
+  "id": "method-locator-setchecked",
+  "upstream": [
+    "method:Locator.setChecked"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.check",
+      "url": "/docs/api/browser/Locator#Locator.check"
+    },
+    {
+      "module": "Locator",
+      "symbol": "Locator.uncheck",
+      "url": "/docs/api/browser/Locator#Locator.uncheck"
+    }
+  ],
+  "notes": "Branch on the desired boolean and call check or uncheck. Each action retains actionability, postcondition errors and radio-button restrictions; there is no setChecked alias.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

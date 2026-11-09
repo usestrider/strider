@@ -1,0 +1,20 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-permissions",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "permissions",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "permissions"
+  ],
+  "requirements": []
+}

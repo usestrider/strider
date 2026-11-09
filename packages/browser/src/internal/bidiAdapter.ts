@@ -115,6 +115,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("network.requestBody.text", "partial", [
         "requires a complete collected body; redirected bodies cannot be addressed independently"
       ]),
+      entry("network.failure", "partial", ["BiDi reports failure text without a cancellation flag"]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),

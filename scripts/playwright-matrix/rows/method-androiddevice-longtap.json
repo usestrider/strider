@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-longtap",
+  "upstream": [
+    "method:AndroidDevice.longTap"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

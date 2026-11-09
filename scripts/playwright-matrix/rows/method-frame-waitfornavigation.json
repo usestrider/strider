@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-waitfornavigation",
+  "upstream": [
+    "method:Frame.waitForNavigation"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageNavigation",
+      "symbol": "next",
+      "url": "/docs/api/browser/PageNavigation#next"
+    }
+  ],
+  "notes": "Subscribe before the action, then run the returned wait. Frame navigations use frames: all plus an explicit predicate on the frame id; cancellation and deadlines follow the subscription. Explicit load states have separate gaps below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-request-url",
+  "upstream": [
+    "method:Request.url"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "NetworkRequest",
+      "url": "/docs/api/browser/NetworkRequest#NetworkRequest"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

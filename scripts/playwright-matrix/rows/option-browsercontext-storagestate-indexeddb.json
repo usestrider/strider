@@ -1,0 +1,12 @@
+{
+  "id": "option-browsercontext-storagestate-indexeddb",
+  "upstream": [
+    "method:BrowserContext.storageState"
+  ],
+  "option": "indexedDB",
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "capabilities": [],
+  "requirements": []
+}

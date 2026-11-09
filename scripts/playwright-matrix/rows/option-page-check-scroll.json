@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-check-scroll",
+  "upstream": [
+    "method:Page.check"
+  ],
+  "option": "scroll",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "auto",
+      "status": "missing"
+    },
+    {
+      "value": "none",
+      "status": "missing"
+    }
+  ]
+}

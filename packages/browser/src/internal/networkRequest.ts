@@ -374,6 +374,10 @@ export const stream = (target: Target, filter?: BodyFilter, where?: Subscription
       )
   ).pipe(Operation.named("NetworkRequest.stream"))
 }
+/** Whether a retained hop belongs to this exact page or context entry. */
+const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry): boolean =>
+  (target._tag === "Page" ? Option.getOrUndefined(hop.page) : Option.getOrUndefined(hop.context)) ===
+    target.behind.entry
 
 /** An immediate read of existing terminal facts, valid only while the original owner remains observable. */
 export const timing = (
@@ -397,11 +401,7 @@ export const timing = (
     return yield* Effect.suspend(() => {
       // Validate ownership at the read, even when phase data was retained before the owner ended.
       if (Option.getOrUndefined(model.hop(request.hop)) !== hop) return unavailable("notRetained")
-      if (
-        owner._tag === "Page"
-          ? Option.getOrUndefined(hop.page) !== owner.behind.entry
-          : Option.getOrUndefined(hop.context) !== owner.behind.entry
-      ) return unavailable("foreignTarget")
+      if (!ownsHop(owner, hop)) return unavailable("foreignTarget")
       if (
         Deferred.isDoneUnsafe(model.lost) || Deferred.isDoneUnsafe(owner.behind.entry.closed) ||
         Option.exists(hop.page, (page) => Deferred.isDoneUnsafe(page.closed)) ||
@@ -455,10 +455,7 @@ export const response = (
       })
     const retained = found.behind.runtime.model.hop(request.hop)
     if (Option.isNone(retained)) return yield* Effect.fail(unavailable("evicted"))
-    const owner: Option.Option<Model.PageEntry | Model.ContextEntry> = found._tag === "Page"
-      ? retained.value.page
-      : retained.value.context
-    if (Option.isNone(owner) || owner.value !== found.behind.entry) {
+    if (!ownsHop(found, retained.value)) {
       return yield* Effect.fail(unavailable("foreignTarget"))
     }
     const targetClosed = found.behind.entry.closed
@@ -504,3 +501,75 @@ export const response = (
       )
     }).pipe(Operation.named("NetworkRequest.response", { attributes: { "browser.hop.id": request.hop } }))
   }).pipe(Operation.named("NetworkRequest.response.acquire", { attributes: { "browser.hop.id": request.hop } }))
+
+/** An immediate read of existing terminal facts, valid only while the original owner remains observable. */
+export const failure = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest.NetworkRequest
+): Effect.Effect<Option.Option<NetworkRequest.Failure>, NetworkRequest.RequestError> => {
+  const owner = Handles.target(target)
+  return Effect.gen(function*() {
+    const { model } = owner.behind.runtime
+    const unavailable = (why: NetworkRequest.RequestUnavailable["why"]) =>
+      Effect.fail(
+        new NetworkRequest.RequestError({
+          hop: request.hop,
+          reason: new NetworkRequest.RequestUnavailable({ why }),
+          diagnostics: Operation.diagnosticsNow()
+        })
+      )
+    const found = model.hop(request.hop)
+    if (Option.isNone(found) || found.value.request !== request) return yield* unavailable("notRetained")
+    const hop = found.value
+    const polled = yield* Deferred.poll(hop.end)
+    return yield* Effect.suspend(() => {
+      // Validate after polling, before reading the captured terminal value. In particular, the fold's
+      // synthetic disconnect failure is cleanup evidence, not a browser-reported network failure.
+      if (Option.getOrUndefined(model.hop(request.hop)) !== hop) return unavailable("notRetained")
+      if (!ownsHop(owner, hop)) return unavailable("foreignTarget")
+      if (
+        Deferred.isDoneUnsafe(model.lost) || Deferred.isDoneUnsafe(owner.behind.entry.closed) ||
+        Option.exists(hop.page, (page) => Deferred.isDoneUnsafe(page.closed)) ||
+        Option.exists(hop.context, (context) => Deferred.isDoneUnsafe(context.closed))
+      ) return unavailable("ownerLost")
+      const initiator = request.initiator
+      if (initiator._tag === "Document") {
+        const page = Option.getOrUndefined(hop.page)
+        if (
+          page === undefined || (page.id !== initiator.navigable &&
+            !page.state.getUnsafe().frames.some((frame) => frame.id === initiator.navigable))
+        ) return unavailable("ownerLost")
+      } else if (initiator._tag === "Worker") {
+        const workers = Option.isSome(hop.context)
+          ? hop.context.value.state.getUnsafe().workers
+          : Option.isSome(hop.page)
+          ? hop.page.value.state.getUnsafe().workers
+          : []
+        if (!workers.some((worker) => worker.realm === initiator.realm && !Deferred.isDoneUnsafe(worker.closed))) {
+          return unavailable("ownerLost")
+        }
+      }
+      if (Option.isNone(polled)) return Effect.succeedNone
+      return Effect.flatMap(polled.value, (end) => {
+        if (end._tag === "Forgotten") return unavailable("notRetained")
+        return Effect.succeed(
+          end._tag === "Failed"
+            ? Option.some(
+              new NetworkRequest.Failure({
+                errorText: end.error,
+                canceled: model.adapter.info.protocol === "cdp" || model.adapter.info.protocol === "webkit"
+                  ? Option.some(end.canceled)
+                  : Option.none()
+              })
+            )
+            : Option.none()
+        )
+      })
+    })
+  }).pipe(Operation.named("NetworkRequest.failure", {
+    attributes: {
+      "browser.hop.id": request.hop,
+      [owner._tag === "Page" ? "browser.page.id" : "browser.context.id"]: owner.behind.entry.id
+    }
+  }))
+}

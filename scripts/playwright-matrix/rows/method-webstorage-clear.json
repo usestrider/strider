@@ -1,0 +1,17 @@
+{
+  "id": "method-webstorage-clear",
+  "upstream": [
+    "method:WebStorage.clear"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "OriginStorage",
+      "symbol": "OriginStorage.clear",
+      "url": "/docs/api/browser/OriginStorage#OriginStorage.clear"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

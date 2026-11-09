@@ -1,0 +1,28 @@
+{
+  "id": "method-touchscreen-tap",
+  "upstream": [
+    "method:Touchscreen.tap"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.tap",
+      "url": "/docs/api/browser/Locator#Locator.tap"
+    }
+  ],
+  "notes": "Touch actions target locators.",
+  "capabilities": [
+    "input.touch"
+  ],
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "property-page-screencast",
+  "upstream": [
+    "property:Page.screencast"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Screencast",
+      "url": "/docs/api/browser/Capability#Screencast"
+    }
+  ],
+  "notes": "Native frame stream, not overlay editing.",
+  "capabilities": [
+    "capability.screencast"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

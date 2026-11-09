@@ -1,0 +1,11 @@
+{
+  "id": "property-testresult-starttime",
+  "upstream": [
+    "property:TestResult.startTime"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Strider Playwright Test runner/reporter integration for this member. The Vitest integration does not implement this contract.",
+  "capabilities": [],
+  "requirements": []
+}

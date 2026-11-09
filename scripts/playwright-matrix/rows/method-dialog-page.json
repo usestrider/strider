@@ -1,0 +1,17 @@
+{
+  "id": "method-dialog-page",
+  "upstream": [
+    "method:Dialog.page"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Dialog values do not retain a Page object. Observe them on the page/context whose subscription the caller owns.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Dialog.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}
