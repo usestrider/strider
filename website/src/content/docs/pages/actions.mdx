@@ -17,6 +17,7 @@ import { Effect } from "effect"
 
 const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
   yield* page.getByLabel("Name").fill("Ada Lovelace")
+  yield* page.getByLabel("Name").blur()
   yield* page.getByLabel("Country").selectOption({ label: "United Kingdom" })
   yield* page.getByLabel("Send me the newsletter").check()
   yield* page.getByRole("button", { name: "Save" }).click()
@@ -42,6 +43,12 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
+
+[`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer.
+Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't have focus
+(`document.hasFocus()` is false), the element gets `focusout` but no `blur` event.
+It waits for one match, accepts hidden, disabled and inert elements by default, and leaves an unfocused element
+unchanged.
 
 In a design-mode document, filling a paragraph blurs a previously focused input or textarea, including one
 inside open shadow roots, and checks the target again after its blur handlers. If refocusing prevents preparation
@@ -87,6 +94,7 @@ Before sending anything, an action checks whether its element is ready and retri
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | rendered, visible, stable, enabled, not inert, in the viewport, receives the pointer |
 | `fill`, `clear`                                                   | visible, enabled, editable, not inert                                    |
+| `blur` | none (still requires exactly one match) |
 | `focus`, `press`, `pressSequentially`                             | visible, not inert                                                       |
 | `scrollIntoView`                                                  | visible, stable                                                          |
 | `selectOption`                                                    | visible, enabled                                                         |

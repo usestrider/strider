@@ -15439,43 +15439,68 @@
       "upstream": [
         "method:Locator.blur"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Locator",
+          "symbol": "Locator.blur",
+          "url": "/docs/api/browser/Locator#Locator.blur"
+        }
+      ],
+      "notes": "Removes focus from exactly one match through the page engine without keyboard or pointer input. Hidden, disabled and inert targets are accepted by default; an unfocused target is unchanged. Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested. Stock WebKit shares the page world; Chromium and Firefox use an isolated world.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+          ]
         },
         "webkit.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Locator.ts"
+          "packages/browser/src/Locator.ts",
+          "packages/browser/test/integration/slice/interaction.ts"
         ],
-        "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+        "scope": "Native element blur, strict matching, ownership, deadlines and browser-native event controls inspected and tested in the interaction slice."
       },
-      "requirements": []
+      "requirements": [],
+      "browserOverrides": {
+        "webkit.launched": {
+          "status": "has",
+          "limitations": [
+            "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+          ]
+        },
+        "webkit.attached": {
+          "status": "has",
+          "limitations": [
+            "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+          ]
+        }
+      }
     },
     {
       "id": "method-locator-boundingbox",
@@ -79558,9 +79583,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locator-blur-signal",
       "upstream": [
@@ -79569,36 +79605,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locator-blur-timeout",
       "upstream": [
@@ -79607,31 +79649,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "missing",
@@ -112823,7 +112871,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "20399d6dc1580714b456296eb415a0f6f8ab7c94dfac20f7a216333e2b5ada37",
+    "docs/decisions.md": "cc713b945d06848def88495bba20eeaf74f5d26ece1f12c98442f5161ec5c45c",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -112839,7 +112887,7 @@
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "6d6989b1962fcb5999b8d59fc6cc7e097a82942e2b540ab9e427ec88057ae40b",
+    "packages/browser/src/Locator.ts": "290bcc67077ff4e44157617c41d94906f817821d8e40ff8aeeac3425e4766787",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",

@@ -125,6 +125,7 @@ export type Action =
     readonly guard: boolean
   }
   | { readonly _tag: "Focus" }
+  | { readonly _tag: "Blur" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
   | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
@@ -1961,6 +1962,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
+      case "Blur":
+        if (!("blur" in element) || typeof element.blur !== "function") {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "an element with a blur method", element: describe(element) }
+          }
+        }
+        if (apply) element.blur()
+        return answer
       default:
         break
     }
@@ -1976,20 +1986,28 @@ export function engine(render: (root: SnapNode) => string) {
         if (invalidNumberFill(element, action.value)) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
+        const recheckFill = (): Response | { readonly _tag: "Retry"; readonly reason: NotReady } | undefined => {
+          let reason: NotReady | null = null
+          if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
+          else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
+          else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
+          else if (checks.notInert) reason = inertReason(element)
+          return reason === null ? undefined : { _tag: "Retry", reason }
+        }
         if (settable(element)) {
           if (fillCandidate(element, action.value) === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
-          if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
-          if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
+          const focused = recheckFill()
+          if (focused !== undefined) return focused
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
             if (invalidNumberFill(element, action.value)) {
               return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
             }
             selectContents(element)
-            return { ...answer, fill: "type" }
+            return recheckFill() ?? { ...answer, fill: "type" }
           }
           const candidate = fillCandidate(element, action.value)
           if (candidate === undefined) {
@@ -2001,13 +2019,11 @@ export function engine(render: (root: SnapNode) => string) {
           return { ...answer, fill: "set" }
         }
         selectContents(element as HTMLElement)
-        // Selection focuses the target; its handlers can remove actionability before native typing.
+        // Focus and selection handlers can remove readiness before insertion.
         if (checks.editable && !editableKind(element)) {
           return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-        if (checks.enabled && !enabled(element)) return { _tag: "Retry", reason: { _tag: "Disabled" } }
-        if (checks.editable && readOnly(element)) return { _tag: "Retry", reason: { _tag: "ReadOnly" } }
-        return { ...answer, fill: "type" }
+        return recheckFill() ?? { ...answer, fill: "type" }
       }
       case "Select": {
         const select = element as HTMLSelectElement

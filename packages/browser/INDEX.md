@@ -991,6 +991,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `check(options?: PointerOptions | undefined): ActionEffect`
   - `uncheck(options?: PointerOptions | undefined): ActionEffect`
   - `focus(options?: ActionOptions | undefined): ActionEffect`
+  - `blur(options?: ActionOptions | undefined): ActionEffect`
   - `clear(options?: ActionOptions | undefined): ActionEffect`
   - `scrollIntoView(options?: ActionOptions | undefined): ActionEffect`
   - `fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect`
