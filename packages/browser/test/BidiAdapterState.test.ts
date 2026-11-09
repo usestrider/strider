@@ -18,6 +18,7 @@ import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Capture from "../src/internal/bidiAdapter/capture.ts"
+import * as Declare from "../src/internal/bidiAdapter/declare.ts"
 import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
 import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
@@ -3044,5 +3045,21 @@ describe("BiDi request body identity", () => {
         why: "redirect"
       })
       assert.deepStrictEqual(sent, ["network.getData"])
+    }))
+})
+
+
+describe("BiDi request collector limits", () => {
+  it.effect("preserves legacy encoded limits while reserving native encoding overhead only for decoded subscriptions", () =>
+    Effect.gen(function*() {
+      for (const decoded of [false, true]) {
+        const { state, page, commands } = yield* withPage({ "network.addDataCollector": { collector: "body-collector" } })
+        yield* Declare.declare(state, { _tag: "Page", page: page.id }, {
+          _tag: "BodyCollection", bodies: ["request"], maxBytes: 4,
+          ...(decoded ? { decodedRequestBytes: true } : {})
+        })
+        const command = commands.find((command) => command.method === "network.addDataCollector")!
+        assert.deepInclude(command.params, { maxEncodedDataSize: decoded ? 8 : 4 })
+      }
     }))
 })
