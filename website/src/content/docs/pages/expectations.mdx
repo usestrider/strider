@@ -38,9 +38,23 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toContainText(expected)`                      | its text contains `expected`                                     |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+
+Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
+case-sensitive strings, so `switch` does not match `checkbox`. They include hidden elements and retry missing or
+multiple matches until the deadline, reporting the role or match count if they fail:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveRole = Effect.fn("saveRole")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+})
+```
 
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).

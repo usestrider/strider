@@ -154,6 +154,7 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -2173,6 +2174,10 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
+      }
+      case "Role": {
+        const role = roleOf(element) ?? ""
+        return { passed: role === expectation.expected, observed: role }
       }
       case "ContainsText": {
         const text = textOf(element)

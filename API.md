@@ -706,6 +706,7 @@ declare const toBeVisible: Matcher<Locator.ReadonlyLocator>   // Matcher<S> = (s
 declare const toHaveText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
 declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>
@@ -731,6 +732,8 @@ declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children    
 declare const including: (...children: ReadonlyArray<AriaPattern>) => Children   // these children in this order; others may come between
 declare const unchecked: Children                                                // children are not compared
 ```
+
+- **Role expectations.** `locator.pipe(Expect.toHaveRole("button"))` compares the computed explicit or implicit ARIA role as an exact, case-sensitive string, without following the role hierarchy. Hidden elements are included. Missing or multiple matches retry until the deadline; failure observations contain `{ matches: number }`, or the role string for one match (empty when it has no role).
 
 - **How expectations evaluate.** An expectation checks once immediately, then again each time something its subject depends on changes. There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the browser's clock, within the deadline (`Deadline.within` adjusts it). Where the change signal comes from depends on the subject:
   - **A locator's expectation waits in the page.** One round is one engine request: it checks, and if the condition doesn't hold, checks again on each mutation of the document (children, attributes, text), each `input`, `change`, `focusin` and `focusout` event, and each animation frame, answering when the condition holds or after a second. L1 sends rounds until the deadline. No change is missed between checks, and there is no polling cadence; a page that renders no frames and changes nothing is checked again at the next round.
