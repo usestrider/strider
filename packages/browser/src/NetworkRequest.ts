@@ -26,6 +26,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
+import type * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import * as Target from "./Target.ts"
@@ -396,6 +397,73 @@ export const headersSent = (
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
 
 /**
+ * A browser-reported request failure, with the original error text and cancellation evidence.
+ *
+ * **Details**
+ *
+ * `canceled` is `Some(true)` for reported cancellation and `Some(false)` otherwise on Chromium and WebKit.
+ * On BiDi it is `None`: that protocol reports error text without a cancellation flag. Error text is not a
+ * portable error code and is never used to infer cancellation here.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkRequest/Failure")({
+  errorText: Schema.String,
+  canceled: Schema.Option(Schema.Boolean)
+}) {}
+
+/**
+ * Reason a request's live observation is unavailable.
+ *
+ * **Details**
+ *
+ * `notRetained` includes unknown, evicted, copied or decoded request snapshots. `foreignTarget` means the
+ * request belongs to another page or context. `ownerLost` means its page, context, frame, worker or browser
+ * connection is gone. `timingNotEnabled` means its context did not opt into timing collection.
+ * None of these proves that the network request failed.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RequestUnavailable
+  extends Schema.Error<RequestUnavailable>("@usestrider/browser/NetworkRequest/RequestUnavailable")({
+    _tag: Schema.tag("RequestUnavailable"),
+    why: Schema.Literals(["notRetained", "foreignTarget", "ownerLost", "timingNotEnabled"])
+  })
+{
+  override get message(): string {
+    return `Request observation unavailable: ${this.why}`
+  }
+}
+
+/**
+ * Reason a request's response association is no longer available.
+ *
+ * **Details**
+ *
+ * `evicted` means the bounded request index forgot the hop. `foreignTarget` means the retained hop belongs to
+ * another page or context. `released` means the acquiring scope closed. `targetClosed` means the target closed
+ * before a response arrived. A network failure without a response instead succeeds with `Option.none`.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ResponseUnavailable
+  extends Schema.Error<ResponseUnavailable>("@usestrider/browser/NetworkRequest/ResponseUnavailable")({
+    _tag: Schema.tag("ResponseUnavailable"),
+    why: Schema.Literals(["evicted", "foreignTarget", "released", "targetClosed"])
+  })
+{
+  override get message(): string {
+    return `Request response unavailable: ${this.why}`
+  }
+}
+
+/**
  * Reason redirect evidence cannot be read at this time.
  *
  * **Details**
@@ -444,24 +512,177 @@ export class RedirectUnknown
 }
 
 /**
- * Error reading a request's redirect links.
+ * Error reading a request's response association, live observation or redirect links.
  *
  * @stability unstable
  * @category errors
  * @since 0.1.0
  */
-export class RequestError extends Schema.TaggedError<RequestError>("@usestrider/browser/NetworkRequest/RequestError")(
-  "RequestError",
-  {
+export class RequestError
+  extends Schema.TaggedError<RequestError>("@usestrider/browser/NetworkRequest/RequestError")("RequestError", {
     hop: HopId,
-    reason: Schema.Union([RedirectUnavailable, RedirectUnknown]),
+    reason: Schema.Union([RequestUnavailable, ResponseUnavailable, RedirectUnavailable, RedirectUnknown]),
     diagnostics: Diagnostics.Diagnostics
-  }
-) {
+  })
+{
   override get message(): string {
     return this.reason.message
   }
 }
+
+/**
+ * A snapshot of a request hop's native timings, with unavailable phases represented by `None`.
+ *
+ * **Details**
+ *
+ * `startTime` is milliseconds since the Unix epoch. Every other value is milliseconds from that same
+ * hop's native baseline. A missing value proves neither completion nor failure. Earlier snapshots never
+ * change. Connection reuse, cache responses and missing browser evidence can leave phases unavailable.
+ * `requestStart` can describe browser-reported cache access as well as request sending. Cache reuse can omit
+ * a second observable request entirely. Source labels alone do not establish whether the server was contacted.
+ * `secureConnectionStart` is currently unavailable; TLS phase mapping is not advertised.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Timing extends Schema.Class<Timing>("@usestrider/browser/NetworkRequest/Timing")({
+  startTime: Schema.Option(Schema.Number),
+  domainLookupStart: Schema.Option(Schema.Number),
+  domainLookupEnd: Schema.Option(Schema.Number),
+  connectStart: Schema.Option(Schema.Number),
+  connectEnd: Schema.Option(Schema.Number),
+  secureConnectionStart: Schema.Option(Schema.Number),
+  requestStart: Schema.Option(Schema.Number),
+  responseStart: Schema.Option(Schema.Number),
+  responseEnd: Schema.Option(Schema.Number)
+}) {}
+
+/**
+ * Reads the timing observed so far for an original request, without waiting or sending browser commands.
+ *
+ * **Details**
+ *
+ * Create the context with `requestTiming: true` before opening its pages. Omitted or false configuration
+ * collects no timing state. Reads otherwise fail with `RequestError` / `RequestUnavailable`.
+ * The original request must remain in the bounded 1000-hop index with live page, context, frame or worker
+ * and connection owners. Copied, decoded, evicted and foreign requests refuse. Save the returned Schema
+ * snapshot to retain it beyond those owners. History does not pin timing observations.
+ *
+ * `responseEnd` appears only after successful transfer completion, including redirect hops. A failure after
+ * headers preserves earlier phases with no successful end. Redirect end can be an observation bound from
+ * the next request event. Response-header boundaries differ by backend; unknown origins leave dependent
+ * values unavailable. Chromium reports header start when present, Firefox its native response start, and
+ * stock WebKit its native response-header start. WebKit's ambiguous zero phases and redirect origins are
+ * unavailable. Worker requests without a page-attributed native timing collector have unavailable phases.
+ *
+ * **Example** (Opting into timings)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, NetworkRequest } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const inspect = Effect.fn("inspect")(function*() {
+ *   const context = yield* Browser.newContext({ requestTiming: true })
+ *   const page = yield* context.newPage
+ *   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com")
+ *   return yield* NetworkRequest.timing(page, yield* sent)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const timing = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Timing, RequestError> => NetworkRequestImpl.timing(target, request)
+
+/**
+ * Retains one request hop in the caller's scope and returns a wait for its response, without collecting its body.
+ *
+ * **Details**
+ *
+ * Acquire on the page or context that observed the request, while it is still among the last 1000 retained hops.
+ * Each redirect hop has its own response. The returned effect gives an already-arrived response immediately, or
+ * waits under the deadline in force when it runs. A request that ends without a response gives `Option.none`.
+ * In-flight model eviction fails with `ResponseUnavailable`; scope closure releases the hop and fails pending
+ * and subsequent waits with `released`. Closing the target before arrival fails with `targetClosed`.
+ * Only this explicit acquisition retains the hop beyond a lookup; it enables no browser instrumentation or body capture.
+ *
+ * **Gotchas**
+ *
+ * Awaiting a response inside a request-phase route handler before continuing that request prevents it from being
+ * sent. Continue the request first. Response bodies require a separate `NetworkResponse` body subscription set
+ * up before the request.
+ *
+ * **Example** (Finding the response to an observed request)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const status = Effect.fn("status")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com/")
+ *   const response = yield* NetworkRequest.response(page, yield* sent)
+ *   return yield* response
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category subscriptions
+ * @since 0.1.0
+ */
+export const response = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<
+  Effect.Effect<Option.Option<NetworkResponse.NetworkResponse>, RequestError | Deadline.Timeout>,
+  RequestError,
+  Scope.Scope
+> => NetworkRequestImpl.response(target, request)
+
+/**
+ * Reads the failure reported for a request so far, without waiting or sending browser commands.
+ *
+ * **Details**
+ *
+ * Returns `None` for a live request still in flight or one that finished successfully, including HTTP 404/503
+ * responses and redirect hops. A failed transfer can have received response headers before failing.
+ * `Some` preserves the failure text and cancellation evidence; it does not classify HTTP status codes.
+ *
+ * Pass the original request observation and its page or context. The bounded index keeps at most 1000 hops
+ * across the connection, dropping completed hops first. Missing, evicted, copied and foreign requests fail
+ * with `RequestError` / `RequestUnavailable`. Loss of the owning page, context, frame, worker or connection
+ * makes even a completed request unavailable. Save a returned `Failure` if it must outlive that owner.
+ * This read adds no retention, subscription or instrumentation.
+ *
+ * **Example** (Inspecting a request after an action completes)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const inspectSave = Effect.fn("inspectSave")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, {
+ *     url: "https://app.example.com/api/save"
+ *   })
+ *   yield* page.getByRole("button", { name: "Save" }).click()
+ *   return yield* NetworkRequest.failure(page, yield* sent)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const failure = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Option.Option<Failure>, RequestError> => NetworkRequestImpl.failure(target, request)
 
 /**
  * Scoped access to neighboring request snapshots in the browser's bounded hop index.

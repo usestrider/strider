@@ -10,6 +10,7 @@ response an action causes checks what the server said, and decoding its body giv
 ## Request and response events
 
 `NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
+Read a transfer's reported failure with [request failures](/docs/events/request-failures).
 
 - A request is reported when sent and a response when it arrives, one of each per redirect hop.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
@@ -32,6 +33,9 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
   yield* deleted
 })
 ```
+
+For a request you already observed, [retain its response association](/docs/events/request-responses) to wait for
+that exact hop rather than matching by URL.
 
 ## Decoding bodies
 
@@ -216,3 +220,5 @@ const nextPageOfOrders = Effect.fn("nextPageOfOrders")(function*(page: Page.Page
 To change what the browser sends or receives, use a [route](/docs/events/routes).
 
 Read a request's predecessor or successor with [scoped redirect access](/docs/events/redirects).
+
+For native phase measurements, opt into [request timings](/docs/events/request-timings) when creating the context.

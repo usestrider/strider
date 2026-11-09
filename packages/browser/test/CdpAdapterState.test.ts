@@ -51,7 +51,7 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*(protocolSession = session) {
+const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
@@ -65,6 +65,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
     release: Responses.release
   })
   const context: State.ContextEntry = {
+    ...(requestTiming ? { requestTiming: new Map() } : {}),
     id: state.defaultContext,
     browserContextId: undefined,
     isDefault: true,
@@ -1535,6 +1536,129 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
+it.effect("waits for observed Network ownership before providing automatic credentials and bounds attempts", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Document",
+      request: sent(`${origin}/auth`).request
+    }, { state, target })
+    const challenge = () =>
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Document",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    challenge()
+    const first = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, first.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "CancelAuth" }
+      }
+    })
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
+    challenge()
+    const second = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, second.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    challenge()
+    const third = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, third.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    })
+    handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    yield* state.buffer.flush
+  }))
+
+it.effect("correlates parent-page Fetch authentication with its worker's Network request", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    handlers.apply("Fetch.authRequired", {
+      requestId: "F1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request,
+      authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+    }, { state, target: parent })
+    const obligation = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, obligation.id, {
+      _tag: "ProvideCredentials",
+      username: "user",
+      password: "secret",
+      once: true
+    })
+    assert.deepStrictEqual(calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
 describe("CDP proxy and website challenge separation", () => {
   for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
     it.effect(`preserves website challenge coverage: ${coverage}`, () =>
@@ -1630,6 +1754,110 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
       yield* state.buffer.flush
     }))
 }
+
+describe("CdpAdapter navigation-interrupted evaluation", () => {
+  for (const outcome of ["retired", "closed", "deadline", "unrelated"] as const) {
+    it.effect(`waits for lifecycle confirmation without replay (${outcome})`, () =>
+      Effect.gen(function*() {
+        const rejected = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
+        let calls = 0
+        const error = new Protocol.ProtocolError({
+          reason: new Protocol.Rejected({
+            method: "Runtime.callFunctionOn",
+            reason: "Unrecognized",
+            code: -32000,
+            description: outcome === "unrelated" ? "Something else failed" : "Inspected target navigated or closed"
+          })
+        })
+        const mock = {
+          ...session,
+          send: Effect.fnUntraced(function*() {
+            calls++
+            yield* Deferred.await(reply)
+            yield* Deferred.succeed(rejected, undefined)
+            return yield* Effect.fail(error)
+          })
+        } as unknown as ProtocolClient.Session
+        const { state, target, page } = yield* withPage(mock)
+        const frame = state.frames.get("T1")!
+        const document = Tree.commit(
+          state,
+          frame,
+          {
+            loaderId: "initial",
+            url: "about:blank",
+            origin: "://"
+          },
+          () => ({ _tag: "InitialBlank" }),
+          undefined,
+          "test"
+        )
+        const realm = Tree.addRealm(state, {
+          uniqueId: "interrupted",
+          contextId: 1,
+          target,
+          frame,
+          world: { _tag: "Main" },
+          origin: "://"
+        })
+        document.realms.add(realm)
+        const at = yield* BrowserClock.after(100)
+        // The call may have mutated the page before its reply was cut off. It must run exactly once.
+        const waiting = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => { globalThis.applied = true; return new Promise(() => {}) }",
+          arguments: [],
+          awaitPromise: true,
+          result: "value",
+          userActivation: false
+        }).pipe(
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("40 millis")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Deferred.await(rejected)
+        yield* TestClock.adjust("0 millis")
+        if (outcome === "unrelated") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          assert.strictEqual(calls, 1)
+          return
+        }
+        assert.isUndefined(waiting.pollUnsafe(), "rejection alone must not claim the realm ended")
+        yield* TestClock.adjust("59 millis")
+        assert.isUndefined(waiting.pollUnsafe())
+        if (outcome === "deadline") {
+          yield* TestClock.adjust("1 millis")
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          if (result.reason._tag === "Protocol") assert.strictEqual(result.reason.error.reason._tag, "NoReply")
+          // A later lifecycle event cannot restart an expired evaluation.
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        } else if (outcome === "closed") {
+          Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test closure")
+        } else {
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        }
+        yield* state.buffer.flush
+        if (outcome !== "deadline") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Gone")
+          if (result.reason._tag === "Gone") {
+            assert.deepStrictEqual(result.reason.target, { _tag: "Realm", id: realm.id })
+          }
+        }
+        assert.strictEqual(calls, 1)
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          BrowserClock.CurrentClock,
+          Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+        )
+      ))
+  }
+})
 
 describe("CdpAdapter transient evaluation results", () => {
   for (const releaseResult of [false, true]) {
@@ -2047,4 +2275,60 @@ it.effect("does not register evaluation cleanup in the connection scope when it 
     assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
     assert.strictEqual(owner.state._tag, "Empty")
     yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))
+
+describe("CDP request timing opt-in dispatch", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`touches native timing only for an enabled context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, enabled)
+        const context = page.context
+        const event = { state, target }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        handlers.apply(
+          "Network.requestWillBeSent",
+          { ...sent(`${origin}/landed`), timestamp: 10, wallTime: 1000 },
+          event
+        )
+        assert.strictEqual(context.requestTiming?.size ?? 0, enabled ? 1 : 0)
+        let nativeReads = 0
+        const native = {
+          ...landed,
+          hasExtraInfo: false,
+          response: {
+            ...landed.response,
+            get timing() {
+              nativeReads++
+              return { requestTime: 10, sendStart: 2, receiveHeadersStart: 3 }
+            }
+          }
+        }
+        handlers.apply("Network.responseReceived", native, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 10.01, encodedDataLength: 0 }, event)
+        yield* state.buffer.flush
+        assert.strictEqual(nativeReads, enabled ? 1 : 0)
+        assert.strictEqual(facts.filter((fact) => fact._tag === "HopTiming").length, enabled ? 2 : 0)
+        assert.strictEqual(context.requestTiming?.size ?? 0, 0, "terminal completion releases the native collector")
+      }).pipe(Effect.scoped))
+  }
+})
+
+it.effect("bounds active native baselines and clears them when their frame closes", () =>
+  Effect.gen(function*() {
+    const { state, target, page } = yield* withPage(session, true)
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    for (let i = 0; i <= 1000; i++) {
+      handlers.apply("Network.requestWillBeSent", {
+        ...sent(`${origin}/landed`),
+        requestId: `timing-${i}`,
+        timestamp: 10 + i,
+        wallTime: 1000 + i
+      }, { state, target })
+    }
+    const store = page.context.requestTiming!
+    assert.strictEqual(store.size, 1000)
+    const oldest = state.requests.get(State.requestKey(target, "timing-0"))!
+    assert.isFalse(store.has(oldest.hop))
+    Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+    assert.strictEqual(store.size, 0)
   }).pipe(Effect.scoped))

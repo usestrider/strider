@@ -30,6 +30,7 @@ import * as Claims from "./cdpAdapter/claims.ts"
 import * as Contexts from "./cdpAdapter/contexts.ts"
 import * as Declare from "./cdpAdapter/declare.ts"
 import * as Evaluation from "./cdpAdapter/evaluation.ts"
+import * as Geometry from "./cdpAdapter/geometry.ts"
 import * as Input from "./cdpAdapter/input.ts"
 import * as Navigation from "./cdpAdapter/navigation.ts"
 import * as Network from "./cdpAdapter/network.ts"
@@ -40,6 +41,7 @@ import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
 import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
@@ -63,14 +65,22 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),
       entry("userContexts.proxy.credentials", "supported", [
         "proxy challenges only; one credential submission per request"
       ]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),
@@ -100,6 +110,7 @@ export const capabilities = (
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -303,6 +314,8 @@ export const connect: (
       removeUserContext: (id) => Contexts.removeUserContext(state, id),
       createPage: (id) => Contexts.createPage(state, id),
       closePage: (id, options) => Contexts.closePage(state, id, options),
+      viewportSize: (id) =>
+        Effect.map(State.pageOf(state, id), (page) => Declarations.viewportSize(state.registry, State.placement(page))),
       activatePage: (id) => Contexts.activatePage(state, id),
       navigate: (id, url, options) => Navigation.navigate(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),
@@ -312,6 +325,8 @@ export const connect: (
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events) => Input.dispatchInput(state, page, events),
       contentFrame: (node) => Input.contentFrame(state, node),
+      releaseNodes: () => Effect.void,
+      geometry: (node, kind) => Geometry.read(state, node, kind),
       setInputFiles: (node, files) => Input.setInputFiles(state, node, files),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),

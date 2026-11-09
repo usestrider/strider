@@ -43,6 +43,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as WebAuthn from "../WebAuthn.ts"
 import * as BrowserClock from "./browserClock.ts"
+import type * as Geometry from "./geometry.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,7 @@ export type ObligationSubject =
     readonly request: NetworkRequest.NetworkRequest
     readonly phase: "request" | "response" | "auth"
     readonly response: Option.Option<NetworkResponse.NetworkResponse>
+    readonly authSource?: "server" | "proxy" | undefined
     readonly challenge: Option.Option<{ readonly origin: string; readonly scheme: string; readonly realm: string }>
   }
   | {
@@ -209,7 +211,12 @@ export interface NodeBinding {
  * `evidence`: the events behind them.
  */
 export type Fact =
-  | { readonly _tag: "UserContextAdded"; readonly context: UserContext.Id; readonly isDefault: boolean }
+  | {
+    readonly _tag: "UserContextAdded"
+    readonly context: UserContext.Id
+    readonly isDefault: boolean
+    readonly requestTiming?: boolean | undefined
+  }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
@@ -299,6 +306,7 @@ export type Fact =
     readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
+  | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
   | {
     readonly _tag: "RequestFinished"
@@ -598,7 +606,12 @@ export type Decision =
    * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
-  | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
+  | {
+    readonly _tag: "ProvideCredentials"
+    readonly username: string
+    readonly password: string
+    readonly once?: boolean | undefined
+  }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
   | { readonly _tag: "Accept"; readonly promptText: Option.Option<string> }
@@ -727,6 +740,7 @@ export interface ProxyOptions {
 
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly requestTiming?: boolean | undefined
   readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
@@ -909,6 +923,8 @@ export interface AdapterConnection {
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
   ) => Effect.Effect<void, AdapterError>
+  /** Reads the viewport declaration in force, without measuring the browser window. */
+  readonly viewportSize: (page: Target.NavigableId) => Effect.Effect<Option.Option<Page.ViewportSize>, AdapterError>
   readonly activatePage: (page: Target.NavigableId) => Effect.Effect<void, AdapterError>
 
   // Navigation
@@ -940,6 +956,8 @@ export interface AdapterConnection {
    * handles of a realm on BiDi in one `script.disown`, and any other one at a time (Q132).
    */
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
+  /** Releases temporary node bindings where the native protocol holds them as remote objects. */
+  readonly releaseNodes: (nodes: ReadonlyArray<NodeBinding>) => Effect.Effect<void>
 
   // Input
   /**
@@ -954,6 +972,8 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */
   readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
+  /** Geometry includes its coordinate document; native queries can cross same-process frame boundaries. */
+  readonly geometry: (node: NodeBinding, kind: Geometry.Kind) => Effect.Effect<Geometry.Result, AdapterError>
 
   // Obligations and declarations
   readonly resolve: (obligation: ObligationId, decision: Decision) => Effect.Effect<void, AdapterError>

@@ -32,6 +32,7 @@ import * as Capture from "./bidiAdapter/capture.ts"
 import * as Contexts from "./bidiAdapter/contexts.ts"
 import * as Declare from "./bidiAdapter/declare.ts"
 import * as Evaluation from "./bidiAdapter/evaluation.ts"
+import * as Geometry from "./bidiAdapter/geometry.ts"
 import * as Input from "./bidiAdapter/input.ts"
 import * as Navigation from "./bidiAdapter/navigation.ts"
 import * as Network from "./bidiAdapter/network.ts"
@@ -41,6 +42,7 @@ import * as Storage from "./bidiAdapter/storage.ts"
 import * as Tree from "./bidiAdapter/tree.ts"
 import * as BidiWire from "./bidiWire.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
@@ -56,15 +58,25 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
       entry("input.topLevelDesignMode", "unsupported", [
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+      ]),
+      entry("boundingBox.frameTransforms", "partial", [
+        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
       ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
@@ -93,6 +105,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.failure", "partial", ["BiDi reports failure text without a cancellation flag"]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -330,6 +343,11 @@ export const connect: (
       removeUserContext: (id) => Contexts.removeUserContext(state, id),
       createPage: (id) => Contexts.createPage(state, id),
       closePage: (id, options) => Contexts.closePage(state, id, options),
+      viewportSize: (id) =>
+        Effect.map(
+          State.navigableById(state, id),
+          (page) => Declarations.viewportSize(state.registry, State.placement(page))
+        ),
       activatePage: (id) => Contexts.activatePage(state, id),
       navigate: (id, url, options) => Navigation.navigate(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),
@@ -339,6 +357,8 @@ export const connect: (
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
+      releaseNodes: () => Effect.void,
+      geometry: (node, kind) => Geometry.read(state, node, kind),
       setInputFiles: (node, files) => Input.setInputFiles(state, node, files),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),

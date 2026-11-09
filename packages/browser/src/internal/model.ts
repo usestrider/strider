@@ -147,6 +147,8 @@ export type HopEnd =
   | {
     readonly _tag: "Failed"
     readonly error: string
+    /** Set only by connection teardown, never inferred from protocol error text. */
+    readonly connectionLost?: true
     /** Canceled by a navigation or the page, which isn't a failure of the network (CLI.md, the digest). */
     readonly canceled: boolean
     readonly at: MonotonicInstant.MonotonicInstant
@@ -338,6 +340,7 @@ export interface ContextState {
 }
 
 export interface ContextEntry {
+  timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
   readonly id: UserContext.Id
   /** Fixed: the default context exists for the whole connection. */
   readonly isDefault: boolean

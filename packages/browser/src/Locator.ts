@@ -38,6 +38,47 @@ import type * as Target from "./Target.ts"
 const TypeId = "~@usestrider/browser/Locator"
 
 /**
+ * Schema for an element's border box in main-frame viewport CSS pixels.
+ *
+ * **Details**
+ *
+ * Scrolling can make `x` and `y` negative. Width and height can be zero.
+ *
+ * **Example** (Decoding a box)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator } from "@usestrider/browser"
+ * import { Schema } from "effect"
+ *
+ * const box = Schema.decodeUnknownSync(Locator.BoundingBox)({
+ *   x: -10,
+ *   y: 20,
+ *   width: 100,
+ *   height: 30
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const BoundingBox = Schema.Struct({
+  x: Schema.Number.check(Schema.isFinite()),
+  y: Schema.Number.check(Schema.isFinite()),
+  width: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
+  height: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))
+})
+
+/**
+ * An element's border box in main-frame viewport CSS pixels.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type BoundingBox = typeof BoundingBox.Type
+
+/**
  * Settings for `getByRole`.
  *
  * **Details**
@@ -230,6 +271,10 @@ export interface Queries<L> {
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
    * `includeHidden` is set.
+   *
+   * Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an author
+   * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
+   * nameable role overrides the implicit role.
    *
    * **Example** (Clicking Save, not Save draft)
    *
@@ -590,6 +635,33 @@ export interface ReadonlyLocator
    * ```
    */
   readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * The one matching element's border box in main-frame viewport CSS pixels, or `None` when it has no layout box.
+   *
+   * **Details**
+   *
+   * Reads immediately without scrolling, focusing or waiting for visibility. Hidden and transparent elements
+   * retain their boxes, including zero-size boxes. The browser's own axis-aligned rect is composed through
+   * child frames, including borders and padding; scrolling can make coordinates negative. Target transforms,
+   * motion paths and camera clipping follow `getBoundingClientRect`, rather than an original-corner hull.
+   * Missing and multiple matches fail with `NoMatch` and `StrictViolation`. Chromium and WebKit use native
+   * frame point conversion. Firefox supports positive axis-aligned frame scaling, CSS zoom and translation;
+   * rotation, skew, reflection, 3D, perspective and motion paths on frame ancestors fail with descriptive
+   * typed `Unsupported`. Browser defaults stay unchanged; no launch profile or preference is required.
+   *
+   * **Example** (Reading an element's position)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const position = Effect.fn("position")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("button", { name: "Save" }).boundingBox
+   * })
+   * ```
+   */
+  readonly boundingBox: Effect.Effect<Option.Option<BoundingBox>, LocatorError | Target.TargetGone | Deadline.Timeout>
+
   /**
    * The value of the one matching form control.
    *

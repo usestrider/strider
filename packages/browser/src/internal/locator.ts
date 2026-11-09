@@ -39,10 +39,11 @@ import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Devices from "./devices.ts"
-import type * as Engine from "./engine.ts"
+import * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
+import * as Geometry from "./geometry.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type { Locate, Owner } from "./locatorOwner.ts"
@@ -323,6 +324,119 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         response._tag === "Count"
           ? Effect.succeed(response.count)
           : this.unmatched("Locator.count", response, id)
+    )
+  }
+
+  get boundingBox() {
+    const operation = "Locator.boundingBox"
+    return Effect.scoped(Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
+      const record = yield* Operation.record
+      const runtime = this.owner.runtime
+      const sendFailure = (failure: Runtime.SendFailure) =>
+        failure._tag === "Deadline"
+          ? record.timeout(Option.fromUndefinedOr(failure.hint))
+          : this.sendFailure(operation, failure, record)
+      const noMatch = () =>
+        Effect.fail(
+          this.error(
+            operation,
+            new Locator.NoMatch({ hint: "A read never waits; Expect waits for what it expects" }),
+            record.id
+          )
+        )
+      const release = (node: Adapter.NodeBinding) => Operation.detached(runtime.model.adapter.releaseNodes([node]))
+      const resolve = () =>
+        Effect.acquireRelease(
+          Runtime.element(runtime, this.owner.page, this.steps, record.id, record.budget.at).pipe(
+            Effect.mapError(sendFailure)
+          ),
+          (found) => found._tag === "Found" ? release(found.node) : Effect.void
+        )
+      let found = yield* resolve()
+      // Creating a utility realm can straddle a child document commit. Resolve again only when the
+      // returned binding belongs to a different document; missing/strict results remain immediate.
+      while (found._tag === "Found" && found.node.document !== found.routed.document) found = yield* resolve()
+      if (found._tag === "Response") {
+        if (found.response._tag === "NoMatch") return yield* noMatch()
+        return yield* this.unmatched(operation, found.response, record.id)
+      }
+      const read = (node: Adapter.NodeBinding, kind: Geometry.Kind) =>
+        runtime.model.adapter.geometry(node, kind).pipe(
+          Effect.mapError((error) => this.adapterFailure(operation, error, record.id))
+        )
+      const target = yield* read(found.node, "bounds")
+      if (target.data.quads.length === 0) return Option.none<Locator.BoundingBox>()
+      let points = target.data.quads.flat()
+      let space = target.document
+      const documents = [...found.routed.hops.map((hop) => hop.document), found.routed.document]
+      for (let index = found.routed.hops.length - 1; index >= 0; index--) {
+        const hop = found.routed.hops[index]!
+        const parent = yield* Effect.acquireRelease(
+          Runtime.elementIn(runtime, hop.document, hop.steps, { scroll: false }, record.id).pipe(
+            Effect.mapError(sendFailure)
+          ),
+          (parent) => Option.isSome(parent) && parent.value._tag === "Found" ? release(parent.value.node) : Effect.void
+        )
+        if (Option.isNone(parent)) return yield* noMatch()
+        if (parent.value._tag === "Response") {
+          if (parent.value.response._tag === "NoMatch") return yield* noMatch()
+          return yield* this.unmatched(operation, parent.value.response, record.id)
+        }
+        const node = parent.value.node
+        const frame = yield* runtime.model.adapter.contentFrame(node).pipe(
+          Effect.mapError((error) => this.adapterFailure(operation, error, record.id))
+        )
+        if (Option.isNone(frame) || frame.value !== hop.frame) return yield* noMatch()
+        const active = yield* runtime.model.documentOf(hop.frame)
+        if (Option.isNone(active) || active.value !== documents[index + 1]) return yield* noMatch()
+        const needsMapping = space === documents[index + 1]
+        if (!needsMapping && !documents.slice(0, index + 1).includes(space)) return yield* noMatch()
+        const geometry = yield* read(node, needsMapping ? "frame" : "bounds")
+        if (geometry.data.quads.length === 0) return Option.none<Locator.BoundingBox>()
+        if (needsMapping) {
+          if (geometry.data.matrix === null) {
+            return yield* Effect.fail(
+              this.error(
+                operation,
+                new Reason.Unsupported({
+                  capability: operation,
+                  backend: runtime.backend,
+                  hint: "The browser did not expose the frame's projected plane"
+                }),
+                record.id
+              )
+            )
+          }
+          points = points.map((point) => Geometry.project(geometry.data.matrix!, point))
+          space = geometry.document
+        }
+      }
+      if (space !== documents[0]) return yield* noMatch()
+      if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+        return yield* Effect.fail(
+          this.error(
+            operation,
+            new Reason.Unsupported({
+              capability: operation,
+              backend: runtime.backend,
+              hint: "The frame projection crosses a non-finite camera plane"
+            }),
+            record.id
+          )
+        )
+      }
+      const x = Math.min(...points.map((p) => p.x)), y = Math.min(...points.map((p) => p.y))
+      return Option.some({
+        x,
+        y,
+        width: Math.max(...points.map((p) => p.x)) - x,
+        height: Math.max(...points.map((p) => p.y)) - y
+      })
+    })).pipe(
+      Operation.named(operation, {
+        attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+      })
     )
   }
 
@@ -1563,11 +1677,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
-      const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
-        action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
+      const inRound = Engine.appliesInRound(action)
       const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
-          if (apply && inRound) record.markSent()
           return Runtime.sendRouted(
             owner.runtime,
             owner.page,

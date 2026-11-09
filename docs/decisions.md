@@ -305,6 +305,15 @@ world and document. Removing a script affects future documents only, and nothing
 from the parent's engine works only for same-origin frames, and a cross-site frame needs the per-document route
 anyway. One path for both keeps locating independent of what a page's script can reach. Parent-frame clipping follows the same boundary: L1 reads visible iframe content bounds in each parent document and passes their intersection in child viewport coordinates to the target engine. Viewport scrolling uses geometric fragment presence, independently of coverage. With pointer checks enabled, the browser hit-tests fragment centres in order, and L1 selects the first reaching the target or a descendant and its iframe in every parent document. If none reaches it locally, the first geometric candidate preserves local Covered; if all locally reachable candidates are blocked by parents, the first parent Covered is retained. Candidates are fresh on each round and under the input permit. This permits a later uncovered line when an earlier line is covered. Disabled pointer checks use the first geometric candidate without probing coverage; explicit offsets are never substituted. Parent candidate probes use each document’s engine across origins and processes. Rejected: restarting at the first child candidate after a parent rejects it, which never reaches an available later line, and carrying candidate coordinates across attempts or permit acquisition, which could reuse stale geometry. Rejected: inferring ancestor clipping from computed overflow and containing-block styles, which duplicates an incomplete layout model and misclassifies inline boxes, SVG and top-layer elements. Rejected: inspecting `window.parent` for same-origin frames, which would give cross-origin frames different pointer behavior, and selecting the first fragment before translating it, which can aim outside the page's visible viewport.
 
+Bounding-box reads use the browser's axis-aligned rect in top-level viewport CSS pixels, composed through
+frames, rather than reconstructing layout or original corners. Native frame conversion is used where
+reliable; stock Firefox supports positive axis-aligned frame scaling, zoom and translation, and refuses
+rotation, skew, reflection, 3D, perspective and frame motion paths with descriptive typed Unsupported.
+Target camera clipping and motion paths retain the browser rect. Stock defaults remain unchanged, without a
+launch-profile prerequisite. Rejected: layout solvers, handwritten CSS grouping/layout rules, original-
+corner accuracy as the rect contract, and enabling a page-visible native-quad preference for unrelated
+contexts. Optional geometry runs only for a bounding-box request.
+
 **Stability measures from the current rectangle across the requested rendering updates.** The first rectangle is
 sampled immediately; the following samples still require native rendering. Checks run again after acquiring the
 input permit, so a queued action never uses the preliminary check's stale geometry or element.
@@ -1364,6 +1373,15 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Request failure observations
+
+Request failure reads inspect the existing bounded hop index immediately, using the original request instance
+and its live owner. Missing retention and owner loss are unavailable observations, never evidence of network
+failure; returned data can be saved independently. This preserves bounded memory and avoids new work in unused
+contexts. Waiting, automatic retention and replaying decoded snapshots were rejected for this read; scoped
+retention belongs to operations that explicitly request it. Cancellation is known only from protocol evidence,
+not inferred from error text, so BiDi leaves it unknown.
+
 ## Editability reads share editing rules
 
 `isEditable` reads the same predicate as editing actions and `toBeEditable`: an enabled text or settable
@@ -1382,6 +1400,19 @@ browsers. Reject name-to-constructor inference tables and emulation of missing c
 those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
+
+## Shared DOM roles
+
+Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`. This keeps existing locator and snapshot meaning consistent even where Playwright omits generic roles. Presentation conflicts and required-child inheritance are resolved in that shared computation, including inherited-role exceptions on the child and cancellation on its parent. Tabindex focusability uses HTML integer parsing: skip ASCII whitespace, accept an optional sign and leading ASCII digits, and ignore trailing text. This agrees with native focus behavior for `0.5` and `2abc`; copying Playwright’s JavaScript number conversion would reject `2abc` and accept non-ASCII leading whitespace. Rejected: a matcher-specific role model that changes the meaning of the same element between querying, asserting and inspecting it, and copying upstream inheritance where it conflicts with ARIA's focusability or global-property exceptions.
+
+## Retrying CSS assertion cardinality
+
+CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.
+A transient duplicate during a render should settle under the same deadline as a transient wrong style; negating
+the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
+single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
+transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
+the value, which could pass without observing the requested element.
 
 ## Extra request header ownership
 
@@ -1407,3 +1438,13 @@ settle a redirect on BiDi, which reports it before its successor and exposes no 
 boundary from status, Location or elapsed time was rejected because it can invent an end. Unlimited object links
 were rejected for unbounded retention; another opt-in cache or injected fetch wrapper was rejected because it
 would add tracking without supplying the missing native request identity or terminal signal.
+
+## Context HTTP credentials
+
+Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different
+pairs for different origins. Keeping origin-specific selection in routes avoids a second routing table and keeps
+page and context route precedence explicit. User auth routes run before the configured pair, and automatic
+submission is bounded to one attempt across a native request and its whole redirect chain, including changes of origin,
+so rejection cannot create an unbounded challenge loop.
+The alternative of an ordered credential array is left to auth routes, which already express that selection.
+Optional interception follows [Pay for what you use](#pay-for-what-you-use).

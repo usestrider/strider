@@ -15560,33 +15560,45 @@
       "upstream": [
         "method:Locator.boundingBox"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Locator",
+          "symbol": "ReadonlyLocator.boundingBox",
+          "url": "/docs/api/browser/Locator#ReadonlyLocator.boundingBox"
+        }
+      ],
+      "notes": "Immediate strict readonly read of the browser-derived axis-aligned rect in top-level viewport CSS pixels, composed through frames including borders/padding. Option.none means no layout box; hidden, transparent and zero-size boxes remain. Reads never wait for a missing match. Target transforms, motion paths and camera clipping follow browser rects, rather than original corner accuracy. Firefox frame rect composition supports positive axis-aligned scaling, CSS zoom and translation; rotation, skew, reflection, 3D, perspective and motion paths on frame ancestors fail with descriptive typed `Unsupported`. Stock defaults are unchanged; no launch profile or preference is required. These documented composition limits belong to the rect contract; immediate reads are a separate design difference.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -15596,7 +15608,13 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "locator-design",
+        "quote": "Retrying expectations: a retry has a name and is asked for in code.",
+        "revision": "23b54562877b42279640e7baef1568cc4994aacf"
+      }
     },
     {
       "id": "method-locator-check",
@@ -19162,33 +19180,39 @@
       "upstream": [
         "method:LocatorAssertions.toBeEmpty"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeEmpty",
+          "url": "/docs/api/browser/Expect#toBeEmpty"
+        }
+      ],
+      "notes": "Input and textarea values are untrimmed; other elements use trimmed textContent. Missing or multiple matches retry until the deadline.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -19328,33 +19352,39 @@
       "upstream": [
         "method:LocatorAssertions.toBeInViewport"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeInViewport",
+          "url": "/docs/api/browser/Expect#toBeInViewport"
+        }
+      ],
+      "notes": "Native intersection ratio, default zero with positive intersection required; inViewport: false inverts the threshold and passes for a missing element. Multiple matches retry with typed count evidence, following other scalar expectations.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -19562,33 +19592,39 @@
       "upstream": [
         "method:LocatorAssertions.toHaveAccessibleName"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveAccessibleName",
+          "url": "/docs/api/browser/Expect#toHaveAccessibleName"
+        }
+      ],
+      "notes": "Retries exactly one match. Strings normalize whitespace; ignoreCase overrides regex flags. Hidden elements have empty names; hidden referenced labels contribute. Failures retain observed names or match counts.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -19765,37 +19801,49 @@
       "upstream": [
         "method:LocatorAssertions.toHaveCSS"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveCSS",
+          "url": "/docs/api/browser/Expect#toHaveCSS"
+        }
+      ],
+      "notes": "Exact computed CSS strings or RegExp, including flags and before/after pseudo-elements. Negate with { not: true }; use Deadline.within for timeouts. Missing and multiple matches retry until exactly one matches, including under negation; Playwright rejects multiple matches immediately. Failure evidence retains the computed string or match count.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "retrying-css-assertion-cardinality",
+        "quote": "CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.",
+        "revision": "bf60009b7a9f64b3bbf65bfb722c28c405e7d4f8"
+      }
     },
     {
       "id": "method-locatorassertions-tohaveid",
@@ -19876,37 +19924,49 @@
       "upstream": [
         "method:LocatorAssertions.toHaveRole"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveRole",
+          "url": "/docs/api/browser/Expect#toHaveRole"
+        }
+      ],
+      "notes": "Exact computed role matching; missing and multiple matches retry until the deadline with typed ExpectationFailed evidence, while Playwright rejects multiple matches immediately. Plain div/span elements retain the shared HTML-AAM generic role; Playwright reports no role. ARIA presentation conflict exceptions also apply to inherited roles on the child, and required-child inheritance stops when parent presentation is cancelled; the pinned Playwright ancestor walk can retain presentation in those cases. Table captions inherit presentation as required by ARIA. Tabindex conflicts use HTML integer parsing: leading ASCII whitespace, optional sign and digits, ignoring trailing text. Thus 2abc counts as focusable and leading non-ASCII whitespace does not; pinned Playwright uses JavaScript number conversion and differs.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "shared-dom-roles",
+        "quote": "Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`.",
+        "revision": "b453ed06b279413d1f432f6acbd873178b38980d"
+      }
     },
     {
       "id": "method-locatorassertions-tohavescreenshot-1",
@@ -20073,33 +20133,39 @@
       "upstream": [
         "method:LocatorAssertions.toHaveValues"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveValues",
+          "url": "/docs/api/browser/Expect#toHaveValues"
+        }
+      ],
+      "notes": "Ordered exact strings or regular expressions on one multiple select, including label retargeting. Invalid controls and multiple matches retry to a typed ExpectationFailed instead of throwing immediately.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -26838,39 +26904,47 @@
       "upstream": [
         "method:Page.viewportSize"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "ReadonlyPage.viewportSize",
+          "url": "/docs/api/browser/Page#ReadonlyPage.viewportSize"
+        }
+      ],
+      "notes": "Reads effective configured CSS width and height as an Effect of Option; None when unset. Uses declaration precedence and scoped release, not measured inner dimensions. Requires inspect access; closed pages fail with TargetGone. Only declarations made through this connection are known; attached stock WebKit cannot configure a viewport and returns None when unset.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Page.ts"
+          "packages/browser/src/Page.ts",
+          "packages/browser/src/internal/page.ts",
+          "packages/browser/src/internal/declarations.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
@@ -28185,33 +28259,45 @@
       "upstream": [
         "method:Request.failure"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "failure",
+          "url": "/docs/api/browser/NetworkRequest#failure"
+        }
+      ],
+      "notes": "Immediate failure observation from the existing bounded hop index. None means pending or successfully finished, including HTTP errors and redirect hops. Failure preserves errorText and canceled: Option<boolean>; BiDi cancellation is unknown. Requires the original request instance and its live page/context; copied, evicted, foreign or owner-lost requests fail with RequestUnavailable. Save returned failure data before owner closure. No additional retention or instrumentation.",
+      "capabilities": [
+        "network.failure"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -28219,9 +28305,15 @@
         "sources": [
           "packages/browser/src/NetworkRequest.ts"
         ],
-        "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+        "scope": "Public immediate-read failure contract, original-instance ownership, bounded retention and protocol cancellation evidence inspected."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "request-failure-observations",
+        "quote": "Request failure reads inspect the existing bounded hop index immediately, using the original request instance",
+        "revision": "881ad51ccc49add1b842de8b4a12c9cb212cb58e"
+      }
     },
     {
       "id": "method-request-frame",
@@ -28961,43 +29053,57 @@
       "upstream": [
         "method:Request.response"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "response",
+          "url": "/docs/api/browser/NetworkRequest#response"
+        }
+      ],
+      "notes": "Scoped opt-in retention of one observed request hop; acquisition must occur within the existing 1000-hop model window on its owning page or context. Returns a bounded response wait, Option.none on completion without a response, and typed unavailable errors for eviction, foreign targets, release or target closure. Each redirect hop resolves separately. Does not retain response bodies.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/NetworkRequest.ts"
+          "packages/browser/src/NetworkRequest.ts",
+          "packages/browser/src/internal/networkRequest.ts",
+          "packages/browser/test/NetworkLifetime.test.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+      }
     },
     {
       "id": "method-request-existingresponse",
@@ -29154,43 +29260,84 @@
       "upstream": [
         "method:Request.timing"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "timing",
+          "url": "/docs/api/browser/NetworkRequest#timing"
+        },
+        {
+          "module": "NetworkRequest",
+          "symbol": "Timing",
+          "url": "/docs/api/browser/NetworkRequest#Timing"
+        }
+      ],
+      "notes": "Context-creation requestTiming opt-in; immediate immutable snapshot with Option epoch-millisecond origin and Option millisecond offsets. Original retained instance and live owners required. Successful-only responseEnd; backend header boundaries differ. Missing origins/phases, TLS and uncollected worker timings stay unavailable; stock WebKit redirects lack native origins. No terminal wait or retroactive collection.",
+      "capabilities": [
+        "network.timing"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "chromium.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "timing collection requires a newly created context"
+          ]
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/NetworkRequest.ts"
+          "packages/browser/src/NetworkRequest.ts",
+          "packages/browser/src/internal/requestTiming.ts",
+          "packages/browser/test/integration/slice/requestTiming.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+      }
     },
     {
       "id": "method-request-url",
@@ -47048,37 +47195,63 @@
         "method:Browser.newContext"
       ],
       "option": "httpCredentials",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt across a request and its redirect chain, never for proxy challenges. Arrays of origin-specific pairs are not accepted. Chromium intercepts requests only in the configured context, which can affect request timing. Firefox cancels ambiguous website/proxy challenges without either automatic pair.",
+      "capabilities": [
+        "interception.auth"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "context-http-credentials",
+        "quote": "Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different pairs for different origins.",
+        "revision": "a379855715526114c020dc57bd6e583733e3ca10"
+      }
     },
     {
       "id": "option-browser-newcontext-ignorehttpserrors",
@@ -47086,34 +47259,54 @@
         "method:Browser.newContext"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -48684,37 +48877,63 @@
         "method:Browser.newPage"
       ],
       "option": "httpCredentials",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt across a request and its redirect chain, never for proxy challenges. Arrays of origin-specific pairs are not accepted. Chromium intercepts requests only in the configured context, which can affect request timing. Firefox cancels ambiguous website/proxy challenges without either automatic pair.",
+      "capabilities": [
+        "interception.auth"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "context-http-credentials",
+        "quote": "Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different pairs for different origins.",
+        "revision": "a379855715526114c020dc57bd6e583733e3ca10"
+      }
     },
     {
       "id": "option-browser-newpage-ignorehttpserrors",
@@ -48722,34 +48941,54 @@
         "method:Browser.newPage"
       ],
       "option": "ignoreHTTPSErrors",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+      "capabilities": [
+        "acceptInsecureCerts"
+      ],
       "browsers": {
         "chromium.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "chromium.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "native capability in the context-owned process"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "an attached process cannot be reconfigured"
+          ]
         }
       },
       "requirements": []
@@ -80064,10 +80303,23 @@
       }
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "id": "option-locator-boundingbox-signal",
       "upstream": [
         "method:Locator.boundingBox"
@@ -80075,37 +80327,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "id": "option-locator-boundingbox-timeout",
       "upstream": [
         "method:Locator.boundingBox"
@@ -80113,31 +80377,41 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "different",
@@ -88621,9 +88895,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeempty-signal",
       "upstream": [
@@ -88632,37 +88917,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      },
       "id": "option-locatorassertions-tobeempty-timeout",
       "upstream": [
         "method:LocatorAssertions.toBeEmpty"
@@ -88670,27 +88967,27 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -89032,9 +89329,15 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeInViewport",
+          "url": "/docs/api/browser/Expect#toBeInViewport"
+        }
+      ],
+      "notes": "Native intersection ratio, default zero with positive intersection required; inViewport: false inverts the threshold and passes for a missing element. Multiple matches retry with typed count evidence, following other scalar expectations.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-ratio",
       "upstream": [
@@ -89043,36 +89346,47 @@
       "option": "ratio",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-signal",
       "upstream": [
@@ -89081,36 +89395,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeinviewport-timeout",
       "upstream": [
@@ -89119,31 +89439,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "has",
@@ -89762,9 +90088,15 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveAccessibleName",
+          "url": "/docs/api/browser/Expect#toHaveAccessibleName"
+        }
+      ],
+      "notes": "Retries exactly one match. Strings normalize whitespace; ignoreCase overrides regex flags. Hidden elements have empty names; hidden referenced labels contribute. Failures retain observed names or match counts.",
       "capabilities": [],
       "id": "option-locatorassertions-tohaveaccessiblename-ignorecase",
       "upstream": [
@@ -89773,36 +90105,47 @@
       "option": "ignoreCase",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tohaveaccessiblename-signal",
       "upstream": [
@@ -89811,37 +90154,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      },
       "id": "option-locatorassertions-tohaveaccessiblename-timeout",
       "upstream": [
         "method:LocatorAssertions.toHaveAccessibleName"
@@ -89849,27 +90204,27 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -90287,9 +90642,15 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toHaveCSS",
+          "url": "/docs/api/browser/Expect#toHaveCSS"
+        }
+      ],
+      "notes": "Read computed styles from the before or after pseudo-element with the pseudo option.",
       "capabilities": [],
       "id": "option-locatorassertions-tohavecss-pseudo",
       "upstream": [
@@ -90298,27 +90659,27 @@
       "option": "pseudo",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -90326,18 +90687,29 @@
       "valueCoverage": [
         {
           "value": "after",
-          "status": "missing"
+          "status": "has"
         },
         {
           "value": "before",
-          "status": "missing"
+          "status": "has"
         }
       ]
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tohavecss-signal",
       "upstream": [
@@ -90346,36 +90718,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locatorassertions-tohavecss-timeout",
       "upstream": [
@@ -90384,31 +90762,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "missing",
@@ -90563,9 +90947,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tohaverole-signal",
       "upstream": [
@@ -90574,37 +90969,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      },
       "id": "option-locatorassertions-tohaverole-timeout",
       "upstream": [
         "method:LocatorAssertions.toHaveRole"
@@ -90612,27 +91019,27 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -91885,9 +92292,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tohavevalues-signal",
       "upstream": [
@@ -91896,36 +92314,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
       "id": "option-locatorassertions-tohavevalues-timeout",
       "upstream": [
@@ -91934,31 +92358,37 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "has",
@@ -113471,7 +113901,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "dcad4bfbb74e3ba0768310ab71b970d6755222c659d2f59738a4f7642a22fedf",
+    "docs/decisions.md": "459607ce8c8183c6ac9a05c894b4b88fea88c9fdc118ecf58e5cab571a43e4dd",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113482,18 +113912,18 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "89aa59a2b6b86267f2382ce6e2e6d09642eb6fd312e01afa64fdf4cbc4d33b62",
-    "packages/browser/src/Expect.ts": "71fcb3b8db64cb95581c3e48fff356afb3d12056faf8b669bd4a947640b15f73",
+    "packages/browser/src/Expect.ts": "fd0fd4bcd502325c22565216e3bc341507fb6b5f9e1e09d59285d993e95fe7ea",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
+    "packages/browser/src/Locator.ts": "d4e60f8be45b4df021aeff52dc0f48d7835eff34b03e3d7c18d2d5d929582653",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "f733b676ecc5b229e19e9ab22477d8abf6dc794476f3e12d7a6ffb5f050e15ba",
+    "packages/browser/src/NetworkRequest.ts": "9c9dd15d128a7dc512ade8d4620aa77640055de2c95f218da9414f1442cabe2d",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
+    "packages/browser/src/Page.ts": "2c8df27ea3996d599d7ed79f80c7d08f18558dd188f0da288d819b131b20905d",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",
@@ -113502,14 +113932,14 @@
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "499fe81f688cf0f467f306d92463b08ab6166da2ca5f042a6549791786bffaca",
+    "packages/browser/src/UserContext.ts": "e565ed9746550027e6c690c4e3698658acc44cf670d39f72fb20a76ec5d20b40",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "b293932264ce9748cd9a78c17d04cd03497659a9132b902f741335c7738dc695",
-    "packages/browser/src/internal/cdpAdapter.ts": "9d9715cbbbba2d4e8a5ed54e5ccd66f0ef249d4740874c9f51933f83d241d75c",
-    "packages/browser/src/internal/webkitAdapter.ts": "ca869782c3443cab3560e3dcc78a590b08702b78bff9e2ef3fe2a0da488c8c4a",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "0c1fa0b0d841d18db6d028f9728e75936b53c02d713241a1dd7c31c8b160ebc2",
+    "packages/browser/src/internal/bidiAdapter.ts": "15ab7fd200084b62d36a152fd1333954266723d0f9c8aef991875430b821eb84",
+    "packages/browser/src/internal/cdpAdapter.ts": "8e8441f7b5529976d8489c12e0320c45e3852bf253edf54db39c5d9643504751",
+    "packages/browser/src/internal/webkitAdapter.ts": "f1a29fa22e24838514c1441a2afcfe67e480238776a388d4b89c3f37420cad1a",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a4121bf3ca602a223747931efa48ec0471c51e3dff338e05e23a75ebb0b9a6ac",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",

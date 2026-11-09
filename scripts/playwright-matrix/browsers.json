@@ -6,6 +6,20 @@
       "layers": "Chromium.layer, Chromium.layerConnect",
       "launched": [
         {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "supported",
           "limitations": []
@@ -14,6 +28,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -28,6 +49,11 @@
           "limitations": [
             "proxy challenges only; one credential submission per request"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -135,6 +161,11 @@
         },
         {
           "name": "popups.opener",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.failure",
           "status": "supported",
           "limitations": []
         },
@@ -430,6 +461,20 @@
       ],
       "attached": [
         {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "supported",
           "limitations": []
@@ -438,6 +483,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "CDP ignores certificate errors browser-wide, not per context"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -452,6 +504,11 @@
           "limitations": [
             "proxy challenges only; one credential submission per request"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -561,6 +618,11 @@
         },
         {
           "name": "popups.opener",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.failure",
           "status": "supported",
           "limitations": []
         },
@@ -861,6 +923,20 @@
       "layers": "Firefox.layer, Firefox.layerConnect, Bidi.layerConnect",
       "launched": [
         {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",
           "limitations": [
@@ -871,6 +947,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -884,6 +967,13 @@
           "status": "partial",
           "limitations": [
             "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+          ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "partial",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
           ]
         },
         {
@@ -1004,6 +1094,13 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.failure",
+          "status": "partial",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -1366,6 +1463,20 @@
       ],
       "attached": [
         {
+          "name": "network.timing.redirect",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; bounded original-instance observations with live owners",
+            "missing native phases remain unavailable; TLS timing is not exposed",
+            "successful completion only; redirect end may be an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",
           "limitations": [
@@ -1376,6 +1487,13 @@
           "name": "userContexts",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native browser.createUserContext setting"
+          ]
         },
         {
           "name": "userContexts.proxy",
@@ -1389,6 +1507,13 @@
           "status": "unsupported",
           "limitations": [
             "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+          ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "partial",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
           ]
         },
         {
@@ -1509,6 +1634,13 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.failure",
+          "status": "partial",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -1876,6 +2008,20 @@
       "layers": "WebKit.layer, WebKit.layerAttach",
       "launched": [
         {
+          "name": "network.timing.redirect",
+          "status": "unsupported",
+          "limitations": [
+            "redirect responses omit native timing origins"
+          ]
+        },
+        {
+          "name": "network.timing",
+          "status": "partial",
+          "limitations": [
+            "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "supported",
           "limitations": []
@@ -1885,6 +2031,13 @@
           "status": "supported",
           "limitations": [
             "each context is a browser process of its own"
+          ]
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "supported",
+          "limitations": [
+            "native capability in the context-owned process"
           ]
         },
         {
@@ -1900,6 +2053,11 @@
           "limitations": [
             "stock WebKit does not support proxy credentials"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -2220,6 +2378,11 @@
           ]
         },
         {
+          "name": "network.failure",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "network.headersSent",
           "status": "partial",
           "limitations": [
@@ -2422,6 +2585,20 @@
       ],
       "attached": [
         {
+          "name": "network.timing.redirect",
+          "status": "unsupported",
+          "limitations": [
+            "redirect responses omit native timing origins"
+          ]
+        },
+        {
+          "name": "network.timing",
+          "status": "unsupported",
+          "limitations": [
+            "timing collection requires a newly created context"
+          ]
+        },
+        {
           "name": "input.topLevelDesignMode",
           "status": "unsupported",
           "limitations": [
@@ -2433,6 +2610,13 @@
           "status": "unsupported",
           "limitations": [
             "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
+        },
+        {
+          "name": "acceptInsecureCerts",
+          "status": "unsupported",
+          "limitations": [
+            "an attached process cannot be reconfigured"
           ]
         },
         {
@@ -2448,6 +2632,11 @@
           "limitations": [
             "stock WebKit does not support proxy credentials"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -2770,6 +2959,11 @@
           "limitations": [
             "a script or stylesheet reused from the memory cache within one document produces no request"
           ]
+        },
+        {
+          "name": "network.failure",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "network.headersSent",

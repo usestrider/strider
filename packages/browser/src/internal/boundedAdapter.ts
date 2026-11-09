@@ -35,7 +35,13 @@ type Method = {
 }[keyof Connection]
 
 /** The methods that are cleanup. */
-type Release = "releaseAuthenticator" | "removeUserContext" | "closePage" | "releaseHandles" | "resetPermissions"
+type Release =
+  | "releaseNodes"
+  | "releaseAuthenticator"
+  | "removeUserContext"
+  | "closePage"
+  | "releaseHandles"
+  | "resetPermissions"
 
 /** What a call does to the browser, and what a `Timeout`'s hint calls it. */
 type Kind =
@@ -53,6 +59,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   removeUserContext: release,
   createPage: { _tag: "Create", what: "creating the page" },
   closePage: release,
+  viewportSize: read("the configured viewport"),
   activatePage: write("bringing the page forward"),
   navigate: write("the navigation"),
   reload: write("the reload"),
@@ -61,8 +68,10 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   // A call into the page is a write only as its caller knows: the caller marks one that may change the page
   evaluate: read("the call into the page"),
   releaseHandles: release,
+  releaseNodes: release,
   dispatchInput: write("the input"),
   contentFrame: read("the iframe's frame"),
+  geometry: read("the element's geometry"),
   resolve: write("the decision"),
   declare: write("the declaration"),
   screenshot: read("the screenshot"),
