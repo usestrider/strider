@@ -1914,7 +1914,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const { url } = yield* fixture(() =>
                 `<input id="go" value="old" onfocus="this.removeAttribute('onfocus');${handler}" oninput="out.textContent=this.value+':'+event.isTrusted"><output id="out">untouched</output>`
               )
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#go")
               assert(target instanceof LocatorImpl)
@@ -1953,7 +1953,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       : ""
                   }" oninput="out.textContent='input'" onchange="out.textContent+=';change'"><output id="out">untouched</output><output id="before"></output>`
                 )
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const target = page.locator("#go")
                 assert(target instanceof LocatorImpl)
