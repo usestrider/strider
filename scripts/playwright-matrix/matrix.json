@@ -25237,43 +25237,58 @@
       "upstream": [
         "method:Page.addLocatorHandler"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.addLocatorHandler",
+          "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+        }
+      ],
+      "notes": "Scoped Effect registration with idempotent removal, exact same-page grants, serial nonrecursive callbacks and one action/assertion deadline. Removal is by registration, not locator identity. Callback typed errors retain their value in process; timeouts use normal enclosing-operation attribution.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Page.ts"
+          "packages/browser/src/Page.ts",
+          "packages/browser/src/internal/locatorHandlers.ts",
+          "packages/browser/test/integration/slice/locatorHandlers.ts",
+          "packages/browser/test/LocatorHandler.test.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "scoped-overlay-dispatch",
+        "quote": "explicit removal prevents new selections, while scope release interrupts selected work.",
+        "revision": "4ca4efce6322c63e58e7a6fccb9374bdcdd2c38a"
+      }
     },
     {
       "id": "method-page-removealllisteners",
@@ -25329,43 +25344,63 @@
       "upstream": [
         "method:Page.removeLocatorHandler"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.addLocatorHandler",
+          "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+        },
+        {
+          "module": "Declaration",
+          "symbol": "Registration.remove",
+          "url": "/docs/api/browser/Declaration#Registration.remove"
+        }
+      ],
+      "notes": "Scoped Effect registration with idempotent removal, exact same-page grants, serial nonrecursive callbacks and one action/assertion deadline. Removal is by registration, not locator identity. Callback typed errors retain their value in process; timeouts use normal enclosing-operation attribution.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/Page.ts"
+          "packages/browser/src/Page.ts",
+          "packages/browser/src/internal/locatorHandlers.ts",
+          "packages/browser/test/integration/slice/locatorHandlers.ts",
+          "packages/browser/test/LocatorHandler.test.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "scoped-overlay-dispatch",
+        "quote": "explicit removal prevents new selections, while scope release interrupts selected work.",
+        "revision": "4ca4efce6322c63e58e7a6fccb9374bdcdd2c38a"
+      }
     },
     {
       "id": "method-page-reload",
@@ -99286,9 +99321,15 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.addLocatorHandler",
+          "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+        }
+      ],
+      "notes": "Invocation count and disappearance-wait options are supported by scoped Page.addLocatorHandler.",
       "capabilities": [],
       "id": "option-page-addlocatorhandler-nowaitafter",
       "upstream": [
@@ -99297,36 +99338,42 @@
       "option": "noWaitAfter",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.addLocatorHandler",
+          "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+        }
+      ],
+      "notes": "Invocation count and disappearance-wait options are supported by scoped Page.addLocatorHandler.",
       "capabilities": [],
       "id": "option-page-addlocatorhandler-times",
       "upstream": [
@@ -99335,27 +99382,27 @@
       "option": "times",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -113313,7 +113360,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "b69e58d7444bd5f16dac9486a6f5b54a48ee2947e010c3c9c9fa06e8a5182b7c",
+    "docs/decisions.md": "12eb6e5fa4d883e3d9a93af3725619b8a829596536c9f328d257c9444ab26aff",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113324,18 +113371,18 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "89aa59a2b6b86267f2382ce6e2e6d09642eb6fd312e01afa64fdf4cbc4d33b62",
-    "packages/browser/src/Expect.ts": "71fcb3b8db64cb95581c3e48fff356afb3d12056faf8b669bd4a947640b15f73",
+    "packages/browser/src/Expect.ts": "5bd988bbca5ef1008d273efc9d81d158564777b2620c2ddb6265c51837e53854",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
+    "packages/browser/src/Locator.ts": "4d8a63021f1414ec2c54e817efdf842357e82bcfdcb97d520052462626dfe50f",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
+    "packages/browser/src/Page.ts": "354ccd13256a854c8b5c216a27d9963d447f6235a70e09f3c5730a3ba2dd1c7b",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",
@@ -113356,7 +113403,10 @@
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
     "node_modules/effect/src/Fiber.ts": "4454a7ce05a176315ad0579d349ac3721b22e7d25ebcd14d6583e0ab2d501c71",
-    "node_modules/effect/package.json": "501c6f86aaf1c8e14fe5c9197cf3dbc3ed812f819944252a50a04f74896a35e5"
+    "node_modules/effect/package.json": "501c6f86aaf1c8e14fe5c9197cf3dbc3ed812f819944252a50a04f74896a35e5",
+    "packages/browser/src/internal/locatorHandlers.ts": "f74c09794d7b2fc80f5808f301a96cb04d5aa5db53cdb58be2ff273fcfa793e7",
+    "packages/browser/test/integration/slice/locatorHandlers.ts": "5ff19ec0ec564aed9a255065d1cc36d94f897451df03fc92dd6ae2dc627381d4",
+    "packages/browser/test/LocatorHandler.test.ts": "07d4d2a2a79633a809d0ff0c2825d5a1ece1bd256c22dca516b37ec4667927c3"
   },
   "scopeDecisions": [
     {

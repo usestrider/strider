@@ -1,0 +1,73 @@
+---
+title: Overlay handlers
+description: Scoped overlay dismissal, invocation limits, removal, callback failures and shared deadlines.
+order: 4
+---
+
+An occasional consent prompt can cover an element while an action waits for it. A scoped locator handler dismisses
+the prompt before actionability or waiting assertion checks, including their retries.
+
+## Registering a handler
+
+Register the overlay's locator on its own page, then perform the steps that might meet it:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openProducts = Effect.fn("openProducts")(function*(page: Page.Page) {
+  yield* page.addLocatorHandler(
+    page.getByRole("dialog", { name: "Cookies" }),
+    () => page.getByRole("button", { name: "Accept" }).click()
+  )
+  yield* page.getByRole("link", { name: "Products" }).click()
+})
+```
+
+Registration requires a scope and ends with it. It also affects locators and effects created before registration.
+Other pages and contexts keep their ordinary execution. Registration does not start a background overlay watcher;
+actionability and waiting assertion checks trigger it. Reads such as a locator's [text](/docs/pages/locators) and
+[low-level keyboard and mouse input](/docs/pages/actions#the-keyboard-and-the-mouse) do not invoke it.
+
+Callbacks run one at a time per page. Actions and assertions inside a callback, including joined child fibers,
+do not invoke handlers. Keep each callback self-contained and join its work: detached work is outside the
+handler's lifetime guarantee. A callback may navigate or change focus and pointer position; the triggering
+operation resolves its target again afterward.
+
+## Invocation limits and removal
+
+By default, a handler can run any number of times, and its triggering check waits for the overlay to disappear
+afterward. Use a positive integer invocation limit, or skip disappearance waiting for a trigger that stays visible:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const prepareCheckout = Effect.fn("prepareCheckout")(function*(page: Page.Page) {
+  const handler = yield* page.addLocatorHandler(
+    page.locator("body"),
+    () => page.getByRole("button", { name: "Dismiss tips" }).click(),
+    {
+      times: 1,
+      noWaitAfter: true
+    }
+  )
+  yield* page.getByRole("button", { name: "Checkout" }).click()
+  yield* handler.remove
+})
+```
+
+Early removal is idempotent. It disables future selections while an already selected callback and its default
+hidden wait can finish. Closing the registration's scope interrupts that callback and prevents its triggering
+operation from succeeding. The last invocation still waits for disappearance unless that wait was disabled.
+
+## Failures and deadlines
+
+Queueing, callback actions, disappearance waiting and the resumed operation share one absolute deadline.
+A handler cannot extend it. Callback timeouts keep their step evidence and receive the enclosing action or
+assertion's normal timeout attribution. An ordinary unmet assertion still fails with an expectation failure.
+
+Other typed callback failures immediately fail the action with a handler-failure reason, or the assertion with
+its handler-failure field. The original error retains its identity and custom fields in process; serialized
+diagnostics are a projection, not lossless transport of arbitrary error values. Defects and interruption remain
+causes. See [error handling](/docs/errors) and [deadlines](/docs/deadlines).

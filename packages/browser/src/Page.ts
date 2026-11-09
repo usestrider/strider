@@ -1005,6 +1005,46 @@ export interface Page extends ReadonlyPage {
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
+   * Dismisses an overlay before actionability checks and waiting assertion checks while this scope lives.
+   *
+   * **Details**
+   *
+   * The locator must belong to this page. Callbacks run serially and share the triggering operation's deadline.
+   * Actions and assertions inside the callback do not invoke handlers, including in joined child fibers.
+   * Removal disables future invocations; an explicitly removed callback already selected may finish.
+   * Closing the registration scope interrupts a selected callback and its triggering operation.
+   *
+   * **Gotchas**
+   *
+   * A callback can change focus, pointer position and the document. Keep it self-contained and join its work.
+   * Registration alone does not watch for overlays. Checks resume from fresh DOM after a callback.
+   *
+   * **Example** (Dismiss an occasional consent prompt)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const browse = Effect.fn("browse")(function*(page: Page.Page) {
+   *   yield* page.addLocatorHandler(
+   *     page.getByRole("dialog"),
+   *     () => page.getByRole("button", { name: "Accept" }).click()
+   *   )
+   *   yield* page.getByRole("link", { name: "Products" }).click()
+   * })
+   * ```
+   */
+  addLocatorHandler<E, R>(
+    locator: Locator.Locator,
+    handler: (locator: Locator.Locator) => Effect.Effect<void, E, R>,
+    options?: {
+      /** Maximum invocations, a positive safe integer. @default unlimited */
+      readonly times?: number | undefined
+      /** Skip waiting for the trigger to become hidden after the callback. @default false */
+      readonly noWaitAfter?: boolean | undefined
+    } | undefined
+  ): Effect.Effect<Declaration.Registration, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  /**
    * Runs a script in every new document of this page, before its own scripts, while the registration lives.
    *
    * **Details**

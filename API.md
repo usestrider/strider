@@ -408,6 +408,7 @@ interface Page extends ReadonlyPage {
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly phase: P }): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
+  addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect<void, E, R>, options?: { readonly times?: number; readonly noWaitAfter?: boolean }): Effect<Registration, PageError | TargetGone | Timeout, Scope | R> // page-local, serial, nonrecursive; default unlimited and wait for disappearance
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   readonly activate: Effect<void, PageError | TargetGone | Timeout> // bring to front; rendering-based waits need it

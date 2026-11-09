@@ -575,7 +575,15 @@ failed-check evidence without another check or application; a missing answer is 
 silently starting another round on the same document. A waiting evaluation reports departure separately, even before the host receives the new
 document commit. That reply, or a changed target or ancestor document route after disposal, causes rerouting
 under the original deadline; the old continuation is cancelled, never replayed.
-The registration API is not yet connected to this driver.
+Page-scoped locator handlers activate this driver only on their page. The mutable page dispatch replaces ordinary
+action/assertion execution, including for previously created locators and effects. A page semaphore serializes
+callbacks; inherited suppression lets callback actions run ordinarily without recursion. Final checks restart
+before application so the host releases the input permit before invoking a handler. Explicit removal disables
+selection; scope closure also interrupts selected work and waits for its finalizers before releasing captured
+services. A callback closing its own registration scope interrupts itself without a self-join. Default dispatch returns only after the last registration
+and all outstanding invocations and hidden waits drain. Callback services are captured while the triggering
+operation, deadline, clock and suppression remain inherited. Original typed callback errors remain unknown-valued
+in process; serialized diagnostics do not promise lossless arbitrary-error transport.
 
 - **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.
 - **Frames.** A frame locator is a boundary in the steps. L1 splits them at each boundary; the engine of each document on the way finds its iframe, which must be one match and an iframe, and the adapter names the frame the iframe holds (`contentFrame`: CDP's `DOM.describeNode`, a window proxy's `context` on BiDi, WebKit's `contentFrameId`). The last part goes to the engine of the frame's current document. A frame not there yet is a request that matches nothing, in a round of at most 100 ms, so the next round looks for the frame again. Same-origin and cross-site frames go the same way. Role/filter combinations are validated from the whole query at the first frame lookup, so a missing frame cannot hide an invalid combination.

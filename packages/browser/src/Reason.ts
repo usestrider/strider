@@ -327,3 +327,29 @@ export class ViewportMismatch extends Schema.Error<ViewportMismatch>("@usestride
     return `Viewport ${this.requested.width}x${this.requested.height} was not confirmed; measured ${this.actual.width}x${this.actual.height} (${this.hint})`
   }
 }
+
+/**
+ * Reason for a locator handler callback that failed while preparing an action or assertion.
+ *
+ * **Details**
+ *
+ * `error` preserves the original typed error, including its identity and custom fields, in this process.
+ * Serialized diagnostics are a projection and do not promise lossless transport of arbitrary callback values.
+ * Defects and interruption propagate as causes; step timeouts and ended targets retain their error types.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
+  "@usestrider/browser/Reason/LocatorHandlerFailed"
+)({
+  _tag: Schema.tag("LocatorHandlerFailed"),
+  error: Schema.Unknown,
+  trigger: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Locator handler for ${this.trigger} failed (${this.hint})`
+  }
+}

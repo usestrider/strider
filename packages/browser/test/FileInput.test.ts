@@ -15,6 +15,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as Evaluation from "../src/internal/evaluation.ts"
+import * as Execution from "../src/internal/execution.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Preparation from "../src/internal/fileInput.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -109,7 +110,7 @@ describe("FileInput across a connection", () => {
               })))
             })
             // Stub only DOM lookup/readiness: keep file preparation and adapter dispatch real.
-            const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+            const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
               routed,
               response: {
                 _tag: "Ready",
@@ -381,7 +382,7 @@ describe("a local read under the deadline", () => {
 
   it.live("Locator.setInputFiles times out when the read doesn't end", () =>
     Effect.scoped(Effect.gen(function*() {
-      const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+      const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
         routed,
         response: {
           _tag: "Ready",

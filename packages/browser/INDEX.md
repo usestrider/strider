@@ -588,10 +588,10 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 
 *models*
 
-- `type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
+- `type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>`
 - `interface DualMatcher<S, Args extends ReadonlyArray<unknown>>`
-  - `(...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
-  - `(subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone>`
+  - `(...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>`
+  - `(subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>`
 
 *combinators*
 
@@ -617,7 +617,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>`
 - `const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
 - `const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
-- `const that: <A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) => Effect.Effect<void, E | ExpectationFailed | Target.TargetGone, R>`
+- `const that: <A, E, R>(subject: Effect.Effect<A, E, R>, condition: Condition.Condition<A>) => Effect.Effect<void, E | ExpectationFailed | Target.TargetGone | Deadline.Timeout, R>`
 
 *references*
 
@@ -629,7 +629,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 
 *errors*
 
-- `class ExpectationFailed: Schema.TaggedError "ExpectationFailed" { subject, condition, last, history, elapsed, checks, nearest, suggestions, diagnostics }`
+- `class ExpectationFailed: Schema.TaggedError "ExpectationFailed" { handlerFailure, subject, condition, last, history, elapsed, checks, nearest, suggestions, diagnostics }`
 
 ### FileChooser
 
@@ -1405,6 +1405,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect.Effect<Route.Registration, Route.RouteErr…`
   - `route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> …`
   - `route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(pattern: Url.Pattern | string, handler: RoutePhaseDiagnostic.Handler<E, R…`
+  - `addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect.Effect<void, E, R>, options?: { readonly times?: number | undef…`
   - `addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect.Effect< InitScript.InitScript, Declaration.DeclarationError | Target…`
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `readonly activate: Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1574,6 +1575,7 @@ Failure reasons that more than one module's error can carry.
 - `class NotSerializable: Schema.Error { path, hint }`
 - `class PromptBlocking: Schema.Error { kind, text, hint }`
 - `class ViewportMismatch: Schema.Error { requested, actual, hint }`
+- `class LocatorHandlerFailed: Schema.Error { error, trigger, hint }`
 
 ### Route
 

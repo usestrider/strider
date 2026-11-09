@@ -13,6 +13,7 @@ import * as Diagnostics from "../Diagnostics.ts"
 import * as Expect from "../Expect.ts"
 import * as Locator from "../Locator.ts"
 import type * as Page from "../Page.ts"
+import type * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
 import * as Access from "./access.ts"
@@ -78,12 +79,14 @@ const failure = (
   triggers: ReadonlySet<"initial" | "change" | "interval">,
   explained: Explained = { nearest: Option.none(), suggestions: [] },
   matcherName: string = "that",
-  source?: object
+  source?: object,
+  handlerFailure?: Reason.LocatorHandlerFailed
 ) =>
   classifyFailure(
     new Expect.ExpectationFailed({
       subject,
       condition,
+      ...(handlerFailure === undefined ? {} : { handlerFailure }),
       last: Option.fromNullishOr(history.at(-1)),
       history: [...history],
       elapsed: Duration.millis((now() - started) / 1e6),
@@ -183,22 +186,35 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
-    const failed = () =>
+    const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
+        handlerFailure !== undefined || expectation._tag === "Count" || expectation._tag === "Hidden" ||
+          expectation._tag === "Title"
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
           Effect.fail(
-            failure(id, subject.description, condition, started, history, checks, triggers, explained, matcherName)
+            failure(
+              id,
+              subject.description,
+              condition,
+              started,
+              history,
+              checks,
+              triggers,
+              explained,
+              matcherName,
+              undefined,
+              handlerFailure
+            )
           )
       )
     while (true) {
       const left = record.left()
       if (left <= 0 && checks > 0) return yield* failed()
       checks++
-      const response = yield* Runtime.send(
+      const response = yield* subject.page.execution.expect(
         subject.runtime,
         subject.page,
         { op: "expect", steps: subject.steps, expectation, cap: Runtime.roundCap(left) },
@@ -208,8 +224,15 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
         Effect.map((response): Engine.Response | { readonly error: string; readonly final: boolean } => response),
         Effect.catch((
           failure
-        ): Effect.Effect<{ readonly error: string; readonly final: boolean } | null, Target.TargetGone> =>
-          failure._tag === "Gone"
+        ): Effect.Effect<
+          { readonly error: string; readonly final: boolean } | null,
+          Target.TargetGone | Deadline.Timeout | Expect.ExpectationFailed
+        > =>
+          failure._tag === "Timeout" || failure._tag === "TargetGone" ?
+            Effect.fail(failure)
+            : failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed" ?
+            failed(failure.reason)
+            : failure._tag === "Gone"
             ? Effect.fail(failure.error)
             : failure._tag === "Deadline"
             ? Effect.succeed(null)

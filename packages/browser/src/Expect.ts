@@ -22,11 +22,13 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
+import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
 import * as Locator from "./Locator.ts"
 import type * as Page from "./Page.ts"
+import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 import * as Watchable from "./Watchable.ts"
 
@@ -37,7 +39,7 @@ import * as Watchable from "./Watchable.ts"
  * @category models
  * @since 0.1.0
  */
-export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>
+export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
 
 /**
  * A matcher with arguments, usable data-first or in `pipe`.
@@ -47,8 +49,8 @@ export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed |
  * @since 0.1.0
  */
 export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
-  (...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>
-  (subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone>
+  (...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
+  (subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -483,7 +485,7 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
 export const that = <A, E, R>(
   subject: Effect.Effect<A, E, R>,
   condition: Condition.Condition<A>
-): Effect.Effect<void, E | ExpectationFailed | Target.TargetGone, R> =>
+): Effect.Effect<void, E | ExpectationFailed | Target.TargetGone | Deadline.Timeout, R> =>
   Watchable.isWatchable(subject)
     ? ExpectImpl.watching(
       subject as Watchable.Watchable<A>,
@@ -583,6 +585,7 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(ExpectationFailedTypeId)(
   "ExpectationFailed",
   {
+    handlerFailure: Schema.optional(Reason.LocatorHandlerFailed),
     subject: Schema.String,
     condition: Schema.String,
     last: Schema.Option(Diagnostics.ObservedValue),
@@ -599,7 +602,9 @@ export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(Exp
 ) {
   readonly [ExpectationFailedTypeId] = ExpectationFailedTypeId
   override get message(): string {
-    return `Expected ${this.subject} ${this.condition}`
+    return this.handlerFailure === undefined
+      ? `Expected ${this.subject} ${this.condition}`
+      : this.handlerFailure.message
   }
 }
 
