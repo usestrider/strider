@@ -125,3 +125,40 @@ and each package's `prepack` generate the indexes. Published tarballs still incl
 Generated TypeScript barrels, protocol output and keyboard layouts remain tracked and retain their freshness checks.
 `pnpm all` validates curated evidence and regenerates derived outputs on the PR itself, including fork PRs, without
 bot commits or post-merge writes. It does not turn generation into a claim of human semantic review.
+
+### Checking a legacy branch before removing its matrix
+
+Save the legacy comparison from the exact commit being merged before resolving the deleted-file conflict. Use the
+commit SHA returned by `git rev-parse`, rather than a moving branch name, so the comparison records the inputs
+actually merged. For example, when merging an older-format main into a branch with per-row files:
+
+```sh
+git fetch origin
+main_commit=$(git rev-parse origin/main)
+git show "$main_commit":scripts/playwright-matrix/matrix.json > /tmp/main-matrix.json
+git merge "$main_commit"
+pnpm matrix:compare /tmp/main-matrix.json
+```
+
+The comparison reads only the supplied legacy JSON and current curated inputs; it needs no generated reference or
+website. It compares every row by stable ID, including classifications, notes, requirements, overrides, API and
+provenance fields, all shared metadata, and the set of evidence paths. Only legacy derived browser statuses, hash
+values, row order and evidence-path order are excluded. Exit zero means equivalent; exit one lists missing, added
+or changed rows (with changed fields) and metadata differences. An optional second argument selects a different
+curated directory. The command never converts, updates or overwrites rows, even when differences are found.
+
+Resolve each reported difference against both branches' intended changes. Copy the affected curated fields into
+`rows/<id>.json` or `metadata.json`, omitting derived browser statuses and hashes. Do not overwrite the entire row
+set from an older feature branch: that can discard newer classifications already on main. Compare again before
+removing the legacy matrix and browser snapshot from the merge, and run `pnpm all`, `pnpm build` and
+`pnpm pack-check`. Intentional feature changes can leave genuine differences; inspect and report them explicitly.
+
+### Reviewing changes to browser capabilities
+
+The old row-by-row browser-status drift gate and adapter-capability snapshot drift gate have both been removed,
+alongside stored evidence-hash acknowledgement. Browser statuses and adapter tables are computed from current
+sources and no longer create committed review diffs. When capabilities or requirements change, reviewers must
+inspect `.data/playwright-matrix/matrix.json` and `.data/playwright-matrix/browsers.json` after `pnpm reference` and
+`pnpm matrix:check`, comparing generated before/after results when assessing affected rows. The legacy comparison
+command deliberately does not assert equality of derived browser data. Symbol, quotation, completeness, decision
+and built-link validation remain, as do freshness checks for tracked generated TypeScript, protocols and keyboards.

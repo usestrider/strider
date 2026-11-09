@@ -1441,6 +1441,8 @@ regenerated during validation; package builds and packing recreate the indexes f
 requirements and provenance remain curated, with one stable-ID row per file, so unrelated features in the same
 Playwright class can merge independently. Hashes describe current inputs, never an acknowledgement of semantic review;
 source symbols, quotations, completeness, decisions, capabilities and built links are still checked on each PR.
-Generated code remains tracked with freshness checks. Rejected: per-module index fragments, which keep redundant
-output; per-class matrix files, which still couple concurrent Locator or Page features; and post-merge generation,
-which delays validation and needs privileged writes unavailable to fork PRs.
+Stored browser-status and adapter-capability snapshot drift gates are removed too: capability changes require
+reviewing generated results rather than committed snapshot diffs. Generated code remains tracked with freshness checks.
+Rejected: per-module index fragments, which keep redundant output; per-class matrix files, which still couple
+concurrent Locator or Page features; and post-merge generation, which delays validation and needs privileged writes
+unavailable to fork PRs.
