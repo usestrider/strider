@@ -1636,6 +1636,7 @@ describe("CdpAdapter navigation-interrupted evaluation", () => {
     it.effect(`waits for lifecycle confirmation without replay (${outcome})`, () =>
       Effect.gen(function*() {
         const rejected = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
         let calls = 0
         const error = new Protocol.ProtocolError({
           reason: new Protocol.Rejected({
@@ -1649,6 +1650,7 @@ describe("CdpAdapter navigation-interrupted evaluation", () => {
           ...session,
           send: Effect.fnUntraced(function*() {
             calls++
+            yield* Deferred.await(reply)
             yield* Deferred.succeed(rejected, undefined)
             return yield* Effect.fail(error)
           })
@@ -1689,6 +1691,8 @@ describe("CdpAdapter navigation-interrupted evaluation", () => {
           Effect.flip,
           Effect.forkChild
         )
+        yield* TestClock.adjust("40 millis")
+        yield* Deferred.succeed(reply, undefined)
         yield* Deferred.await(rejected)
         yield* TestClock.adjust("0 millis")
         if (outcome === "unrelated") {
@@ -1698,7 +1702,7 @@ describe("CdpAdapter navigation-interrupted evaluation", () => {
           return
         }
         assert.isUndefined(waiting.pollUnsafe(), "rejection alone must not claim the realm ended")
-        yield* TestClock.adjust("99 millis")
+        yield* TestClock.adjust("59 millis")
         assert.isUndefined(waiting.pollUnsafe())
         if (outcome === "deadline") {
           yield* TestClock.adjust("1 millis")
