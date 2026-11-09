@@ -1,16 +1,16 @@
 /** Deterministic terminal header settlement, without browser traffic or elapsed time. */
 import { assert, describe, it } from "@effect/vitest"
-import { Deadline, NetworkRequest, NetworkResponse, Target, Url, UserContext } from "@usestrider/browser"
+import { Deadline, NetworkRequest, NetworkResponse, Page, Target, Url, UserContext } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import * as Scope from "effect/Scope"
-import * as Handles from "../src/internal/handles.ts"
-import type * as Runtime from "../src/internal/runtime.ts"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Fold from "../src/internal/fold.ts"
+import * as Handles from "../src/internal/handles.ts"
+import type * as Runtime from "../src/internal/runtime.ts"
 
 const context = "context" as UserContext.Id
 const page = "page" as Target.NavigableId
@@ -136,7 +136,6 @@ describe("Request header lifetime", () => {
     }))
 })
 
-
 const responseFixture = Effect.gen(function*() {
   const fold = yield* Fold.make({ release: () => Effect.void })
   const entry = yield* fold.context(context, false)
@@ -147,13 +146,24 @@ const responseFixture = Effect.gen(function*() {
     grant: Option.none()
   })
   yield* fold.sink({
-    _tag: "PageAdded", page, context, kind: "tab", origin: { _tag: "Created" }, url: "about:blank" as Url.Url
+    _tag: "PageAdded",
+    page,
+    context,
+    kind: "tab",
+    origin: { _tag: "Created" },
+    url: "about:blank" as Url.Url
   })
   const sent = request(0, { _tag: "Document", navigable: page, navigation: Option.none() })
   yield* fold.sink({ _tag: "RequestSent", request: sent })
   const response = new NetworkResponse.NetworkResponse({
-    hop: sent.hop, url: sent.url, status: 200 as NetworkResponse.StatusCode, statusText: "OK",
-    httpVersion: Option.none(), headers: Headers.empty, servedBy: "network", at: sent.at
+    hop: sent.hop,
+    url: sent.url,
+    status: 200 as NetworkResponse.StatusCode,
+    statusText: "OK",
+    httpVersion: Option.none(),
+    headers: Headers.empty,
+    servedBy: "network",
+    at: sent.at
   })
   return { fold, target, sent, response }
 })
@@ -181,6 +191,36 @@ describe("Request response lifetime", () => {
       assert.deepStrictEqual(yield* Fiber.join(fiber), Option.none())
     })))
 
+  it.effect("delivers to an already-running waiter and keeps redirect hops separate", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, target, sent, response } = yield* responseFixture
+      const wait = yield* NetworkRequest.response(target, sent)
+      const fiber = yield* wait.pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      assert.isUndefined(fiber.pollUnsafe())
+      const redirect = new NetworkResponse.NetworkResponse({ ...response, status: 302 as NetworkResponse.StatusCode })
+      yield* fold.sink({ _tag: "ResponseReceived", response: redirect })
+      yield* fold.sink({ _tag: "RequestFinished", hop: sent.hop, encodedBytes: 0, at: sent.at })
+      const next = new NetworkRequest.NetworkRequest({ ...sent, hop: "request-0.1" as NetworkRequest.HopId })
+      yield* fold.sink({ _tag: "RequestSent", request: next })
+      yield* fold.sink({
+        _tag: "ResponseReceived",
+        response: new NetworkResponse.NetworkResponse({ ...response, hop: next.hop })
+      })
+      assert.strictEqual(Option.getOrThrow(yield* Fiber.join(fiber)).status, 302)
+      assert.strictEqual(Option.getOrThrow(yield* (yield* NetworkRequest.response(target, next))).status, 200)
+    })))
+
+  it.effect("wakes when the target closes before arrival", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, target, sent } = yield* responseFixture
+      const wait = yield* NetworkRequest.response(target, sent)
+      const fiber = yield* wait.pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* fold.sink({ _tag: "UserContextRemoved", context })
+      assert.strictEqual(unavailableWhy(yield* Effect.flip(Fiber.join(fiber))), "targetClosed")
+    })))
+
   it.effect("clears retention and wakes a pending wait when its scope closes", () =>
     Effect.scoped(Effect.gen(function*() {
       const { target, sent } = yield* responseFixture
@@ -189,8 +229,8 @@ describe("Request response lifetime", () => {
       const fiber = yield* wait.pipe(Effect.forkScoped)
       yield* Effect.yieldNow
       yield* Scope.close(scope, Exit.void)
-      assert.strictEqual((yield* Effect.flip(Fiber.join(fiber))).reason.why, "released")
-      assert.strictEqual((yield* Effect.flip(wait)).reason.why, "released")
+      assert.strictEqual(unavailableWhy(yield* Effect.flip(Fiber.join(fiber))), "released")
+      assert.strictEqual(unavailableWhy(yield* Effect.flip(wait)), "released")
     })))
 
   it.effect("rejects a request owned by another context", () =>
@@ -198,8 +238,15 @@ describe("Request response lifetime", () => {
       const { fold, sent } = yield* responseFixture
       const entry = yield* fold.context("foreign" as UserContext.Id, false)
       const target = {} as UserContext.ObservedUserContext
-      Handles.registerContext(target, { runtime: { model: fold } as unknown as Runtime.Runtime, entry, grant: Option.none() })
-      assert.strictEqual((yield* Effect.flip(NetworkRequest.response(target, sent))).reason.why, "foreignTarget")
+      Handles.registerContext(target, {
+        runtime: { model: fold } as unknown as Runtime.Runtime,
+        entry,
+        grant: Option.none()
+      })
+      assert.strictEqual(
+        (yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))).reason.why,
+        "foreignTarget"
+      )
     })))
 
   it.effect("reports eviction both for an acquired hop and a later lookup", () =>
@@ -209,8 +256,47 @@ describe("Request response lifetime", () => {
       for (let i = 1; i <= Fold.maxHops; i++) {
         yield* fold.sink({ _tag: "RequestSent", request: request(i, { _tag: "Unattributed" }) })
       }
-      assert.strictEqual((yield* Effect.flip(wait)).reason.why, "evicted")
-      assert.strictEqual((yield* Effect.flip(NetworkRequest.response(target, sent))).reason.why, "evicted")
+      assert.strictEqual(unavailableWhy(yield* Effect.flip(wait)), "evicted")
+      assert.strictEqual(
+        (yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))).reason.why,
+        "evicted"
+      )
+    })))
+
+  it.effect("keeps an acquired completed response through index eviction, without retaining its body", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, target, sent, response } = yield* responseFixture
+      yield* fold.sink({ _tag: "ResponseReceived", response })
+      yield* fold.sink({ _tag: "RequestFinished", hop: sent.hop, encodedBytes: 0, at: sent.at })
+      const wait = yield* NetworkRequest.response(target, sent)
+      for (let i = 1; i <= Fold.maxHops; i++) {
+        yield* fold.sink({ _tag: "RequestSent", request: request(i, { _tag: "Unattributed" }) })
+      }
+      assert.isTrue(Option.isNone(fold.hop(sent.hop)))
+      assert.deepStrictEqual(yield* wait, Option.some(response))
+      assert.isFalse("body" in Option.getOrThrow(yield* wait))
+    })))
+
+  it.effect("rejects another page even within the owning context", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { fold, sent } = yield* responseFixture
+      const otherPage = "other-page" as Target.NavigableId
+      yield* fold.sink({
+        _tag: "PageAdded",
+        page: otherPage,
+        context,
+        kind: "tab",
+        origin: { _tag: "Created" },
+        url: sent.url
+      })
+      const target = {} as Page.ObservedPage
+      Handles.registerPage(target, {
+        runtime: { model: fold } as unknown as Runtime.Runtime,
+        entry: Option.getOrThrow(fold.page(otherPage)),
+        grant: Option.none()
+      })
+      const error = yield* NetworkRequest.response(target, sent).pipe(Effect.asVoid, Effect.flip)
+      assert.strictEqual(error.reason.why, "foreignTarget")
     })))
 
   it.effect("bounds waits by the operation deadline", () =>
@@ -222,3 +308,9 @@ describe("Request response lifetime", () => {
       assert.strictEqual(error.phase, "waitingForEvent")
     })))
 })
+
+const unavailableWhy = (error: NetworkRequest.RequestError | Deadline.Timeout) => {
+  assert.strictEqual(error._tag, "RequestError")
+  if (error._tag !== "RequestError") throw error
+  return error.reason.why
+}

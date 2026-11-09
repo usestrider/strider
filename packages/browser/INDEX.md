@@ -1172,6 +1172,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
 - `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const response: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect< Effect.Effect<Option.Option<NetworkResponse.NetworkResponse>, RequestError | Deadline.Timeout>, RequestError, Scope.Scope >`
 
 *getters*
 
@@ -1181,6 +1182,14 @@ The requests a page or context sends, as events and as the data routes and respo
 *converting*
 
 - `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+*errors*
+
+- `class RequestError: Schema.TaggedError "RequestError" { hop, reason, diagnostics }`
+
+*reasons*
+
+- `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
 

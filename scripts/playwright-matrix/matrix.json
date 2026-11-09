@@ -28803,43 +28803,57 @@
       "upstream": [
         "method:Request.response"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
+      "status": "different",
+      "api": [
+        {
+          "module": "NetworkRequest",
+          "symbol": "response",
+          "url": "/docs/api/browser/NetworkRequest#response"
+        }
+      ],
+      "notes": "Scoped opt-in retention of one observed request hop; acquisition must occur within the existing 1000-hop model window on its owning page or context. Returns a bounded response wait, Option.none on completion without a response, and typed unavailable errors for eviction, foreign targets, release or target closure. Each redirect hop resolves separately. Does not retain response bodies.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
       "audit": {
         "sources": [
-          "packages/browser/src/NetworkRequest.ts"
+          "packages/browser/src/NetworkRequest.ts",
+          "packages/browser/src/internal/networkRequest.ts",
+          "packages/browser/test/NetworkLifetime.test.ts"
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "pay-for-what-you-use",
+        "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+        "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+      }
     },
     {
       "id": "method-request-existingresponse",
@@ -113332,7 +113346,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
+    "packages/browser/src/NetworkRequest.ts": "16a255dd43b9ad01a825667e8d2e4629ee112bbbf97dd1604e254440687cf37b",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",
