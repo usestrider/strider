@@ -4164,6 +4164,42 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects accessible names with normalized strings, regex flags and typed evidence", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<span id="label" hidden>  Save   changes </span><button id="named" aria-labelledby="label">Ignored</button><button id="hidden" hidden aria-label="Secret"></button><label for="field">Email address</label><input id="field"><button class="many">One</button><button class="many">Two</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            const named = page.locator("#named")
+            yield* named.pipe(Expect.toHaveAccessibleName("  Save\n changes  "))
+            yield* Expect.toHaveAccessibleName(named, /save changes/, { ignoreCase: true })
+            yield* named.pipe(Expect.toHaveAccessibleName(/SAVE CHANGES/i))
+            yield* named.pipe(Expect.toHaveAccessibleName("SAVE CHANGES", { ignoreCase: true }))
+            yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleName(""))
+            yield* page.locator("#field").pipe(Expect.toHaveAccessibleName("Email address"))
+            const pending = yield* named.pipe(Expect.toHaveAccessibleName("Updated"), Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => { document.querySelector("#label")!.textContent = "Updated" })
+            yield* Fiber.join(pending)
+            for (const [locator, expected, options, observed] of [
+              [named, /updated/i, { ignoreCase: false }, "Updated"],
+              [named, "updated", undefined, "Updated"],
+              [named, /Updated  /, undefined, "Updated"],
+              [page.locator("#missing"), "", undefined, { matches: 0 }],
+              [page.locator(".many"), /One/, undefined, { matches: 2 }]
+            ] as const) {
+              const error = yield* locator.pipe(
+                Expect.toHaveAccessibleName(expected, options), Deadline.within("300 millis"), Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert(error.history.length > 0)
+              assert.deepStrictEqual(error.history.at(-1)!.value, observed)
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+            }
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
