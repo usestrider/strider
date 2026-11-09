@@ -5,7 +5,12 @@ import { expect, it } from "vitest"
 
 const driver = path.resolve(import.meta.dirname, "../src/benchmarks/compare-bin.ts")
 it("rejects unsupported browser and workload before touching checkouts", () => {
-  for (const args of [["--browser", "firefox"], ["--workload", "unknown"], ["--runs", "1"]]) {
+  for (
+    const args of [["--browser", "firefox"], ["--workload", "unknown"], ["--runs", "1"], ["--runs", "2"], [
+      "--runs",
+      "6"
+    ], ["--runs", "1001"]]
+  ) {
     const result = spawnSync(process.execPath, [driver, ...args], { encoding: "utf8" })
     expect(result.status).toBe(1)
     expect(result.stderr).toMatch(/support only|must be/)

@@ -275,6 +275,6 @@ so ask the maintainer first.
 
 Performance comparisons run through `.github/workflows/benchmarks.yml`, never on the shared desktop.
 Dispatch from the driver branch with `base`, `head`, `workload` (`bench` or `scenarios`), `only`, `browser`
-(currently `chromium`) and `runs`, then follow `gh run watch`. See `packages/scenarios/BENCHMARKS.md` for
+(currently `chromium`) and `runs` (a multiple of four from 4 to 1000), then follow `gh run watch`. See `packages/scenarios/BENCHMARKS.md` for
 paired ratios, confidence intervals, recording requirements and retained failure evidence. Hosted main-against-main
 variance must be measured before interpreting small differences. Local non-browser harness tests remain appropriate.

@@ -26,7 +26,7 @@ on:
         options: [chromium]
         default: chromium
       runs:
-        description: Measured repetitions (2..1000)
+        description: Measured repetitions (multiple of 4, 4..1000)
         type: string
         default: "20"
 

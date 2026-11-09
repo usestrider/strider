@@ -40,7 +40,11 @@ const compare = (base: string, head: string, env: NodeJS.ProcessEnv) => {
   return {
     result,
     started: fs.existsSync(path.join(output, "base", "worker.log")),
-    report: fs.existsSync(report) ? JSON.parse(fs.readFileSync(report, "utf8")) : undefined
+    report: fs.existsSync(report) ? JSON.parse(fs.readFileSync(report, "utf8")) : undefined,
+    summary: fs.existsSync(path.join(output, "summary.md"))
+      ? fs.readFileSync(path.join(output, "summary.md"), "utf8")
+      : undefined,
+    driverPins: pins.every((file) => fs.existsSync(path.join(output, "driver", path.basename(file))))
   }
 }
 
@@ -62,6 +66,7 @@ it("rejects refs whose browser pins differ, not only flake.lock, before starting
     expect(started, changed.file).toBe(false)
     expect(result.status, changed.file).toBe(1)
     expect(report?.status).toBe("failed")
+    expect(report?.provenance.driver.files[changed.file]).toBeDefined()
     expect(report?.error).toContain(`Environment pin mismatch: head ${changed.file} differs from driver`)
   }
 })
@@ -84,3 +89,30 @@ it("records a failed comparison, without starting workers, when the browser is n
   expect(report?.status).toBe("failed")
   expect(report?.error).toContain("STRIDER_CHROMIUM must name the pinned browser executable")
 }, 70_000)
+
+it("retains driver pins and a failed summary for an unreadable browser executable", () => {
+  const env = { ...process.env, STRIDER_CHROMIUM: "/missing-paired-browser" }
+  const { result, started, report, summary, driverPins } = compare(checkout(), checkout(), env)
+  expect(result.status).toBe(1)
+  expect(started).toBe(false)
+  expect(report.status).toBe("failed")
+  expect(report.error).toContain("ENOENT")
+  expect(driverPins).toBe(true)
+  expect(summary).toContain("No valid comparison")
+  expect(summary).not.toContain("| Head/base")
+})
+
+it("rejects an executable with the wrong browser version before workers start", () => {
+  const env = browser()
+  fs.writeFileSync(env.STRIDER_CHROMIUM, "#!/bin/sh\necho Chromium 0.0.0.0\n", { mode: 0o755 })
+  fs.chmodSync(env.STRIDER_CHROMIUM, 0o755)
+  const { result, started, report } = compare(checkout(), checkout(), {
+    ...env,
+    STRIDER_ENVIRONMENT: "nix-integration"
+  })
+  expect(result.status).toBe(1)
+  expect(started).toBe(false)
+  expect(report.error).toContain("Browser version mismatch")
+  expect(report.environment.browserHash).toMatch(/^[a-f0-9]{64}$/)
+  expect(report.environment.browserVersion).toBe("Chromium 0.0.0.0")
+})

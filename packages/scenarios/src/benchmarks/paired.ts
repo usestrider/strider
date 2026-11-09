@@ -1,6 +1,8 @@
 export const rotation = (index: number) => {
   const roles = ["base:strider", "head:strider", "head:playwright", "base:playwright"] as const
-  return [...roles.slice(index % 4), ...roles.slice(0, index % 4)]
+  // Williams square: each role occupies each position and follows each other role once within rounds.
+  const orders = [[0, 1, 3, 2], [1, 2, 0, 3], [2, 3, 1, 0], [3, 0, 2, 1]]
+  return orders[index % 4]!.map((i) => roles[i]!)
 }
 
 /** Paired log-ratio mean with a two-sided 95% Student t interval. */

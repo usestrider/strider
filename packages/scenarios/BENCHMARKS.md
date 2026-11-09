@@ -634,24 +634,33 @@ gh run watch <run-id>
 
 For a scenario use `-f workload=scenarios -f only=login`. Scenarios requiring demo HAR recordings fail clearly
 when recordings are absent; this workflow never records from live sites or silently replaces recordings.
-Currently only pinned stock Chromium is supported. Different `flake.lock` pins are rejected so the browser
-and system environment remain common. Dependencies and builds are separate for each ref. The dispatched
-branch supplies the measurement driver, overlaid onto both checkouts, so a base predating this driver works.
-The libraries and their dependency lockfiles come from the respective refs; driver files are saved separately.
+Currently only pinned stock Chromium is supported. Different `flake.lock`, `flake.nix` or browser version pins
+in the driver, base or head are rejected so the browser and system environment remain common. Before workers start, the driver records its executable path, SHA-256 and
+version output and checks the version against its pins. Dependencies and builds are separate for each ref.
+The dispatched branch supplies the measurement driver, overlaid onto both checkouts, so a base predating this driver works.
+Both refs use the dispatched driver’s workload definitions (`cases.ts` / `scenarios.ts` and supporting runner files),
+including when head names a different branch. Changes to head’s own workloads are therefore not measured; dispatch
+from the branch containing the workload definitions to measure. The libraries and their dependency lockfiles come
+from the respective refs; driver files are saved separately.
 
-The scheduler rotates base Strider, head Strider, head Playwright and base Playwright through all four positions.
+The scheduler uses a four-round Williams square for base Strider, head Strider, head Playwright and base Playwright.
+Each role occupies each position once and follows every other role once within rounds. Measured run counts must
+be multiples of four from 4 through 1000. This balances immediate carryover within rounds; transitions across round
+boundaries, warmup boundaries, longer history and persistent browser state are not balanced or eliminated.
 It grants one individual sample at a time, including benchmark warmups. Scenario initial correctness checks and
 browser setup precede each case's readiness barrier; operation setup, assertions and cleanup retain their existing
 boundaries. Browser processes for both refs stay resident while waiting, which differs from standalone runs.
 The extra base Playwright samples retain a control for dependency changes.
 
-Artifacts contain incremental raw samples (including warmups), worker logs, original lockfiles and browser pins,
-resolved commits, driver sources, browser binary SHA-256, machine metadata and each worker's original report.
+Artifacts contain incremental raw samples (including warmups), worker logs, original driver/base/head lockfiles
+and browser pins, resolved commits, driver sources, browser binary SHA-256, machine metadata and each worker's original report.
 The summary reports geometric means of paired head/base and head/Playwright ratios with two-sided 95% Student t
 intervals on log ratios (conservative degrees-of-freedom table). These describe uncertainty across repetitions,
 not systematic machine bias; cases have separate intervals with no multiple-comparison correction. Ratios below
 one favor head. A failed or incomplete run retains evidence and publishes no valid comparison in its summary;
-partial per-case estimates in JSON must not be used as a successful comparison.
+partial per-case estimates in JSON must not be used as a successful comparison. Failed scenario attempts are
+retained in `<base|head>/run/attempts.jsonl` and the worker log. They are not successful timing samples and are
+absent from the parent’s `samples.ndjson`. Setup errors also write a failed JSON report and summary.
 
 Hosted variance has not yet been measured. Before relying on small differences, repeat main against main at least
 three times, record the observed spread, and use it to judge practical resolution. No performance gate is enabled.
