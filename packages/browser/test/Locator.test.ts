@@ -850,3 +850,82 @@ describe("Locator.isEditable", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 })
+
+it.effect("does not acknowledge native fill while its insertion guard is still pending", () =>
+  Effect.gen(function*() {
+    const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+    const guarding = yield* Deferred.make<void>()
+    const cleaned = yield* Deferred.make<void>()
+    let inputs = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("fill-realm" as Target.RealmId),
+        dispatchInput: () =>
+          Effect.sync(() => {
+            inputs++
+          }),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          const argument = call.arguments[0]
+          assert(argument?._tag === "Value" && argument.value.type === "string")
+          const request = JSON.parse(argument.value.value) as Engine.Request
+          if (request.op === "fillGuard") {
+            yield* Deferred.succeed(guarding, undefined)
+            return yield* Effect.never
+          }
+          if (request.op === "fillDisarm") {
+            yield* Deferred.succeed(cleaned, undefined)
+            return {
+              _tag: "Value",
+              value: {
+                type: "string",
+                value: JSON.stringify({
+                  _tag: "FillGuard",
+                  blocked: "input#other",
+                  unsafe: false,
+                  accepted: false
+                })
+              }
+            } as const
+          }
+          assert(request.op === "act" && request.action._tag === "Fill")
+          return {
+            _tag: "Value",
+            value: {
+              type: "string",
+              value: JSON.stringify({
+                _tag: "Ready",
+                element: "p#target",
+                scrolled: false,
+                point: null,
+                draggable: false,
+                checked: null,
+                fill: request.apply ? "guarded" : null
+              })
+            }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const pending = yield* page.locator("#target").fill("new").pipe(
+        Deadline.within("1 second"),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* Deferred.await(guarding)
+      yield* TestClock.adjust("1 second")
+      const error = yield* Fiber.join(pending)
+      yield* Deferred.await(cleaned)
+      assert(Deadline.isTimeout(error))
+      assert.strictEqual(inputs, 0)
+      assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+    })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+  }).pipe(Effect.scoped))
