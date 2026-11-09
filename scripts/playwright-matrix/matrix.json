@@ -28681,48 +28681,48 @@
           "url": "/docs/api/browser/NetworkRequest#RedirectUnknown"
         }
       ],
-      "notes": "Scoped redirects(target).from(request) and .to(request) reuse original snapshots in the existing 1000-hop connection-wide index. Observed links are authoritative; None requires terminal proof. RedirectUnknown distinguishes insufficient proof from RedirectUnavailable retention, ownership and lifetime errors. Effect.catchReason(\"RequestError\", \"RedirectUnknown\", () => Effect.succeedNone) handles only uncertainty as no successor seen. Terminal redirect navigation proof uses the bounded page event log; no tracking or implicit waiting is added.",
+      "notes": "Scoped redirects(target).from(request) and .to(request) reuse original snapshots in the existing 1000-hop connection-wide index. Observed links are authoritative; None requires terminal proof. RedirectUnknown distinguishes insufficient proof from RedirectUnavailable retention, ownership and lifetime errors. Effect.catchReason(\"RequestError\", \"RedirectUnknown\", () => Effect.succeedNone) handles only uncertainty as no successor seen. Terminal redirect navigation proof uses the bounded page event log; an absent needed outcome in disabled or incomplete history remains an unavailable-evidence error; no tracking or implicit waiting is added.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "firefox.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "firefox.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         }
@@ -28738,48 +28738,48 @@
         "file": "docs/decisions.md",
         "anchor": "bounded-redirect-evidence",
         "quote": "Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle.",
-        "revision": "1a7dbaf923c1a227c0c6b56dd1d3954d292b2b0a"
+        "revision": "4ab54bae975aa2c65afd110bb782250b243b609b"
       },
       "browserOverrides": {
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "firefox.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "firefox.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         }
@@ -28803,48 +28803,48 @@
           "url": "/docs/api/browser/NetworkRequest#RedirectUnknown"
         }
       ],
-      "notes": "Scoped redirects(target).from(request) and .to(request) reuse original snapshots in the existing 1000-hop connection-wide index. Observed links are authoritative; None requires terminal proof. RedirectUnknown distinguishes insufficient proof from RedirectUnavailable retention, ownership and lifetime errors. Effect.catchReason(\"RequestError\", \"RedirectUnknown\", () => Effect.succeedNone) handles only uncertainty as no successor seen. Terminal redirect navigation proof uses the bounded page event log; no tracking or implicit waiting is added.",
+      "notes": "Scoped redirects(target).from(request) and .to(request) reuse original snapshots in the existing 1000-hop connection-wide index. Observed links are authoritative; None requires terminal proof. RedirectUnknown distinguishes insufficient proof from RedirectUnavailable retention, ownership and lifetime errors. Effect.catchReason(\"RequestError\", \"RedirectUnknown\", () => Effect.succeedNone) handles only uncertainty as no successor seen. Terminal redirect navigation proof uses the bounded page event log; an absent needed outcome in disabled or incomplete history remains an unavailable-evidence error; no tracking or implicit waiting is added.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "firefox.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "firefox.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         }
@@ -28860,48 +28860,48 @@
         "file": "docs/decisions.md",
         "anchor": "bounded-redirect-evidence",
         "quote": "Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle.",
-        "revision": "1a7dbaf923c1a227c0c6b56dd1d3954d292b2b0a"
+        "revision": "4ab54bae975aa2c65afd110bb782250b243b609b"
       },
       "browserOverrides": {
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Successor lookup preserves the observed canceled successor attempt for manual fetch; otherwise missing terminal proof is RedirectUnknown."
           ]
         },
         "firefox.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "firefox.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "Redirect completion precedes the next request and exposes no fetch redirect mode; a manual fetch without terminal navigation proof can remain RedirectUnknown."
           ]
         },
         "webkit.launched": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         },
         "webkit.attached": {
           "status": "different",
           "limitations": [
-            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots; absent retained committed-navigation proof cannot establish a redirect terminal boundary.",
+            "Scoped access, at most 1000 shared retained hops, exact original target-owned snapshots. Absent terminal navigation proof cannot establish a boundary; disabled or incomplete navigation history with no matching outcome remains an unavailable-evidence error.",
             "A manual fetch can expose no successor; without retained terminal navigation proof successor lookup remains RedirectUnknown."
           ]
         }
@@ -113471,7 +113471,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "b7712274839139de51270b6b5ac6d4d6c32591210e6ecde38cb37a915776183c",
+    "docs/decisions.md": "dcad4bfbb74e3ba0768310ab71b970d6755222c659d2f59738a4f7642a22fedf",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113490,7 +113490,7 @@
     "packages/browser/src/Locator.ts": "b0af05466fac6b24aacb7a017f0d83431e126898e0f13d3325edeb6b2e42fee6",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
-    "packages/browser/src/NetworkRequest.ts": "5805308f275908ae182ec23a76a0a7a66138293d81b4b92d404a16c7f9044010",
+    "packages/browser/src/NetworkRequest.ts": "f733b676ecc5b229e19e9ab22477d8abf6dc794476f3e12d7a6ffb5f050e15ba",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
     "packages/browser/src/Page.ts": "cf081ebadc1d9f004c1787395c127418e2f065144833e04df9a8e4979167033d",

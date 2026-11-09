@@ -192,7 +192,10 @@ describe("Scoped redirect evidence", () => {
           })
         })
         yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
-        assert.strictEqual((yield* Effect.flip(links.to(first))).reason._tag, "RedirectUnknown")
+        assert.strictEqual(
+          (yield* Effect.flip(links.to(first))).reason._tag,
+          mismatch === "notRetained" ? "RedirectUnavailable" : "RedirectUnknown"
+        )
         yield* fold.sink({
           _tag: "NavigationEnded",
           navigation: endedNavigation,
@@ -204,7 +207,10 @@ describe("Scoped redirect evidence", () => {
           evidence: "test"
         })
         if (mismatch === "none") assert.isTrue(Option.isNone(yield* links.to(first)))
-        else assert.strictEqual((yield* Effect.flip(links.to(first))).reason._tag, "RedirectUnknown")
+        else {assert.strictEqual(
+            (yield* Effect.flip(links.to(first))).reason._tag,
+            mismatch === "notRetained" ? "RedirectUnavailable" : "RedirectUnknown"
+          )}
         // An observed link remains authoritative even when terminal navigation evidence is retained.
         const second = yield* send("navigation.1", Option.some(navigation))
         assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)

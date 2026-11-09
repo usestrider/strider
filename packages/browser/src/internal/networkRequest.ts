@@ -122,12 +122,17 @@ export const redirects: (
         if (Option.isNone(response)) return yield* fail("unavailable")
         if ([301, 302, 303, 307, 308].includes(response.value.status)) {
           const navigation = request.initiator._tag === "Document" ? request.initiator.navigation : Option.none()
-          const committed = Option.isSome(navigation) && Option.isSome(source.value.page) &&
-            source.value.page.value.events.navigation.entries.some(({ value }) =>
-              value.navigation === navigation.value && value.outcome._tag === "Committed" &&
-              Option.contains(value.outcome.response, request.hop)
-            )
-          if (committed) return Option.none()
+          if (Option.isSome(navigation) && Option.isSome(source.value.page)) {
+            const channel = source.value.page.value.events.navigation
+            const ended = channel.entries.find(({ value }) => value.navigation === navigation.value)
+            if (
+              ended?.value.outcome._tag === "Committed" && Option.contains(ended.value.outcome.response, request.hop)
+            ) {
+              return Option.none()
+            }
+            // Incomplete history cannot distinguish missing terminal evidence from discarded evidence.
+            if (ended === undefined && (channel.dropped > 0 || channel.cap() === 0)) return yield* fail("unavailable")
+          }
           return yield* unknown("completedRedirect")
         }
         return Option.none()

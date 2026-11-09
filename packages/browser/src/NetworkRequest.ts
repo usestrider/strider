@@ -402,7 +402,7 @@ export const headersSent = (
  *
  * `evicted` means the request or its neighbor is not retained. `foreignTarget` means the retained hop belongs
  * to another page or context. `unavailable` means the snapshot was reconstructed or required response evidence
- * is missing. `released` ends scoped access and `targetClosed` ends access through a closed target or connection.
+ * is missing. It also covers an absent navigation outcome when its history is disabled or incomplete. `released` ends scoped access and `targetClosed` ends access through a closed target or connection.
  *
  * @stability unstable
  * @category reasons
@@ -503,7 +503,9 @@ export interface Redirects {
  * Without terminal proof, `to` fails with `RedirectUnknown`: `inFlight` before completion or `completedRedirect`
  * after a redirect response. Firefox reports redirect completion before its next request, and does not expose
  * fetch redirect mode. Firefox and WebKit manual fetches can therefore remain unknown. A missing retained
- * navigation outcome cannot prove a boundary either. Neither member waits, installs tracking or sends commands.
+ * navigation outcome cannot prove a boundary either. If the needed outcome is absent and navigation history is
+ * disabled or has dropped entries, `RedirectUnavailable` (`unavailable`) preserves that retention failure.
+ * Neither member waits, installs tracking or sends commands.
  *
  * **Example** (Reading a redirect's predecessor)
  *

@@ -47,11 +47,13 @@ A lookup fails with `RequestError`, whose reason is one of:
 - `RedirectUnknown`: `inFlight` before the hop ends, or `completedRedirect` after a redirect response when neither
   a successor nor terminal navigation proof is retained. Completion, status and Location alone cannot prove an end.
 - `RedirectUnavailable`: `evicted` for a request or neighbor outside retention, `foreignTarget` for a retained hop
-  owned by another page or context, `unavailable` for a copied snapshot or missing response evidence, `released`
+  owned by another page or context, `unavailable` for a copied snapshot, missing response evidence, or an absent navigation outcome in disabled or
+  incomplete history, `released`
   when the acquiring scope ends, or `targetClosed` when the target or connection closes.
 
 Access reuses the existing connection-wide index of at most 1000 hops. Completed hops are evicted oldest first,
 then unfinished hops if necessary; another context can evict evidence too. Navigation proof reuses the page's
-bounded [event history](/docs/events/events#next-stream-and-history); an omitted or evicted navigation outcome
-cannot establish a boundary. The handle can inspect retained requests from before it opened. It adds no request
+bounded [event history](/docs/events/events#next-stream-and-history); an absent navigation outcome
+cannot establish a boundary. If its history is disabled or has dropped entries, the lookup reports unavailable
+evidence; the one-step unknown recovery preserves this error. The handle can inspect retained requests from before it opened. It adds no request
 cache, event listener or protocol command, and closing its scope revokes further lookups.
