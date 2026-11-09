@@ -36,6 +36,7 @@ import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as InternalOperation from "../../../src/internal/operation.ts"
 import { site } from "../adapter/harness.ts"
+import * as FailureTrace from "../failureTrace.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -1946,10 +1947,24 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.scoped(Effect.gen(function*() {
                 const old = type === "date" ? "2020-03-02" : "old"
                 const value = type === "date" ? "2020-03-03" : "filled"
+                const diagnoseRecovery = name === "Firefox" && type === "date" && property === "inert" &&
+                  mode === "recovery"
+                const stamp = (event: string) =>
+                  diagnoseRecovery
+                    ? `window.__dateRecovery.push({event:'${event}',epoch:Date.now(),at:performance.now(),inert:this.inert,value:this.value});`
+                    : ""
                 const { url } = yield* fixture(() =>
-                  `<input id="go" type="${type}" value="${old}" onfocus="this.removeAttribute('onfocus');${block};${
+                  `${
+                    diagnoseRecovery ? "<script>window.__dateRecovery=[]</script>" : ""
+                  }<input id="go" type="${type}" value="${old}" onfocus="${
+                    stamp("focus")
+                  }this.removeAttribute('onfocus');${block};${
                     mode === "recovery"
-                      ? `setTimeout(() => { before.textContent=this.value+'|'+out.textContent; ${restore} }, 250)`
+                      ? `setTimeout(() => { ${
+                        stamp("timer")
+                      }before.textContent=this.value+'|'+out.textContent; ${restore}${
+                        diagnoseRecovery ? `;${stamp("restored")}` : ""
+                      } }, 250)`
                       : ""
                   }" oninput="out.textContent='input'" onchange="out.textContent+=';change'"><output id="out">untouched</output><output id="before"></output>`
                 )
@@ -1962,6 +1977,30 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const result = yield* target.fill(value, {
                   checks: mode === "override" ? { [check]: false } : {}
                 }).pipe(Deadline.within("1 second"), Effect.result)
+                if (diagnoseRecovery) {
+                  // Sample before assertions/cleanup on either outcome; sampling can observe recovery after fill ended.
+                  const fillEndedAt = Date.now()
+                  const snapshot = yield* page.evaluateInMainWorld(() => {
+                    const input = document.querySelector("#go")
+                    return JSON.stringify({
+                      collectedAt: Date.now(),
+                      at: performance.now(),
+                      events: Reflect.get(window, "__dateRecovery"),
+                      inert: input instanceof HTMLInputElement ? input.inert : null,
+                      value: input instanceof HTMLInputElement ? input.value : null,
+                      before: document.querySelector("#before")?.textContent,
+                      out: document.querySelector("#out")?.textContent
+                    })
+                  }).pipe(
+                    Deadline.within("1 second"),
+                    Effect.match({ onSuccess: (value) => value, onFailure: (error) => `Unavailable: ${String(error)}` })
+                  )
+                  FailureTrace.connection("date-inert-recovery")("host-fixture-recovery", {
+                    fillResult: result._tag,
+                    fillEndedAt,
+                    snapshot
+                  })
+                }
                 if (mode === "blocked") {
                   assert(result._tag === "Failure")
                   assert(Deadline.isTimeout(result.failure), String(result.failure))
