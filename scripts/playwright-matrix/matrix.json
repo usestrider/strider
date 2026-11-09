@@ -25814,33 +25814,39 @@
       "upstream": [
         "method:Page.setContent"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.setContent",
+          "url": "/docs/api/browser/Page#Page.setContent"
+        }
+      ],
+      "notes": "Replaces HTML with document.open/write/close, preserving URL, history and document identity; parser scripts and resources run. Defaults to load. Interruption stops waiting without undoing browser side effects.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -100289,9 +100295,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-page-setcontent-signal",
       "upstream": [
@@ -100300,36 +100317,42 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply a deadline to the effect instead of passing milliseconds.",
       "capabilities": [],
       "id": "option-page-setcontent-timeout",
       "upstream": [
@@ -100338,36 +100361,48 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Page",
+          "symbol": "Page.setContent",
+          "url": "/docs/api/browser/Page#Page.setContent"
+        }
+      ],
+      "notes": "Defaults to load; commit skips readiness, domContentLoaded waits for parsing/deferred scripts, load waits for resources and child frames. No networkidle.",
       "capabilities": [],
       "id": "option-page-setcontent-waituntil",
       "upstream": [
@@ -100376,27 +100411,27 @@
       "option": "waitUntil",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -100404,20 +100439,24 @@
       "valueCoverage": [
         {
           "value": "commit",
-          "status": "missing"
+          "status": "has"
         },
         {
           "value": "domcontentloaded",
-          "status": "missing"
+          "status": "has"
         },
         {
           "value": "load",
-          "status": "missing"
+          "status": "has"
         },
         {
           "value": "networkidle",
-          "status": "missing"
+          "status": "missing",
+          "gap": "option-page-setcontent-waituntil-value-networkidle"
         }
+      ],
+      "gaps": [
+        "option-page-setcontent-waituntil-value-networkidle"
       ]
     },
     {
@@ -113011,6 +113050,52 @@
           "limitations": []
         }
       }
+    },
+    {
+      "id": "option-page-setcontent-waituntil-value-networkidle",
+      "upstream": [
+        "method:Page.setContent"
+      ],
+      "status": "missing",
+      "api": [],
+      "notes": "networkidle is not a load state; observe explicit application readiness.",
+      "capabilities": [],
+      "browsers": {
+        "chromium.launched": {
+          "status": "missing",
+          "limitations": []
+        },
+        "chromium.attached": {
+          "status": "missing",
+          "limitations": []
+        },
+        "firefox.launched": {
+          "status": "missing",
+          "limitations": []
+        },
+        "firefox.attached": {
+          "status": "missing",
+          "limitations": []
+        },
+        "webkit.launched": {
+          "status": "missing",
+          "limitations": []
+        },
+        "webkit.attached": {
+          "status": "missing",
+          "limitations": []
+        }
+      },
+      "audit": {
+        "sources": [
+          "packages/browser/src/Page.ts"
+        ],
+        "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+      },
+      "requirements": [],
+      "parent": "option-page-setcontent-waituntil",
+      "value": "networkidle",
+      "option": "waitUntil"
     }
   ],
   "patchedBrowserNotes": [
@@ -113137,7 +113222,7 @@
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "0eb19390aa8a8f8cbcd557df04d8a1866dc50be049ca56abd534c84024c21830",
+    "packages/browser/src/Page.ts": "fbc8a0e607241f985bf55300336b3e76cbef9d530a05df0e1c742ac5da3c1d1f",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",
@@ -113808,7 +113893,8 @@
       "note": "Keep networkidle outside 1.0; observe explicit application readiness.",
       "rows": [
         "navigation-networkidle",
-        "method-page-waitforloadstate-value-networkidle"
+        "method-page-waitforloadstate-value-networkidle",
+        "option-page-setcontent-waituntil-value-networkidle"
       ]
     }
   ]

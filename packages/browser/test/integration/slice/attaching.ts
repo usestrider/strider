@@ -156,6 +156,8 @@ export const attaching = (
             assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const replaced = reasonOf(yield* Effect.exit(kept!.setContent("<title>Forbidden</title>")))
+            assert.deepStrictEqual((replaced as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
               yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
             )

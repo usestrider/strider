@@ -182,6 +182,7 @@ const actions = new Set([
   "Locator.dragTo",
   "Locator.scrollIntoView",
   "Page.goto",
+  "Page.setContent",
   "Page.reload",
   "Page.back",
   "Page.forward"

@@ -1,0 +1,52 @@
+---
+title: HTML fixtures
+description: Replacing a page's HTML, resource readiness, and deadlines.
+order: 8
+---
+
+Assigning HTML to an element skips the document parser's script execution and does not tell you when resources have loaded.
+[`Page.setContent`](/docs/api/browser/Page#Page.setContent) replaces a page's HTML through the parser and waits for the readiness you choose.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const renderReceipt = Effect.fn("renderReceipt")(function*(page: Page.Page) {
+  yield* page.setContent("<title>Receipt</title><h1>Order received</h1>")
+  return yield* page.getByRole("heading").readText
+})
+```
+
+The call opens, writes and closes the current document. It preserves the URL, history entry, document identity
+and main-world globals while replacing the DOM and its event listeners. Scripts execute and resources load with
+the current document's origin and security policy. Relative resource URLs use its base URL; include an HTML
+`base` element when the fixture needs another one.
+
+## Readiness and deadlines
+
+The default waits for loading, including resources and child frames. Choose parsing readiness when images can
+finish later, and bound the entire call with [`Deadline.within`](/docs/api/browser/Deadline#within):
+
+```ts
+import { Deadline, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const renderPreview = Effect.fn("renderPreview")(function*(page: Page.Page) {
+  yield* page.setContent(
+    "<base href=\"https://shop.example.com/\"><h1>Preview</h1><img src=\"product.png\">",
+    { waitUntil: "domContentLoaded" }
+  ).pipe(Deadline.within("5 seconds"))
+})
+```
+
+`waitUntil` accepts `"load"`, `"domContentLoaded"` for parsing and deferred scripts, or `"commit"` to return after
+writing and closing without a readiness wait. The operation returns no navigation result and creates no history
+entry. There is no network-idle wait; observe the application condition you need instead.
+
+Interruption and deadlines stop waiting without undoing the replacement or stopping scripts and requests already
+started. The temporary readiness listener is removed with a separate one-second cleanup budget; cleanup failures are
+recorded in diagnostics. A subsequent call can replace the HTML again. Navigation can destroy the realm and fail the call with `TargetGone`. Avoid concurrent replacements;
+page scripts can also change the document methods used by the call.
+
+Earlier resource requests can keep delaying load after another replacement. Choose parsing readiness when those
+requests need not finish; replacing the DOM does not cancel them.
