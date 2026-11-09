@@ -28,6 +28,8 @@ describe("access is typed", () => {
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
     expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")
     expect(page.locator("input").selectText()).type.not.toRaiseError()
+    expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
+    expect(page.getByRole("button").blur()).type.not.toRaiseError()
   })
 
   it("a snapshot carries its page's access, so its refs can't act either", () => {

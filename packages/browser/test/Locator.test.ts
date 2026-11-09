@@ -17,6 +17,7 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
+import { LocatorImpl } from "../src/internal/locator.ts"
 
 describe("Locator.fill", () => {
   for (
@@ -205,4 +206,96 @@ describe("Locator.check refusal deadlines", () => {
         }).pipe(Effect.scoped)
     )
   }
+})
+
+describe("Locator.blur", () => {
+  it.effect("reports uncertain dispatch when the native blur reply misses the deadline", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      const applying = yield* Deferred.make<void>()
+      let inputs = 0
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: () => Effect.succeed("blur-realm" as Target.RealmId),
+          dispatchInput: () =>
+            Effect.sync(() => {
+              inputs++
+            }),
+          evaluate: Effect.fnUntraced(function*(_realm, call) {
+            if (call.functionDeclaration === Engine.install) {
+              return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+            }
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            assert(request.op === "act" && request.action._tag === "Blur")
+            assert(Object.values(request.checks).every((value) => value === false || value === 0))
+            if (request.apply) {
+              yield* Deferred.succeed(applying, undefined)
+              return yield* Effect.never
+            }
+            return {
+              _tag: "Value",
+              value: {
+                type: "string",
+                value: JSON.stringify({
+                  _tag: "Ready",
+                  element: "<input>",
+                  scrolled: false,
+                  point: null,
+                  draggable: false,
+                  checked: null,
+                  fill: null
+                })
+              }
+            } as const
+          })
+        })))
+      )
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* page.locator("#field").blur().pipe(
+          Deadline.within("1 second"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* Deferred.await(applying)
+        yield* TestClock.adjust("1 second")
+        const error = yield* Fiber.join(pending)
+        assert(Deadline.isTimeout(error))
+        assert.strictEqual(error.operation, "Locator.blur")
+        assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+        assert.strictEqual(inputs, 0)
+      })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+    }).pipe(Effect.scoped))
+
+  it.effect("rejects a released control grant before consulting the backend", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const target = page.locator("#field") as LocatorImpl
+      const owned = new LocatorImpl({
+        ...target.owner,
+        grant: Option.some({
+          level: "control",
+          target: { _tag: "Page", id: target.owner.page.id },
+          released: () => true,
+          onRelease: () => Effect.void
+        })
+      }, target.steps)
+      const error = yield* owned.blur().pipe(Effect.flip)
+      assert(Target.isTargetGone(error))
+      assert.strictEqual(error.reason._tag, "AccessReleased")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("uses the owned action path and preserves backend refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#field").blur().pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })

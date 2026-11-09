@@ -79,7 +79,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
-  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand, a Linux job per browser and one for the other files, and one on macOS, keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
+  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand for any branch, one run per branch at a time: a Linux job per browser and one for the other files, and one on macOS (optional on demand), keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
@@ -147,6 +147,12 @@ snapshots separately. It labels missing, partial, failed or mismatched evidence 
 Moving work between jobs must not conceal aggregate growth; preserve all coverage.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
+
+Run the full integration suite on CI, not on a shared machine: push the branch and dispatch it with
+`gh workflow run integration.yml --ref <branch>` (add `-f macos=false` when nothing macOS-specific changed), then follow
+it with `gh run watch`. Each branch runs on its own, so branches validate side by side, and the Linux jobs take about
+twenty minutes. On a machine others use, run only what a change needs locally: `pnpm all`, and the integration files or
+cases it touches. The full suite's timing and five-second deadlines make two suites on one machine fail each other.
 
 An integration case costs a page, and on stock WebKit a context costs a browser process, so the suites grow by
 rules, not combinations. Write a case for each rule the code has, run on every backend, and a cross-product of
@@ -266,3 +272,9 @@ can't open the board, so a comment explains the behavior itself.
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,
 so ask the maintainer first.
+
+Performance comparisons run through `.github/workflows/benchmarks.yml`, never on the shared desktop.
+Dispatch from the driver branch with `base`, `head`, `workload` (`bench` or `scenarios`), `only`, `browser`
+(currently `chromium`) and `runs` (a multiple of four from 4 to 1000), then follow `gh run watch`. See `packages/scenarios/BENCHMARKS.md` for
+paired ratios, confidence intervals, recording requirements and retained failure evidence. Hosted main-against-main
+variance must be measured before interpreting small differences. Local non-browser harness tests remain appropriate.

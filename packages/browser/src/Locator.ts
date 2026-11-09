@@ -769,7 +769,7 @@ export interface ReadonlyLocator
  *
  * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
- * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
+ * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
@@ -1167,6 +1167,33 @@ export interface Locator extends ReadonlyLocator {
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
+   * Removes focus from the one match through its native blur method.
+   *
+   * **Details**
+   *
+   * Waits for exactly one match without visibility, enabled or inert checks by default. An unfocused element
+   * is unchanged. Calls the element's native blur method through Strider's engine without sending keyboard
+   * or pointer input. Uses an isolated world where the backend provides one; stock WebKit shares the page world.
+   * Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't
+   * have focus (`document.hasFocus()` is false), the element gets `focusout` but no `blur` event.
+   * Missing matches wait until the deadline; several matches fail with `StrictViolation`.
+   *
+   * **Example** (Leaving an email field)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const leaveEmail = Effect.fn("leaveEmail")(function*(page: Page.Page) {
+   *   const email = page.getByLabel("Email")
+   *   yield* email.fill("ada@example.com")
+   *   yield* email.blur()
+   * })
+   * ```
+   */
+  blur(options?: ActionOptions | undefined): ActionEffect
+
+  /**
    * Clears an input or editable element. Checks: visible, enabled, editable, notInert.
    *
    * **Details**
@@ -1291,18 +1318,20 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * Waits for one visible match under the current deadline, then selects its entire value for text,
-   * search, URL, telephone, email and password inputs or a textarea. Other elements use a DOM range over
-   * their contents, including nested text. Attempts to focus the target; an unfocusable element
-   * can still have its contents selected. Requires owned access on every backend.
+   * Waits for one visible match under the current deadline. Labels and their noninteractive descendants
+   * select the associated control; descendants of buttons and button, checkbox or radio roles target
+   * that interactive ancestor. Inputs and textareas use native `select()`; other elements use a DOM
+   * range over their contents, including nested text. Attempts to focus the target; an unfocusable
+   * element can still have its contents selected. Requires owned access on every backend.
    *
    * **Gotchas**
    *
-   * Other input types fail with `WrongElement`, including during trial. Multiple matches fail with
-   * `StrictViolation`; an absent or hidden match waits until the deadline. Checks only visibility,
-   * with no viewport, pointer hit test, enabled, editable or inert check. Native focus may scroll. Labels select their own
-   * contents, rather than redirecting to a control. `trial: true` checks without focus or selection;
-   * `checks: { visible: false }` skips visibility. There is no blanket force option.
+   * Native input selection depends on the browser and input type: number inputs support selection,
+   * while inputs without selectable text, such as checkboxes, can succeed without selecting text.
+   * Multiple matches fail with `StrictViolation`; an absent or hidden match waits until the deadline.
+   * Checks only the matched element's visibility, before label retargeting, with no viewport, pointer
+   * hit test, enabled, editable or inert check. Native focus may scroll. `trial: true` checks without
+   * focus or selection; `checks: { visible: false }` skips visibility. There is no blanket force option.
    * Focus and selection handlers can change the resulting selection; this operation does not lock it.
    *
    * **Example** (Selecting a field's text)

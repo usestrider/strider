@@ -510,6 +510,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   uncheck(options?: Locator.PointerOptions) {
     return this.setChecked("Locator.uncheck", false, options)
   }
+  blur(options?: Locator.ActionOptions) {
+    return this.act("Locator.blur", options, noChecks, { _tag: "Blur" }, () => Effect.succeed("done" as const))
+  }
   focus(options?: Locator.ActionOptions) {
     return this.act("Locator.focus", options, focusChecks, { _tag: "Focus" }, () => Effect.succeed("done" as const))
   }
@@ -1282,7 +1285,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
-        action._tag === "Select" || action._tag === "SelectText"
+        action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
       const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
           if (apply && inRound) record.markSent()

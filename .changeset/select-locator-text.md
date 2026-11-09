@@ -2,4 +2,4 @@
 "@usestrider/browser": patch
 ---
 
-Add Locator.selectText to select a control's value or an element's contents, with visibility checks, trial mode and frame support.
+Add Locator.selectText to select native input values or DOM contents, following associated labels, with visibility checks, trial mode and frame support.

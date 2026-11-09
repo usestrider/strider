@@ -125,6 +125,7 @@ export type Action =
   }
   | { readonly _tag: "Focus" }
   | { readonly _tag: "SelectText" }
+  | { readonly _tag: "Blur" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
   | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
@@ -1505,12 +1506,33 @@ export function engine(render: (root: SnapNode) => string) {
     ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
   }
 
+  const enclosingLabel = (element: Element): HTMLLabelElement | null => {
+    let label: Element | null = element
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    return label
+  }
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = element
+    if (!target.matches("input, textarea, select") && !contentEditable(target)) {
+      target = target.closest("button, [role=button], [role=checkbox], [role=radio]") ?? target
+    }
+    if (
+      !target.matches(
+        "a, input, textarea, button, select, [role=link], [role=button], [role=checkbox], [role=radio]"
+      ) &&
+      !contentEditable(target)
+    ) {
+      target = enclosingLabel(target)?.control ?? target
+    }
+    return target
+  }
+
   /** Association stays in the DOM; slots can add refusals without choosing another label. */
   const checkableForAction = (element: Element): Element | null => {
     const own = checkedOf(element)
     if (own !== null) return element
-    let label: Element | null = element
-    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    const label = enclosingLabel(element)
     if (label === null || label.control === null) return null
     for (
       let ancestor: Element | null = element;
@@ -1943,36 +1965,31 @@ export function engine(render: (root: SnapNode) => string) {
         if (apply && action.guard) arm(element)
         return { ...answer, point, draggable }
       }
-      case "SelectText":
-        if (
-          element instanceof HTMLInputElement &&
-          !["text", "search", "url", "tel", "email", "password"].includes(element.type)
-        ) {
-          return {
-            _tag: "Final",
-            final: {
-              _tag: "WrongElement",
-              expected: "an input supporting text selection, a textarea or DOM contents",
-              element: describe(element)
-            }
-          }
-        }
-        break
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
+      case "Blur":
+        if (!("blur" in element) || typeof element.blur !== "function") {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "an element with a blur method", element: describe(element) }
+          }
+        }
+        if (apply) element.blur()
+        return answer
       default:
         break
     }
     if (!apply) return answer
     switch (action._tag) {
-      case "SelectText":
-        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-          element.select()
-          element.focus()
+      case "SelectText": {
+        const target = textSelectionTarget(element)
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          target.select()
+          target.focus()
         } else {
-          if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
+          if (target instanceof HTMLElement || target instanceof SVGElement) target.focus()
           const range = document.createRange()
-          range.selectNodeContents(element)
+          range.selectNodeContents(target)
           const selection = getSelection()
           if (selection !== null) {
             selection.removeAllRanges()
@@ -1980,6 +1997,7 @@ export function engine(render: (root: SnapNode) => string) {
           }
         }
         return answer
+      }
       case "Focus":
         if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
         return answer

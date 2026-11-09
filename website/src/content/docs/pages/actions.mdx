@@ -17,6 +17,7 @@ import { Effect } from "effect"
 
 const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
   yield* page.getByLabel("Name").fill("Ada Lovelace")
+  yield* page.getByLabel("Name").blur()
   yield* page.getByLabel("Country").selectOption({ label: "United Kingdom" })
   yield* page.getByLabel("Send me the newsletter").check()
   yield* page.getByRole("button", { name: "Save" }).click()
@@ -55,13 +56,21 @@ const selectName = Effect.fn("selectName")(function*(page: Page.Page) {
 })
 ```
 
-Text, search, URL, telephone, email and password inputs and textareas select their entire value. Other elements,
-including ordinary paragraphs and editable elements, select their contents with a DOM range. The action attempts
-to focus the target; unfocusable elements can still have a selection. Labels select their own text.
-Other input types fail with `WrongElement`. Selection waits for exactly one visible match under the current
-[deadline](/docs/deadlines), without requiring viewport position or checking enabled, editable, inert or pointer coverage. Native focus may scroll.
-The settings below apply: trial preserves focus and selection, and the visibility check can be turned off.
-Focus and selection handlers can change what remains selected.
+Inputs and textareas use native selection of their value; other elements select their contents with a DOM range.
+Labels and their noninteractive descendants select the associated control. Descendants of buttons and button,
+checkbox or radio roles target that interactive ancestor. The action attempts to focus the target; unfocusable
+elements can still have a selection. Number inputs support selection, while inputs without selectable text,
+such as checkboxes, can succeed without selecting text. Strider preserves native browser behavior.
+Selection waits for exactly one visible match under the current [deadline](/docs/deadlines), checking the matched
+element's visibility before label retargeting, without requiring viewport position or checking enabled, editable,
+inert or pointer coverage. Native focus may scroll. The settings below apply: trial preserves focus and selection,
+and the visibility check can be turned off. Focus and selection handlers can change what remains selected.
+
+[`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer.
+Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't have focus
+(`document.hasFocus()` is false), the element gets `focusout` but no `blur` event.
+It waits for one match, accepts hidden, disabled and inert elements by default, and leaves an unfocused element
+unchanged.
 
 In a design-mode document, filling a paragraph blurs a previously focused input or textarea, including one
 inside open shadow roots, and checks the target again after its blur handlers. If refocusing prevents preparation
@@ -107,6 +116,7 @@ Before sending anything, an action waits, checking at each animation frame, unti
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | visible, stable, enabled, not inert, in the viewport, receives the pointer |
 | `fill`, `clear`                                                   | visible, enabled, editable, not inert                                    |
+| `blur` | none (still requires exactly one match) |
 | `focus`, `press`, `pressSequentially`                             | visible, not inert                                                       |
 | `scrollIntoView`                                                  | visible, stable                                                          |
 | `selectOption`                                                    | visible, enabled                                                         |
