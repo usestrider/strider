@@ -531,7 +531,7 @@ export const register = <E, R>(
           )
           : incoming.payload.pipe(
             Effect.flatMap((payload) =>
-              Admission.textBytes(payload, 2 * MiB) > 2 * MiB
+              Admission.textBytes(payload, 7 * MiB) > 7 * MiB
                 ? Effect.sync(() => fault(incoming.realm))
                 : Schema.decodeUnknownEffect(Envelope)(JSON.parse(payload)).pipe(
                   Effect.flatMap((message) => process(incoming.realm, message, incoming.origin!))

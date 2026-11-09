@@ -74,9 +74,12 @@ The admission ceilings are:
 - 16 MiB of issued reservations and admitted payload per registration, across all its realms;
 - 1024 admitted connections, with at most 16 pending constructor requests per realm;
 - 64 early CDP envelopes per target while its realm is being announced;
-- 4096 pending host envelopes per registration, at most 2 MiB of JSON text per envelope, and 256 concurrent host
+- 4096 pending host envelopes per registration, at most 7 MiB of JSON text per envelope, and 256 concurrent host
   sends per connection;
 - 8192 characters in a matched URL, 128 requested subprotocols, and 8192 bytes across those subprotocols.
+
+The JSON envelope allowance includes up to sixfold text escaping plus metadata; it does not increase the
+application-message limit.
 
 Each admitted connection receives a fixed 1 MiB in each browser direction before its open event. Unused issued
 credits remain charged until acknowledged draining or confirmed realm destruction. Local credit exhaustion can

@@ -9,7 +9,7 @@
  * Unused issued credit counts, so a realm can overflow while capacity is reserved elsewhere. These are not
  * guaranteed usable queue capacities or bounds on process memory, encoded copies or native browser buffers.
  * Each connection receives fixed 1 MiB credits per browser direction. A realm allows 16 pending constructors;
- * the registration allows 4096 pending host envelopes, each at most 2 MiB of JSON text. A connection allows
+ * the registration allows 4096 pending host envelopes, each at most 7 MiB of JSON text. A connection allows
  * 256 concurrent host sends. CDP buffers at most 64 envelopes per target while its realm is being announced.
  * Matched URLs are at most 8192 characters; at most 128 requested subprotocols
  * have at most 8192 aggregate UTF-8 bytes. Control-envelope overload fails that realm closed; other transport
