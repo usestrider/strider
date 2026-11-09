@@ -317,7 +317,7 @@ export const fromAdapter = (
  * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
  * lost its engine, so the caller goes again.
  */
-const callEngine = (
+const callEngine = Effect.fnUntraced(function*(
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
@@ -325,12 +325,21 @@ const callEngine = (
   id: Diagnostics.OperationId,
   releaseResult?: boolean,
   replay = true
-): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
-  engineRealm(runtime, document).pipe(
+) {
+  let sent = false
+  return yield* engineRealm(runtime, document).pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
         typeof request === "string" ? Effect.succeed(request) : request,
-        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+        Effect.fnUntraced(function*(encoded: string) {
+          // Realm lookup and installation cannot apply this round. Its own evaluation may do so once started.
+          if (!replay) {
+            const record = yield* Operation.current
+            if (Option.isSome(record)) record.value.markSent()
+          }
+          sent = true
+          return yield* call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+        })
       )
     ),
     Effect.map(Option.some),
@@ -338,7 +347,7 @@ const callEngine = (
       if (isMoved(error)) {
         return Cache.invalidate(runtime.engineRealms, document).pipe(
           Effect.andThen(
-            replay
+            replay || !sent
               ? Effect.succeed(Option.none<Adapter.RemoteResult>())
               : Effect.fail(fromAdapter(error, id, runtime.backend))
           )
@@ -352,12 +361,17 @@ const callEngine = (
         if (result._tag === "Exception") return Effect.die(new Error(`The engine threw: ${result.text}`))
         if (result.value.type === "string" && result.value.value === Engine.missing) {
           // A realm that lost its engine, as a reused realm can: install again
-          return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          return Effect.flatMap(Operation.current, (record) => {
+            // The engine answered before running the request, so this round applied nothing.
+            if (!replay && Option.isSome(record)) record.value.markNotSent()
+            return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          })
         }
         return Effect.succeed(Option.some(result.value))
       }
     }))
   )
+})
 
 /**
  * The engine's answer, decoded. One that isn't an answer the engine gives fails as `IncompatibleResponse`: where

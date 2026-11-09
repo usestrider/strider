@@ -1566,7 +1566,6 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       const inRound = Engine.appliesInRound(action)
       const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
-          if (apply && inRound) record.markSent()
           return Runtime.sendRouted(
             owner.runtime,
             owner.page,
