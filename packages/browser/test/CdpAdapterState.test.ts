@@ -1869,3 +1869,104 @@ it.effect("interruption doesn't wait for a busy page to acknowledge node release
     for (let i = 0; i < 100; i++) yield* Effect.yieldNow
     assert.isDefined(interrupting.pollUnsafe(), "interrupting the caller waited for the busy page's release reply")
   }).pipe(Effect.scoped))
+
+for (const finish of ["reply", "shutdown"] as const) {
+  it.effect(`evaluation cleanup survives caller interruption and finishes on ${finish}`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const owner = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void))
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "owned-cleanup",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const waiting = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), node("2")],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      for (const id of ["node-1", "node-2"]) {
+        const resolving = yield* browser.next
+        assert.strictEqual(resolving.method, "DOM.resolveNode")
+        yield* browser.receive({ id: resolving.id, result: { object: { type: "object", objectId: id } } })
+      }
+      const callback = yield* browser.next
+      yield* browser.receive({
+        id: callback.id,
+        result: {
+          result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } },
+          exceptionDetails: { text: "failed", exception: { type: "object", objectId: "exception" } }
+        }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, "node-1")
+      assert.isUndefined(waiting.pollUnsafe(), "successful completion must still wait for its cleanup")
+      const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+      for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+      assert.isDefined(interrupting.pollUnsafe(), "caller interruption must not wait for a release acknowledgment")
+      if (finish === "reply") {
+        // Resuming the page drains every id already owned before interruption, including the received result.
+        yield* browser.receive({ id: first.id, result: {} })
+        for (const id of ["node-2", "result", "exception"]) {
+          const release = yield* browser.next
+          assert.strictEqual(release.method, "Runtime.releaseObject")
+          assert.strictEqual(release.params?.objectId, id)
+          yield* browser.receive({ id: release.id, result: {} })
+        }
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+        yield* Scope.close(owner, Exit.void)
+      } else {
+        const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(closing.pollUnsafe(), "shutdown must interrupt an unanswered cleanup request")
+        // An acknowledgment after shutdown cannot restart cleanup in an unowned fiber.
+        yield* browser.receive({ id: first.id, result: {} })
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+      }
+    }).pipe(Effect.scoped))
+}
+
+it.effect("does not register evaluation cleanup in the connection scope when it owns no ids", () =>
+  Effect.gen(function*() {
+    const owner = yield* Scope.make()
+    const { state, target } = yield* withPage(
+      {
+        ...session,
+        send: () => Effect.succeed({ result: { type: "number", value: 1 } })
+      } as unknown as ProtocolClient.Session
+    )
+    const realm = Tree.addRealm(state, {
+      uniqueId: "no-objects",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const result = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+      functionDeclaration: "() => 1",
+      arguments: [],
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    })
+    assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
+    assert.strictEqual(owner.state._tag, "Empty")
+    yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))
