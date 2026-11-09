@@ -42,6 +42,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
+| `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
@@ -124,6 +125,19 @@ const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
 })
 ```
 
+
+Selected values match exactly, including whitespace, or by regular expression, in option order.
+`toHaveValues([])` waits for an empty selection; the locator must still match one `<select multiple>`.
+Labels resolve to their associated control. Other controls fail with expectation evidence at the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkColors = Effect.fn("checkColors")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByLabel("Colors").pipe(Expect.toHaveValues(["red", /^green$/]))
+})
+```
 
 A string `toHaveText` matches the whole text; a `RegExp` is tested; an array matches each match's text, in order.
 `toBeHidden` also passes when nothing matches, so it waits for something to go away:

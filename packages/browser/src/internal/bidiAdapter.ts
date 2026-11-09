@@ -105,6 +105,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.failure", "partial", ["BiDi reports failure text without a cancellation flag"]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),

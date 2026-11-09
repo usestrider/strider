@@ -397,6 +397,24 @@ export const headersSent = (
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> => NetworkRequestImpl.headersSent(target, request)
 
 /**
+ * A browser-reported request failure, with the original error text and cancellation evidence.
+ *
+ * **Details**
+ *
+ * `canceled` is `Some(true)` for reported cancellation and `Some(false)` otherwise on Chromium and WebKit.
+ * On BiDi it is `None`: that protocol reports error text without a cancellation flag. Error text is not a
+ * portable error code and is never used to infer cancellation here.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkRequest/Failure")({
+  errorText: Schema.String,
+  canceled: Schema.Option(Schema.Boolean)
+}) {}
+
+/**
  * Reason a request's live observation is unavailable.
  *
  * **Details**
@@ -446,7 +464,7 @@ export class ResponseUnavailable
 }
 
 /**
- * Error for a request observation that cannot be read from its target.
+ * Error reading a request's response association or live observation.
  *
  * @stability unstable
  * @category errors
@@ -578,3 +596,42 @@ export const response = (
   RequestError,
   Scope.Scope
 > => NetworkRequestImpl.response(target, request)
+
+/**
+ * Reads the failure reported for a request so far, without waiting or sending browser commands.
+ *
+ * **Details**
+ *
+ * Returns `None` for a live request still in flight or one that finished successfully, including HTTP 404/503
+ * responses and redirect hops. A failed transfer can have received response headers before failing.
+ * `Some` preserves the failure text and cancellation evidence; it does not classify HTTP status codes.
+ *
+ * Pass the original request observation and its page or context. The bounded index keeps at most 1000 hops
+ * across the connection, dropping completed hops first. Missing, evicted, copied and foreign requests fail
+ * with `RequestError` / `RequestUnavailable`. Loss of the owning page, context, frame, worker or connection
+ * makes even a completed request unavailable. Save a returned `Failure` if it must outlive that owner.
+ * This read adds no retention, subscription or instrumentation.
+ *
+ * **Example** (Inspecting a request after an action completes)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const inspectSave = Effect.fn("inspectSave")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, {
+ *     url: "https://app.example.com/api/save"
+ *   })
+ *   yield* page.getByRole("button", { name: "Save" }).click()
+ *   return yield* NetworkRequest.failure(page, yield* sent)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const failure = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Option.Option<Failure>, RequestError> => NetworkRequestImpl.failure(target, request)

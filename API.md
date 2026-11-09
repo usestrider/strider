@@ -727,6 +727,7 @@ declare const toHaveAccessibleName: DualMatcher<Locator.ReadonlyLocator, [expect
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
@@ -854,6 +855,14 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll. An event log is not state: its changes are just the events again, and a level-triggered wait on it would match old events.
 
 ## Network
+
+`NetworkRequest.failure(target, request): Effect<Option<NetworkRequest.Failure>, NetworkRequest.RequestError>`
+reads an original request observation immediately from the existing bounded hop index. `None` means pending or
+successfully finished, including HTTP error statuses and redirect hops. `Some` preserves `errorText` and
+`canceled: Option<boolean>`: Chromium and WebKit report a cancellation flag; BiDi leaves it unknown. Text alone
+does not establish cancellation. Unknown, copied/decoded, evicted or foreign requests are `RequestUnavailable`.
+Owner or connection loss takes precedence even over a completed failure; save a returned value for later use.
+The read adds no retention or instrumentation and follows [Pay for what you use](docs/decisions.md#pay-for-what-you-use).
 
 ```ts
 // Route
