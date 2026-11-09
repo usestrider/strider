@@ -4754,14 +4754,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
-            yield* page.evaluateInMainWorld(() => { document.querySelector<HTMLTextAreaElement>("#textarea")!.value = "" })
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLTextAreaElement>("#textarea")!.value = ""
+            })
             for (const selector of ["#input", "#textarea", "#text", "#child"]) {
               yield* page.locator(selector).pipe(Expect.toBeEmpty)
             }
-            for (const [selector, observed] of [
-              ["#space", "not empty"], ["#full", "not empty"], [".absent", { matches: 0 }], [".many", { matches: 2 }]
-            ] as const) {
-              const error = yield* page.locator(selector).pipe(Expect.toBeEmpty, Deadline.within("500 millis"), Effect.flip)
+            for (
+              const [selector, observed] of [
+                ["#space", "not empty"],
+                ["#full", "not empty"],
+                [".absent", { matches: 0 }],
+                [".many", { matches: 2 }]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toBeEmpty,
+                Deadline.within("500 millis"),
+                Effect.flip
+              )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.strictEqual(error.condition, "to be empty")
               assert.isAtLeast(error.checks.count, 1)
@@ -4769,12 +4780,16 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
             }
             yield* page.evaluateInMainWorld(() => {
-              setTimeout(() => { document.querySelector("#full")!.textContent = "" }, 100)
+              setTimeout(() => {
+                document.querySelector("#full")!.textContent = ""
+              }, 100)
             })
             yield* page.locator("#full").pipe(Expect.toBeEmpty)
             yield* page.evaluateInMainWorld(() => {
               const input = document.querySelector<HTMLInputElement>("#space")!
-              setTimeout(() => { input.value = "" }, 100)
+              setTimeout(() => {
+                input.value = ""
+              }, 100)
             })
             yield* page.locator("#space").pipe(Expect.toBeEmpty)
           }))

@@ -37,6 +37,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
@@ -57,6 +58,20 @@ const checkClasses = Effect.fn("checkClasses")(function*(page: Page.ReadonlyPage
   yield* page.getByRole("listitem").pipe(Expect.toHaveClass(["selected", /^pending/]))
 })
 ```
+
+`Expect.toBeEmpty` waits for one match with an empty input or textarea value, or only whitespace
+in another element's text. Whitespace in a field value counts as nonempty; missing or multiple
+matches retry until the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+  yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+})
+```
+
 
 A string `toHaveText` matches the whole text; a `RegExp` is tested; an array matches each match's text, in order.
 `toBeHidden` also passes when nothing matches, so it waits for something to go away:

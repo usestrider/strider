@@ -706,7 +706,7 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
 // no extra arguments: the matcher itself is the function
 //   locator.pipe(Expect.toBeVisible)   or   Expect.toBeVisible(locator)
 declare const toBeVisible: Matcher<Locator.ReadonlyLocator>   // Matcher<S> = (subject: S) => Effect<void, ExpectationFailed | TargetGone>
-// toBeHidden (passes when the element is missing), toBeEnabled, toBeDisabled, toBeChecked, toBeFocused, toBeEditable
+// toBeHidden (passes when the element is missing), toBeEnabled, toBeDisabled, toBeChecked, toBeFocused, toBeEditable, toBeEmpty (raw input/textarea value, otherwise trimmed textContent)
 // with arguments: dual
 //   locator.pipe(Expect.toHaveText("1 item"))   or   Expect.toHaveText(locator, "1 item")
 declare const toHaveText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
