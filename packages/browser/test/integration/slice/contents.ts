@@ -266,6 +266,113 @@ export const contents = (
           assert.strictEqual(reasonOf(exit)?.reason?._tag, "Unsupported", JSON.stringify(exit))
         }), timeout)
 
+      it.effect("refuses slotted frame geometry scaled inside a closed shadow root", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
+          )
+          yield* page.goto(fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+          ))
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
+              `<div style="position:absolute;left:0;top:0;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#slotted")).locator("#target")
+          // The frame's content is drawn at (20, 20) and 40px wide; adding the iframe's origin alone gives (10, 10).
+          const exit = yield* Effect.exit(target.boundingBox)
+          assert.strictEqual(reasonOf(exit)?.reason?._tag, "Unsupported", JSON.stringify(exit))
+        }), timeout)
+
+      for (
+        const rule of [
+          { name: "scaling", css: "transform:scale(2,3)", world: "" },
+          { name: "rotation and skew", css: "transform:rotate(31deg) skew(17deg,-8deg)", world: "" },
+          { name: "nested CSS zoom", css: "zoom:1.5;transform:scale(.8,1.2)", world: "zoom:1.25" },
+          {
+            name: "3D and perspective",
+            css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world: "perspective:600px;perspective-origin:0 0"
+          }
+        ]
+      ) {
+        it.effect(`maps bounding corners through frame ${rule.name}`, () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const page = yield* Browser.newPage()
+            const targetStyle = "position:absolute;left:10px;top:20px;width:30px;height:40px"
+            const child = fixtureUrl(
+              crossSite,
+              `<body style="margin:0"><div id="target" style="${targetStyle}"></div></body>`
+            )
+            const boxStyle =
+              `position:absolute;left:40px;top:60px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform-origin:0 0;${rule.css}`
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0;width:3000px;height:3000px"><div style="position:absolute;left:20px;top:30px;width:800px;height:800px;${rule.world}"><iframe id="frame" style="${boxStyle}" src="${child}"></iframe><div style="${boxStyle};pointer-events:none"><div style="position:relative;width:200px;height:150px"><div id="expected" style="${targetStyle}"></div></div></div></div></body>`
+              )
+            )
+            const target = page.frame(page.locator("#frame")).locator("#target")
+            for (const scrolled of [false, true]) {
+              if (scrolled) {
+                yield* page.evaluateInMainWorld(() =>
+                  scrollTo(80, 70)
+                )
+              }
+              // The reference is rendered by the browser in the same parent transform, without a frame boundary.
+              const expected = yield* page.evaluateInMainWorld(() => {
+                const r = document.querySelector("#expected")!.getBoundingClientRect()
+                return { x: r.x, y: r.y, width: r.width, height: r.height }
+              })
+              const box = Option.getOrThrow(yield* target.boundingBox)
+              for (const key of ["x", "y", "width", "height"] as const) {
+                assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
+              }
+            }
+          }), timeout)
+      }
+
+      it.effect("preserves bounding corners through nested cross-origin counter-rotations", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* Browser.newPage()
+          const targetStyle =
+            "position:absolute;left:10px;top:20px;width:30px;height:40px;transform:rotate(12deg);transform-origin:0 0"
+          const child = fixtureUrl(
+            crossSite,
+            `<body style="margin:0"><div id="target" style="${targetStyle}"></div></body>`
+          )
+          const innerStyle =
+            "position:absolute;left:30px;top:40px;width:100px;height:80px;border:2px solid;padding:3px;transform:rotate(-25deg) scale(1.2,.8);transform-origin:0 0;box-sizing:content-box"
+          const middle = fixtureUrl(
+            origin,
+            `<body style="margin:0"><iframe id="inner" style="${innerStyle}" src="${child}"></iframe></body>`
+          )
+          const outerStyle =
+            "position:absolute;left:300px;top:200px;width:300px;height:250px;border:3px solid;padding:4px;transform:rotate(25deg) scale(.7,1.3);transform-origin:0 0;box-sizing:content-box"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="outer" style="${outerStyle}" src="${
+                middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
+              }"></iframe><div style="${outerStyle};pointer-events:none"><div style="position:relative;width:300px;height:250px"><div style="${innerStyle}"><div style="position:relative;width:100px;height:80px"><div id="expected" style="${targetStyle}"></div></div></div></div></div></body>`
+            )
+          )
+          const outer = page.frame(page.locator("#outer"))
+          const target = outer.frame(outer.locator("#inner")).locator("#target")
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) assert.closeTo(box[key], expected[key], .05, key)
+        }), timeout)
+
       // ── Evaluation and handles ──
 
       it.effect("evaluates by value in the isolated world, and in the main world when asked", () =>
@@ -280,9 +387,7 @@ export const contents = (
               ))
             ) {
               assert.strictEqual(
-                yield* page.evaluateInMainWorld(() =>
-                  (window as unknown as { secret: number }).secret
-                ),
+                yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
                 42
               )
               return
