@@ -1,3 +1,4 @@
+import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Chromium, through the public layer: the pinned Chromium (`browsers.ts`), in the Nix
  * environment `pnpm test:integration` enters.
@@ -35,3 +36,5 @@ deadlines("Chromium", backend)
 attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))
 
 webauthn("Chromium", backend)
+
+locatorHandlers("Chromium", backend)
