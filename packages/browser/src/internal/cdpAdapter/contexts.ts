@@ -111,6 +111,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
     }).pipe(Protocol.on(state.root()))
   )
   const entry: ContextEntry = {
+    ...(options.requestTiming ? { requestTiming: new Map() } : {}),
     id: state.ids.userContext(),
     browserContextId,
     isDefault: false,
@@ -119,7 +120,14 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
   }
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+  yield* state.buffer.run(() =>
+    state.buffer.emit({
+      _tag: "UserContextAdded",
+      context: entry.id,
+      isDefault: false,
+      ...(options.requestTiming ? { requestTiming: true } : {})
+    })
+  )
   yield* Kit.protocol(applyDownloads(state, entry))
   return entry.id
 })
