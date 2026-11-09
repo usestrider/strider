@@ -121,7 +121,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p>`
+              `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p><p id="unfocusable">unfocusable text</p>`
             )
             const page = yield* newPage
             yield* page.goto(url)
@@ -142,7 +142,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.strictEqual(selected, text)
               assert.isTrue(yield* target.evaluate((element) => element.ownerDocument.activeElement === element))
             }
+            yield* page.locator("#unfocusable").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "unfocusable text")
+            assert.isFalse(
+              yield* page.locator("#unfocusable").evaluate((element) => element.ownerDocument.activeElement === element)
+            )
             assert.strictEqual(yield* page.locator("#input").readValue, "Ada Lovelace")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText selects email values without relying on selection offsets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="email" value="ada@example.com">`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const email = page.locator("input")
+            yield* email.selectText()
+            assert.strictEqual(yield* email.readValue, "ada@example.com")
+            yield* email.press("Backspace")
+            assert.strictEqual(yield* email.readValue, "")
           })),
         timeout
       )
@@ -175,16 +196,44 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<input type="number" value="42"><p>one</p><p>two</p>`)
             const page = yield* newPage
             yield* page.goto(url)
-            for (const [selector, reason] of [["p", "StrictMatch"], ["input", "WrongElement"]] as const) {
+            for (const [selector, reason] of [["p", "StrictViolation"], ["input", "WrongElement"]] as const) {
               const error = yield* page.locator(selector).selectText().pipe(Effect.flip)
               assert(Locator.isLocatorError(error))
               assert.strictEqual(error.reason._tag, reason)
             }
+            const trial = yield* page.locator("input").selectText({ trial: true }).pipe(Effect.flip)
+            assert(Locator.isLocatorError(trial))
+            assert.strictEqual(trial.reason._tag, "WrongElement")
             const missing = yield* page.locator("#missing").selectText().pipe(
               Deadline.within("150 millis"),
               Effect.flip
             )
             assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText permits readonly, disabled, inert and covered targets without input events",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div inert><input id="field" readonly disabled value="unchanged"></div><div style="position:fixed;inset:0">cover</div><label id="label" for="field">label text</label><script>window.edits=0;document.addEventListener('input',()=>window.edits++);document.addEventListener('change',()=>window.edits++);</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText()
+            assert.deepStrictEqual(
+              yield* field.evaluate((element) => {
+                const input = element as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd, input.value]
+              }),
+              [0, 9, "unchanged"]
+            )
+            yield* page.locator("#label").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "label text")
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as unknown as { edits: number }).edits), 0)
           })),
         timeout
       )

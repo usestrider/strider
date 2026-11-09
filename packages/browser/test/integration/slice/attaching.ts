@@ -149,6 +149,8 @@ export const attaching = (
             const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
             assert.deepInclude(read, { _tag: "TargetGone" })
             assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const selected = reasonOf(yield* Effect.exit(kept!.getByRole("heading").selectText()))
+            assert.deepStrictEqual((selected as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
