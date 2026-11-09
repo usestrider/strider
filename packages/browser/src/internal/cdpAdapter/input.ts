@@ -51,14 +51,17 @@ export const dispatchInput = Effect.fnUntraced(
     ) {
       // Move and press may overlap, but a modal mousedown handler can suspend the press while Chromium
       // acknowledges (and discards) a release. Wait for the press before sending the normal release.
-      // Keep the finalizer installed across both groups, including the boundary between successful press
-      // completion and the release write. Replies stay interruptible under the action's deadline; any failure
-      // or interruption releases again outside that deadline. Drags and frame routing stay sequential below.
-      const release = Kit.protocol(page.target.session.sendOrdered([mouseCommand(click[2])]))
+      // Keep cleanup installed until the release write completes, including the boundary after the press.
+      // The protocol marks that write before restoring interruption for replies: once written, cancellation
+      // must only abandon the reply, since another release would deliver an extra mouseup to the page.
+      let releaseWritten = false
+      const release = Kit.protocol(page.target.session.sendOrdered([mouseCommand(click[2])], () => {
+        releaseWritten = true
+      }))
       yield* Effect.gen(function*() {
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
-      }).pipe(Effect.onError(() => release.pipe(Operation.detached, Effect.ignore)))
+      }).pipe(Effect.onError(() => releaseWritten ? Effect.void : release.pipe(Operation.detached, Effect.ignore)))
       return
     }
     for (const event of events) {

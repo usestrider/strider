@@ -106,12 +106,16 @@ describe("CDP click cleanup", () => {
       let calls = 0
       const protocolSession = {
         ...session,
-        sendOrdered: (commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>) =>
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
           Effect.suspend(() => {
             calls++
             // The press has succeeded, but cancellation wins before the normal release can write.
             if (calls === 2) return Effect.interrupt
             sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
             return Effect.void
           })
       } as unknown as ProtocolClient.Session
@@ -132,10 +136,14 @@ describe("CDP click cleanup", () => {
       let calls = 0
       const protocolSession = {
         ...session,
-        sendOrdered: (commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>) =>
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
           Effect.suspend(() => {
             calls++
             sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
             // The release has been written; cancellation arrives while its reply is outstanding.
             return calls === 2 ? Effect.interrupt : Effect.void
           })
