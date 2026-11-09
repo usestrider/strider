@@ -33,7 +33,10 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
 })
 ```
 
-## Decoding response bodies
+For a request you already observed, [retain its response association](/docs/events/request-responses) to wait for
+that exact hop rather than matching by URL.
+
+## Decoding bodies
 
 A status says the call went through, not what came back. A body decoded with a Schema gives the data the server
 returned, typed, and fails if it isn't that shape. A body is collected only when a subscription asks with `body`: a

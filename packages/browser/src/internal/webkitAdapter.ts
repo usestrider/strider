@@ -25,6 +25,7 @@ import type * as L1Target from "../Target.ts"
 import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Automation from "./webkitAdapter/automation.ts"
@@ -173,6 +174,8 @@ export const connect: (
       removeUserContext: refuse("userContexts", noPages),
       createPage: refuse("userContexts", noPages),
       closePage: refuse("userContexts", noPages),
+      viewportSize: (id) =>
+        Effect.map(State.pageOf(state, id), (page) => Declarations.viewportSize(state.registry, State.placement(page))),
       activatePage: refuse("emulation.focus", "stock WebKit's inspector has no Emulation domain"),
       navigate: (id, url, options) => Navigation.navigateByScript(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),

@@ -21,8 +21,10 @@ import {
   Route,
   Trace
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -140,6 +142,67 @@ interface HarEntry {
 export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} recordings`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("associates an observed request with its response before and after arrival", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          const release = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+          yield* page.route(`${origin}/json`, () => Deferred.await(release).pipe(Effect.andThen(Route.continue)))
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/json")
+            return true
+          })
+          const request = yield* next
+          const response = yield* NetworkRequest.response(page, request)
+          const waiting = yield* response.pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          assert.isUndefined(waiting.pollUnsafe())
+          yield* Deferred.succeed(release, undefined)
+          const arrived = Option.getOrThrow(yield* Fiber.join(waiting))
+          assert.strictEqual(arrived.status, 200)
+          assert.strictEqual(arrived.hop, request.hop)
+          assert.deepStrictEqual(yield* (yield* NetworkRequest.response(page.context, request)), Option.some(arrived))
+          const foreign = yield* Browser.newContext()
+          const error = yield* NetworkRequest.response(foreign, request).pipe(Effect.asVoid, Effect.flip)
+          assert.deepInclude(error.reason, { _tag: "ResponseUnavailable", why: "foreignTarget" })
+        })))
+
+      it.effect("returns no response for a request aborted before receiving headers", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          yield* page.route(`${origin}/json`, () => Route.abort())
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(async () => {
+            await fetch("/json").catch(() => {})
+            return true
+          })
+          const wait = yield* NetworkRequest.response(page, yield* next)
+          assert.deepStrictEqual(yield* wait, Option.none())
+        })))
+
+      it.effect("associates each redirect hop with its own response", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const redirect = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+          const landed = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+          yield* page.goto(`${origin}/redirect`, { waitUntil: "load" })
+          const first = yield* redirect
+          const last = yield* landed
+          const firstResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, first)))
+          const lastResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, last)))
+          assert.notStrictEqual(first.hop, last.hop)
+          assert.strictEqual(firstResponse.hop, first.hop)
+          assert.strictEqual(firstResponse.status, 302)
+          assert.strictEqual(lastResponse.hop, last.hop)
+          assert.strictEqual(lastResponse.status, 200)
+        })))
+
       it.effect(
         "records URL expectation evidence with export-time redaction",
         () =>

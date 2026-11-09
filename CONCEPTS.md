@@ -471,8 +471,20 @@ process, overriding inherited proxy variables without changing the parent enviro
 ::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
 Unsupported endpoint schemes, WebKit credentials and settings for an existing WebKit process are explicit refusals.
 
+Context HTTP credentials install a context-owned auth route before user routes and an auth-phase intercept only
+when configured, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). Page routes and later
+context routes retain precedence; fallthrough reaches the configured pair, while cancellation or handler failure
+keeps the existing default. An optional HTTP(S) origin compares normalized scheme, hostname and effective port.
+Only website challenges receive this pair: CDP supplies the challenge source, and BiDi combines status, authentication headers, challenge metadata and this request's proxy-attempt evidence. Conflicting or inconclusive evidence receives neither automatic pair; a stale
+407 is accepted as website evidence only after this request's proxy attempt, with a website header, no proxy
+header and an explicitly empty challenge list. Passwords remain redacted until answering the
+protocol obligation. Automatic decisions are bounded to one credential submission across a native request and its whole redirect chain, even across origins; attempt
+state lives in the backend's existing request/auth ledger and ends with that request. Unconfigured requests gain no
+attempt state or interception. Stock WebKit refuses the option through its auth interception capability.
+
 Automatic proxy authentication participates in native interception without replacing route declarations. CDP
-requires a Proxy source and matching endpoint origin; BiDi requires Proxy-Authenticate in the observed response.
+requires a Proxy source and matching endpoint origin; BiDi requires a 407 with a matching proxy challenge, a Proxy-Authenticate header and no conflicting
+WWW-Authenticate header.
 Configured credentials are submitted at most once per request, then canceled if challenged again. Website
 challenges continue through the ordinary obligations and auth routes; Firefox's missing challenge fields are read
 from WWW-Authenticate, never inferred from its potentially stale 407 status. Attempt state is removed when requests

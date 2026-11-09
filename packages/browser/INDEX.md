@@ -609,10 +609,12 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toHaveAccessibleName: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined] >`
 - `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
+- `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
 - `const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>`
 - `const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
@@ -1171,7 +1173,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `const ResourceType = Schema.Literals(["document", "stylesheet", "image", "media", "font", "script", "fetch", "xhr", "webSocket", "eventSource", "manifest", "ping", "other"])`
 - `const Initiator = Schema.Union([Schema.TaggedStruct("Document", { navigable: Target.NavigableId, navigation: Schema.Option(Schema.String.pipe(Schema.brand("~@usestrider/browser/PageNavigation/Id"))) }), Schema.TaggedS…`
 - `const Method = Schema.Literals(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE", "QUERY"] as const satisfies ReadonlyArray<HttpMethod.HttpMethod>)`
-- `const RequestErrorReason = Schema.Union([BodyUnavailable, BodyTruncated, MalformedBody, Reason.BackendFailure, Reason.Unsupported])`
+- `const RequestErrorReason = Schema.Union([BodyUnavailable, ResponseUnavailable, BodyTruncated, MalformedBody, Reason.BackendFailure, Reason.Unsupported])`
 
 *combinators*
 
@@ -1187,6 +1189,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `const stream`
   - `<B, DE, DR, PE = never, PR = never>(target: Page.ReadonlyPage | UserContext.UserContext, filter: Filter & { readonly body: BodyDecoder<B, DE, DR> }, where?: Su…`
   - `<PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: (Filter & { readonly body?: never }) | undefined, where?: Subscr…`
+- `const response: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect< Effect.Effect<Option.Option<NetworkResponse.NetworkResponse>, RequestError | Deadline.Timeout>, RequestError, Scope.Scope >`
 
 *getters*
 
@@ -1210,6 +1213,7 @@ The requests a page or context sends, as events and as the data routes and respo
 - `class BodyUnavailable: Schema.Error { why, hint }`
 - `class BodyTruncated: Schema.Error { why, hint }`
 - `class MalformedBody: Schema.Error { expected, hint }`
+- `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
 
@@ -1347,6 +1351,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *models*
 
+- `type ViewportSize = typeof ViewportSize.Type`
 - `type DocumentStatus = typeof DocumentStatus.Type`
 - `type Prompt = typeof Prompt.Type`
 - `type Status = typeof Status.Type`
@@ -1394,6 +1399,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>`
   - `readonly control: Effect.Effect<Page, PageError, Scope.Scope>`
 - `interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator>`
+  - `readonly viewportSize: Effect.Effect<Option.Option<ViewportSize>, PageError | Target.TargetGone | Deadline.Timeout>`
   - `frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator`
   - `readonly title: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readHtml: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1443,6 +1449,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *schemas*
 
+- `const ViewportSize = Schema.Struct({ width: Schema.Number, height: Schema.Number })`
 - `const DocumentStatus = Schema.Struct({ id: Target.DocumentId, readiness: Schema.Literals(["loading", "interactive", "complete"]), lifecycle: Schema.Literals(["active", "suspended"]) })`
 - `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
 - `const Status = Schema.Union([Schema.TaggedStruct("Open", { url: Url.Url, document: DocumentStatus, prompt: Schema.Option(Prompt) }), Schema.TaggedStruct("Closed", { reason: Target.CloseReason })])`
@@ -1951,6 +1958,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly httpCredentials?: { readonly origin?: string | undefined readonly username: string readonly password: Redacted.Redacted<string> } | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`

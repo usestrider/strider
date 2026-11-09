@@ -57,14 +57,20 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
     },
     permissions: ["geolocation"]
   })
+  const viewport = yield* page.viewportSize // Some({ width: 390, height: 844 }), in CSS pixels
   yield* page.goto("https://maps.example.com")
   yield* page.getByRole("button", { name: "Route berechnen" }).pipe(Expect.toBeVisible)
 }, Effect.scoped)
 ```
 
+`page.viewportSize` reads the configured width and height, returning `None` when no viewport is declared.
+It follows page, context and browser declaration precedence, and release restores the next setting.
+It does not measure the window or document layout, and is available with inspect access.
+
 | Option           | Sets                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------- |
 | `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
+| [`httpCredentials`](/docs/events/routes#http-authentication) | website credentials, optionally limited to one origin; Chromium and Firefox |
 | `permissions`    | permissions granted to every origin; not on WebKit, nor on Firefox, where [`grant`](#settings-for-a-while) with an `origin` grants to one |
 | [`storageState`](#logging-in-once) | cookies and storage to start from                                |
 | `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs-and-file-choosers) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
