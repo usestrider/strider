@@ -5117,6 +5117,55 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects empty values and trimmed text with typed failure evidence", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="input"><textarea id="textarea">old text</textarea><div id="text"> \n <span> </span></div><div id="child"><img></div><div id="full"><span>content</span></div><input id="space" value=" "><div class="many"></div><div class="many"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLTextAreaElement>("#textarea")!.value = ""
+            })
+            for (const selector of ["#input", "#textarea", "#text", "#child"]) {
+              yield* page.locator(selector).pipe(Expect.toBeEmpty)
+            }
+            for (
+              const [selector, observed] of [
+                ["#space", "not empty"],
+                ["#full", "not empty"],
+                [".absent", { matches: 0 }],
+                [".many", { matches: 2 }]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toBeEmpty,
+                Deadline.within("500 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.condition, "to be empty")
+              assert.isAtLeast(error.checks.count, 1)
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+            }
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                document.querySelector("#full")!.textContent = ""
+              }, 100)
+            })
+            yield* page.locator("#full").pipe(Expect.toBeEmpty)
+            yield* page.evaluateInMainWorld(() => {
+              const input = document.querySelector<HTMLInputElement>("#space")!
+              setTimeout(() => {
+                input.value = ""
+              }, 100)
+            })
+            yield* page.locator("#space").pipe(Expect.toBeEmpty)
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

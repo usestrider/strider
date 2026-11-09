@@ -368,10 +368,21 @@ export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) 
 
 // ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
 
-const stateOf =
-  (tag: "Attached" | "Detached" | "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable") =>
-  (matcherName: string, condition: string) =>
-  (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
+const stateOf = (
+  tag:
+    | "Attached"
+    | "Detached"
+    | "Visible"
+    | "Hidden"
+    | "Enabled"
+    | "Disabled"
+    | "Checked"
+    | "Focused"
+    | "Editable"
+    | "Empty"
+) =>
+(matcherName: string, condition: string) =>
+(locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
 
 export const toBeAttached = stateOf("Attached")("toBeAttached", "to be attached")
 export const toBeDetached = stateOf("Detached")("toBeDetached", "to be detached")
@@ -381,6 +392,7 @@ export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")
 export const toBeDisabled = stateOf("Disabled")("toBeDisabled", "to be disabled")
 export const toBeChecked = stateOf("Checked")("toBeChecked", "to be checked")
 export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
+export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
 export const toHaveText = (

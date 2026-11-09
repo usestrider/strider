@@ -168,6 +168,7 @@ export type Expectation =
   | { readonly _tag: "Checked" }
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
+  | { readonly _tag: "Empty" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "Role"; readonly expected: string }
@@ -2448,6 +2449,12 @@ export function engine(render: (root: SnapNode) => string) {
       case "Focused": {
         const active = deepActive()
         return { passed: active === element, observed: active === null ? "nothing focused" : describe(active) }
+      }
+      case "Empty": {
+        const empty = element.nodeName === "INPUT" || element.nodeName === "TEXTAREA"
+          ? !(element as HTMLInputElement | HTMLTextAreaElement).value
+          : !element.textContent?.trim()
+        return { passed: empty, observed: empty ? "empty" : "not empty" }
       }
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
