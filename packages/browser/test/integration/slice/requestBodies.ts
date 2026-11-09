@@ -1,11 +1,13 @@
 /** Native request collection, before responses finish, with per-subscription limits and representation refusals. */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, NetworkRequest, Page } from "@usestrider/browser"
+import { Browser, Har, NetworkRequest, Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -125,6 +127,33 @@ export const requestBodies = (name: string, backend: Layer.Layer<Browser.Browser
             })
             yield* post(page, `${origin}/redirect`, "discarded")
             assert.isTrue(Option.isNone((yield* after302).body))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps a body stream collecting after overlapping HAR and smaller subscriptions close",
+        () =>
+          Effect.gen(function*() {
+            const { page, origin } = yield* open()
+            const stream = yield* NetworkRequest.stream(page, { url: "**/echo", body: (message) => message.text }).pipe(
+              NetworkRequest.withBodyLimit(5)
+            )
+            const queue = yield* Stream.toQueue(stream, { capacity: 2 })
+            const overlapping = yield* Scope.fork(yield* Effect.scope)
+            const har = yield* Har.record(page, { content: "omit", url: "**/echo" }).pipe(Scope.provide(overlapping))
+            const small = yield* NetworkRequest.next(page, { url: "**/echo", body: (message) => message.text }).pipe(
+              NetworkRequest.withBodyLimit(4),
+              Scope.provide(overlapping)
+            )
+            yield* post(page, `${origin}/echo`, "first")
+            const refused = yield* small.pipe(Effect.flip)
+            assert.strictEqual(refused._tag, "RequestError")
+            assert.deepStrictEqual((yield* Queue.take(queue)).body, Option.some("first"))
+            yield* har.entries.waitFor((count) => count >= 1)
+            yield* Scope.close(overlapping, Exit.void)
+            yield* post(page, `${origin}/echo`, "later")
+            assert.deepStrictEqual((yield* Queue.take(queue)).body, Option.some("later"))
           }),
         timeout
       )
