@@ -954,6 +954,19 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("preserves Map arguments in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate((value) =>
+                value instanceof Map && value.get("suffix"), new Map([["suffix", "!"]])),
+              "!"
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
