@@ -692,9 +692,12 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
             yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
             const outcome = yield* links.to(request).pipe(Effect.result)
+            // Nothing proves a manual fetch's chain ended: it reads as the observed attempt or as unknown, never `None`
             if (outcome._tag === "Failure") {
               assert.strictEqual(outcome.failure.reason._tag, "RedirectUnknown")
               assert.strictEqual(outcome.failure.reason.why, "completedRedirect")
+            } else {
+              assert.isTrue(Option.isSome(outcome.success))
             }
             const next = yield* links.to(request).pipe(
               Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
