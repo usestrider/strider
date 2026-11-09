@@ -1400,7 +1400,9 @@ adds no request tracking or cache, following [Pay for what you use](#pay-for-wha
 and model ownership establish which target can read a link. Observed links are authoritative, including canceled
 successor attempts. An absent link is a boundary only with terminal evidence; a committed navigation naming the
 exact hop can supply that evidence from the existing bounded event log. Insufficient proof is an explicit typed
-unknown outcome, separately recoverable from retention, ownership and lifetime errors. Completion alone cannot
+unknown outcome, separately recoverable from retention, ownership and lifetime errors. Missing terminal navigation
+evidence in disabled or incomplete history is an unavailable-evidence error, so unknown recovery cannot hide
+retention loss. Completion alone cannot
 settle a redirect on BiDi, which reports it before its successor and exposes no fetch redirect mode. Inferring a
 boundary from status, Location or elapsed time was rejected because it can invent an end. Unlimited object links
 were rejected for unbounded retention; another opt-in cache or injected fetch wrapper was rejected because it
