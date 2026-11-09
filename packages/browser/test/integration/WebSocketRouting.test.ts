@@ -81,6 +81,31 @@ for (const [name, backend] of backends) {
         60_000
       )
       it.effect(
+        "preserves a maximum-sized text message when JSON escaping expands its wire envelope",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.context.routeWebSocket("**/socket", (connection) =>
+              connection.open({ fromPage: (message, endpoint) => endpoint.send(message) }), {
+              implementation: "script",
+              timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+            })
+            const result = yield* page.evaluateInMainWorld(() =>
+              new Promise<{ length: number; exact: boolean }>((resolve) => {
+                const expected = "\0".repeat(1024 * 1024)
+                const socket = new WebSocket("ws://example.invalid/socket")
+                socket.onopen = () =>
+                  socket.send(expected)
+                socket.onmessage = (event) =>
+                  resolve({ length: event.data.length, exact: event.data === expected })
+                socket.onclose = () => resolve({ length: -1, exact: false })
+              })
+            )
+            assert.deepStrictEqual(result, { length: 1024 * 1024, exact: true })
+          }),
+        60_000
+      )
+      it.effect(
         "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
         () =>
           Effect.gen(function*() {
