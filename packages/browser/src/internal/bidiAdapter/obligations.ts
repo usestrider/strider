@@ -72,7 +72,8 @@ export const pause = (
   phase: Phase,
   request: NetworkRequest.NetworkRequest,
   response: Option.Option<NetworkResponse.NetworkResponse>,
-  challenge?: Network.AuthChallenge
+  challenge?: Network.AuthChallenge,
+  authSource?: "server" | "proxy"
 ) => {
   const navigable = navigableOf(state, params.context)
   const where = navigable === undefined ? undefined : placement(navigable)
@@ -103,6 +104,7 @@ export const pause = (
       request,
       phase,
       response,
+      authSource,
       challenge: challenge === undefined
         ? Option.none()
         : Option.some({ origin: originOf(params.request.url), scheme: challenge.scheme, realm: challenge.realm })
@@ -157,7 +159,15 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const challenge = context?.proxy?.credentials !== undefined && website !== undefined
         ? websiteChallenge(bytesText(website.value))
         : params.response.authChallenges?.[0]
-      pause(state, params, "auth", requestSnapshot(params, request), Option.none(), challenge)
+      pause(
+        state,
+        params,
+        "auth",
+        requestSnapshot(params, request),
+        Option.none(),
+        challenge,
+        website === undefined ? "proxy" : "server"
+      )
     })
     .on(BrowsingContext.userPromptOpened, (params, { state }) => {
       const navigable = navigableOf(state, params.context)
@@ -289,12 +299,20 @@ const decide = (
       return decision.error === "failed"
         ? state.send(Network.failRequest({ request }))
         : refused("interception.abortReason")
-    case "ProvideCredentials":
+    case "ProvideCredentials": {
+      if (decision.once === true) {
+        const entry = state.requests.get(request)
+        if (entry === undefined || entry.credentialsAttempted === true) {
+          return state.send(Network.continueWithAuth({ request, action: "cancel" }))
+        }
+        entry.credentialsAttempted = true
+      }
       return state.send(Network.continueWithAuth({
         request,
         action: "provideCredentials",
         credentials: { type: "password", username: decision.username, password: Redacted.make(decision.password) }
       }))
+    }
     case "DefaultAuth":
     case "CancelAuth":
       return state.send(Network.continueWithAuth({

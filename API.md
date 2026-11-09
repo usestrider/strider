@@ -309,6 +309,11 @@ interface Options {                                      // UserContext.Options;
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
     readonly credentials?: { readonly username: string; readonly password: Redacted<string> } | undefined // default none
   } | undefined                                          // default existing browser proxy settings
+  readonly httpCredentials?: {
+    readonly origin?: string | undefined                 // HTTP(S) origin; default any website origin
+    readonly username: string
+    readonly password: Redacted<string>
+  } | undefined                                          // default none; user auth routes take precedence; one attempt per request; never proxy challenges; Chromium/Firefox, WebKit refuses
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)

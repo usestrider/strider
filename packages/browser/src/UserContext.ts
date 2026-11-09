@@ -390,6 +390,36 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  */
 export interface Options {
   /**
+   * Answers website authentication challenges with these credentials. User auth routes run first;
+   * falling through uses these credentials. A rejected pair is tried only once per request.
+   * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname and effective port.
+   * An omitted origin permits any website. Proxy challenges never receive these credentials.
+   * Chromium and Firefox support this option; stock WebKit refuses it with `Unsupported`.
+   * Chromium enables request interception for this context, which can affect request timing.
+   *
+   * **Example** (Website credentials)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Config, Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const password = yield* Config.Redacted("HTTP_PASSWORD")
+   *   return yield* Browser.newContext({
+   *     httpCredentials: { origin: "https://example.com", username: "automation", password }
+   *   })
+   * })
+   * ```
+   *
+   * @default no automatic website credentials or additional interception
+   */
+  readonly httpCredentials?: {
+    readonly origin?: string | undefined
+    readonly username: string
+    readonly password: Redacted.Redacted<string>
+  } | undefined
+
+  /**
    * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
    * `host:port`, without credentials, path, query or fragment. An omitted port is 80.
    *

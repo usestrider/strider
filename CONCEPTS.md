@@ -471,6 +471,16 @@ process, overriding inherited proxy variables without changing the parent enviro
 ::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
 Unsupported endpoint schemes, WebKit credentials and settings for an existing WebKit process are explicit refusals.
 
+Context HTTP credentials install a context-owned auth route before user routes and an auth-phase intercept only
+when configured, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). Page routes and later
+context routes retain precedence; fallthrough reaches the configured pair, while cancellation or handler failure
+keeps the existing default. An optional HTTP(S) origin compares normalized scheme, hostname and effective port.
+Only website challenges receive this pair: CDP supplies the challenge source, and BiDi uses WWW-Authenticate
+versus Proxy-Authenticate as the existing proxy contract does. Passwords remain redacted until answering the
+protocol obligation. Automatic decisions are bounded to one credential submission per native request; attempt
+state lives on the backend's existing request entry and ends with that request. Unconfigured requests gain no
+attempt state or interception. Stock WebKit refuses the option through its auth interception capability.
+
 Automatic proxy authentication participates in native interception without replacing route declarations. CDP
 requires a Proxy source and matching endpoint origin; BiDi requires Proxy-Authenticate in the observed response.
 Configured credentials are submitted at most once per request, then canceled if challenged again. Website

@@ -46890,37 +46890,57 @@
         "method:Browser.newContext"
       ],
       "option": "httpCredentials",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted.",
+      "capabilities": [
+        "interception.auth"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ]
     },
     {
       "id": "option-browser-newcontext-ignorehttpserrors",
@@ -48526,37 +48546,57 @@
         "method:Browser.newPage"
       ],
       "option": "httpCredentials",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public option; the parent row does not imply option parity.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "UserContext",
+          "symbol": "Options",
+          "url": "/docs/api/browser/UserContext#Options"
+        }
+      ],
+      "notes": "httpCredentials supplies one Redacted password pair, optionally restricted to an HTTP(S) origin. User auth routes take precedence; one automatic attempt per request, never for proxy challenges. Arrays of origin-specific pairs are not accepted.",
+      "capabilities": [
+        "interception.auth"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "WebKit answers challenges from credentials set in advance",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ]
     },
     {
       "id": "option-browser-newpage-ignorehttpserrors",
@@ -113344,7 +113384,7 @@
     "packages/browser/src/StorageState.ts": "5abb155a90ce3ba2778dd34599a5dcfdbc46af68acf74ebfb7f8e9586fea9b4d",
     "packages/browser/src/Trace.ts": "43b726eae8efac0f39702f5cc135177afde268c48f9bd77a22ed1f40ef4703bb",
     "packages/browser/src/UncaughtException.ts": "d559c0c76d0bba239150b1b08280190d5f049d19e6dc673d8a76e3322d4dbe0a",
-    "packages/browser/src/UserContext.ts": "499fe81f688cf0f467f306d92463b08ab6166da2ca5f042a6549791786bffaca",
+    "packages/browser/src/UserContext.ts": "e2d353a4966c3a72a782c80245515acc44126dc8cc3791ce5bf7b653b039aa3a",
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
