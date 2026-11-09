@@ -1391,3 +1391,13 @@ the value comparison must not let an absent or ambiguous element satisfy it. Thi
 single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
 transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
 the value, which could pass without observing the requested element.
+
+## Extra request header ownership
+
+Extra request headers use the existing scoped override registry and native protocol header commands. Each
+registration replaces the map within its scope; page headers merge over context headers, with page values
+winning when names match. Removal restores the preceding map within the scope, and an empty page map retains
+context headers. This matches BiDi's native header merging and Playwright's contract. Rejected: replacing the
+whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
+which adds unnecessary request handling. Unset configuration adds no header commands or request state,
+following [Pay for what you use](#pay-for-what-you-use).
