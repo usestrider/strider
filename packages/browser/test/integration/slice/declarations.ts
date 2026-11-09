@@ -14,7 +14,8 @@ import {
   Page,
   PageClock,
   Route,
-  UncaughtException
+  UncaughtException,
+  UserContext
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -329,6 +330,48 @@ export const declarations = (
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)
             assert.deepStrictEqual(result, { routed: true })
           }))
+        }), timeout)
+
+      it.effect("uses context HTTP credentials for navigation and subresources with route precedence and isolation", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const configured = Browser.newContext({ httpCredentials: {
+            origin, username: "strider", password: Redacted.make("secret")
+          } })
+          if (name === "WebKit") {
+            const error = yield* Effect.flip(configured)
+            assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+            return
+          }
+          const context = yield* configured
+          const page = yield* context.newPage
+          yield* page.goto(`${origin}/auth`)
+          yield* page.getByText("signed in").pipe(Expect.toBeVisible)
+          assert.include(String(yield* run(page, origin, `return fetch('/auth').then(r => r.text())`)), "signed in")
+          const isolated = yield* Browser.newPage()
+          yield* isolated.goto(`${origin}/auth`)
+          yield* isolated.getByText("who are you?").pipe(Expect.toBeVisible)
+          const refused = yield* Browser.newContext({ httpCredentials: {
+            origin, username: "strider", password: Redacted.make("wrong")
+          } })
+          const denied = yield* refused.newPage
+          yield* denied.goto(`${origin}/auth`).pipe(Deadline.within("5 seconds"))
+          yield* denied.getByText("who are you?").pipe(Expect.toBeVisible)
+          const mismatch = yield* Browser.newContext({ httpCredentials: {
+            origin: "https://example.com", username: "strider", password: Redacted.make("secret")
+          } })
+          const unmatched = yield* mismatch.newPage
+          yield* unmatched.goto(`${origin}/auth`)
+          yield* unmatched.getByText("who are you?").pipe(Expect.toBeVisible)
+          const overridden = yield* Browser.newContext({ httpCredentials: {
+            origin, username: "strider", password: Redacted.make("wrong")
+          } })
+          yield* overridden.route("**", () => Route.provideCredentials({
+            username: "strider", password: Redacted.make("secret")
+          }), { phase: "auth" })
+          const routed = yield* overridden.newPage
+          yield* routed.goto(`${origin}/auth`)
+          yield* routed.getByText("signed in").pipe(Expect.toBeVisible)
         }), timeout)
 
       it.effect("answers an authentication challenge where the backend can", () =>
