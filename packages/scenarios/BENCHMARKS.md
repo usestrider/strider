@@ -621,3 +621,37 @@ Report each arm's median/spread/p95, paired differences and adjacent-control dri
 unmatched controls before assigning cost to auth configuration rather than generic proxy work. A finite sample
 does not validate route activation, factory acknowledgement, authentication, or release safety. Opting out of
 default challenge handling alone still leaves the unmatched interceptor installed in production today.
+
+## Paired CI comparisons
+
+Run performance comparisons on CI. The shared desktop is in constant use and cannot supply reliable timings.
+Dispatch the workflow from a branch containing the comparison driver:
+
+```sh
+gh workflow run benchmarks.yml --ref <driver-branch> -f base=main -f head=<change-branch> -f workload=bench -f only=click -f browser=chromium -f runs=20
+gh run watch <run-id>
+```
+
+For a scenario use `-f workload=scenarios -f only=login`. Scenarios requiring demo HAR recordings fail clearly
+when recordings are absent; this workflow never records from live sites or silently replaces recordings.
+Currently only pinned stock Chromium is supported. Different `flake.lock` pins are rejected so the browser
+and system environment remain common. Dependencies and builds are separate for each ref. The dispatched
+branch supplies the measurement driver, overlaid onto both checkouts, so a base predating this driver works.
+The libraries and their dependency lockfiles come from the respective refs; driver files are saved separately.
+
+The scheduler rotates base Strider, head Strider, head Playwright and base Playwright through all four positions.
+It grants one individual sample at a time, including benchmark warmups. Scenario initial correctness checks and
+browser setup precede each case's readiness barrier; operation setup, assertions and cleanup retain their existing
+boundaries. Browser processes for both refs stay resident while waiting, which differs from standalone runs.
+The extra base Playwright samples retain a control for dependency changes.
+
+Artifacts contain incremental raw samples (including warmups), worker logs, original lockfiles and browser pins,
+resolved commits, driver sources, browser binary SHA-256, machine metadata and each worker's original report.
+The summary reports geometric means of paired head/base and head/Playwright ratios with two-sided 95% Student t
+intervals on log ratios (conservative degrees-of-freedom table). These describe uncertainty across repetitions,
+not systematic machine bias; cases have separate intervals with no multiple-comparison correction. Ratios below
+one favor head. A failed or incomplete run retains evidence and publishes no valid comparison in its summary;
+partial per-case estimates in JSON must not be used as a successful comparison.
+
+Hosted variance has not yet been measured. Before relying on small differences, repeat main against main at least
+three times, record the observed spread, and use it to judge practical resolution. No performance gate is enabled.

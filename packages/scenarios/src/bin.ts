@@ -168,6 +168,9 @@ const chosen = scenarios.filter((scenario) =>
   (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
 )
 if (chosen.length === 0) throw new Error("No supported scenarios selected")
+if (process.env["STRIDER_PAIRED"] === "1" && chosen.some((scenario) => scenario.playwright === undefined)) {
+  throw new Error("Paired scenario comparisons require a Playwright twin for every selected case")
+}
 const problems = recordingProblems(chosen, files.recording)
 if (output !== undefined) {
   fs.writeFileSync(path.join(output, "recording-validation.json"), JSON.stringify({ problems }, null, 2))

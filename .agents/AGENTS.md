@@ -272,3 +272,9 @@ can't open the board, so a comment explains the behavior itself.
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,
 so ask the maintainer first.
+
+Performance comparisons run through `.github/workflows/benchmarks.yml`, never on the shared desktop.
+Dispatch from the driver branch with `base`, `head`, `workload` (`bench` or `scenarios`), `only`, `browser`
+(currently `chromium`) and `runs`, then follow `gh run watch`. See `packages/scenarios/BENCHMARKS.md` for
+paired ratios, confidence intervals, recording requirements and retained failure evidence. Hosted main-against-main
+variance must be measured before interpreting small differences. Local non-browser harness tests remain appropriate.
