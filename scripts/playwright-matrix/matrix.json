@@ -16336,34 +16336,46 @@
       "upstream": [
         "method:Locator.evaluateAll"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Locator",
+          "symbol": "ReadonlyLocator.evaluateAll",
+          "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluateAll"
+        }
+      ],
+      "notes": "Resolves one membership snapshot without waiting, including no matches. Runs in the isolated world; DOM may change before dispatch or across awaits. Arguments and results use by-value serialization.",
+      "capabilities": [
+        "isolatedWorlds"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+          ]
         }
       },
       "audit": {
@@ -113216,7 +113228,7 @@
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "1e6c273124640035b5a433f64bba9460c97e2c9800f5a455a32fac2966d51583",
+    "packages/browser/src/Locator.ts": "158332a277234eeec429014952e975659403fe1ce29a9b867878609659201791",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
