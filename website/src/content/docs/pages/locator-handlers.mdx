@@ -26,7 +26,7 @@ const openProducts = Effect.fn("openProducts")(function*(page: Page.Page) {
 
 Registration requires a scope and ends with it. It also affects locators and effects created before registration.
 Other pages and contexts keep their ordinary execution. Registration does not start a background overlay watcher;
-actionability and waiting assertion checks trigger it. Reads such as a locator's [text](/docs/pages/locators) and
+actionability and page/locator matcher checks trigger it. Generic [effect polling](/docs/pages/expectations#expecting-anything) does not identify a page and does not invoke handlers for ordinary reads. Reads such as a locator's [text](/docs/pages/locators) and
 [low-level keyboard and mouse input](/docs/pages/actions#the-keyboard-and-the-mouse) do not invoke it.
 
 Callbacks run one at a time per page. Actions and assertions inside a callback, including joined child fibers,

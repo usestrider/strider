@@ -4,7 +4,10 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
+import * as Tracer from "effect/Tracer"
 import * as Deadline from "../Deadline.ts"
 import type * as Declaration from "../Declaration.ts"
 import type * as Locator from "../Locator.ts"
@@ -18,6 +21,7 @@ import { LocatorImpl } from "./locator.ts"
 import type { Owner } from "./locatorOwner.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 
 const Suppressed = Context.Reference<boolean>("@usestrider/browser/LocatorHandlers/Suppressed", {
@@ -202,6 +206,17 @@ const activate = (page: Model.PageEntry, state: State) => {
   }
 }
 
+// Keep captured services in a separate lexical environment: a retained remove handle must not retain them.
+const captureCallback = <E, R>(
+  handler: (locator: Locator.Locator) => Effect.Effect<void, E, R>,
+  locator: Locator.Locator,
+  services: Context.Context<R>
+): () => Effect.Effect<void, unknown> =>
+() =>
+  Effect.contextWith((current: Context.Context<never>) =>
+    Effect.provideContext(Effect.suspend(() => handler(locator)), Context.merge(current, services))
+  )
+
 export const add = Effect.fnUntraced(function*<E, R>(
   owner: Owner,
   locator: Locator.Locator,
@@ -244,6 +259,9 @@ export const add = Effect.fnUntraced(function*<E, R>(
     Context.Service<unknown, unknown>(Operation.CurrentKey),
     Deadline.CurrentDeadline,
     BrowserClock.CurrentClock,
+    Tracer.ParentSpan,
+    References.CurrentStackFrame,
+    Recorders.CurrentSubject,
     Suppressed
   )(yield* Effect.context<R>())
   const entry: Entry = {
@@ -255,13 +273,7 @@ export const add = Effect.fnUntraced(function*<E, R>(
     done: undefined,
     invokingFiber: undefined,
     noWaitAfter: options?.noWaitAfter === true,
-    callback: () =>
-      Effect.contextWith((current: Context.Context<never>) =>
-        Effect.provideContext(
-          Effect.suspend(() => handler(locator)),
-          Context.merge(current, captured) as Context.Context<R>
-        )
-      )
+    callback: captureCallback(handler, locator, captured as Context.Context<R>)
   }
   const page = owner.page
   let state = states.get(page)
@@ -281,7 +293,8 @@ export const add = Effect.fnUntraced(function*<E, R>(
     // A callback closing its own registration scope cannot join itself; its return is interrupted above.
     if (entry.done !== undefined && entry.invokingFiber !== Fiber.getCurrent()) yield* Deferred.await(entry.done)
   })
-  yield* Effect.addFinalizer(() => close)
+  // This finalizer needs no caller services; Effect.addFinalizer would capture the entire registration context.
+  yield* Scope.addFinalizer(yield* Effect.scope, close)
   if (Option.isSome(owner.grant)) yield* owner.grant.value.onRelease(close)
   if (Option.isSome(locator.owner.grant)) yield* locator.owner.grant.value.onRelease(close)
   yield* Effect.sync(() => {

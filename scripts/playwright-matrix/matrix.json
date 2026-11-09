@@ -113404,9 +113404,9 @@
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
     "node_modules/effect/src/Fiber.ts": "4454a7ce05a176315ad0579d349ac3721b22e7d25ebcd14d6583e0ab2d501c71",
     "node_modules/effect/package.json": "501c6f86aaf1c8e14fe5c9197cf3dbc3ed812f819944252a50a04f74896a35e5",
-    "packages/browser/src/internal/locatorHandlers.ts": "f74c09794d7b2fc80f5808f301a96cb04d5aa5db53cdb58be2ff273fcfa793e7",
+    "packages/browser/src/internal/locatorHandlers.ts": "9cfbc98d7e0a256b31da9040d8a943e78a9cec8ab558b6337cd794a312fbaf53",
     "packages/browser/test/integration/slice/locatorHandlers.ts": "5ff19ec0ec564aed9a255065d1cc36d94f897451df03fc92dd6ae2dc627381d4",
-    "packages/browser/test/LocatorHandler.test.ts": "07d4d2a2a79633a809d0ff0c2825d5a1ece1bd256c22dca516b37ec4667927c3"
+    "packages/browser/test/LocatorHandler.test.ts": "54468c83d23620864eb1975a4d23a0e76a8e20c1d83294e976ede8fac96b2e2f"
   },
   "scopeDecisions": [
     {
