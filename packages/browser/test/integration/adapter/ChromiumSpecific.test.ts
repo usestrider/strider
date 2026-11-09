@@ -313,7 +313,65 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
-        "click sends stay ordered across a suspended transport and do not wait for earlier acknowledgments",
+        "finishes a click when release delivery overlaps a mousedown dialog",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const opened = yield* Deferred.make<void>()
+            const released = yield* Deferred.make<void>()
+            let pressCompleted = false
+            let pressId: number | undefined
+            let releaseQueued = false
+            let releaseId: number | undefined
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased" && !pressCompleted) {
+                      // Deliver an overlapping release only once the press handler is suspended in its dialog.
+                      releaseQueued = true
+                      releaseId = wire.id
+                      yield* Deferred.await(opened)
+                      yield* transport.send(message)
+                      return
+                    }
+                  }
+                  if (wire.method === "Page.handleJavaScriptDialog" && releaseQueued) {
+                    yield* Deferred.await(released)
+                  }
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(Stream.mapEffect((message) => {
+                  const wire = JSON.parse(message)
+                  if (wire.id === pressId && pressId !== undefined) pressCompleted = true
+                  if (wire.id === releaseId && releaseId !== undefined) {
+                    return Effect.as(Deferred.succeed(released, undefined), message)
+                  }
+                  return wire.method === "Page.javascriptDialogOpening"
+                    ? Effect.as(Deferred.succeed(opened, undefined), message)
+                    : Effect.succeed(message)
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button id="go" onmousedown="confirm('Go?');out.textContent+='down '" onmouseup="out.textContent+='up '" onclick="out.textContent+='click'">Go</button><output id="out"></output>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(yield* page.locator("#out").readText, "down up click")
+              assert.isFalse(releaseQueued)
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "click sends stay ordered across a suspended transport and release waits for press acknowledgment",
         () =>
           Effect.gen(function*() {
             const served = yield* site
@@ -322,6 +380,8 @@ describe("Chromium adapter, CDP only", () => {
             const allSent = yield* Deferred.make<void>()
             const sent: Array<string> = []
             const ids = new Set<number>()
+            let pressId: number | undefined
+            let pressAcknowledged = false
             const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
               const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
               return yield* CdpAdapter.connect({
@@ -333,17 +393,20 @@ describe("Chromium adapter, CDP only", () => {
                       yield* Deferred.succeed(entered, undefined)
                       yield* Deferred.await(proceed)
                     }
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased") assert.isTrue(pressAcknowledged)
                     ids.add(wire.id)
                     sent.push(wire.params.type)
                   }
                   yield* transport.send(message)
-                  if (sent.length === 3) yield* Deferred.succeed(allSent, undefined)
+                  if (sent.length === 2) yield* Deferred.succeed(allSent, undefined)
                 }),
-                messages: transport.messages.pipe(Stream.mapEffect((message) =>
-                  ids.has(JSON.parse(message).id)
-                    ? Effect.as(Deferred.await(allSent), message)
-                    : Effect.succeed(message)
-                ))
+                messages: transport.messages.pipe(Stream.mapEffect(Effect.fnUntraced(function*(message) {
+                  const wire = JSON.parse(message)
+                  if (ids.has(wire.id)) yield* Deferred.await(allSent)
+                  if (wire.id === pressId && pressId !== undefined) pressAcknowledged = true
+                  return message
+                })))
               }, { sink, ownership: "launched" })
             }))
             yield* Effect.gen(function*() {
@@ -483,14 +546,25 @@ describe("Chromium adapter, CDP only", () => {
         )
       }
 
-      for (const stop of ["interrupted", "mouse interrupted", "rejected", "deadline"] as const) {
+      for (
+        const stop of [
+          "interrupted",
+          "mouse interrupted",
+          "rejected",
+          "deadline",
+          "release interrupted",
+          "release deadline"
+        ] as const
+      ) {
         it.effect(
-          `a click ${stop} with its replies outstanding has sent its release, and the next gesture works`,
+          `a click ${stop} with its ${
+            stop.startsWith("release") ? "release" : "press"
+          } reply outstanding sends one release, and the next gesture works`,
           () =>
             Effect.gen(function*() {
               const served = yield* site
-              const released = yield* Deferred.make<void>()
-              let pressId: number | undefined
+              const blocked = yield* Deferred.make<void>()
+              let pendingId: number | undefined
               const sent: Array<string> = []
               const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
                 const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
@@ -499,22 +573,28 @@ describe("Chromium adapter, CDP only", () => {
                   send: Effect.fnUntraced(function*(message: string) {
                     const wire = JSON.parse(message)
                     if (wire.method === "Input.dispatchMouseEvent") {
-                      if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                      if (
+                        wire.params.type === (stop.startsWith("release") ? "mouseReleased" : "mousePressed") &&
+                        pendingId === undefined
+                      ) pendingId = wire.id
                       sent.push(wire.params.type)
                     }
                     yield* transport.send(message)
-                    if (wire.method === "Input.dispatchMouseEvent" && wire.params.type === "mouseReleased") {
-                      yield* Deferred.succeed(released, undefined)
-                    }
                   }),
-                  // The first press's reply: rejected, or never answered, so its click can't finish on its own
+                  // Observe that Chromium answered before withholding the selected reply. In the release cases,
+                  // the page has already received mouseup; cancellation must not dispatch another one.
                   messages: transport.messages.pipe(
+                    Stream.tap((message) =>
+                      pendingId !== undefined && JSON.parse(message).id === pendingId
+                        ? Deferred.succeed(blocked, undefined)
+                        : Effect.void
+                    ),
                     Stream.filter((message) =>
-                      stop === "rejected" || pressId === undefined || JSON.parse(message).id !== pressId
+                      stop === "rejected" || pendingId === undefined || JSON.parse(message).id !== pendingId
                     ),
                     Stream.map((message) => {
                       const wire = JSON.parse(message)
-                      return wire.id === pressId && pressId !== undefined
+                      return wire.id === pendingId && pendingId !== undefined
                         ? JSON.stringify({
                           id: wire.id,
                           sessionId: wire.sessionId,
@@ -528,7 +608,7 @@ describe("Chromium adapter, CDP only", () => {
               yield* Effect.gen(function*() {
                 const page = yield* Browser.newPage()
                 const html =
-                  `<button id="go">Go</button><script>window.log=[];for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push(e.type));</script>`
+                  `<button id="go">Go</button><script>window.log=[];window.trusted=true;for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>{log.push(e.type);window.trusted&&=e.isTrusted});</script>`
                 yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
                 // A click at a point has no checks of its own, and input before the page has rendered is lost,
                 // though the browser answers it; the test's raw click starts after two rendering updates
@@ -541,15 +621,15 @@ describe("Chromium adapter, CDP only", () => {
                   if (stop === "mouse interrupted") yield* page.mouse.click({ x: 20, y: 20 })
                   else yield* target.click()
                 }).pipe(
-                  Deadline.within(stop === "deadline" ? "2 seconds" : "10 seconds"),
+                  Deadline.within(stop.endsWith("deadline") ? "2 seconds" : "10 seconds"),
                   Effect.forkChild
                 )
-                yield* Deferred.await(released)
-                if (stop === "interrupted" || stop === "mouse interrupted") {
+                yield* Deferred.await(blocked)
+                if (stop.endsWith("interrupted")) {
                   yield* Fiber.interrupt(click)
                 } else {
                   const error = yield* Fiber.join(click).pipe(Effect.flip)
-                  if (stop === "deadline") assert.isTrue(Deadline.isTimeout(error), String(error))
+                  if (stop.endsWith("deadline")) assert.isTrue(Deadline.isTimeout(error), String(error))
                   else assert.strictEqual(error._tag, "LocatorError")
                 }
                 assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
@@ -562,6 +642,7 @@ describe("Chromium adapter, CDP only", () => {
                   "mousePressed",
                   "mouseReleased"
                 ])
+                assert.isTrue(yield* page.evaluateInMainWorld(() => (window as any).trusted))
                 assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), [
                   "mousedown",
                   "mouseup",

@@ -311,9 +311,16 @@ input permit, so a queued action never uses the preliminary check's stale geomet
 
 - **Why.** Waiting for rendering before taking the baseline adds one frame to each of the two checks without
   adding a rendering update between samples. A changed rectangle or replacement element still resets stability.
-- **Rejected:** removing the rendering wait entirely when stability is disabled, since a browser may drop input
-  before rendering; and skipping the check under the input permit, since another action may change the target
+- **Rejected:** skipping the check under the input permit, since another action may change the target
   while this one waits for the permit.
+
+**Readiness waits for a drawn frame by default only for pointer actions.** Per-call `checks.rendered` keeps
+pointer routing aligned with what was drawn, while fill and other non-pointer actions check current layout
+immediately. Stability sampling, retry waits and the check under the input permit remain independent. A frame
+is no hydration guarantee; callers can wait for application readiness or opt one action into rendering. With
+rendering disabled, timeouts retain readiness reasons rather than a no-frame hint. Rejected: a uniform default
+on, which delays ready fills; a uniform default off, which risks pointer routing; and a suite-wide switch, which
+hides the choice from the action that needs it.
 
 **An unqueued click, check or uncheck may reuse stability within the same rendering frame.** Its preliminary check returns a
 single-use token. Under the input permit, the engine resolves the locator again and checks every condition; only
@@ -1379,3 +1386,13 @@ Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event functi
 ## Shared DOM roles
 
 Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`. This keeps existing locator and snapshot meaning consistent even where Playwright omits generic roles. Presentation conflicts and required-child inheritance are resolved in that shared computation, including inherited-role exceptions on the child and cancellation on its parent. Tabindex focusability uses HTML integer parsing: skip ASCII whitespace, accept an optional sign and leading ASCII digits, and ignore trailing text. This agrees with native focus behavior for `0.5` and `2abc`; copying Playwright’s JavaScript number conversion would reject `2abc` and accept non-ASCII leading whitespace. Rejected: a matcher-specific role model that changes the meaning of the same element between querying, asserting and inspecting it, and copying upstream inheritance where it conflicts with ARIA's focusability or global-property exceptions.
+
+## Extra request header ownership
+
+Extra request headers use the existing scoped override registry and native protocol header commands. Each
+registration replaces the map within its scope; page headers merge over context headers, with page values
+winning when names match. Removal restores the preceding map within the scope, and an empty page map retains
+context headers. This matches BiDi's native header merging and Playwright's contract. Rejected: replacing the
+whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
+which adds unnecessary request handling. Unset configuration adds no header commands or request state,
+following [Pay for what you use](#pay-for-what-you-use).

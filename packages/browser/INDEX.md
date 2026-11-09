@@ -565,6 +565,7 @@ Emulated settings: viewport, locale, time zone, media features, network conditio
   - `readonly longitude: number`
   - `readonly accuracy?: number | undefined`
 - `interface Emulation`
+  - `readonly extraHTTPHeaders?: Readonly<Record<string, string>> | undefined`
   - `readonly viewport?: Viewport | undefined`
   - `readonly userAgent?: string | undefined`
   - `readonly locale?: Locale | string | undefined`
@@ -608,6 +609,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>`
@@ -945,6 +947,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `evaluate<Args extends ReadonlyArray<unknown>, B>(fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Serialized<B>,…`
   - `evaluateAll<Args extends ReadonlyArray<unknown>, B>(fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args): Effect.Effect<JSHandle.Ser…`
 - `interface Checks`
+  - `readonly rendered?: boolean | undefined`
   - `readonly visible?: boolean | undefined`
   - `readonly enabled?: boolean | undefined`
   - `readonly editable?: boolean | undefined`
