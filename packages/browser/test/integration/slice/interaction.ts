@@ -133,19 +133,20 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             ) {
               const target = page.locator(`#${id}`)
               yield* target.selectText()
-              const selected = yield* target.evaluate((element) => {
+              const selected = yield* page.evaluateInMainWorld((id: string) => {
+                const element = document.getElementById(id)!
                 if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
                   return element.value.slice(element.selectionStart ?? 0, element.selectionEnd ?? 0)
                 }
                 return element.ownerDocument.getSelection()?.toString() ?? ""
-              })
+              }, id)
               assert.strictEqual(selected, text)
-              assert.isTrue(yield* target.evaluate((element) => element.ownerDocument.activeElement === element))
+              assert.isTrue(yield* page.evaluateInMainWorld((id: string) => document.activeElement?.id === id, id))
             }
             yield* page.locator("#unfocusable").selectText()
             assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "unfocusable text")
             assert.isFalse(
-              yield* page.locator("#unfocusable").evaluate((element) => element.ownerDocument.activeElement === element)
+              yield* page.evaluateInMainWorld(() => document.activeElement?.id === "unfocusable")
             )
             assert.strictEqual(yield* page.locator("#input").readValue, "Ada Lovelace")
           })),
@@ -179,8 +180,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url)
             const field = page.locator("#field")
             yield* field.selectText({ trial: true })
-            assert.isFalse(yield* field.evaluate((element) => element.ownerDocument.activeElement === element))
-            assert.strictEqual(yield* field.evaluate((element) => (element as HTMLInputElement).selectionEnd), 0)
+            assert.isFalse(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "field"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                (document.getElementById("field") as HTMLInputElement).selectionEnd
+              ),
+              0
+            )
             const hidden = page.locator("#hidden")
             const error = yield* hidden.selectText().pipe(Deadline.within("150 millis"), Effect.flip)
             assert(Deadline.isTimeout(error))
@@ -225,8 +231,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const field = page.locator("#field")
             yield* field.selectText()
             assert.deepStrictEqual(
-              yield* field.evaluate((element) => {
-                const input = element as HTMLInputElement
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("field") as HTMLInputElement
                 return [input.selectionStart, input.selectionEnd, input.value]
               }),
               [0, 9, "unchanged"]
@@ -246,7 +252,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const target = page.frame(page.locator("iframe")).locator("#target")
           yield* target.selectText()
           assert.strictEqual(
-            yield* target.evaluate((element) => element.ownerDocument.getSelection()?.toString()),
+            yield* page.evaluateInMainWorld(() =>
+              (document.querySelector("iframe") as HTMLIFrameElement).contentDocument!.getSelection()?.toString()
+            ),
             "frame text"
           )
           assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "")
