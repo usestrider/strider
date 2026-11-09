@@ -1349,3 +1349,13 @@ Optional browser features do work only when requested, within the owning context
 never request a feature gain no interception, injected instrumentation, per-action checks or retained request
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
+
+## Explicit DOM event constructors
+
+DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.
+Initialization crosses by value under the existing evaluation serialization contract, and the target document
+constructs and dispatches the event. This keeps application events and native event fields explicit across
+browsers. Reject name-to-constructor inference tables and emulation of missing constructors or touch dictionaries:
+those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
+
+Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
