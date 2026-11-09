@@ -1349,3 +1349,12 @@ Optional browser features do work only when requested, within the owning context
 never request a feature gain no interception, injected instrumentation, per-action checks or retained request
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
+
+## Editability reads share editing rules
+
+`isEditable` reads the same predicate as editing actions and `toBeEditable`: an enabled text or settable
+input, textarea or contenteditable element that is not read-only. Unsupported kinds return false so callers
+can branch on the predicate without handling a type error. Visibility and inertness remain separate checks.
+Rejected: a broader read-only definition accepting selects, checkboxes or ARIA-only textboxes, because a true
+read would then describe kinds Strider's editing actions do not accept. This preserves existing action
+semantics rather than adopting Playwright's broader kinds and unsupported-kind exception.
