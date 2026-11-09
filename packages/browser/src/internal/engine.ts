@@ -666,18 +666,23 @@ export function engine(render: (root: SnapNode) => string) {
   // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
   // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
   const HTML_INTEGER_PREFIX = /^[\t\n\f\r ]*[+-]?[0-9]/
+  const DISABLABLE_TAGS = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
+  const NATIVE_FOCUSABLE_TAGS = new Set(["button", "details", "select", "textarea"])
   const focusable = (element: Element): boolean => {
-    if (element.matches(":disabled")) return false
+    const tag = element.localName
+    // Custom-element definitions live in the main world. A hyphen conservatively includes form-associated hosts.
+    // Keep the native selector for these and built-in controls: it includes disabled fieldsets and legend exceptions.
+    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && element.matches(":disabled")) return false
     const tabindex = element.getAttribute("tabindex")
     return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
-      ((element.localName === "a" || element.localName === "area") && element.hasAttribute("href")) ||
-      ["button", "details", "select", "textarea"].includes(element.localName) ||
+      ((tag === "a" || tag === "area") && element.hasAttribute("href")) ||
+      NATIVE_FOCUSABLE_TAGS.has(tag) ||
       (element instanceof HTMLInputElement && element.type !== "hidden") ||
       (element instanceof HTMLElement && element.isContentEditable)
   }
 
   // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
-  const GLOBAL_ARIA = [
+  const GLOBAL_ARIA = new Set([
     "aria-atomic",
     "aria-busy",
     "aria-controls",
@@ -692,7 +697,7 @@ export function engine(render: (root: SnapNode) => string) {
     "aria-live",
     "aria-owns",
     "aria-relevant"
-  ]
+  ])
   const NAME_PROHIBITED = new Set([
     "caption",
     "code",
@@ -706,11 +711,18 @@ export function engine(render: (root: SnapNode) => string) {
     "subscript",
     "superscript"
   ])
-  const presentationConflict = (element: Element, implicit: string | null): boolean =>
-    focusable(element) || GLOBAL_ARIA.some((attribute) => element.hasAttribute(attribute)) ||
-    (!NAME_PROHIBITED.has(implicit ?? "") &&
-      (element.hasAttribute("aria-label") || element.hasAttribute("aria-labelledby"))) ||
-    (implicit !== "generic" && element.hasAttribute("aria-roledescription"))
+  const presentationConflict = (element: Element, implicit: string | null): boolean => {
+    if (focusable(element)) return true
+    // One attribute snapshot avoids probing every possible global property on every presentation candidate.
+    for (const attribute of element.getAttributeNames()) {
+      if (GLOBAL_ARIA.has(attribute)) return true
+      if (
+        (attribute === "aria-label" || attribute === "aria-labelledby") && !NAME_PROHIBITED.has(implicit ?? "")
+      ) return true
+      if (attribute === "aria-roledescription" && implicit !== "generic") return true
+    }
+    return false
+  }
 
   // Only required structural children inherit presentation, never arbitrary descendants or nested lists/tables.
   // https://www.w3.org/TR/wai-aria-1.2/#presentation
