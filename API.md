@@ -725,6 +725,7 @@ declare const toHaveAccessibleName: DualMatcher<Locator.ReadonlyLocator, [expect
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>

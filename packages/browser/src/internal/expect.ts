@@ -56,7 +56,7 @@ export const classifyFailure = (
         ? "URL"
         : matcherName === "toHaveTitle"
         ? "Title"
-        : matcherName === "toHaveValue"
+        : (matcherName === "toHaveValue" || matcherName === "toHaveValues")
         ? "Value"
         : Sources.kind(source) ?? "Other"
     )
@@ -423,6 +423,14 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     { _tag: "Value", expected: matcher(expected, true) },
     "toHaveValue",
     `to have the value ${show(expected)}`
+  )
+
+export const toHaveValues = (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+  expectLocator(
+    locator,
+    { _tag: "Values", expected: expected.map((value) => matcher(value, true)) },
+    "toHaveValues",
+    `to have the values [${expected.map(show).join(", ")}]`
   )
 
 export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>

@@ -6,6 +6,7 @@ import {
   Capability,
   Deadline,
   Download,
+  Expect,
   JSHandle,
   Locator,
   NetworkRequest,
@@ -39,6 +40,14 @@ describe("access is typed", () => {
     )
     expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
     expect(page.getByRole("button").blur()).type.not.toRaiseError()
+  })
+
+  it("selected-value expectations need only inspect access and preserve typed failures", () => {
+    expect(reader.locator("select").pipe(Expect.toHaveValues(["red", /green/] as const))).type.toBe<
+      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone>
+    >()
+    expect(Expect.toHaveValues(reader.locator("select"), [])).type.not.toRaiseError()
+    expect(observed.locator("select").pipe(Expect.toHaveValues([]))).type.toRaiseError()
   })
 
   it("editability needs only inspect access and preserves read failures", () => {
