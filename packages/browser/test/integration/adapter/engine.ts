@@ -371,6 +371,27 @@ export const engine = (backend: Backend) =>
             assert.isFalse(result.expired.response.passed)
             assert.deepStrictEqual(result.afterExpiry, [0, 0, 0, 0])
           }), timeout)
+        it.effect("cooperative expiry while the host holds a token still answers with the timeout evidence", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>")
+            // The browser-side timer expires the session while the host is probing triggers. Its resume must
+            // receive the terminal response the expiry computed (why the target wasn't actionable), as a resume
+            // that arrives with no time left does, not Disposed, which discards that evidence and reroutes.
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const control = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              const answered = await command({ command: "resume", token: control.token, left: 0, decision: "continue" })
+              const first = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
+              await new Promise((resolve) => setTimeout(resolve, 300))
+              const expired = await command({ command: "resume", token: first.token, left: 0, decision: "continue" })
+              return JSON.stringify({ answered, expired })
+            `
+            )
+            assert.strictEqual(result.answered._tag, "Done")
+            assert.strictEqual(result.expired._tag, "Done", JSON.stringify(result.expired))
+            assert.strictEqual(result.expired.response._tag, result.answered.response._tag)
+          }), timeout)
         it.effect("cooperative runtime probes a top-document trigger while the target is cross-origin", () =>
           Effect.gen(function*() {
             const served = yield* site
