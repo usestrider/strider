@@ -3,6 +3,11 @@ import * as Cache from "effect/Cache"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import { TestClock } from "effect/testing"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as WebKitWire from "../src/internal/webkitWire.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Evaluation from "../src/internal/webkitAdapter/evaluation.ts"
 import type * as State from "../src/internal/webkitAdapter/state.ts"
@@ -76,6 +81,57 @@ describe("WebKit evaluation retirement", () => {
     yield* Fiber.interrupt(fiber)
     assert.strictEqual(f.interrupted(), 1)
   }).pipe(Effect.scoped))
+
+  it.effect("keeps the caller's original timeout and interrupts its unanswered call", () => Effect.gen(function*() {
+    const f = yield* fixture()
+    const fiber = yield* Effect.forkChild(Effect.result(f.run.pipe(Effect.timeout("100 millis"))))
+    yield* Deferred.await(f.sent)
+    yield* TestClock.adjust("99 millis")
+    assert.strictEqual(f.interrupted(), 0)
+    yield* f.buffer.flush
+    yield* TestClock.adjust("1 millis")
+    const result = yield* Fiber.join(fiber)
+    assert.strictEqual(result._tag, "Failure")
+    if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "TimeoutError")
+    assert.strictEqual(f.interrupted(), 1)
+    assert.strictEqual(f.calls(), 1)
+  }).pipe(Effect.scoped))
+
+  for (const terminal of ["success", "failure", "sessionEnded"] as const) {
+    it.effect(`preserves protocol abandonment and late ${terminal} cleanup after retirement`, () => Effect.gen(function*() {
+      const f = yield* fixture()
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, WebKitWire.wire)
+      Object.assign(f.realm, { session: client.root })
+      const outcomes: Array<string> = []
+      const fiber = yield* Effect.forkChild(Effect.result(f.run.pipe(
+        Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => { outcomes.push(outcome) })
+      )))
+      const command = yield* browser.next
+      assert.strictEqual(command.method, "Runtime.callFunctionOn")
+      yield* f.retire
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Failure")
+      assert.deepStrictEqual(outcomes, [])
+      if (terminal === "sessionEnded") {
+        yield* browser.lose("closed")
+        yield* client.closed
+      } else {
+        yield* browser.receive(terminal === "success"
+          ? { id: command.id, result: { result: { type: "object", objectId: "late-object" } } }
+          : { id: command.id, error: { code: -32000, message: "realm gone" } })
+        yield* browser.delivered
+      }
+      assert.deepStrictEqual(outcomes, [terminal])
+      if (terminal === "success") {
+        const release = yield* browser.next
+        assert.strictEqual(release.method, "Runtime.releaseObject")
+        assert.deepStrictEqual(release.params, { objectId: "late-object" })
+        yield* browser.receive({ id: release.id, result: {} })
+      }
+      yield* browser.delivered
+      assert.strictEqual(yield* browser.pending, 0)
+    }).pipe(Effect.scoped))
+  }
 
   it.live("rejects a realm already retired before dispatch", () => Effect.gen(function*() {
     const f = yield* fixture()
