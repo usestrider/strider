@@ -2091,3 +2091,40 @@ describe("CDP request body identity", () => {
       assert.deepStrictEqual(yield* Fiber.join(reading), { _tag: "Unavailable", why: "redirect" })
     }))
 })
+
+describe("CDP request body fallback completeness", () => {
+  it.effect("refuses an empty fallback for a request with native body presence", () =>
+    Effect.gen(function*() {
+      const wire = {
+        ...session,
+        send: () => Effect.succeed({ postData: "", base64Encoded: false })
+      } as unknown as ProtocolClient.Session
+      const { page, state, target } = yield* withPage(wire)
+      Object.assign(target, { page })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const params = sent(`${origin}/send`)
+      handlers.apply("Network.requestWillBeSent", {
+        ...params,
+        request: { ...params.request, method: "POST", hasPostData: true }
+      }, { state, target })
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: `${origin}/send` as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      assert.deepStrictEqual(yield* Network.captureRequestBody(state, snapshot, 100), {
+        _tag: "Unavailable",
+        why: "unavailable"
+      })
+    }))
+})

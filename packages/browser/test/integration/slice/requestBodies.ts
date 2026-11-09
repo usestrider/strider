@@ -41,6 +41,14 @@ export const requestBodies = (name: string, backend: Layer.Layer<Browser.Browser
               yield* page.evaluateInMainWorld((empty) => {
                 void fetch("/echo", empty ? { method: "POST", body: "" } : {}).catch(() => {})
               }, empty)
+              if (!(yield* supports("network.requestBody.absence"))) {
+                const error = yield* captured.pipe(Effect.flip)
+                assert.strictEqual(error._tag, "RequestError")
+                if (error._tag === "RequestError") {
+                  assert.deepInclude(error.reason, { _tag: "BodyUnavailable", why: "unavailable" })
+                }
+                continue
+              }
               const body = (yield* captured).body
               console.log(
                 `${name} native ${empty ? "empty POST" : "bodyless GET"}: ${
@@ -126,7 +134,15 @@ export const requestBodies = (name: string, backend: Layer.Layer<Browser.Browser
               body: (message) => message.text
             })
             yield* post(page, `${origin}/redirect`, "discarded")
-            assert.isTrue(Option.isNone((yield* after302).body))
+            if (yield* supports("network.requestBody.absence")) {
+              assert.isTrue(Option.isNone((yield* after302).body))
+            } else {
+              const error = yield* after302.pipe(Effect.flip)
+              assert.strictEqual(error._tag, "RequestError")
+              if (error._tag === "RequestError") {
+                assert.deepInclude(error.reason, { _tag: "BodyUnavailable", why: "unavailable" })
+              }
+            }
           }),
         timeout
       )
@@ -165,10 +181,15 @@ export const requestBodies = (name: string, backend: Layer.Layer<Browser.Browser
           yield* page.evaluateInMainWorld(() => {
             void fetch("/echo", { method: "POST", body: new Blob(["blob-content"]) }).catch(() => {})
           })
-          const exit = yield* Effect.exit(wait)
+          const result = yield* Effect.result(wait)
           // The browser sent twelve bytes: they are delivered, or the read fails as a typed refusal.
-          if (Exit.isSuccess(exit)) assert.deepStrictEqual(exit.value.body, Option.some("blob-content"))
-          else assert.isTrue(Exit.isFailure(exit))
+          if (result._tag === "Success") assert.deepStrictEqual(result.success.body, Option.some("blob-content"))
+          else {
+            assert.strictEqual(result.failure._tag, "RequestError")
+            if (result.failure._tag === "RequestError") {
+              assert.deepInclude(result.failure.reason, { _tag: "BodyUnavailable", why: "unavailable" })
+            }
+          }
         }), timeout)
 
       it.effect("does not decode multipart reports with unknown completeness", () =>
