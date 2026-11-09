@@ -1368,3 +1368,12 @@ browsers. Reject name-to-constructor inference tables and emulation of missing c
 those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
+
+## Extra request header ownership
+
+Extra request headers use the existing scoped override registry and native protocol header commands. Each
+registration replaces the whole map, with page scope taking precedence over context scope; removal restores
+the preceding map. An empty map deliberately masks inherited headers. This keeps replacement and restoration
+consistent with other emulation fields. Rejected: merging page and context maps, which prevents a page from
+clearing inherited headers without another removal mechanism; interception, which adds unnecessary request
+handling. Unset configuration adds no header commands or request state, following [Pay for what you use](#pay-for-what-you-use).
