@@ -711,6 +711,14 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   /**
    * Calls `fn` in the isolated world, where page globals are invisible, and returns the result by value.
    *
+   * **Details**
+   *
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
+   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * their own enumerable string keys.
+   * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
+   * separate from `JSHandle.Serialized`, which describes the returned value.
+   *
    * **Gotchas**
    *
    * Fails with `Unsupported` on WebKit, which has no isolated worlds (`isolatedWorlds`); use `evaluateInMainWorld`.
@@ -933,6 +941,14 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` in the page's main world, where its own globals are visible, and returns the result by value.
+   *
+   * **Details**
+   *
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
+   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * their own enumerable string keys.
+   * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
+   * separate from `JSHandle.Serialized`, which describes the returned value.
    *
    * **Gotchas**
    *

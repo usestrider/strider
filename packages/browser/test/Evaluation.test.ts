@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as Evaluation from "../src/internal/evaluation.ts"
+import * as Argument from "../src/internal/evaluationArgument.ts"
 import * as Operation from "../src/internal/operation.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
 import * as Target from "../src/Target.ts"
@@ -106,4 +107,17 @@ describe("Evaluation dispatch evidence", () => {
       yield* Evaluation.call(runtime(() => Effect.succeed(value)), options(record, false))
       assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
     }).pipe(Operation.named("query after input")))
+})
+
+describe("Evaluation argument reconstruction", () => {
+  it("copies own __proto__ keys as data without changing the object prototype", () => {
+    const call = new Function(`return (${Argument.call("value => value")})`)()
+    const value = call(["v"], {
+      type: "object",
+      value: [["__proto__", { type: "string", value: "data" }]]
+    })
+    assert.strictEqual(Object.getPrototypeOf(value), Object.prototype)
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(value, "__proto__"), true)
+    assert.strictEqual(value["__proto__"], "data")
+  })
 })

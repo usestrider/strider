@@ -975,8 +975,8 @@ export const contents = (
             assert.strictEqual(
               yield* evaluate(
                 (set, date, regexp, nested) => {
-                  const map = nested.items[0]
-                  const key = Array.from(map.keys())[0]
+                  const map = nested.items[0]!
+                  const key = Array.from(map.keys())[0]!
                   const values = map.get(key)!
                   return set instanceof Set && set.has(3) &&
                     date instanceof Date && date.toISOString() === "2020-01-02T00:00:00.000Z" &&
@@ -2010,9 +2010,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
