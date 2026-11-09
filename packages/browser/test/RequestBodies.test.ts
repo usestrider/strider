@@ -8,6 +8,7 @@ import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as Access from "../src/internal/access.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Events from "../src/internal/events.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -26,7 +27,7 @@ const sent = (headers: Record<string, string> = {}) =>
     at: 0 as NetworkRequest.NetworkRequest["at"]
   })
 
-const setup = (body: unknown) => {
+const setup = (body: unknown, grant: Option.Option<Access.Grant> = Option.none()) => {
   const channel = Events.make<NetworkRequest.NetworkRequest>({ _tag: "Browser" }, () => 10)
   const declarations: Array<Adapter.Declaration> = []
   let reads = 0
@@ -49,7 +50,7 @@ const setup = (body: unknown) => {
       })
   }
   Handles.registerPage(page, {
-    grant: Option.none(),
+    grant,
     entry: { id: "page" as Target.NavigableId, events: { request: channel } } as Model.PageEntry,
     runtime: { backend: "test", model: { adapter } } as unknown as Runtime.Runtime
   })
@@ -255,4 +256,19 @@ describe("Request body subscriptions", () => {
       const error = yield* Stream.runHead(stream).pipe(Effect.flip)
       assert.isTrue(Deadline.isTimeout(error))
     })))
+  it.live("releases body collection with borrowed inspect access and refuses an expired grant", () => Effect.scoped(Effect.gen(function*() {
+    const accessScope = yield* Scope.make()
+    const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
+    const world = setup(bytes("owned"), Option.some(grant))
+    const wait = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text })
+    Events.publish(world.channel, sent())
+    const captured = yield* wait
+    yield* Scope.close(accessScope, (yield* Effect.exit(Effect.void)))
+    assert.strictEqual(world.released(), 1)
+    assert.deepStrictEqual(captured.body, Option.some("owned"))
+    const error = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text }).pipe(Effect.flip)
+    assert.strictEqual(error._tag, "TargetGone")
+    assert.strictEqual(world.declarations.length, 1)
+  })))
+
 })
