@@ -4184,11 +4184,47 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 Expect.toHaveAccessibleName("")
               )
               yield* page.locator("#field").pipe(Expect.toHaveAccessibleName("Email address"))
-              const pending = yield* named.pipe(Expect.toHaveAccessibleName("Updated"), Effect.forkChild)
-              yield* page.evaluateInMainWorld(() => {
-                document.querySelector("#label")!.textContent = "Updated"
-              })
-              yield* Fiber.join(pending)
+              // Wait for a real mismatching engine round before changing the label.
+              assert(named instanceof LocatorImpl)
+              const adapter = named.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const initial = yield* Deferred.make<void>()
+              const evaluate: typeof original = (realm, call) =>
+                original(realm, call).pipe(
+                  Effect.tap((result) => {
+                    const arg = call.arguments[0]
+                    if (
+                      call.functionDeclaration !== Engine.run || arg?._tag !== "Value" || arg.value.type !== "string"
+                    ) {
+                      return Effect.void
+                    }
+                    const request = JSON.parse(arg.value.value) as Engine.Request
+                    if (request.op !== "expect" || request.expectation._tag !== "AccessibleName") return Effect.void
+                    assert(result._tag === "Value" && result.value.type === "string")
+                    const response = JSON.parse(result.value.value) as Engine.Response
+                    if (response._tag !== "Expected" || response.passed) return Effect.void
+                    assert.strictEqual(response.observed, "Save changes")
+                    return Deferred.succeed(initial, undefined)
+                  })
+                )
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => Object.assign(adapter, { evaluate })),
+                  () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+                )
+                const pending = yield* named.pipe(Expect.toHaveAccessibleName("Updated"), Effect.forkChild)
+                yield* Effect.raceFirst(
+                  Deferred.await(initial),
+                  Fiber.join(pending).pipe(
+                    Effect.andThen(Effect.die(new Error("Name expectation passed before mutation")))
+                  )
+                )
+                assert.strictEqual(pending.pollUnsafe(), undefined)
+                yield* page.evaluateInMainWorld(() => {
+                  document.querySelector("#label")!.textContent = "Updated"
+                })
+                yield* Fiber.join(pending)
+              }))
               for (
                 const [locator, expected, options, observed] of [
                   [named, /updated/i, { ignoreCase: false }, "Updated"],
@@ -4219,7 +4255,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             // Roles such as generic, paragraph and code cannot be named, so their author label is not their name.
             const { url } = yield* fixture(() =>
-              `<div id="generic" aria-label="Region">Text</div><p id="paragraph" aria-label="Note">Text</p><code id="code" aria-label="Snippet">x</code>`
+              `<div id="generic" aria-label="Region">Text</div><p id="paragraph" aria-labelledby="reference">Text</p><code id="code" title="Snippet">x</code><span id="reference" aria-label="Reference override">Reference text</span><p id="override" role="button" aria-label="Allowed">Ignored</p><button id="content"><strong>Confirm</strong><code>code</code></button><button id="referenced" aria-labelledby="reference">Ignored</button><label for="native"><span>Native label</span></label><input id="native">`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
@@ -4227,6 +4263,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               for (const id of ["#generic", "#paragraph", "#code"]) {
                 yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""), Deadline.within("300 millis"))
               }
+              yield* page.getByRole("generic", { name: "Region", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("paragraph", { name: "Reference override", exact: true }).pipe(
+                Expect.toHaveCount(0)
+              )
+              yield* page.getByRole("code", { name: "Snippet", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("button", { name: "Allowed", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#override").pipe(Expect.toHaveAccessibleName("Allowed"))
+              yield* page.getByRole("button", { name: "Confirmcode", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#content").pipe(Expect.toHaveAccessibleName("Confirmcode"))
+              yield* page.getByRole("button", { name: "Reference override", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#referenced").pipe(Expect.toHaveAccessibleName("Reference override"))
+              yield* page.getByRole("textbox", { name: "Native label", exact: true }).pipe(Expect.toHaveCount(1))
             }))
           }),
         timeout
