@@ -1535,6 +1535,60 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
+it.effect("answers an automatic auth challenge before its Network request arrives and bounds subsequent attempts", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Document",
+      request: sent(`${origin}/auth`).request
+    }, { state, target })
+    const challenge = () =>
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Document",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    challenge()
+    const first = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, first.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
+    challenge()
+    const second = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, second.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    })
+    yield* state.buffer.flush
+  }))
+
 describe("CDP proxy and website challenge separation", () => {
   for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
     it.effect(`preserves website challenge coverage: ${coverage}`, () =>
