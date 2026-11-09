@@ -57,10 +57,15 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
     },
     permissions: ["geolocation"]
   })
+  const viewport = yield* page.viewportSize // Some({ width: 390, height: 844 }), in CSS pixels
   yield* page.goto("https://maps.example.com")
   yield* page.getByRole("button", { name: "Route berechnen" }).pipe(Expect.toBeVisible)
 }, Effect.scoped)
 ```
+
+`page.viewportSize` reads the configured width and height, returning `None` when no viewport is declared.
+It follows page, context and browser declaration precedence, and release restores the next setting.
+It does not measure the window or document layout, and is available with inspect access.
 
 | Option           | Sets                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------- |

@@ -19,7 +19,161 @@ import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
 import { LocatorImpl } from "../src/internal/locator.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as Runtime from "../src/internal/runtime.ts"
+
+it.effect("runtime never reroutes an applying engine round after its realm ends", () =>
+  Effect.gen(function*() {
+    let calls = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("action-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          calls++
+          if (calls === 1) {
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "action-realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          }
+          return {
+            _tag: "Value",
+            value: { type: "string", value: JSON.stringify({ _tag: "Count", count: 1 }) }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const result = yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        return yield* Runtime.send(
+          runtime,
+          entry,
+          {
+            op: "act",
+            steps: [],
+            action: { _tag: "Focus" },
+            apply: true,
+            cap: 100,
+            checks: {
+              rendered: false,
+              visible: false,
+              enabled: false,
+              editable: false,
+              notInert: false,
+              inViewport: false,
+              stable: 0,
+              receivesPointer: false
+            }
+          },
+          record.id,
+          record.budget.at
+        )
+      }).pipe(Operation.named("test.applyingRound"), Effect.result)
+      assert.strictEqual(result._tag, "Failure")
+      if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "Gone")
+      assert.strictEqual(calls, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }).pipe(Effect.scoped))
+
+for (const loss of ["realm", "engine"] as const) {
+  it.effect(
+    loss === "realm"
+      ? "runtime follows a realm lost while installing the engine, before an applying round is sent"
+      : "runtime reinstalls a missing engine without claiming an action was applied",
+    () =>
+      Effect.gen(function*() {
+        let installs = 0
+        let calls = 0
+        let operation: Operation.Record | undefined
+        const layer = BrowserImpl.layer((sink) =>
+          Fake.connect([], {
+            info: new Browser.Info(Fake.info),
+            capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+          })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+            ...adapter,
+            realm: () => Effect.succeed("action-realm" as Target.RealmId),
+            evaluate: Effect.fnUntraced(function*(_realm, call) {
+              if (call.functionDeclaration === Engine.install) {
+                assert.deepStrictEqual(operation?.diagnostics().dispatch, { _tag: "NotSent" })
+                installs++
+                // The document is replaced while the engine is installed: the action round was never sent.
+                if (installs === 1 && loss === "realm") {
+                  return yield* Effect.fail(
+                    new Adapter.AdapterError({
+                      reason: {
+                        _tag: "Gone",
+                        target: { _tag: "Realm", id: "action-realm" as Target.RealmId },
+                        reason: new Target.RealmDestroyed({})
+                      }
+                    })
+                  )
+                }
+                return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+              }
+              if (installs === 1 && loss === "engine") {
+                return { _tag: "Value", value: { type: "string", value: Engine.missing } } as const
+              }
+              assert.deepStrictEqual(operation?.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+              calls++
+              return {
+                _tag: "Value",
+                value: { type: "string", value: JSON.stringify({ _tag: "Count", count: 1 }) }
+              } as const
+            })
+          })))
+        )
+        yield* Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const { entry, runtime } = Handles.page(page)
+          const result = yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            operation = record
+            return yield* Runtime.send(
+              runtime,
+              entry,
+              {
+                op: "act",
+                steps: [],
+                action: { _tag: "Focus" },
+                apply: true,
+                cap: 100,
+                checks: {
+                  rendered: false,
+                  visible: false,
+                  enabled: false,
+                  editable: false,
+                  notInert: false,
+                  inViewport: false,
+                  stable: 0,
+                  receivesPointer: false
+                }
+              },
+              record.id,
+              record.budget.at
+            )
+          }).pipe(Operation.named("test.applyingRoundInstall"), Effect.result)
+          assert.strictEqual(result._tag, "Success")
+          assert.strictEqual(installs, 2)
+          assert.strictEqual(calls, 1)
+        }).pipe(Effect.scoped, Effect.provide(layer))
+      }).pipe(Effect.scoped)
+  )
+}
 
 describe("Locator.fill", () => {
   for (

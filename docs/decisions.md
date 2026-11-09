@@ -1392,6 +1392,15 @@ those hide browser differences and make the library define DOM behavior. Missing
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
 
+## Retrying CSS assertion cardinality
+
+CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.
+A transient duplicate during a render should settle under the same deadline as a transient wrong style; negating
+the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
+single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
+transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
+the value, which could pass without observing the requested element.
+
 ## Extra request header ownership
 
 Extra request headers use the existing scoped override registry and native protocol header commands. Each
