@@ -156,7 +156,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent(
-                "<div id=\"overlay\" hidden>Overlay</div><script>setTimeout(() => document.querySelector(\"#overlay\").hidden=false,100)</script>"
+                "<div>Content</div><div id=\"overlay\" hidden>Overlay</div><script>setTimeout(() => document.querySelector(\"#overlay\").hidden=false,100)</script>"
               )
             }`
           )
@@ -171,6 +171,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
               })
             }))
           yield* assertion
+          assert.isTrue(yield* page.locator("body").isVisible)
           yield* page.addLocatorHandler(page.locator("body"), () =>
             Effect.sync(() => {
               calls++

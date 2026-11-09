@@ -3048,6 +3048,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionTimeout,
     actionFrameTimeout,
     evaluate,
+    matchesValue: classMatches,
     clearTreeCaches,
     failureResponse,
     now,
@@ -3090,7 +3091,10 @@ export const element = `function(request) {
 export const missing = "\u0000missing"
 
 /** A check that may be driven by the opted-in host handshake. */
-export type CooperativeRequest = Extract<Request, { readonly op: "act" | "expect" }>
+export type CooperativeURLRequest = Omit<Extract<Request, { readonly op: "expect" }>, "expectation"> & {
+  readonly expectation: { readonly _tag: "URL"; readonly expected: TextMatcher }
+}
+export type CooperativeRequest = Extract<Request, { readonly op: "act" | "expect" }> | CooperativeURLRequest
 
 /** All commands name both the actual document and the triggering operation. */
 export type CooperativeCommand =
@@ -3269,7 +3273,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       let done = false
       let frame: number | undefined
       let observer: MutationObserver | undefined
-      const events = ["input", "change", "focusin", "focusout"]
+      const events = ["input", "change", "focusin", "focusout", "hashchange", "popstate"]
       const finish = (ready: boolean) => {
         if (done) return
         done = true
@@ -3392,7 +3396,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         if (!(await wait(session, false))) return stopped(session)
       } else {
         helpers.clearTreeCaches()
-        const result = helpers.evaluate(session.request.steps, session.request.expectation)
+        const expectation = session.request.expectation
+        const result = expectation._tag === "URL"
+          ? { passed: helpers.matchesValue(expectation.expected, location.href), observed: location.href }
+          : helpers.evaluate(session.request.steps, expectation)
         session.observed = result.observed
         if (result.passed) {
           return finished(session, {

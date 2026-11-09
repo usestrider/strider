@@ -430,6 +430,9 @@ await runtime.dispose()
       assert.isFalse(f.requests.some((request) => request.request === "start"))
       yield* registration.remove
       yield* page.locator("#target").focus()
+      const beforeURL = f.requests.length
+      yield* Expect.toHaveURL(page, "about:blank")
+      assert.strictEqual(f.requests.length, beforeURL)
       assert.isFalse(f.requests.some((request) => request.request === "start"))
     }).pipe(Effect.scoped, Effect.provide(f.layer))
   })

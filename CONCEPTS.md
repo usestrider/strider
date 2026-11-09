@@ -582,7 +582,9 @@ before application so the host releases the input permit before invoking a handl
 selection; scope closure also interrupts selected work and waits for its finalizers before releasing captured
 services. A callback closing its own registration scope interrupts itself without a self-join. Default dispatch returns only after the last registration
 and all outstanding invocations and hidden waits drain. Callback services are captured while the triggering
-operation, deadline, clock and suppression remain inherited. Original typed callback errors remain unknown-valued
+operation, deadline, clock and suppression remain inherited. URL assertions retain their model-only watcher
+on ordinary pages; opted-in pages use cooperative URL checks with the same failure/evidence loop as locator
+matchers. Hash and history events wake active URL checks without installing listeners on unused pages. Original typed callback errors remain unknown-valued
 in process; serialized diagnostics do not promise lossless arbitrary-error transport.
 
 - **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.

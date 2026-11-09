@@ -286,7 +286,11 @@ const nothing: ReadonlyArray<Engine.Step> = [{ _tag: "Css", selector: ":not(*)" 
 const missingCap = 100
 
 /** The request with its steps in the document it goes to; one with no steps goes as it is. */
-const retarget = (request: Engine.Request, steps: ReadonlyArray<Engine.Step>, missing: boolean): Engine.Request => {
+const retarget = <R extends Engine.Request | Engine.CooperativeRequest>(
+  request: R,
+  steps: ReadonlyArray<Engine.Step>,
+  missing: boolean
+): R => {
   if (!("steps" in request) || request.steps === null) return request
   const at = missing ? nothing : steps
   switch (request.op) {
@@ -511,7 +515,7 @@ export interface Answer {
 const prepareRound = Effect.fnUntraced(function*(
   runtime: Runtime,
   page: Model.PageEntry,
-  request: Engine.Request,
+  request: Engine.Request | Engine.CooperativeRequest,
   route: Exclude<Route, { readonly _tag: "Answer" }>,
   id: Diagnostics.OperationId
 ) {

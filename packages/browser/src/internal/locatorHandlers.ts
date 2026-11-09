@@ -17,6 +17,8 @@ import * as Target from "../Target.ts"
 import * as Access from "./access.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Execution from "./execution.ts"
+import * as ExpectImpl from "./expect.ts"
+import * as Handles from "./handles.ts"
 import { LocatorImpl } from "./locator.ts"
 import type { Owner } from "./locatorOwner.ts"
 import type * as Model from "./model.ts"
@@ -176,17 +178,38 @@ const check = (state: State, final: boolean): Effect.Effect<"continue" | "invali
   })
 
 const activate = (page: Model.PageEntry, state: State) => {
+  const managed = Effect.fnUntraced(function*<A>(self: Effect.Effect<A, Execution.Failure>) {
+    state.running++
+    return yield* self.pipe(Effect.ensuring(Effect.sync(() => {
+      state.running--
+      restore(page, state)
+    })))
+  })
   const dispatch = Effect.fnUntraced(
     function*<A>(self: Effect.Effect<A, Execution.Failure>, ordinary: Effect.Effect<A, Execution.Failure>) {
       if (yield* Effect.service(Suppressed)) return yield* ordinary
-      state.running++
-      return yield* self.pipe(Effect.ensuring(Effect.sync(() => {
-        state.running--
-        restore(page, state)
-      })))
+      return yield* managed(self)
     }
   )
   page.execution = {
+    url: Effect.fnUntraced(function*(page: Page.ReadonlyPage, expected: string | RegExp) {
+      if (yield* Effect.service(Suppressed)) return yield* ExpectImpl.watchURL(page, expected)
+      return yield* ExpectImpl.handlerURL(page, expected, (request, record) =>
+        managed(
+          Runtime.sendCooperative<Execution.Failure, never>(
+            Handles.page(page).runtime,
+            Handles.page(page).entry,
+            request,
+            record.id,
+            record.budget.at,
+            (_route, last) => check(state, last)
+          ).pipe(
+            Effect.flatMap((answer) =>
+              "_tag" in answer ? Effect.die("URL assertion unexpectedly restarted") : Effect.succeed(answer.response)
+            )
+          )
+        ))
+    }),
     action: (runtime, target, request, id, at, final) =>
       dispatch(
         Runtime.sendCooperative<Execution.Failure, never>(runtime, target, request, id, at, (_route, last) =>
