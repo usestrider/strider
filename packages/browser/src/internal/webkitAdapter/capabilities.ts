@@ -104,6 +104,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "partial", [
         "without the Cookie header, which WebKitGTK's network process doesn't report"
       ]),

@@ -139,6 +139,11 @@
           "limitations": []
         },
         {
+          "name": "network.failure",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "network.headersSent",
           "status": "supported",
           "limitations": []
@@ -561,6 +566,11 @@
         },
         {
           "name": "popups.opener",
+          "status": "supported",
+          "limitations": []
+        },
+        {
+          "name": "network.failure",
           "status": "supported",
           "limitations": []
         },
@@ -1004,6 +1014,13 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.failure",
+          "status": "partial",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -1509,6 +1526,13 @@
           "name": "popups.opener",
           "status": "supported",
           "limitations": []
+        },
+        {
+          "name": "network.failure",
+          "status": "partial",
+          "limitations": [
+            "BiDi reports failure text without a cancellation flag"
+          ]
         },
         {
           "name": "network.headersSent",
@@ -2220,6 +2244,11 @@
           ]
         },
         {
+          "name": "network.failure",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "network.headersSent",
           "status": "partial",
           "limitations": [
@@ -2770,6 +2799,11 @@
           "limitations": [
             "a script or stylesheet reused from the memory cache within one document produces no request"
           ]
+        },
+        {
+          "name": "network.failure",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "network.headersSent",

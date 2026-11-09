@@ -33,6 +33,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
 
 const timeout = 60_000
 
@@ -140,6 +141,38 @@ interface HarEntry {
 export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} recordings`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("reads a protocol request failure with honest cancellation evidence", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const failedSite = yield* navigationFailure
+          const sent = yield* NetworkRequest.next(page, { url: `${failedSite.origin}/failure` })
+          yield* page.goto(`${failedSite.origin}/failure`).pipe(Effect.exit)
+          const request = yield* sent
+          const failure = Option.getOrThrow(yield* NetworkRequest.failure(page, request))
+          assert.isAbove(failure.errorText.length, 0)
+          assert.deepStrictEqual(
+            failure.canceled,
+            (yield* fullySupports("network.failure")) ? Option.some(false) : Option.none()
+          )
+          assert.deepStrictEqual(yield* NetworkRequest.failure(page.context, request), Option.some(failure))
+        })))
+
+      it.effect("keeps HTTP errors successful and refuses failure lookup after owner closure", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { page, request } = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const served = yield* site
+            const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/missing` })
+            yield* page.goto(`${served.origin}/missing`)
+            const request = yield* sent
+            assert.isTrue(Option.isNone(yield* NetworkRequest.failure(page, request)))
+            return { page, request }
+          }))
+          const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
+          assert.strictEqual(error.reason._tag, "RequestUnavailable")
+          assert.strictEqual(error.reason.why, "ownerLost")
+        })))
+
       it.effect(
         "records URL expectation evidence with export-time redaction",
         () =>

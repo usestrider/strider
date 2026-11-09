@@ -1159,6 +1159,7 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `class Failure: Schema.Class { errorText, canceled }`
 
 *schemas*
 
@@ -1177,10 +1178,19 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
+- `const failure: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Option.Option<Failure>, RequestError>`
 
 *converting*
 
 - `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+*errors*
+
+- `class RequestError: Schema.TaggedError "RequestError" { hop, reason, diagnostics }`
+
+*reasons*
+
+- `class RequestUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
 
