@@ -140,13 +140,13 @@ const webSocketFrame = (
   })
 }
 
-/** Chunk accounting belongs only to live page/frame sessions in an opted-in context. */
+/** Chunk accounting belongs only to live page-attributed sessions in an opted-in context. */
 export const eventScopes = (state: State): NonNullable<ProtocolClient.Fold["eventScopes"]> =>
   new Map([
     [Network.dataReceived.method, (session: ProtocolClient.Session) => {
       const target = state.targets.get(session)
       const page = target?.page ?? target?.frame?.page
-      return target !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
+      return target !== undefined && !target.ended &&
         page !== undefined && !page.ended && !page.context.disposed &&
         page.context.requestSizes !== undefined
     }]
