@@ -124,6 +124,7 @@ export type Action =
     readonly guard: boolean
   }
   | { readonly _tag: "Focus" }
+  | { readonly _tag: "SelectText" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
   | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
@@ -1942,6 +1943,21 @@ export function engine(render: (root: SnapNode) => string) {
         if (apply && action.guard) arm(element)
         return { ...answer, point, draggable }
       }
+      case "SelectText":
+        if (
+          element instanceof HTMLInputElement &&
+          !["text", "search", "url", "tel", "email", "password"].includes(element.type)
+        ) {
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "an input supporting text selection, a textarea or DOM contents",
+              element: describe(element)
+            }
+          }
+        }
+        break
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
       default:
@@ -1949,6 +1965,21 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (!apply) return answer
     switch (action._tag) {
+      case "SelectText":
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          element.select()
+          element.focus()
+        } else {
+          if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          const selection = getSelection()
+          if (selection !== null) {
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+        }
+        return answer
       case "Focus":
         if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
         return answer

@@ -525,6 +525,7 @@ interface Locator extends ReadonlyLocator {             // queries, chainers and
   check(options?: PointerOptions | undefined): Effect<void, LocatorError>            // confirms it became checked
   uncheck(options?: PointerOptions | undefined): Effect<void, LocatorError>
   focus(options?: ActionOptions | undefined): Effect<void, LocatorError>
+  selectText(options?: ActionOptions | undefined): Effect<void, LocatorError>
   clear(options?: ActionOptions | undefined): Effect<void, LocatorError>
   scrollIntoView(options?: ActionOptions | undefined): Effect<void, LocatorError>    // the toolkit's scroll
   fill(value: string | Redacted<string>, options?: ActionOptions | undefined): Effect<void, LocatorError>
@@ -575,6 +576,13 @@ the deadline, the timeout reports focus preparation in its history. Firefox cann
 document, so filling that input is unsupported; text intended for it can reach the document body instead.
 Strider does not change design mode or synthesize input to work around this browser limitation.
 
+`selectText` waits for one visible match, selects the whole value of a text, search, URL, telephone or password
+input or textarea, or uses a DOM range over another element's contents, and attempts to focus the target.
+It requires owned access, works inside frames, and makes no enabled, editable, inert, viewport, stability or pointer checks. Native focus may scroll.
+Unsupported input types fail with `WrongElement`, even in trial; multiple matches fail with `StrictViolation`.
+Missing or hidden matches wait under the current deadline. `trial: true` leaves focus and selection unchanged;
+`checks: { visible: false }` bypasses visibility. There is no blanket force. Labels select their own contents.
+Focus or selection handlers can change the resulting selection. The action does not insert text or emit input/change events.
 
 - **How a locator finds elements** is CONCEPTS.md §8, Queries: one engine of ours, in each document's utility world, the same on every backend. Text is text content with whitespace collapsed, never `innerText`; `getByText` finds the smallest element that says it; `getByRole` uses the explicit or HTML-AAM implicit role and the accname 1.2 name.
 - **Actionability is the CONCEPTS.md §8 predicate set**, evaluated together in the target document per attempt, with frame bounds read from each parent document. An attempt checks at each animation frame, in the page, for up to a second; when the checks pass, the action takes the page's input permit, checks once more, and dispatches (CONCEPTS.md §5, Actions). At the deadline it fails with `Timeout{phase}`, `waitingForCondition`, or `resolving` when nothing ever matched, whose hint explains the last reason: "Another element covers the element's action point: div.toast "Saved"". Each action documents its checks:

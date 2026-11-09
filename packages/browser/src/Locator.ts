@@ -770,7 +770,7 @@ export interface ReadonlyLocator
  * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `selectOption` checks enabled;
- * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
+ * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
  *
@@ -1286,6 +1286,41 @@ export interface Locator extends ReadonlyLocator {
    * ```
    */
   pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect
+  /**
+   * Selects the matched element's text without changing its contents.
+   *
+   * **Details**
+   *
+   * Waits for one visible match under the current deadline, then selects its entire value for text,
+   * search, URL, telephone, email and password inputs or a textarea. Other elements use a DOM range over
+   * their contents, including nested text. Attempts to focus the target; an unfocusable element
+   * can still have its contents selected. Requires owned access on every backend.
+   *
+   * **Gotchas**
+   *
+   * Other input types fail with `WrongElement`, including during trial. Multiple matches fail with
+   * `StrictViolation`; an absent or hidden match waits until the deadline. Checks only visibility,
+   * with no viewport, pointer hit test, enabled, editable or inert check. Native focus may scroll. Labels select their own
+   * contents, rather than redirecting to a control. `trial: true` checks without focus or selection;
+   * `checks: { visible: false }` skips visibility. There is no blanket force option.
+   * Focus and selection handlers can change the resulting selection; this operation does not lock it.
+   *
+   * **Example** (Selecting a field's text)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const selectName = Effect.fn("selectName")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Name").selectText()
+   * })
+   * ```
+   *
+   * @stability unstable
+   * @since 0.1.0
+   */
+  selectText(options?: ActionOptions | undefined): ActionEffect
+
   /**
    * Chooses options of a `<select>`, by value, label or index. Checks: visible, enabled.
    *

@@ -995,6 +995,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect`
   - `press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect`
   - `pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect`
+  - `selectText(options?: ActionOptions | undefined): ActionEffect`
   - `selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): ActionEffect`
   - `setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: ActionOptions | undefined): ActionEffect`
   - `dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect`
