@@ -144,7 +144,7 @@ describe("Expect received observations", () => {
           ...values.map((value) => ({ delay: 50, value })),
           { delay: 1000, value: late }
         ], expectation)
-        assert.deepStrictEqual(error.history.map((entry) => entry.value), values)
+        assert.deepStrictEqual(error.history.map((entry) => entry.value), [...values])
         assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
         assert.strictEqual(delivered, values.length + 1)
       }))
