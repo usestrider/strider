@@ -279,6 +279,41 @@ export const toHaveAccessibleName: DualMatcher<
 )
 
 /**
+ * Expects the one match's class string to match `expected`, or, given a list, as many matches as the list has entries,
+ * each matching its entry in order.
+ *
+ * **Details**
+ *
+ * Strings compare the whole class string, preserving case, whitespace and class order. Regular expressions
+ * are tested as given. Missing class attributes are empty strings. Scalars retry zero or multiple matches;
+ * an empty array passes when nothing matches. Failures include the observed class strings or match count.
+ *
+ * **Example** (Checking item classes in order)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cartItems = Effect.fn("cartItems")(function*(page: Page.ReadonlyPage) {
+ *   const items = page.getByRole("list", { name: "Cart" }).getByRole("listitem")
+ *   yield* items.pipe(Expect.toHaveClass(["selected", /^pending/]))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveClass: DualMatcher<
+  Locator.ReadonlyLocator,
+  [expected: string | RegExp | ReadonlyArray<string | RegExp>]
+> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) =>
+    ExpectImpl.toHaveClass(locator, expected)
+)
+
+/**
  * Expects the text of the one match to contain `expected`. A string is matched case-sensitively, after whitespace
  * is collapsed.
  *

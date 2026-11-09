@@ -20,7 +20,7 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. Actions without a stability check still await a rendering update.
+ *   the action point. The rendered check independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -77,6 +77,7 @@ export type Step =
 
 /** Which actionability checks an action runs. */
 export interface Checks {
+  readonly rendered: boolean
   readonly visible: boolean
   readonly enabled: boolean
   readonly editable: boolean
@@ -155,6 +156,8 @@ export type Expectation =
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The raw class string of one match, or each match in order. */
+  | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -279,6 +282,8 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
+  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
+  | { readonly op: "fillDisarm" }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
@@ -347,7 +352,7 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -356,12 +361,18 @@ export const Response = Schema.Union([
     scrolled: Schema.Boolean,
     /**
      * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included.
+     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
+     * wait is reported even without a frame, since no rendering hint will replace it.
      */
     checked: Schema.Boolean
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("FillGuard", {
+    blocked: Schema.NullOr(Schema.String),
+    unsafe: Schema.Boolean,
+    accepted: Schema.Boolean
+  }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("Expected", {
@@ -1786,6 +1797,104 @@ export function engine(render: (root: SnapNode) => string) {
     guard = current
   }
 
+  // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
+  // form control after selection, so validate at the cancellable native event, before its default mutation.
+  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
+  const fillDisarm = () => {
+    const current = fillGuard
+    fillGuard = null
+    current?.remove()
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current?.blocked ?? null,
+      unsafe: current?.unsafe ?? false,
+      accepted: current?.accepted ?? false
+    }
+  }
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
+    fillDisarm()
+    const matches = resolve(steps)
+    const element = matches.length === 1 ? matches[0]! : null
+    const types = ["keydown", "keypress", "keyup", "beforeinput"]
+    const current = {
+      remove: () => {
+        for (const type of types) removeEventListener(type, handler, true)
+      },
+      blocked: null as string | null,
+      unsafe: false,
+      accepted: false,
+      inserting: false
+    }
+    const blocker = (): string | null => {
+      // Ancestors should receive no insertion event: correct input reaches the target document instead.
+      if (ancestor) return null
+      const active = deepActive()
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return describe(active)
+      const selection = getSelection()
+      if (element === null || !element.isConnected || selection?.rangeCount !== 1) {
+        return "the selection left the target"
+      }
+      const selected = selection.getRangeAt(0)
+      if (current.inserting && element.contains(selected.startContainer) && element.contains(selected.endContainer)) {
+        return null
+      }
+      // WebKit canonicalizes element-edge ranges to text-node edges. Ascend equivalent edges rather
+      // than treating those native representations as different selections.
+      const atEdge = (node: Node, offset: number, end: boolean): boolean => {
+        while (node !== element) {
+          const length = node instanceof CharacterData ? node.length : node.childNodes.length
+          if (offset !== (end ? length : 0) || node.parentNode === null) return false
+          const parent = node.parentNode
+          offset = Array.prototype.indexOf.call(parent.childNodes, node) + (end ? 1 : 0)
+          node = parent
+        }
+        return offset === (end ? element.childNodes.length : 0)
+      }
+      return atEdge(selected.startContainer, selected.startOffset, false) &&
+          atEdge(selected.endContainer, selected.endOffset, true)
+        ? null :
+        "the selection left the target"
+    }
+    const handler = (event: Event) => {
+      if (!event.isTrusted || (event.type === "keyup" && current.blocked === null)) return
+      const recipient = event.composedPath()[0]
+      const elsewhere = ancestor ?
+        (recipient instanceof Element ? describe(recipient) : "another document")
+        : recipient instanceof Element && element !== null &&
+            !composedContains(recipient, element) && !composedContains(element, recipient)
+        ? describe(recipient) :
+        null
+      const blocked = current.blocked ?? elsewhere ?? blocker()
+      if (blocked === null) {
+        current.accepted = true
+        if (event.type === "beforeinput") current.inserting = true
+        return
+      }
+      // Cancellation must be confirmed locally; the host also combines accepted input across documents.
+      if (current.blocked === null && !event.cancelable) current.unsafe = true
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.defaultPrevented) current.blocked = blocked
+    }
+    if (ancestor) {
+      if (!(element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement)) {
+        current.blocked = "the frame no longer matches"
+      } else {
+        const active = deepActive()
+        if (active !== element) {
+          current.blocked = active === null ? "another document" : describe(active)
+          element.focus()
+        }
+      }
+    }
+    current.blocked ??= blocker()
+    // A preparation blocker sends no native input. Recheck through the ordinary action loop after focusing the frame,
+    // whose handlers may replace the target or change readiness, before installing an insertion guard.
+    if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
+    fillGuard = current
+    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+  }
+
   // ── Actions ──
 
   let stabilitySequence = 0
@@ -1821,15 +1930,30 @@ export function engine(render: (root: SnapNode) => string) {
     const action = request.action
     while (true) {
       const left = end - now()
-      if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+      if (left <= 0) {
+        return {
+          _tag: "NotReady",
+          reason: last,
+          history,
+          scrolled,
+          checked: history.length > 0 || (!request.checks.rendered && sampled)
+        }
+      }
       // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
       // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
-      // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
-      if (sampled || !(request.checks.stable > 0)) {
+      // input permit. Without stability, only the rendered check waits before checking current layout.
+      // Retry waits remain frame-based even when rendered is disabled.
+      if (sampled || (request.checks.rendered && !(request.checks.stable > 0))) {
         if (!(await nextFrame(left))) {
           // A round the deadline cut too short for any page to render says nothing about rendering
-          if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-          return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+          if (request.checks.rendered && frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+          return {
+            _tag: "NotReady",
+            reason: last,
+            history,
+            scrolled,
+            checked: history.length > 0 || (!request.checks.rendered && sampled)
+          }
         }
         frames++
       }
@@ -1978,7 +2102,7 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | null
+      fill: null as "type" | "set" | "guarded" | null
     }
     switch (action._tag) {
       case "Point": {
@@ -2069,7 +2193,13 @@ export function engine(render: (root: SnapNode) => string) {
         if (checks.editable && !editableKind(element)) {
           return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-        return recheckFill() ?? { ...answer, fill: "type" }
+        return recheckFill() ?? {
+          ...answer,
+          fill: document.designMode === "on" &&
+              !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) ?
+            "guarded" :
+            "type"
+        }
       }
       case "Select": {
         const select = element as HTMLSelectElement
@@ -2138,6 +2268,9 @@ export function engine(render: (root: SnapNode) => string) {
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
+  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
     clearTreeCaches()
@@ -2171,6 +2304,18 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      case "Class": {
+        const texts = found.map((element) => element.classList.toString())
+        if (expectation.list) {
+          return {
+            passed: texts.length === expectation.expected.length &&
+              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+            observed: texts
+          }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
@@ -2873,6 +3018,10 @@ export function engine(render: (root: SnapNode) => string) {
         }
         case "act":
           return JSON.stringify(await act(request))
+        case "fillGuard":
+          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
+        case "fillDisarm":
+          return JSON.stringify(fillDisarm() satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":

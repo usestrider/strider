@@ -373,6 +373,8 @@ export interface NavigationEntry {
 }
 
 export interface Model {
+  /** Owns background cleanup until the connection ends. */
+  readonly scope: Scope.Scope
   /** The adapter, its calls bounded by the operation they run in (`boundedAdapter.ts`). */
   readonly adapter: BoundedAdapter.Bounded
 
@@ -470,6 +472,7 @@ export const make = Effect.fnUntraced(function*() {
           return Option.isNone(entry) ? Effect.void : ownership.release(entry.value, by)
         })
       const model: Model = {
+        scope: modelScope,
         adapter: bounded,
         pages: fold.pages,
         page: fold.page,

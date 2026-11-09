@@ -828,7 +828,12 @@ export interface ReadonlyLocator
  *
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
- * how many.
+ * how many. `rendered` defaults on for pointer actions and off for the rest. With it off, checks run against
+ * current layout immediately, including the check just before input; retry waits and stability samples still
+ * follow rendering frames. Stability starts from the current rectangle and supplies its own rendering updates;
+ * enabling `rendered` adds no frame to that observation window. Actions with `rendered` disabled do not report
+ * the no-frame timeout hint. A drawn frame does not guarantee hydration: wait for application readiness before filling a server-rendered input that hydration
+ * could reset, or enable `rendered` for that call when a frame is sufficient.
  *
  * An action needs its element reachable; visible means a person can see it. Actions accept `opacity: 0` on
  * the element or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits,
@@ -858,6 +863,12 @@ export interface ReadonlyLocator
  * @since 0.1.0
  */
 export interface Checks {
+  /**
+   * Wait for a drawn frame before checking the target, independently of stability sampling.
+   *
+   * @default true for pointer actions; false for other actions
+   */
+  readonly rendered?: boolean | undefined
   readonly visible?: boolean | undefined
   readonly enabled?: boolean | undefined
   readonly editable?: boolean | undefined
@@ -1150,6 +1161,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("button", { name: "Add to cart" }).click()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   click(options?: ClickOptions | undefined): ActionEffect
   /**
@@ -1166,6 +1179,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("row", { name: "invoice-1042.pdf" }).dblclick()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   dblclick(options?: ClickOptions | undefined): ActionEffect
   /**
@@ -1187,6 +1202,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("button", { name: "Menu" }).tap()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   tap(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -1209,6 +1226,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("menuitem", { name: "Sign out" }).click()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   hover(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -1249,6 +1268,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("checkbox", { name: "I accept the terms" }).check()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   check(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -1292,6 +1313,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByLabel("Email me offers").uncheck()
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   uncheck(options?: PointerOptions | undefined): ActionEffect
   /**
@@ -1307,6 +1330,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("searchbox").focus()
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   focus(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -1353,6 +1378,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByLabel("Coupon code").clear()
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   clear(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -1368,6 +1395,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("contentinfo").scrollIntoView()
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   scrollIntoView(options?: ActionOptions | undefined): ActionEffect
   /**
@@ -1409,6 +1438,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByLabel("Delivery date").fill("2026-12-24")
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect
   /**
@@ -1430,6 +1461,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("searchbox").press("Enter")
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect
   /**
@@ -1454,6 +1487,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByRole("option", { name: "Lisbon, Portugal" }).click()
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect
   /**
@@ -1488,6 +1523,7 @@ export interface Locator extends ReadonlyLocator {
    * })
    * ```
    *
+   * @default checks.rendered: false; check current layout immediately
    * @stability unstable
    * @since 0.1.0
    */
@@ -1512,6 +1548,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
@@ -1540,6 +1578,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* page.getByLabel("Receipt").setInputFiles(FileInput.local("./receipt.pdf"))
    * })
    * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
    */
   setInputFiles(
     files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>,
@@ -1547,7 +1587,7 @@ export interface Locator extends ReadonlyLocator {
   ): ActionEffect
   /**
    * Drags the one match onto `target`, with the same checks and guard as `click`. The target's checks are
-   * visible, enabled, notInert and inViewport.
+   * visible, enabled, notInert and inViewport. The rendered override applies to both endpoints.
    *
    * **Details**
    *
@@ -1578,6 +1618,8 @@ export interface Locator extends ReadonlyLocator {
    *   yield* card.dragTo(page.getByRole("list", { name: "Shipped" }))
    * })
    * ```
+   *
+   * @default checks.rendered: true; wait for a drawn frame
    */
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect
 }
