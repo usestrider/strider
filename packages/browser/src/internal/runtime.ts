@@ -734,6 +734,28 @@ export const sendCooperative = <E, R>(
             hint: "The cooperative timeout evidence is unavailable after deadline cleanup"
           })
         })
+        // Disposal alone is not evidence of navigation: compare the target and its whole ancestor route.
+        const unchangedRoute = Effect.gen(function*() {
+          const top = yield* openState(page, id)
+          const again = yield* route(
+            runtime,
+            top.document.id,
+            split(request.steps ?? []).frames,
+            request.op === "act",
+            id,
+            request.steps ?? []
+          )
+          if (
+            Option.isNone(again) || again.value._tag === "Answer" || again.value._tag !== routed._tag ||
+            again.value.routed.document !== destination.document ||
+            again.value.routed.hops.length !== destination.hops.length ||
+            again.value.routed.hops.some((hop, index) =>
+              hop.document !== destination.hops[index]!.document ||
+              hop.frame !== destination.hops[index]!.frame
+            )
+          ) return Option.none()
+          return Option.some(again.value)
+        })
         const drive = Effect.gen(function*() {
           const budget = yield* BrowserClock.left(at)
           const current = retarget(
@@ -755,7 +777,10 @@ export const sendCooperative = <E, R>(
               completed = true
               return Option.some({ _tag: "Restart" } as const)
             }
+            if (response._tag === "Departed") return Option.none()
             if (response._tag === "Disposed") {
+              if (Option.isNone(yield* unchangedRoute)) return Option.none()
+
               return yield* Effect.fail<SendFailure>({
                 _tag: "Reason",
                 reason: new Reason.BackendFailure({
@@ -773,25 +798,8 @@ export const sendCooperative = <E, R>(
               reply = yield* command({ command: "resume", token: response.token, left, decision })
               continue
             }
-            // The target (including every ancestor document) may have navigated while trigger probes/callbacks ran.
-            const top = yield* openState(page, id)
-            const again = yield* route(
-              runtime,
-              top.document.id,
-              split(request.steps ?? []).frames,
-              request.op === "act",
-              id,
-              request.steps ?? []
-            )
-            if (
-              Option.isNone(again) || again.value._tag !== routed._tag ||
-              again.value.routed.document !== destination.document ||
-              again.value.routed.hops.length !== destination.hops.length ||
-              again.value.routed.hops.some((hop, index) =>
-                hop.document !== destination.hops[index]!.document ||
-                hop.frame !== destination.hops[index]!.frame
-              )
-            ) return Option.none()
+            const again = yield* unchangedRoute
+            if (Option.isNone(again)) return Option.none()
             // A handler invalidates viewport coordinates as well as samples and resolved elements.
             if (decision === "invalidate") {
               prepared = yield* prepareRound(runtime, page, request, again.value, id)

@@ -3122,6 +3122,7 @@ export const CooperativeResponse = Schema.Union([
   Schema.TaggedStruct("Check", { token: Schema.String, final: Schema.Boolean }),
   Schema.TaggedStruct("Done", { response: Response, retained: Schema.optional(Schema.Boolean) }),
   Schema.TaggedStruct("Restart", {}),
+  Schema.TaggedStruct("Departed", {}),
   Schema.TaggedStruct("Disposed", {})
 ])
 export type CooperativeResponse = typeof CooperativeResponse.Type
@@ -3147,6 +3148,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     terminal: Response | undefined
     changed: boolean
     disposed: boolean
+    departed: boolean
     timer: number
     stopWaiting: (() => void) | undefined
     expireEvidence: (() => void) | undefined
@@ -3226,7 +3228,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     lifecycle()
   }
   const navigated = () => {
-    for (const session of sessions.values()) remove(session)
+    for (const session of sessions.values()) {
+      session.departed = true
+      remove(session)
+    }
     terminals.clear()
     terminalBytes = 0
     sweepTerminals()
@@ -3256,7 +3261,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
   }
   const stopped = (session: Session): CooperativeResponse =>
     session.terminal === undefined
-      ? disposed
+      ? session.departed ? { _tag: "Departed" } : disposed
       : { _tag: "Done", response: session.terminal, retained: terminals.has(session.session) }
   // A cooperative wait only announces that another check is due. It never evaluates/asserts/applies DOM.
   const wait = (session: Session, mutations: boolean): Promise<boolean> =>
@@ -3306,6 +3311,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         terminal: undefined,
         changed: false,
         disposed: false,
+        departed: false,
         timer: 0,
         stopWaiting: undefined,
         expireEvidence: undefined

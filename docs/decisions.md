@@ -1372,7 +1372,9 @@ the host before checking; callbacks invalidate samples and final checks can rest
 own and dispose their timers, observers and DOM references on every exit. Expired answers are serialized separately
 for single-use delivery, bounded by 64 entries, one MiB of estimated UTF-16 string storage and a 30-second retention
 period; cancellation, consumption and navigation clear them earlier. The host reports unavailable evidence rather
-than silently restarting after eviction. A bounded read-only finish handoff can collect timeout evidence after the
+than silently restarting after eviction on the same document. An in-flight wait reports departure separately from disposal; no departure cache is retained. Otherwise,
+disposal triggers rerouting only when resolving the target and ancestor chain proves movement, always under
+the original deadline. A bounded read-only finish handoff can collect timeout evidence after the
 operation deadline without applying anything. Rejected: retaining live sessions for delivery, which keeps DOM state
 and wait resources alive, and discarding an expired answer immediately, which loses observations while the host
 holds the continuation. Ordinary loops have no handler branches or continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing

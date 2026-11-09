@@ -227,6 +227,54 @@ describe("cooperative runtime", () => {
       }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }))
 
+  it.effect("reroutes an explicit departure before the host receives the document commit", () =>
+    Effect.gen(function*() {
+      const { layer, commands } = scenario([{ _tag: "Departed" }])
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const answer = yield* run(owner, () => Effect.succeed("continue" as const))
+        assert(!("_tag" in answer))
+        assert.deepStrictEqual(commands.map((command) => command.command), [
+          "start",
+          "resume",
+          "cancel",
+          "start",
+          "resume"
+        ])
+        assert.strictEqual(commands[0]!.operation, commands[3]!.operation)
+        assert.notStrictEqual(commands[0]!.session, commands[3]!.session)
+      }).pipe(Effect.scoped, Effect.provide(layer))
+    }))
+
+  it.effect("does not replay a disposed applying action on the same document", () =>
+    Effect.gen(function*() {
+      const { layer, commands } = scenario([{ _tag: "Disposed" }])
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const failure = yield* run(owner, () => Effect.succeed("continue" as const), {
+          op: "act",
+          steps: request.steps!,
+          cap: 1000,
+          apply: true,
+          action: { _tag: "Focus" },
+          checks: {
+            rendered: false,
+            visible: true,
+            enabled: true,
+            editable: false,
+            notInert: true,
+            inViewport: false,
+            stable: 0,
+            receivesPointer: false
+          }
+        }).pipe(Effect.flip)
+        assert.strictEqual(failure._tag, "Reason")
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume", "cancel"])
+      }).pipe(Effect.scoped, Effect.provide(layer))
+    }))
+
   it.effect("collects failed observations after the absolute deadline without checking again", () =>
     Effect.gen(function*() {
       const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))

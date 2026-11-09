@@ -365,11 +365,15 @@ export const engine = (backend: Backend) =>
               await command({ command: "cancel" })
               const canceled = await pending
               const second = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const departing = command({ command: "resume", token: second.token, left: 2000, decision: "continue" })
               dispatchEvent(new Event("pagehide"))
+              const departed = await departing
               const afterNavigation = await command({ command: "resume", token: second.token, left: 2000, decision: "continue" })
-              return JSON.stringify({ wrongDocument, foreign, replay, canceled, afterNavigation })
+              return JSON.stringify({ wrongDocument, foreign, replay, canceled, afterNavigation, departed })
             `
             )
+            assert.strictEqual(result.departed._tag, "Departed")
+            delete result.departed
             for (const response of Object.values(result)) {
               assert.strictEqual((response as { _tag: string })._tag, "Disposed")
             }
