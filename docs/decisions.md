@@ -1392,6 +1392,15 @@ those hide browser differences and make the library define DOM behavior. Missing
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
 
+## Retrying CSS assertion cardinality
+
+CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.
+A transient duplicate during a render should settle under the same deadline as a transient wrong style; negating
+the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
+single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
+transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
+the value, which could pass without observing the requested element.
+
 ## Extra request header ownership
 
 Extra request headers use the existing scoped override registry and native protocol header commands. Each
@@ -1401,3 +1410,13 @@ context headers. This matches BiDi's native header merging and Playwright's cont
 whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
+
+## Context HTTP credentials
+
+Context HTTP credentials supply one default pair with an optional origin restriction; auth routes select different
+pairs for different origins. Keeping origin-specific selection in routes avoids a second routing table and keeps
+page and context route precedence explicit. User auth routes run before the configured pair, and automatic
+submission is bounded to one attempt across a native request and its whole redirect chain, including changes of origin,
+so rejection cannot create an unbounded challenge loop.
+The alternative of an ordered credential array is left to auth routes, which already express that selection.
+Optional interception follows [Pay for what you use](#pay-for-what-you-use).

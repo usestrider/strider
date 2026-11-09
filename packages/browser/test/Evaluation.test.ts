@@ -73,6 +73,32 @@ describe("Evaluation dispatch evidence", () => {
       }).pipe(Operation.named("Locator.evaluate")))
   }
 
+  it.effect("does not replay a possibly applied caller function when its realm ends", () =>
+    Effect.gen(function*() {
+      const record = yield* Operation.record
+      let calls = 0
+      const error = yield* Evaluation.call(
+        runtime(() =>
+          Effect.suspend(() => {
+            calls++
+            return Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          })
+        ),
+        { ...options(record, true), functionDeclaration: "() => { globalThis.applied = true }" }
+      ).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "Gone")
+      assert.strictEqual(calls, 1)
+      assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+    }).pipe(Operation.named("Locator.evaluate")))
+
   it.effect("does not use a read evaluation to confirm an earlier uncertain write", () =>
     Effect.gen(function*() {
       const record = yield* Operation.record
