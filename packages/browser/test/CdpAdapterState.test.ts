@@ -125,6 +125,31 @@ describe("CDP click cleanup", () => {
       assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
       assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
     }).pipe(Effect.scoped))
+
+  it.effect("doesn't release again when interruption arrives after the release was written", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>) =>
+          Effect.suspend(() => {
+            calls++
+            sent.push(...commands.map((command) => command.params.type))
+            // The release has been written; cancellation arrives while its reply is outstanding.
+            return calls === 2 ? Effect.interrupt : Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const exit = yield* CdpInput.dispatchInput(
+        state,
+        page.id,
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
+      ).pipe(Effect.exit)
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }).pipe(Effect.scoped))
 })
 
 // ── A redirect's headers ──
