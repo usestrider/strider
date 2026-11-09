@@ -3114,12 +3114,13 @@ export type CooperativeCommand =
       readonly clip?: Clip
     }
     | { readonly command: "cancel" }
+    | { readonly command: "finish" }
   )
 
 /** The ordinary response is nested so cooperative control messages cannot reach ordinary callers. */
 export const CooperativeResponse = Schema.Union([
   Schema.TaggedStruct("Check", { token: Schema.String, final: Schema.Boolean }),
-  Schema.TaggedStruct("Done", { response: Response }),
+  Schema.TaggedStruct("Done", { response: Response, retained: Schema.optional(Schema.Boolean) }),
   Schema.TaggedStruct("Restart", {}),
   Schema.TaggedStruct("Disposed", {})
 ])
@@ -3150,10 +3151,69 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     stopWaiting: (() => void) | undefined
     expireEvidence: (() => void) | undefined
   }
+  interface Terminal {
+    readonly document: string
+    readonly operation: string
+    readonly token: string | undefined
+    readonly text: string
+    readonly expires: number
+    readonly bytes: number
+  }
   const sessions = new Map<string, Session>()
+  // Only serialized data survives expiry. Count, UTF-16 storage and age are independently bounded.
+  const terminals = new Map<string, Terminal>()
+  const terminalLimit = 64
+  const terminalByteLimit = 1024 * 1024
+  const terminalRetention = 30_000
+  let terminalBytes = 0
+  let terminalTimer: number | undefined
+  let listening = false
   let sequence = 0
   const epoch = Math.random().toString(36).slice(2)
   const disposed = { _tag: "Disposed" } as const
+  const lifecycle = () => {
+    const needed = sessions.size > 0 || terminals.size > 0
+    if (needed && !listening) addEventListener("pagehide", navigated)
+    else if (!needed && listening) removeEventListener("pagehide", navigated)
+    listening = needed
+  }
+  const forgetTerminal = (key: string) => {
+    const terminal = terminals.get(key)
+    if (terminal === undefined) return
+    terminalBytes -= terminal.bytes
+    terminals.delete(key)
+  }
+  const sweepTerminals = () => {
+    if (terminalTimer !== undefined) clearTimer(terminalTimer)
+    terminalTimer = undefined
+    let next = Infinity
+    const time = now()
+    for (const [key, terminal] of terminals) {
+      if (terminal.expires <= time) forgetTerminal(key)
+      else next = Math.min(next, terminal.expires)
+    }
+    if (next !== Infinity) terminalTimer = setTimer(sweepTerminals, Math.max(0, next - now()))
+    lifecycle()
+  }
+  const retainTerminal = (session: Session, response: Response, token: string | undefined) => {
+    const text = JSON.stringify(response)
+    const bytes = 2 * (text.length + session.session.length + session.document.length +
+      session.operation.length + (token?.length ?? 0))
+    if (bytes > terminalByteLimit) return
+    while (terminals.size >= terminalLimit || terminalBytes + bytes > terminalByteLimit) {
+      forgetTerminal(terminals.keys().next().value!)
+    }
+    terminals.set(session.session, {
+      document: session.document,
+      operation: session.operation,
+      token,
+      text,
+      expires: now() + terminalRetention,
+      bytes
+    })
+    terminalBytes += bytes
+    sweepTerminals()
+  }
   const remove = (session: Session) => {
     if (session.disposed) return
     session.disposed = true
@@ -3163,10 +3223,13 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     session.stopWaiting?.()
     session.expireEvidence?.()
     session.state = undefined
-    if (sessions.size === 0) removeEventListener("pagehide", navigated)
+    lifecycle()
   }
   const navigated = () => {
     for (const session of sessions.values()) remove(session)
+    terminals.clear()
+    terminalBytes = 0
+    sweepTerminals()
   }
   const check = (session: Session): CooperativeResponse => {
     if (session.disposed) return disposed
@@ -3187,12 +3250,14 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     session.terminal = session.request.op === "act" && session.stopWaiting !== undefined
       ? helpers.actionFrameTimeout(session.request, session.state!)
       : timeoutResponse(session)
+    const token = session.token
     remove(session)
+    retainTerminal(session, session.terminal, token)
   }
   const stopped = (session: Session): CooperativeResponse =>
     session.terminal === undefined
       ? disposed
-      : { _tag: "Done", response: session.terminal }
+      : { _tag: "Done", response: session.terminal, retained: terminals.has(session.session) }
   // A cooperative wait only announces that another check is due. It never evaluates/asserts/applies DOM.
   const wait = (session: Session, mutations: boolean): Promise<boolean> =>
     new Promise((resume) => {
@@ -3222,8 +3287,9 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       }
     })
   const run = async (command: CooperativeCommand): Promise<CooperativeResponse> => {
+    sweepTerminals()
     if (command.command === "start") {
-      if (sessions.has(command.session)) return disposed
+      if (sessions.has(command.session) || terminals.has(command.session)) return disposed
       if (!Number.isFinite(command.budget) || command.budget <= 0 || !Number.isFinite(command.request.cap)) {
         return disposed
       }
@@ -3244,8 +3310,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         stopWaiting: undefined,
         expireEvidence: undefined
       }
-      if (sessions.size === 0) addEventListener("pagehide", navigated)
       sessions.set(session.session, session)
+      lifecycle()
       session.timer = setTimer(() => expire(session), Math.max(0, session.end - now()))
       // Captured final-check evidence expires at the next rendering update, even while the host probes.
       if (session.state?.previous !== null && session.state !== undefined) {
@@ -3259,6 +3325,24 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       }
       return check(session)
     }
+    const terminal = terminals.get(command.session)
+    if (terminal !== undefined) {
+      if (terminal.document !== command.document || terminal.operation !== command.operation) return disposed
+      if (command.command === "cancel") {
+        forgetTerminal(command.session)
+        sweepTerminals()
+        return disposed
+      }
+      if (
+        command.command === "resume" &&
+        (terminal.token === undefined || typeof command.token !== "string" || command.token !== terminal.token)
+      ) return disposed
+      forgetTerminal(command.session)
+      sweepTerminals()
+      return command.command === "finish" || Number.isFinite(command.left)
+        ? { _tag: "Done", response: JSON.parse(terminal.text) as Response }
+        : disposed
+    }
     const session = sessions.get(command.session)
     if (session === undefined || session.document !== command.document || session.operation !== command.operation) {
       return disposed
@@ -3267,6 +3351,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       remove(session)
       return disposed
     }
+    // Finishing only returns timeout evidence; it never authorizes a check or application.
+    if (command.command === "finish") return expired(session)
     if (session.token === undefined || session.token !== command.token) return disposed
     // Consume before any await. Concurrent/replayed resumes cannot evaluate the same check twice.
     session.token = undefined

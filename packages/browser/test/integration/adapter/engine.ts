@@ -442,11 +442,20 @@ export const engine = (backend: Backend) =>
               }
               const token = await expired("consume")
               const retained = resources()
+              const foreignFinish = await command({ command: "finish", session: "consume", operation: "other" })
               const foreign = await command({ command: "resume", session: "consume", operation: "other", token, left: 0, decision: "continue" })
               const wrongDocument = await command({ command: "resume", session: "consume", document: "other", token, left: 0, decision: "continue" })
               const consumed = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
               const replay = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
               const afterConsumption = resources()
+              document.querySelector('#go').textContent = "actual"
+              const waiting = await command({ command: "start", session: "pending", budget: 100, request })
+              const pending = command({ command: "resume", session: "pending", token: waiting.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              const stopped = await pending
+              const finished = await command({ command: "finish", session: "pending" })
+              const finishedReplay = await command({ command: "resume", session: "pending", token: waiting.token, left: 0, decision: "continue" })
+              const afterFinish = resources()
               const canceledToken = await expired("cancel")
               await command({ command: "cancel", session: "cancel" })
               const canceled = await command({ command: "resume", session: "cancel", token: canceledToken, left: 0, decision: "continue" })
@@ -459,18 +468,31 @@ export const engine = (backend: Backend) =>
               globalThis.engineTestAdvance(30000)
               const afterRetention = resources()
               const abandoned = await command({ command: "resume", session: "abandon", token: abandonedToken, left: 0, decision: "continue" })
-              return JSON.stringify({ retained, foreign, wrongDocument, consumed, replay, afterConsumption,
-                canceled, afterCancel, departed, afterDeparture, abandoned, afterRetention })
+              return JSON.stringify({ retained, foreignFinish, foreign, wrongDocument, consumed, replay, afterConsumption,
+                stopped, finished, finishedReplay, afterFinish, canceled, afterCancel, departed, afterDeparture, abandoned, afterRetention })
             `
             )
             assert.deepStrictEqual(result.retained, [1, 0, 0, 1])
             assert.strictEqual(result.consumed._tag, "Done")
             assert.strictEqual(result.consumed.response.observed, "actual")
             assert.isFalse(result.consumed.response.passed)
-            for (const key of ["foreign", "wrongDocument", "replay", "canceled", "departed", "abandoned"]) {
+            assert.isTrue(result.stopped.retained)
+            assert.strictEqual(result.finished.response.observed, "actual")
+            for (
+              const key of [
+                "foreignFinish",
+                "foreign",
+                "wrongDocument",
+                "replay",
+                "finishedReplay",
+                "canceled",
+                "departed",
+                "abandoned"
+              ]
+            ) {
               assert.strictEqual(result[key]._tag, "Disposed", key)
             }
-            for (const key of ["afterConsumption", "afterCancel", "afterDeparture", "afterRetention"]) {
+            for (const key of ["afterConsumption", "afterFinish", "afterCancel", "afterDeparture", "afterRetention"]) {
               assert.deepStrictEqual(result[key], [0, 0, 0, 0], key)
             }
           }), timeout)
@@ -502,13 +524,19 @@ export const engine = (backend: Backend) =>
               }
               const evicted = await command({ command: "resume", session: "size-0", token: large[0], left: 0, decision: "continue" })
               const kept = await command({ command: "resume", session: "size-1", token: large[1], left: 0, decision: "continue" })
-              return JSON.stringify({ oldest, newest, evicted, keptTag: kept._tag, observedLength: kept.response?.observed.length,
+              document.title = "x".repeat(600000)
+              let oversized = await command({ command: "start", session: "oversized", budget: 100, request })
+              oversized = await command({ command: "resume", session: "oversized", token: oversized.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              oversized = await command({ command: "resume", session: "oversized", token: oversized.token, left: 0, decision: "continue" })
+              return JSON.stringify({ oldest, newest, evicted, oversized, keptTag: kept._tag, observedLength: kept.response?.observed.length,
                 resources: Object.values(globalThis.engineTestResources).map((set) => set.size) })
             `
             )
             assert.strictEqual(result.oldest._tag, "Disposed")
             assert.strictEqual(result.newest._tag, "Done")
             assert.strictEqual(result.evicted._tag, "Disposed")
+            assert.strictEqual(result.oversized._tag, "Disposed")
             assert.strictEqual(result.keptTag, "Done")
             assert.strictEqual(result.observedLength, 300000)
             assert.deepStrictEqual(result.resources, [0, 0, 0, 0])

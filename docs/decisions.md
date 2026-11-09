@@ -1369,8 +1369,13 @@ always-on preparation for optional features: unused capabilities must not slow e
 Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
 and evaluation helpers, following [Pay for what you use](#pay-for-what-you-use). Single-use continuations yield to
 the host before checking; callbacks invalidate samples and final checks can restart before application. Sessions
-own and dispose their timers, observers and references on every exit. Ordinary loops have no handler branches or
-continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing
+own and dispose their timers, observers and DOM references on every exit. Expired answers are serialized separately
+for single-use delivery, bounded by 64 entries, one MiB of estimated UTF-16 string storage and a 30-second retention
+period; cancellation, consumption and navigation clear them earlier. The host reports unavailable evidence rather
+than silently restarting after eviction. A bounded read-only finish handoff can collect timeout evidence after the
+operation deadline without applying anything. Rejected: retaining live sessions for delivery, which keeps DOM state
+and wait resources alive, and discarding an expired answer immediately, which loses observations while the host
+holds the continuation. Ordinary loops have no handler branches or continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing
 an observer against an already-running check, which cannot prevent that check from passing or applying; and
 always-on hooks in ordinary loops, which charge unused contexts for the feature. Cross-frame host probes remain
 sequential observations, not an atomic browser snapshot.

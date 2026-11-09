@@ -676,13 +676,15 @@ export const sendCooperative = <E, R>(
               Engine.cooperate,
               Effect.gen(function*() {
                 // Compute after cold engine setup, immediately before the wire call, not before routing/probing.
-                const remaining = value.command === "cancel" ? undefined : yield* BrowserClock.left(at)
+                const remaining = value.command === "start" || value.command === "resume"
+                  ? yield* BrowserClock.left(at) :
+                  undefined
                 return JSON.stringify({
                   ...value,
                   ...(value.command === "start" ?
-                    { budget: remaining } :
+                    { budget: Math.min(value.budget, remaining!) } :
                     value.command === "resume"
-                    ? { left: remaining }
+                    ? { left: Math.min(value.left, remaining!) }
                     : {}),
                   document: destination.document,
                   operation: id,
@@ -710,6 +712,28 @@ export const sendCooperative = <E, R>(
               )
             }
           )
+        // Evidence collection/acknowledgement is bounded cleanup, never another readiness check.
+        const cleanupCommand = (value: Payload<Engine.CooperativeCommand>) =>
+          command(value).pipe(
+            Operation.detached,
+            Deadline.within("250 millis"),
+            Effect.catch(() => Effect.succeed(Option.none<Engine.CooperativeResponse>()))
+          )
+        const timedOut = Effect.fnUntraced(function*(): Effect.fn.Return<Option.Option<Answer>, SendFailure> {
+          const answer = yield* cleanupCommand({ command: "finish" })
+          if (Option.isSome(answer) && answer.value._tag === "Done") {
+            const response = answer.value.response
+            // An interrupted hook must never turn the triggering operation into a success.
+            if (response._tag === "NotReady" || response._tag === "Expected" && !response.passed) {
+              completed = true
+              return Option.some({ response, routed: destination })
+            }
+          }
+          return yield* Effect.fail<SendFailure>({
+            _tag: "Deadline",
+            hint: "The cooperative timeout evidence is unavailable after deadline cleanup"
+          })
+        })
         const drive = Effect.gen(function*() {
           const budget = yield* BrowserClock.left(at)
           const current = retarget(
@@ -723,6 +747,7 @@ export const sendCooperative = <E, R>(
           while (Option.isSome(reply)) {
             const response = reply.value
             if (response._tag === "Done") {
+              if (response.retained === true) yield* cleanupCommand({ command: "cancel" })
               completed = true
               return Option.some({ response: response.response, routed: destination })
             }
@@ -730,14 +755,23 @@ export const sendCooperative = <E, R>(
               completed = true
               return Option.some({ _tag: "Restart" } as const)
             }
-            if (response._tag === "Disposed") return Option.none()
+            if (response._tag === "Disposed") {
+              return yield* Effect.fail<SendFailure>({
+                _tag: "Reason",
+                reason: new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: "engine.cooperative",
+                  hint:
+                    "The cooperative continuation answer is unavailable (disposed or evicted); the round was not restarted"
+                })
+              })
+            }
             const decision = yield* beforeCheck(destination, response.final)
             const left = yield* BrowserClock.left(at)
-            if (left <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
+            if (left <= 0) return "Expired" as const
             if (decision === "restart") {
-              const stopped = yield* command({ command: "resume", token: response.token, left, decision })
-              completed = Option.isSome(stopped) && stopped.value._tag === "Restart"
-              return Option.some({ _tag: "Restart" } as const)
+              reply = yield* command({ command: "resume", token: response.token, left, decision })
+              continue
             }
             // The target (including every ancestor document) may have navigated while trigger probes/callbacks ran.
             const top = yield* openState(page, id)
@@ -775,20 +809,17 @@ export const sendCooperative = <E, R>(
           return Option.none()
         })
         return yield* drive.pipe(
+          BrowserClock.until(at),
+          Effect.flatMap((answer) =>
+            Option.isNone(answer) || answer.value === "Expired"
+              ? timedOut() :
+              Effect.succeed(answer.value)
+          ),
           Effect.ensuring(Effect.suspend(() =>
             completed ?
               Effect.void :
-              command({ command: "cancel" }).pipe(
-                Operation.detached,
-                Deadline.within("250 millis"),
-                Effect.ignore
-              )
+              Effect.ignore(cleanupCommand({ command: "cancel" }))
           )),
-          BrowserClock.until(at),
-          Effect.flatMap(Option.match({
-            onNone: () => Effect.fail<SendFailure>({ _tag: "Deadline" }),
-            onSome: Effect.succeed
-          })),
           Effect.raceFirst(promptBlocked(page))
         )
       })

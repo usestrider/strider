@@ -55,7 +55,7 @@ const scenario = (resumes: ReadonlyArray<Engine.CooperativeResponse> = []) => {
             } :
             command.command === "cancel" ?
             { _tag: "Disposed" } :
-            resumes[resumed++] ?? (command.decision === "restart"
+            resumes[resumed++] ?? (command.command === "resume" && command.decision === "restart"
               ? { _tag: "Restart" }
               : { _tag: "Done", response: ordinary })
           return { _tag: "Value", value: { type: "string", value: JSON.stringify(response) } } as const
@@ -144,7 +144,7 @@ describe("cooperative runtime", () => {
         yield* TestClock.adjust("100 millis")
         const error = yield* Fiber.join(pending)
         assert.strictEqual(error._tag, "Deadline")
-        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "cancel"])
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "finish", "cancel"])
       }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }))
 
@@ -177,6 +177,40 @@ describe("cooperative runtime", () => {
           assert.strictEqual(failure.reason._tag, "BackendFailure")
           assert.include(failure.reason.message, "unavailable")
         }
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume", "cancel"])
+      }).pipe(Effect.scoped, Effect.provide(layer))
+    }))
+
+  it.effect("collects failed observations after the absolute deadline without checking again", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      const terminal = { _tag: "Expected", passed: false, observed: "actual", changed: true } as const
+      const { layer, commands } = scenario([{ _tag: "Done", response: terminal }])
+      const entered = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const pending = yield* run(owner, () => Effect.andThen(Deferred.succeed(entered, undefined), Effect.never))
+          .pipe(Deadline.within("100 millis"), Effect.forkChild)
+        yield* Deferred.await(entered)
+        yield* TestClock.adjust("100 millis")
+        const answer = yield* Fiber.join(pending)
+        assert(!("_tag" in answer))
+        assert.deepStrictEqual(answer.response, terminal)
+        assert.deepStrictEqual(commands.map((command) => command.command), ["start", "finish"])
+      }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+    }))
+
+  it.effect("acknowledges terminal evidence returned to an in-flight resume", () =>
+    Effect.gen(function*() {
+      const terminal = { _tag: "Expected", passed: false, observed: "actual", changed: true } as const
+      const { layer, commands } = scenario([{ _tag: "Done", response: terminal, retained: true }])
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        const answer = yield* run(owner, () => Effect.succeed("continue" as const))
+        assert(!("_tag" in answer))
+        assert.deepStrictEqual(answer.response, terminal)
         assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume", "cancel"])
       }).pipe(Effect.scoped, Effect.provide(layer))
     }))

@@ -566,7 +566,13 @@ before resuming. The host probes triggers through their own frame routes while t
 the target's document chain before resuming. These probes are not an atomic snapshot across frames. A final check,
 including a trial under the input permit, can restart without applying anything so the caller can release the
 permit. Invalidation discards resolved elements, stability evidence and coordinates; cancellation, deadline,
-completion and page departure dispose session resources. The registration API is not yet connected to this driver.
+completion and page departure dispose session resources. Expiry retains only a serialized timeout answer for
+single-use delivery: at most 64 answers, one MiB of estimated UTF-16 string storage (including ownership keys),
+and 30 seconds. Oldest answers are evicted first; oversized answers are not retained. A shared retention timer
+and departure listener remain only while this bounded cache holds answers. Consumption, cancellation, departure
+and retention expiry release them. The host can finish a session under a bounded cleanup deadline to collect
+failed-check evidence without another check or application; a missing answer is reported explicitly rather than
+silently starting another round. The registration API is not yet connected to this driver.
 
 - **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.
 - **Frames.** A frame locator is a boundary in the steps. L1 splits them at each boundary; the engine of each document on the way finds its iframe, which must be one match and an iframe, and the adapter names the frame the iframe holds (`contentFrame`: CDP's `DOM.describeNode`, a window proxy's `context` on BiDi, WebKit's `contentFrameId`). The last part goes to the engine of the frame's current document. A frame not there yet is a request that matches nothing, in a round of at most 100 ms, so the next round looks for the frame again. Same-origin and cross-site frames go the same way. Role/filter combinations are validated from the whole query at the first frame lookup, so a missing frame cannot hide an invalid combination.
