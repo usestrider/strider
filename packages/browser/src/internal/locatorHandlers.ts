@@ -54,6 +54,18 @@ const restore = (page: Model.PageEntry, state: State) => {
     states.delete(page)
   }
 }
+const failureHint = (error: unknown): string => {
+  try {
+    if (typeof error === "string") return error
+    if (error instanceof Error) {
+      const message: unknown = error.message
+      if (typeof message === "string") return message
+    }
+  } catch {
+    // Reading user-defined error properties can itself throw; the original typed value still belongs to the failure.
+  }
+  return "Inspect error for the original callback failure"
+}
 const asFailure = (failure: Runtime.SendFailure): Execution.Failure => failure
 const probe = Effect.fnUntraced(function*(entry: Entry, record: Operation.Record) {
   yield* Access.check(entry.pageGrant)
@@ -115,11 +127,7 @@ const check = (state: State, final: boolean): Effect.Effect<"continue" | "invali
               reason: new Reason.LocatorHandlerFailed({
                 error,
                 trigger: entry.locator.description,
-                hint: error instanceof Error
-                  ? error.message
-                  : typeof error === "string"
-                  ? error
-                  : "Inspect error for the original callback failure"
+                hint: failureHint(error)
               })
             })
           }))
