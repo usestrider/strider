@@ -24,6 +24,7 @@ import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
 import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
+import * as CdpInput from "../src/internal/cdpAdapter/input.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
@@ -32,6 +33,7 @@ import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
@@ -94,6 +96,33 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP click cleanup", () => {
+  it.effect("releases a successful press when interruption arrives before release dispatch", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>) =>
+          Effect.suspend(() => {
+            calls++
+            // The press has succeeded, but cancellation wins before the normal release can write.
+            if (calls === 2) return Effect.interrupt
+            sent.push(...commands.map((command) => command.params.type))
+            return Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const exit = yield* CdpInput.dispatchInput(
+        state,
+        page.id,
+        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
+      ).pipe(Effect.exit)
+      assert.isTrue(Exit.isInterrupted(exit))
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+    }).pipe(Effect.scoped))
 })
 
 // ── A redirect's headers ──

@@ -380,6 +380,8 @@ describe("Chromium adapter, CDP only", () => {
             const allSent = yield* Deferred.make<void>()
             const sent: Array<string> = []
             const ids = new Set<number>()
+            let pressId: number | undefined
+            let pressAcknowledged = false
             const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
               const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
               return yield* CdpAdapter.connect({
@@ -391,17 +393,20 @@ describe("Chromium adapter, CDP only", () => {
                       yield* Deferred.succeed(entered, undefined)
                       yield* Deferred.await(proceed)
                     }
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased") assert.isTrue(pressAcknowledged)
                     ids.add(wire.id)
                     sent.push(wire.params.type)
                   }
                   yield* transport.send(message)
                   if (sent.length === 2) yield* Deferred.succeed(allSent, undefined)
                 }),
-                messages: transport.messages.pipe(Stream.mapEffect((message) =>
-                  ids.has(JSON.parse(message).id)
-                    ? Effect.as(Deferred.await(allSent), message)
-                    : Effect.succeed(message)
-                ))
+                messages: transport.messages.pipe(Stream.mapEffect(Effect.fnUntraced(function*(message) {
+                  const wire = JSON.parse(message)
+                  if (ids.has(wire.id)) yield* Deferred.await(allSent)
+                  if (wire.id === pressId && pressId !== undefined) pressAcknowledged = true
+                  return message
+                })))
               }, { sink, ownership: "launched" })
             }))
             yield* Effect.gen(function*() {
