@@ -8528,7 +8528,7 @@
           "url": "/docs/api/browser/Page#ReadonlyPage.screenshot"
         }
       ],
-      "notes": "Element screenshots use area: Element; see screenshot option gaps. This uses a lazy locator instead of fixed ElementHandle identity.",
+      "notes": "Element screenshots use area: { element }; see screenshot option gaps. This uses a lazy locator instead of fixed ElementHandle identity.",
       "capabilities": [
         "screenshot"
       ],
@@ -16336,34 +16336,46 @@
       "upstream": [
         "method:Locator.evaluateAll"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Locator",
+          "symbol": "ReadonlyLocator.evaluateAll",
+          "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluateAll"
+        }
+      ],
+      "notes": "Resolves one membership snapshot without waiting, including no matches. Runs in the isolated world; DOM may change before dispatch or across awaits. Arguments and results use by-value serialization.",
+      "capabilities": [
+        "isolatedWorlds"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+          ]
         }
       },
       "audit": {
@@ -18138,7 +18150,7 @@
           "url": "/docs/api/browser/Page#ReadonlyPage.screenshot"
         }
       ],
-      "notes": "Element screenshots use area: Element; see screenshot option gaps.",
+      "notes": "Element screenshots use area: { element }; see screenshot option gaps.",
       "capabilities": [
         "screenshot"
       ],
@@ -25655,7 +25667,7 @@
           "url": "/docs/api/browser/Page#ReadonlyPage.screenshot"
         }
       ],
-      "notes": "Element screenshots use area: Element; see screenshot option gaps.",
+      "notes": "Element screenshots use area: { element }; see screenshot option gaps.",
       "capabilities": [
         "screenshot"
       ],
@@ -51272,7 +51284,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.omitBackground"
       ],
@@ -51370,7 +51382,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -51420,7 +51432,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.cssScale"
       ],
@@ -51627,7 +51639,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -53180,7 +53192,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -53224,7 +53236,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
@@ -53344,7 +53356,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.omitBackground"
       ],
@@ -53442,7 +53454,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -53492,7 +53504,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.cssScale"
       ],
@@ -53699,7 +53711,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -65687,7 +65699,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.omitBackground"
       ],
@@ -65785,7 +65797,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -65835,7 +65847,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.cssScale"
       ],
@@ -66042,7 +66054,7 @@
           "url": "/docs/api/browser/Page#ScreenshotOptions"
         }
       ],
-      "notes": "Full-page, clip and element capture use area; format carries JPEG quality.",
+      "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
       "capabilities": [
         "screenshot.format"
       ],
@@ -113208,12 +113220,12 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "ea89f15bd6a349b0cb0b864cb2666f3d2123fef2a9c1c79ef2a583bdbc74db5f",
+    "docs/decisions.md": "af5bafd840d03e850a10892509f1a97d880654f82bfc7016ba725fd47c1ab45b",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
     "packages/browser/src/ConsoleMessage.ts": "c1de163b1a67dc8b761c5f3cd72429a550018d9130c17d2141bf7b5a56241eeb",
-    "packages/browser/src/CookieJar.ts": "4548831378cf3a2d5259fe73efc0bfb273ddab8fa1ba573d24f3f4d450d0e452",
+    "packages/browser/src/CookieJar.ts": "b12aa5729db3bd875d2838e7aa6c88f140f770eb2e5ac99267dd63b3e6fe62b7",
     "packages/browser/src/Deadline.ts": "7cc2934e4bc6dc3d1d4ca758be178fe3217790e30b3bbc26091d3d259408a973",
     "packages/browser/src/Declaration.ts": "252d1067442dc26e93b94f8c988af9ef9a0574d3e864406bf9cadf16f2d67e56",
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
@@ -113224,13 +113236,13 @@
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "1e6c273124640035b5a433f64bba9460c97e2c9800f5a455a32fac2966d51583",
+    "packages/browser/src/Locator.ts": "158332a277234eeec429014952e975659403fe1ce29a9b867878609659201791",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "f41fc5026d8e9f76dab126a5d17ba30619d3a32f1641a83c7d03b0afb98367d7",
     "packages/browser/src/NetworkResponse.ts": "4569adca50609372dcc50ae699b7adac0fbe59877d8f49811ade84c323323d68",
     "packages/browser/src/OriginStorage.ts": "0967ec1e429b66a209b47cf57712b869f4714df4fafc0f744ab401179520af85",
-    "packages/browser/src/Page.ts": "4d7c25292400736104f60695ae0e5dac5abbeac4f50e1613110125ddab6ab9c4",
+    "packages/browser/src/Page.ts": "8925e3dedd60c7af8557792f6f8f30c36a6d1b3c899af1ac7cc50233598f4fb5",
     "packages/browser/src/PageClock.ts": "7287ff0095260921b029e44939dff0183884dda4f14a8ee17efa1a21839940e8",
     "packages/browser/src/PageNavigation.ts": "c9299969f3e9be917d24cd2729f3f395f3616ce0a10f0a38c885b58e9d783b02",
     "packages/browser/src/Popup.ts": "8ddb355c72b5f9b079e76a5e8e03ab95ee9aba87d9a5fedbf700fabee085d711",

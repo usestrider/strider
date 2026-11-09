@@ -185,36 +185,36 @@ export const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded> = Schema.Struc
 /**
  * Settings for `screenshot`.
  *
+ * **Details**
+ *
+ * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface ScreenshotOptions {
+export type ScreenshotOptions = ScreenshotFormat & {
   /**
-   * What to capture. An element is captured beyond the viewport if needed, never by scrolling.
+   * What to capture: `"viewport"`, `"fullPage"`, `{ clip }`, a rectangle of the page in CSS pixels, or
+   * `{ element }`, the one element a locator matches. An element is captured beyond the viewport if needed, never
+   * by scrolling.
    *
-   * @default the viewport
+   * @default "viewport"
    */
   readonly area?:
-    | { readonly _tag: "Viewport" }
-    | { readonly _tag: "FullPage" }
+    | "viewport"
+    | "fullPage"
     | {
-      readonly _tag: "Clip"
-      readonly rect: {
+      readonly clip: {
         readonly x: Pixels.Css
         readonly y: Pixels.Css
         readonly width: Pixels.Css
         readonly height: Pixels.Css
       }
+      readonly element?: never
     }
-    | { readonly _tag: "Element"; readonly locator: Locator.ReadonlyLocator }
+    | { readonly element: Locator.ReadonlyLocator; readonly clip?: never }
     | undefined
-  /**
-   * The image format.
-   *
-   * @default PNG
-   */
-  readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number } | undefined
   /**
    * One image pixel per CSS pixel, or per device pixel.
    *
@@ -228,6 +228,31 @@ export interface ScreenshotOptions {
    */
   readonly omitBackground?: boolean | undefined
 }
+
+/**
+ * A screenshot's image format: PNG, or JPEG with a quality from 0 to 100.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ScreenshotFormat =
+  | {
+    /**
+     * The image format.
+     *
+     * @default "png"
+     */
+    readonly format?: "png" | undefined
+    readonly quality?: undefined
+  }
+  | {
+    readonly format: "jpeg"
+    /**
+     * The JPEG quality, from 0 to 100.
+     */
+    readonly quality: number
+  }
 
 /**
  * A length for PDF paper sizes and margins.
@@ -647,7 +672,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * const captureCart = Effect.fn("captureCart")(function*(page: Page.ReadonlyPage) {
    *   const cart = page.getByRole("region", { name: "Cart" })
-   *   return yield* page.screenshot({ area: { _tag: "Element", locator: cart } })
+   *   return yield* page.screenshot({ area: { element: cart } })
    * })
    * ```
    */

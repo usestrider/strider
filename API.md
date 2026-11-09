@@ -42,7 +42,7 @@ The principles (docs/design.md), as they apply to this layer, written the way Ef
 - **Immutable by default.** Handles, locators, snapshots, events and errors are immutable. Anything that can change is read through an `Effect` or a `Watchable` (`page.url`, `page.title`, `browser.capabilities`, page lists, held access), so it can't go stale in a variable. A plain field on a live handle must be fixed for the handle's lifetime and say why in its JSDoc; ids, `closed` and sub-handles bound to their parent (`keyboard`, `mouse`, `clock`, `cookies`) are exempt.
 - **Data that crosses a boundary is a Schema,** as `LLMS.md` asks ("all validation and domain modeling in Effect is done with `Schema`"). Events that are data (`NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `PageNavigation`, `AutoResolution`, `NetworkConnection.Frame`), states (`Page.Status`, `Page.FrameTree`, `Download.Status`), cookies, snapshot trees, storage state, diagnostics and every error are Schemas. The CLI's RPC, MCP results, `--json` output, history exports and trace attachments encode them without hand-written serializers. Live handles (pages, locators, downloads) stay interfaces.
 - **Brand liberally** (principle 14). Outputs are always branded. Inputs require the brand only where two meanings could be confused (`FileInput.local` / `FileInput.remote`, CSS vs device pixels); elsewhere a plain string is parsed at the boundary and fails at once if it is bad (`goto(url)`, `route(pattern)`). Tokens (ids, refs, generations, registration handles) are accepted only in branded form, and are checked against their origin when used.
-- **Unions of valid models; `Option` for what's truly optional** (principle 15). Optional inputs are written `?: T | undefined`, as Effect writes them, so callers under `exactOptionalPropertyTypes` can pass `undefined`. Mutually exclusive inputs are unions: a cookie's scope is a URL *or* a domain and path.
+- **Unions of valid models; `Option` for what's truly optional** (principle 15). Optional inputs are written `?: T | undefined`, as Effect writes them, so callers under `exactOptionalPropertyTypes` can pass `undefined`. Mutually exclusive inputs are unions: a cookie's scope is a URL *or* a domain and path. A caller never writes `_tag`: a choice that carries no data is a string (`area: "fullPage"`), and one that does is told by its keys (`scope: { url }` or `scope: { domain, path }`). Outputs keep `_tag`, for matching.
 - **Access is typed.** `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, like `ReadonlyArray` ⊂ `Array`; contexts have two levels. `.inspect` and `.control` are the only way up, because access is a grant held by a `Scope`. A helper that only reads takes a `Page.ReadonlyPage`, and calling an action on a page you may only inspect is a compile error. A subtype never changes what an inherited member does.
 - **Every handle is identified, pipeable and inspectable.** Each public type has a string TypeId (`"~@usestrider/browser/Page"`), and each module a kind guard (`Page.isPage`, `Locator.isLocator`, `Download.isDownload`). Guards identify kinds, never access: `Page.isPage` narrows to `ObservedPage`. Handles are `Pipeable`, so `page.pipe(Expect.toHaveURL(…))` works, and `Inspectable`, so logging one shows a description rendered under the diagnostics preset.
 - **Locators are values,** resolved again on every attempt. The one exception is a ref (`snapshot.ref(id)`), which is pinned to one node and fails with `StaleRef` rather than rebinding.
@@ -431,14 +431,16 @@ type Serialized<A> =                                   // what actually arrives:
   : A extends Function | symbol ? never
   : { [K in keyof A as A[K] extends Function | symbol ? never : K]: Serialized<A[K]> }   // class instances arrive as their data
 
-interface ScreenshotOptions {
-  readonly area?:                                        // default the viewport
-    | { _tag: "Viewport" } | { _tag: "FullPage" } | { _tag: "Clip"; rect: Rect<Pixels.Css> }
-    | { _tag: "Element"; locator: Locator.ReadonlyLocator } | undefined   // an element is captured beyond the viewport, never by scrolling
-  readonly format?: { _tag: "Png" } | { _tag: "Jpeg"; quality: number } | undefined   // quality exists only for JPEG
+type ScreenshotOptions = ScreenshotFormat & {
+  readonly area?:                                        // default "viewport"
+    | "viewport" | "fullPage" | { clip: Rect<Pixels.Css> }
+    | { element: Locator.ReadonlyLocator } | undefined   // an element is captured beyond the viewport, never by scrolling
   readonly scale?: "css" | "device" | undefined          // default "device"
   readonly omitBackground?: boolean | undefined          // default false
 }
+type ScreenshotFormat =                                  // quality exists only for JPEG
+  | { readonly format?: "png" | undefined }              // default "png"
+  | { readonly format: "jpeg"; readonly quality: number }
 interface PdfOptions {                                   // Length is a value and a unit: in, cm, mm or px
   readonly paper?: "letter" | "legal" | "tabloid" | "a3" | "a4" | "a5" | { width: Length; height: Length } | undefined   // default "letter", as Chrome and BiDi
   readonly landscape?: boolean | undefined               // default false
@@ -530,7 +532,19 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   evaluate<Args extends ReadonlyArray<unknown>, B>(      // the isolated world, with the element first; strict: exactly one match
     fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
   ): Effect<JSHandle.Serialized<B>, LocatorError>
+  evaluateAll<Args extends ReadonlyArray<unknown>, B>(   // one current match-set snapshot, including an empty array
+    fn: (elements: Array<Element>, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.Serialized<B>, LocatorError>
+
 }
+
+`evaluateAll` resolves membership once and transfers node bindings into the caller's isolated world. It never
+waits for matches and never requires uniqueness. No array handle survives the call. Resolution and callback
+dispatch are separate: DOM changes may occur between them, and the snapshot's nodes may be detached. The callback's
+synchronous code runs in one JavaScript turn; an async callback may observe DOM changes across awaits. Arguments
+and results use evaluation's by-value serialization. Inspect access, isolated-world capability refusals and the
+operation deadline apply as for `evaluate`; a timeout after dispatch cannot cancel JavaScript already running.
+
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
@@ -953,7 +967,7 @@ class Cookie extends Schema.Class<Cookie>("@usestrider/browser/CookieJar/Cookie"
 interface Input {
   readonly name: Name | string
   readonly value: string | Redacted<string>
-  readonly scope: { _tag: "Url"; url: Url.Url | string } | { _tag: "Domain"; domain: Domain | string; path: string }   // which one is always stated
+  readonly scope: { url: Url.Url | string } | { domain: Domain | string; path: string }   // which one is always stated
   readonly expires?: DateTime.DateTime.Input | undefined   // default: a session cookie
   readonly httpOnly?: boolean | undefined; readonly secure?: boolean | undefined   // defaults false
   readonly sameSite?: "strict" | "lax" | "none" | undefined   // default "lax"

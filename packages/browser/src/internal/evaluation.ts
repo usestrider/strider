@@ -130,6 +130,7 @@ export const fromRemote = (value: Adapter.RemoteValue): Effect.Effect<unknown, F
   })
 
 export interface Call {
+  readonly releaseResult?: boolean | undefined
   /** The operation sending a write; absent for read-only queries. */
   readonly dispatch?: Operation.Record | undefined
   readonly realm: Target.RealmId
@@ -154,6 +155,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
       arguments: options.arguments,
       awaitPromise: true,
       result: options.result,
+      ...(options.releaseResult === true ? { releaseResult: true } : {}),
       ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
     })

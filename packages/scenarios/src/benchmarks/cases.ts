@@ -381,7 +381,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a seeded dense 1280 by 2880 canvas full page as PNG; setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareDenseCapture),
     preparePlaywright: (page) => page.evaluate(prepareDenseCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyDensePng
   },
@@ -407,7 +407,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared 1280 by 2880 full page as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyPng(1280, 2880, [12, 34, 56])
   },
@@ -416,7 +416,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared visible 320 by 180 element as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "Element", locator: page.locator("#capture") } }),
+    strider: (page) => page.screenshot({ area: { element: page.locator("#capture") } }),
     playwright: (page) => page.locator("#capture").screenshot({ type: "png" }),
     verify: verifyPng(320, 180, [200, 100, 50])
   }

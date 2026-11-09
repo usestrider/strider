@@ -43,16 +43,16 @@ export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/T
 }) {}
 
 /**
- * Schema for a file to attach to the running test.
+ * Schema for a file to attach to the running test: `{ trace }`, `{ har }` or `{ screenshot }`, each a path.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const TestArtifact = Schema.Union([
-  Schema.TaggedStruct("Trace", { path: FilePath.Local }),
-  Schema.TaggedStruct("Har", { path: FilePath.Local }),
-  Schema.TaggedStruct("Screenshot", { path: FilePath.Local })
+  Schema.Struct({ trace: FilePath.Local }),
+  Schema.Struct({ har: FilePath.Local }),
+  Schema.Struct({ screenshot: FilePath.Local })
 ])
 
 /**
@@ -95,7 +95,7 @@ export interface TestRun {
    *   yield* page.getByRole("button", { name: "Checkout" }).click()
    *   const path = yield* trace.exportTrace("traces/checkout.zip")
    *   const run = yield* TestRun.TestRun
-   *   yield* run.attach({ _tag: "Trace", path })
+   *   yield* run.attach({ trace: path })
    * })
    * ```
    */

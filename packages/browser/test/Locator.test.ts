@@ -441,6 +441,95 @@ describe("Locator.blur", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
+describe("Locator.evaluateAll", () => {
+  it.effect("preserves a typed backend refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("p").evaluateAll((elements) => elements.length).pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+it.effect("evaluateAll rejects a released ownership grant before reaching the backend", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const original = page.locator("#target") as LocatorImpl
+    const locator = new LocatorImpl(
+      {
+        ...original.owner,
+        grant: Option.some({
+          level: "control",
+          target: { _tag: "Page", id: original.owner.page.id },
+          released: () => true,
+          onRelease: () => Effect.void
+        })
+      },
+      original.steps,
+      Option.none()
+    )
+    const error = yield* locator.evaluateAll((elements) => elements.length).pipe(Effect.flip)
+    assert(Target.isTargetGone(error))
+    assert.strictEqual(error.reason._tag, "AccessReleased")
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("evaluateAll preserves deadlines before and after dispatch without repeating the snapshot", () =>
+  Effect.gen(function*() {
+    const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+    const dispatched = yield* Deferred.make<void>()
+    let calls = 0
+    let snapshots = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" ? { ...entry, status: "supported" } : entry
+          )
+        })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("all-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*() {
+          calls++
+          yield* Deferred.succeed(dispatched, undefined)
+          return yield* Effect.never
+        })
+      })))
+    )
+    yield* Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const document = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      const expired = yield* page.locator("p").evaluateAll((elements) => elements.length).pipe(
+        Deadline.within("0 millis"),
+        Effect.flip
+      )
+      assert(Deadline.isTimeout(expired))
+      assert.strictEqual(snapshots, 0)
+      assert.strictEqual(calls, 0)
+      const snapshot = vi.spyOn(Runtime, "elements").mockImplementation(() =>
+        Effect.sync(() => {
+          snapshots++
+          return { _tag: "Found", nodes: [], routed: { document, hops: [] } } as const
+        })
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => snapshot.mockRestore()))
+      const running = yield* page.locator("p").evaluateAll(async () => 1).pipe(
+        Deadline.within("1 second"),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* Deferred.await(dispatched)
+      yield* TestClock.adjust("1 second")
+      const error = yield* Fiber.join(running)
+      assert(Deadline.isTimeout(error))
+      assert.strictEqual(error.operation, "Locator.evaluateAll")
+      assert.strictEqual(error.diagnostics.dispatch._tag, "MayHaveBeenSent")
+      assert.strictEqual(snapshots, 1)
+      assert.strictEqual(calls, 1)
+    })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+  }).pipe(Effect.scoped))
 describe("Locator.isEditable", () => {
   it.effect("reads through the engine without dispatching input", () => {
     let reads = 0
