@@ -522,6 +522,27 @@ export const declarations = (
 
       // ── Emulation ──
 
+      it.effect("applies extra request headers and restores scoped replacements", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          const read = () =>
+            run(page, origin, "return fetch('/headers').then(r => r.json())") as Effect.Effect<
+              Record<string, string>,
+              unknown,
+              never
+            >
+          const registration = yield* page.emulate({ extraHTTPHeaders: { "X-Strider": "outer" } })
+          assert.strictEqual((yield* read())["x-strider"], "outer")
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* page.emulate({ extraHTTPHeaders: { "x-strider": "inner" } })
+            assert.strictEqual((yield* read())["x-strider"], "inner")
+          }))
+          assert.strictEqual((yield* read())["x-strider"], "outer")
+          yield* registration.remove
+          assert.strictEqual((yield* read())["x-strider"], undefined)
+        }), timeout)
+
       it.effect("runs call site 6: a context created with a locale", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
