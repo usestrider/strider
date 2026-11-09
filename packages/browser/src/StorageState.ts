@@ -116,12 +116,12 @@ export class StorageState extends Schema.Class<StorageState>("@usestrider/browse
 export const Json = Schema.fromJsonString(Schema.toCodecJson(StorageState))
 
 /**
- * Reason for a storage state the new context can't apply in full, such as partitioned cookies on a backend that
+ * Reason for a storage state the context can't apply in full, such as partitioned cookies on a backend that
  * can't set them.
  *
  * **Details**
  *
- * The context isn't created, so nothing is applied.
+ * Creation refuses before making a context; replacement refuses before changing the existing context's storage.
  *
  * **Example** (Starting signed out when the state doesn't apply)
  *
