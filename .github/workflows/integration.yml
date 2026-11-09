@@ -12,12 +12,17 @@ on:
         description: Run macOS only and keep bounded diagnostic traces even on success
         type: boolean
         default: false
+      macos:
+        description: Run the macOS job too; a change that doesn't touch what differs on macOS can skip it
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One run at a time per branch, so branches validate side by side
 concurrency:
-  group: integration
+  group: integration-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -89,8 +94,8 @@ jobs:
         run: node scripts/integration-budget.ts
 
   integration-macos:
-    # Run independently of Linux; respect workflow cancellation.
-    if: ${{ !cancelled() }}
+    # Run independently of Linux; respect workflow cancellation. Every scheduled run includes macOS.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics) }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
