@@ -642,6 +642,28 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect(
+        "ends the redirect chain at a redirect status the browser doesn't follow",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            // Its body, which has no location to follow, arrives only once the hop has ended
+            const completed = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-unfollowed`,
+              status: 302,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            assert.strictEqual((yield* completed).body, "<title>unfollowed</title>")
+            const [request] = (yield* NetworkRequest.history(page, { url: `${origin}/redirect-unfollowed` })).entries
+            assert.isTrue(Option.isNone(yield* links.from(request!)))
+            assert.isTrue(Option.isNone(yield* links.to(request!)))
+          })),
+        timeout
+      )
+
       it.effect("says a redirect hop has no body, and filters responses by status", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Go", "fetch('/redirect')"))

@@ -72,6 +72,11 @@ const routes: Record<string, Route> = {
       html(response, "<title>redirected</title>")
     }
   },
+  // A redirect status with no location, which the browser doesn't follow: the response is the request's last
+  "/redirect-unfollowed": (_request, response) => {
+    response.writeHead(302, { "content-type": "text/html" })
+    response.end("<title>unfollowed</title>")
+  },
   "/redirect": (_request, response) => {
     response.writeHead(302, { location: "/landed" })
     response.end()
