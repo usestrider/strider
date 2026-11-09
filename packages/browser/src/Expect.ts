@@ -222,6 +222,32 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
 export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeFocused(locator)
 
 /**
+ * Expects the one match to have an empty value or no text apart from whitespace.
+ *
+ * **Details**
+ *
+ * Inputs and textareas use their current value without trimming. Other elements use trimmed
+ * `textContent`, including descendant text. Missing or multiple matches keep retrying until the
+ * deadline. Failure evidence reports match counts or whether the element is empty.
+ *
+ * **Example** (Waiting for a field to clear)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+ *   yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeEmpty: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeEmpty(locator)
+
+/**
  * Expects the one match to accept input.
  *
  * **Example** (Waiting for an address field to unlock)

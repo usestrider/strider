@@ -15560,33 +15560,45 @@
       "upstream": [
         "method:Locator.boundingBox"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Locator",
+          "symbol": "ReadonlyLocator.boundingBox",
+          "url": "/docs/api/browser/Locator#ReadonlyLocator.boundingBox"
+        }
+      ],
+      "notes": "Immediate strict readonly read of the browser-derived axis-aligned rect in top-level viewport CSS pixels, composed through frames including borders/padding. Option.none means no layout box; hidden, transparent and zero-size boxes remain. Reads never wait for a missing match. Target transforms, motion paths and camera clipping follow browser rects, rather than original corner accuracy. Firefox frame rect composition supports positive axis-aligned scaling, CSS zoom and translation; rotation, skew, reflection, 3D, perspective and motion paths on frame ancestors fail with descriptive typed `Unsupported`. Stock defaults are unchanged; no launch profile or preference is required. These documented composition limits belong to the rect contract; immediate reads are a separate design difference.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -15596,7 +15608,13 @@
         ],
         "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "locator-design",
+        "quote": "Retrying expectations: a retry has a name and is asked for in code.",
+        "revision": "23b54562877b42279640e7baef1568cc4994aacf"
+      }
     },
     {
       "id": "method-locator-check",
@@ -19162,33 +19180,39 @@
       "upstream": [
         "method:LocatorAssertions.toBeEmpty"
       ],
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider capability for this member.",
+      "status": "has",
+      "api": [
+        {
+          "module": "Expect",
+          "symbol": "toBeEmpty",
+          "url": "/docs/api/browser/Expect#toBeEmpty"
+        }
+      ],
+      "notes": "Input and textarea values are untrimmed; other elements use trimmed textContent. Missing or multiple matches retry until the deadline.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
@@ -80190,10 +80214,23 @@
       }
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "id": "option-locator-boundingbox-signal",
       "upstream": [
         "method:Locator.boundingBox"
@@ -80201,37 +80238,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
-      "capabilities": [],
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
+      "capabilities": [
+        "boundingBox.frameTransforms"
+      ],
       "id": "option-locator-boundingbox-timeout",
       "upstream": [
         "method:Locator.boundingBox"
@@ -80239,31 +80288,41 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "firefox.attached": {
-          "status": "missing",
-          "limitations": []
+          "status": "different",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+          ]
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
-      "requirements": []
+      "requirements": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      }
     },
     {
       "status": "different",
@@ -88747,9 +88806,20 @@
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+      "status": "has",
+      "api": [
+        {
+          "package": "effect",
+          "module": "Fiber",
+          "symbol": "interrupt",
+          "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+          "source": {
+            "file": "node_modules/effect/src/Fiber.ts",
+            "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+          }
+        }
+      ],
+      "notes": "Cancel the running operation by interrupting its fiber (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative: uninterruptible work and finalizers may delay completion. It produces Effect interruption rather than an AbortSignal error and does not undo browser side effects or commands already sent. Deadline.within separately bounds operation time with a typed timeout; a deadline is not a cancellation signal. Parent-operation browser limits still apply.",
       "capabilities": [],
       "id": "option-locatorassertions-tobeempty-signal",
       "upstream": [
@@ -88758,37 +88828,49 @@
       "option": "signal",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         }
       },
       "requirements": []
     },
     {
-      "status": "missing",
-      "api": [],
-      "notes": "The parent capability is missing; this option is not implemented by that contract.",
+      "status": "different",
+      "api": [
+        {
+          "module": "Deadline",
+          "symbol": "within",
+          "url": "/docs/api/browser/Deadline#within"
+        }
+      ],
+      "notes": "Apply Deadline.within to the effect; there is no per-call timeout property.",
       "capabilities": [],
+      "decision": {
+        "file": "docs/decisions.md",
+        "anchor": "composable-operation-deadlines",
+        "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+        "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+      },
       "id": "option-locatorassertions-tobeempty-timeout",
       "upstream": [
         "method:LocatorAssertions.toBeEmpty"
@@ -88796,27 +88878,27 @@
       "option": "timeout",
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         },
         "webkit.attached": {
-          "status": "missing",
+          "status": "different",
           "limitations": []
         }
       },
@@ -113707,7 +113789,7 @@
     }
   ],
   "evidence": {
-    "docs/decisions.md": "4dc1b3a164388739b80c9326f5f0cbbf0552a1ce626fa6312ccec60fad3ec892",
+    "docs/decisions.md": "98f6ba549f7a3751fa11b60dfc46a11920c08617867d8503da244ced409bd515",
     "packages/browser/src/Browser.ts": "ae28dc9d6d63d8ebcca26ba6e4a6d71b9f57b0d646f8f9456f232d7682d721ad",
     "packages/browser/src/BrowserWorker.ts": "4da60ed7a258743e9c81b42aa8c359c5450944de102410c0a7ff879f9fd2e7e3",
     "packages/browser/src/Capability.ts": "bf138655bb5829d4908b17a7115b35dd7efafd53fcf2bd3512dcce38326781c1",
@@ -113718,12 +113800,12 @@
     "packages/browser/src/Dialog.ts": "ad06707952cd08c2ab6b8bdcbc1262631d4cbbd39a8c22cef100a5ea4738d81d",
     "packages/browser/src/Download.ts": "84157a6497154693ec37a208a9282ae7cc53c89ce63143b59759e40a48e57dc9",
     "packages/browser/src/Emulation.ts": "89aa59a2b6b86267f2382ce6e2e6d09642eb6fd312e01afa64fdf4cbc4d33b62",
-    "packages/browser/src/Expect.ts": "6d06da421a5f299ae8ffb55d8d8edffd6c1bd494cd448452097e3ac5d74122f7",
+    "packages/browser/src/Expect.ts": "ea7a23e239a5746cb4edf122fc70a4e568367f556511f127c751f6e5106d6dff",
     "packages/browser/src/FileChooser.ts": "38f82bffd793bfba9e786442afff7b5d37350b3e63bf375860bee0554276081d",
     "packages/browser/src/Har.ts": "9433086ccac0640a8437a9eacf5b5d41961970e5e56a09ac72bf81c137af62be",
     "packages/browser/src/JSHandle.ts": "d16cda8da92ad717267a89283c7ddacd9c7fdef791136f56e00178310665d23a",
     "packages/browser/src/Keyboard.ts": "36934031e520f80cd45b68e4c62e4bd58d8abb7cac9487b4de305bf315902eed",
-    "packages/browser/src/Locator.ts": "c3e32ee8d5b3de88205a6a14eda61a78eeb49e2e6df6bede3222795e5af41539",
+    "packages/browser/src/Locator.ts": "d4e60f8be45b4df021aeff52dc0f48d7835eff34b03e3d7c18d2d5d929582653",
     "packages/browser/src/Mouse.ts": "afaaa56701da5f7cee4c67989eb8cb3d491ec8dac0e729f789053bd33e5b9e65",
     "packages/browser/src/NetworkConnection.ts": "92caa78171311d34136ee9b9342f8f1de673899c2ee5291205f1dd5e961e5321",
     "packages/browser/src/NetworkRequest.ts": "4c764cde3aefad5ce88775685a44ce224acff1b9f787dfdd8a627c3da066bd30",
@@ -113742,10 +113824,10 @@
     "packages/browser/src/Watchable.ts": "7eba129f2b849d20377adc1054bd781fd6312f2365f2edcc3e9983d3ab328b59",
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
-    "packages/browser/src/internal/bidiAdapter.ts": "2f495f213ae70cfe8df0a91d6fbb568737563c9290eba4b35ee4b743fc800a5e",
-    "packages/browser/src/internal/cdpAdapter.ts": "191ee89089c7807f337f93e95bcc41bc3545333d9a15ba0c154721fb7597e24f",
-    "packages/browser/src/internal/webkitAdapter.ts": "c71f333efadbb902d5fa671c5a45f46813aeb333f14cf15760e07a3a50c4d482",
-    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "4465b775ac71608d2feb18389dc8133ec8b55ce6d1bd6407be73b7ce9500be5d",
+    "packages/browser/src/internal/bidiAdapter.ts": "88d472988c23560fc6bde6d6a6fcbe8dba6fe1d03db6ff671225ddfbcc1e3957",
+    "packages/browser/src/internal/cdpAdapter.ts": "2b39fbd662fc1806e68f0d0385cf6138e1710b70e187b20c7815bc96e3c0a0d0",
+    "packages/browser/src/internal/webkitAdapter.ts": "cbd276f1030a34c4ee4fd6049a6a324dbf5e7d6c1ea1e7666596e1648e0fc7f1",
+    "packages/browser/src/internal/webkitAdapter/capabilities.ts": "126a8b7ea48b79f5258c0ec51433182984c18fed7e6773481feec8421f6ae5b3",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",
     "packages/browser/src/Operation.ts": "60f6399b6dab5e6fab4eabb050c0a824926c8b2cd8076f61064827bc20aa9d52",
     "node_modules/effect/src/Effect.ts": "8a32355d3c59534d6a9f56a614274f0616a2d3e82b678847adc374e9f6a0b545",
