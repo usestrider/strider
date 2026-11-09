@@ -452,3 +452,24 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     `to match ${AriaPatterns.describe(data)}`
   )
 }
+
+export const toHaveCSS = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected: string | RegExp,
+  options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined }
+) =>
+  expectLocator(
+    locator,
+    {
+      _tag: "CSS",
+      name,
+      expected: matcher(expected, true),
+      not: options?.not ?? false,
+      pseudo: options?.pseudo ?? null
+    },
+    "toHaveCSS",
+    `${options?.not ? "not " : ""}to have the computed CSS ${name}${options?.pseudo ? ` on ::${options.pseudo}` : ""} ${
+      show(expected)
+    }`
+  )

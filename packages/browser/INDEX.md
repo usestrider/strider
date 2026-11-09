@@ -615,6 +615,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
+- `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
 - `const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>`
 - `const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>`
@@ -1174,6 +1175,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const next: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter: Filter & { readonly url: Url.Pattern | string }, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Effect.Effect<NetworkRequest, PE | Target.TargetGone | Deadline.Timeout>, Subscription.SubscriptionError, Scope.Scope | PR >`
 - `const stream: <PE = never, PR = never>(target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined, where?: Subscription.Where<NetworkRequest, PE, PR> | undefined) => Effect.Effect< Stream.Stream<NetworkRequest, PE | Subscription.EventOverflow | Target.TargetGone>, Subscription.SubscriptionError, Scope.Scope | PR >`
+- `const response: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect< Effect.Effect<Option.Option<NetworkResponse.NetworkResponse>, RequestError | Deadline.Timeout>, RequestError, Scope.Scope >`
 
 *getters*
 
@@ -1183,6 +1185,14 @@ The requests a page or context sends, as events and as the data routes and respo
 *converting*
 
 - `const toHttpClientRequest: (request: NetworkRequest) => HttpClientRequest.HttpClientRequest`
+
+*errors*
+
+- `class RequestError: Schema.TaggedError "RequestError" { hop, reason, diagnostics }`
+
+*reasons*
+
+- `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
 
@@ -1320,6 +1330,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *models*
 
+- `type ViewportSize = typeof ViewportSize.Type`
 - `type DocumentStatus = typeof DocumentStatus.Type`
 - `type Prompt = typeof Prompt.Type`
 - `type Status = typeof Status.Type`
@@ -1367,6 +1378,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly inspect: Effect.Effect<ReadonlyPage, PageError, Scope.Scope>`
   - `readonly control: Effect.Effect<Page, PageError, Scope.Scope>`
 - `interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator>`
+  - `readonly viewportSize: Effect.Effect<Option.Option<ViewportSize>, PageError | Target.TargetGone | Deadline.Timeout>`
   - `frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator`
   - `readonly title: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readHtml: Effect.Effect<string, PageError | Target.TargetGone | Deadline.Timeout>`
@@ -1416,6 +1428,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
 
 *schemas*
 
+- `const ViewportSize = Schema.Struct({ width: Schema.Number, height: Schema.Number })`
 - `const DocumentStatus = Schema.Struct({ id: Target.DocumentId, readiness: Schema.Literals(["loading", "interactive", "complete"]), lifecycle: Schema.Literals(["active", "suspended"]) })`
 - `const Prompt = Schema.Struct({ id: Dialog.PromptId, kind: Schema.Literals(["alert", "confirm", "prompt", "beforeunload", "unknown"]), blocking: Schema.Literals(["confirmed", "suspected"]) })`
 - `const Status = Schema.Union([Schema.TaggedStruct("Open", { url: Url.Url, document: DocumentStatus, prompt: Schema.Option(Prompt) }), Schema.TaggedStruct("Closed", { reason: Target.CloseReason })])`

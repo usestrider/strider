@@ -35,7 +35,7 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Snapshot from "../Snapshot.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
@@ -316,6 +316,25 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    get viewportSize() {
+      return Effect.gen(function*() {
+        const record = yield* Operation.record
+        const { id } = record
+        const { status } = yield* entry.state.get
+        if (status._tag === "Closed") {
+          return yield* Effect.fail(
+            new Target.TargetGone({
+              target: { _tag: "Page", id: entry.id },
+              reason: status.reason,
+              diagnostics: Operation.diagnostics(id)
+            })
+          )
+        }
+        return yield* adapter.viewportSize(entry.id).pipe(
+          Effect.mapError((error) => failure("Page.viewportSize", id, error))
+        )
+      }).pipe(Operation.named("Page.viewportSize", { attributes: { "browser.page.id": entry.id } }))
+    },
     get title() {
       return ExpectSource.mark(
         Effect.gen(function*() {

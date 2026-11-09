@@ -152,6 +152,8 @@ export const attaching = (
             assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const selected = reasonOf(yield* Effect.exit(kept!.getByRole("heading").selectText()))
             assert.deepStrictEqual((selected as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const viewport = reasonOf(yield* Effect.exit(kept!.viewportSize))
+            assert.deepStrictEqual((viewport as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const editable = reasonOf(yield* Effect.exit(kept!.getByRole("heading").isEditable))
             assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             for (const matcher of [Expect.toBeAttached, Expect.toBeDetached]) {
@@ -171,6 +173,7 @@ export const attaching = (
             // A grant's declarations go with it: the analytics call goes through now
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
+              assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
               assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
               assert.isFalse(yield* reader.getByRole("heading").isEditable)
               const tab = yield* first.control
@@ -303,6 +306,7 @@ export const attaching = (
               yield* Effect.scoped(Effect.gen(function*() {
                 const reader = yield* first.inspect
                 yield* reader.getByRole("heading").pipe(Expect.toBeVisible)
+                assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
                 const text = yield* reader.getByRole("heading").readText
                 assert.strictEqual(text, "First")
                 const tab = yield* second.control

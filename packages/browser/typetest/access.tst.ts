@@ -24,6 +24,11 @@ declare const page: Page.Page
 declare const ref: Snapshot.RefId
 
 describe("access is typed", () => {
+  it("configured viewport requires only inspect access", () => {
+    expect(reader.viewportSize).type.not.toRaiseError()
+    expect(observed.viewportSize).type.toRaiseError()
+  })
+
   it("a page you may only inspect offers no actions", () => {
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
     expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")

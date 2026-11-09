@@ -340,6 +340,7 @@ describe("Stock WebKit, launched in automation mode", () => {
         launched(Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
           const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
             Effect.exit
@@ -351,6 +352,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             requested: { width: 1440, height: 1000 },
             actual: { width: 1280, height: 762 }
           })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
         })),
       timeout
