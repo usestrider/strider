@@ -1611,3 +1611,49 @@ describe("CdpAdapter transient evaluation results", () => {
     }
   }
 })
+
+describe("CdpAdapter node arguments under interruption", () => {
+  it.effect("releases the nodes it resolved when the call is interrupted before dispatch", () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const resolving = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: (command: { readonly method: string; readonly params: { readonly backendNodeId?: number; readonly objectId?: string } }) => {
+          if (command.method === "Runtime.releaseObject") {
+            released.push(command.params.objectId!)
+            return Effect.succeed({})
+          }
+          assert.strictEqual(command.method, "DOM.resolveNode")
+          // The first two nodes resolve; the third never answers, as when a deadline ends the call on its way
+          return command.params.backendNodeId === 3
+            ? Effect.andThen(Deferred.succeed(resolving, undefined), Effect.never)
+            : Effect.succeed({ object: { type: "object", objectId: `node-${command.params.backendNodeId}` } })
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "nodes",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1:8000"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const fiber = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "(...nodes) => nodes.length",
+        arguments: [node("1"), node("2"), node("3")],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false,
+        releaseResult: true
+      }).pipe(Effect.forkChild)
+      yield* Deferred.await(resolving)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(released.sort(), ["node-1", "node-2"])
+    }).pipe(Effect.scoped))
+})
