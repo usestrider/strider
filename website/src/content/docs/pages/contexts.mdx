@@ -89,6 +89,24 @@ Chromium, Firefox and launched stock WebKit; attached stock WebKit refuses it.
 A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
 applied. [`browser.capabilities`](/docs/browsers/choosing#capabilities) lists what a backend can do.
 
+For local HTTPS sites with an untrusted certificate, create a context with `acceptInsecureCerts`:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const localHttps = Effect.fn("localHttps")(function*() {
+  const context = yield* Browser.newContext({ acceptInsecureCerts: true })
+  const page = yield* context.newPage
+  yield* page.goto("https://localhost:8443")
+}, Effect.scoped)
+```
+
+Certificate checks remain enabled by default and in sibling contexts. Firefox and launched stock WebKit support
+this option; Chromium refuses `true` with `Unsupported` because its override affects the whole browser. Attached
+stock WebKit cannot create contexts. `Browser.newPage` accepts the same option. It is fixed at creation:
+`UserContext.reclaim` refuses either explicit value and preserves the existing setting when omitted.
+
 ## Settings for a while
 
 Some states come and go while a context is open, such as the network dropping or a permission granted after a

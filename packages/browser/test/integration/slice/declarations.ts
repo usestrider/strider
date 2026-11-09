@@ -31,7 +31,7 @@ import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
-import { site } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -60,6 +60,34 @@ export const declarations = (
 ) =>
   describe(`${name} declarations`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("accepts untrusted HTTPS only in the opted-in context, or refuses without changing siblings", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* tlsSite
+          const sibling = yield* Browser.newPage()
+          const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
+          assert(Page.isPageError(rejected) && rejected.reason._tag === "NavigationFailed")
+          const options = { acceptInsecureCerts: true, eventLog: 0 }
+          if (!(yield* supports("acceptInsecureCerts"))) {
+            const error = yield* Browser.newContext(options).pipe(Effect.flip)
+            assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported")
+            assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+          } else {
+            const context = yield* Browser.newContext(options)
+            const page = yield* context.newPage
+            yield* page.goto(origin)
+            assert.strictEqual(yield* page.title, "secure")
+            // Browser.newPage must forward the same creation options.
+            const shortcut = yield* Browser.newPage(options)
+            yield* shortcut.goto(origin)
+            assert.strictEqual(yield* shortcut.title, "secure")
+          }
+          const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
+          assert(Page.isPageError(stillRejected) && stillRejected.reason._tag === "NavigationFailed")
+          const explicit = yield* Browser.newPage({ ...options, acceptInsecureCerts: false })
+          const explicitRejected = yield* explicit.goto(origin).pipe(Effect.flip)
+          assert(Page.isPageError(explicitRejected) && explicitRejected.reason._tag === "NavigationFailed")
+        }), timeout)
+
       it.effect("reads configured viewport precedence and releases without measuring the page", () =>
         Effect.scoped(Effect.gen(function*() {
           const browser = yield* Browser.Browser
@@ -566,7 +594,8 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const registered = page.route(
               `${origin}/auth`,
-              () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              () =>
+                Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
               {
                 phase: "auth"
               }
@@ -590,7 +619,8 @@ export const declarations = (
           }
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
+            yield* page.route(`${origin}/auth`, () =>
+              Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))
