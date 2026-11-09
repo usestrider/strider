@@ -104,6 +104,8 @@ export const response = (
         Effect.flatMap(hop.state.get, (state) =>
           Option.isSome(state.response) ?
             Effect.succeed(state.response)
+            : Deferred.isDoneUnsafe(targetClosed) ?
+            Effect.fail(unavailable("targetClosed"))
             : end._tag === "Forgotten" ?
             Effect.fail(unavailable("evicted"))
             : Effect.succeed(Option.none<NetworkResponse.NetworkResponse>())))
