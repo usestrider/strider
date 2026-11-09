@@ -4164,6 +4164,39 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects exact computed roles and retries role mutations", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<button id="implicit" hidden>Save</button><div id="explicit" role="switch checkbox"></div><div id="later"></div><span class="many"></span><span class="many"></span>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#implicit").pipe(Expect.toHaveRole("button"))
+            yield* Expect.toHaveRole(page.locator("#explicit"), "switch")
+            const waiting = yield* page.locator("#later").pipe(Expect.toHaveRole("button"), Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#later")!.setAttribute("role", "button")
+            })
+            yield* Fiber.join(waiting)
+            for (const [selector, role, observed] of [
+              ["#explicit", "checkbox", "switch"],
+              ["#implicit", "Button", "button"],
+              ["#absent", "button", { matches: 0 }],
+              [".many", "button", { matches: 2 }]
+            ] as const) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toHaveRole(role), Deadline.within("300 millis"), Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.condition, `to have the role ${JSON.stringify(role)}`)
+              assert(error.history.length > 0)
+              assert.deepStrictEqual(error.history.at(-1)!.value, observed)
+              assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
+            }
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
