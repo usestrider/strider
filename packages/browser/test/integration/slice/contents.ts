@@ -967,6 +967,39 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate(
+                (set, date, regexp, nested) => {
+                  const map = nested.items[0]
+                  const key = Array.from(map.keys())[0]
+                  const values = map.get(key)!
+                  return set instanceof Set && set.has(3) &&
+                    date instanceof Date && date.toISOString() === "2020-01-02T00:00:00.000Z" &&
+                    regexp instanceof RegExp && regexp.source === "a+" && regexp.flags === "gi" &&
+                    map instanceof Map && key.id === 1 && values instanceof Set &&
+                    values.has(undefined) && values.has(42n) && values.has(NaN) && values.has(Infinity) &&
+                    Object.is(nested.zero, -0) && nested.absent === undefined && nested.nil === null
+                },
+                new Set([3]),
+                new Date("2020-01-02"),
+                /a+/gi,
+                {
+                  items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+                  zero: -0,
+                  absent: undefined,
+                  nil: null
+                }
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
