@@ -611,6 +611,49 @@ export const engine = (backend: Backend) =>
               assert.strictEqual(removals, 1)
             }).pipe(Effect.scoped, Effect.provide(browser))
           }), timeout)
+        it.effect("cooperative runtime follows a navigation during a waiting round instead of failing", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const browser = BrowserImpl.layer((sink) =>
+              backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                adapter
+              ))
+            )
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const next = `${served.origin}/fixture?html=${encodeURIComponent("<div id=\"done\">Done</div>")}`
+              // The page leaves while the engine waits; pagehide disposes the session, as a navigation does in
+              // ordinary dispatch, and the target must then be found again in the new document.
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<div id="done" hidden>Done</div><script>setTimeout(() => { location.href = ${
+                      JSON.stringify(next)
+                    } }, 300)</script>`
+                  )
+                }`
+              )
+              const target = page.locator("#done") as LocatorImpl
+              const reply = yield* Effect.gen(function*() {
+                const record = yield* Operation.record
+                return yield* Runtime.sendCooperative(
+                  target.owner.runtime,
+                  target.owner.page,
+                  { op: "expect", steps: target.steps, expectation: { _tag: "Visible" }, cap: 2000 },
+                  record.id,
+                  record.budget.at,
+                  () =>
+                    Effect.succeed("continue" as const)
+                )
+              }).pipe(Operation.named("Test.cooperativeNavigation"), Effect.result)
+              assert(reply._tag === "Success", JSON.stringify(reply))
+              assert(!("_tag" in reply.success))
+              assert.strictEqual(reply.success.response._tag, "Expected")
+              if (reply.success.response._tag === "Expected") {
+                assert.isTrue(reply.success.response.passed)
+              }
+            }).pipe(Effect.scoped, Effect.provide(browser))
+          }), timeout)
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
