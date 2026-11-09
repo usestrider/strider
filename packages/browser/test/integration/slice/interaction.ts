@@ -4746,6 +4746,43 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects ordered selected values with typed failure evidence", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label for="colors">Colors</label><select id="colors" multiple><option value=" R " selected>Red</option><option value="G" selected>Green</option></select><select id="empty" multiple></select><select id="single"><option>R</option></select><input id="input">`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#colors").pipe(Expect.toHaveValues([" R ", /^G$/g]))
+            yield* Expect.toHaveValues(page.locator("label"), [/ R /g, "G"])
+            yield* page.locator("#empty").pipe(Expect.toHaveValues([]))
+            for (const [selector, values, observed] of [
+              ["#colors", ["G", " R "], [" R ", "G"]],
+              ["#colors", ["R", "G"], [" R ", "G"]],
+              ["#colors", [" R "], [" R ", "G"]],
+              [".absent", [], { matches: 0 }],
+              ["select", [], { matches: 3 }],
+              ["#single", [], "not a select element with a multiple attribute"],
+              ["#input", [], "not a select element with a multiple attribute"]
+            ] as const) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toHaveValues(values), Deadline.within("300 millis"), Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+            }
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                const select = document.querySelector<HTMLSelectElement>("#colors")!
+                for (const option of select.options) option.selected = false
+              }, 100)
+            })
+            yield* page.locator("#colors").pipe(Expect.toHaveValues([]))
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
