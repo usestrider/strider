@@ -1,6 +1,6 @@
 /** Request body subscriptions without a browser: ownership, decoding and scoped collection. */
 import { assert, describe, it } from "@effect/vitest"
-import { NetworkRequest, Page, Target, Url } from "@usestrider/browser"
+import { Deadline, NetworkRequest, Page, Target, Url } from "@usestrider/browser"
 import * as ByteSize from "effect/ByteSize"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -67,7 +67,8 @@ describe("Request body subscriptions", () => {
         assert.deepStrictEqual(world.declarations, [{
           _tag: "BodyCollection",
           bodies: ["request"],
-          maxBytes: 10485760
+          maxBytes: 10485760,
+          decodedRequestBytes: true
         }])
         Events.publish(world.channel, sent())
         return yield* wait
@@ -244,4 +245,12 @@ describe("Request body subscriptions", () => {
       yield* Stream.runHead(stream)
       assert.deepStrictEqual(names, ["NetworkRequest.body", "NetworkRequest.where"])
     })))
+  it.live("bounds a stream decoder that never completes by the captured browser deadline", () => Effect.scoped(Effect.gen(function*() {
+    const world = setup(bytes("pending"))
+    const stream = yield* NetworkRequest.stream(world.page, { body: () => Effect.never }).pipe(Deadline.withDefaultBudget("20 millis"))
+    Events.publish(world.channel, sent())
+    const error = yield* Stream.runHead(stream).pipe(Effect.flip)
+    assert.isTrue(Deadline.isTimeout(error))
+  })))
+
 })
