@@ -85,6 +85,7 @@ export const response = (
     if (Option.isNone(owner) || owner.value !== found.behind.entry) {
       return yield* Effect.fail(unavailable("foreignTarget"))
     }
+    const targetClosed = found.behind.entry.closed
     let held: Model.HopEntry | undefined = retained.value
     const released = Deferred.makeUnsafe<void>()
     yield* Effect.addFinalizer(() =>
@@ -112,7 +113,7 @@ export const response = (
         )),
         Stream.runHead
       )
-      const closed = Deferred.await(found.behind.entry.closed).pipe(
+      const closed = Deferred.await(targetClosed).pipe(
         Effect.andThen(Effect.fail(unavailable("targetClosed")))
       )
       const release = Deferred.await(released).pipe(Effect.andThen(Effect.fail(unavailable("released"))))
