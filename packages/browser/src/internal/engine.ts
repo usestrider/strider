@@ -166,6 +166,7 @@ export type Expectation =
   | { readonly _tag: "Checked" }
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
+  | { readonly _tag: "Empty" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "Role"; readonly expected: string }
@@ -174,6 +175,7 @@ export type Expectation =
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
+  | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
@@ -2443,6 +2445,12 @@ export function engine(render: (root: SnapNode) => string) {
         const active = deepActive()
         return { passed: active === element, observed: active === null ? "nothing focused" : describe(active) }
       }
+      case "Empty": {
+        const empty = element.nodeName === "INPUT" || element.nodeName === "TEXTAREA"
+          ? !(element as HTMLInputElement | HTMLTextAreaElement).value
+          : !element.textContent?.trim()
+        return { passed: empty, observed: empty ? "empty" : "not empty" }
+      }
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
@@ -2474,6 +2482,18 @@ export function engine(render: (root: SnapNode) => string) {
             ? new RegExp(matcher.source, matcher.flags).test(text)
             : text.includes(collapse(matcher.value)),
           observed: text
+        }
+      }
+      case "Values": {
+        const control = textSelectionTarget(element)
+        if (!(control instanceof HTMLSelectElement) || !control.multiple) {
+          return { passed: false, observed: "not a select element with a multiple attribute" }
+        }
+        const values = Array.from(control.selectedOptions, (option) => option.value)
+        return {
+          passed: values.length === expectation.expected.length &&
+            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+          observed: values
         }
       }
       case "Value": {

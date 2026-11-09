@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Locator#ReadonlyFrameLocator.owner"
     }
   ],
-  "notes": "The frame locator\u2019s owner is its iframe element locator; reading it does not wait for an attached document.",
+  "notes": "The frame locator’s owner is its iframe element locator; reading it does not wait for an attached document.",
   "capabilities": [],
   "audit": {
     "sources": [

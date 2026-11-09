@@ -5117,6 +5117,98 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects empty values and trimmed text with typed failure evidence", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="input"><textarea id="textarea">old text</textarea><div id="text"> \n <span> </span></div><div id="child"><img></div><div id="full"><span>content</span></div><input id="space" value=" "><div class="many"></div><div class="many"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLTextAreaElement>("#textarea")!.value = ""
+            })
+            for (const selector of ["#input", "#textarea", "#text", "#child"]) {
+              yield* page.locator(selector).pipe(Expect.toBeEmpty)
+            }
+            for (
+              const [selector, observed] of [
+                ["#space", "not empty"],
+                ["#full", "not empty"],
+                [".absent", { matches: 0 }],
+                [".many", { matches: 2 }]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toBeEmpty,
+                Deadline.within("500 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.condition, "to be empty")
+              assert.isAtLeast(error.checks.count, 1)
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+            }
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                document.querySelector("#full")!.textContent = ""
+              }, 100)
+            })
+            yield* page.locator("#full").pipe(Expect.toBeEmpty)
+            yield* page.evaluateInMainWorld(() => {
+              const input = document.querySelector<HTMLInputElement>("#space")!
+              setTimeout(() => {
+                input.value = ""
+              }, 100)
+            })
+            yield* page.locator("#space").pipe(Expect.toBeEmpty)
+          }))
+        }), timeout)
+
+      it.effect("expects ordered selected values with typed failure evidence", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<label for="colors"><span id="caption">Colors</span><button id="label-button">Other</button></label><select id="colors" multiple><option value=" R " selected>Red</option><option value="G" selected>Green</option></select><select id="empty" multiple></select><select id="single"><option>R</option></select><input id="input">`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#colors").pipe(Expect.toHaveValues([" R ", /^G$/g]))
+            yield* Expect.toHaveValues(page.locator("label"), [/ R /g, "G"])
+            yield* page.locator("#caption").pipe(Expect.toHaveValues([" R ", "G"]))
+            yield* page.locator("#empty").pipe(Expect.toHaveValues([]))
+            for (
+              const [selector, values, observed] of [
+                ["#colors", ["G", " R "], [" R ", "G"]],
+                ["#colors", ["R", "G"], [" R ", "G"]],
+                ["#colors", [" R "], [" R ", "G"]],
+                [".absent", [], { matches: 0 }],
+                ["select", [], { matches: 3 }],
+                ["#single", [], "not a select element with a multiple attribute"],
+                ["#input", [], "not a select element with a multiple attribute"],
+                ["#label-button", [], "not a select element with a multiple attribute"]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toHaveValues(values),
+                Deadline.within("300 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+            }
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                const select = document.querySelector<HTMLSelectElement>("#colors")!
+                for (const option of select.options) option.selected = false
+              }, 100)
+            })
+            yield* page.locator("#colors").pipe(Expect.toHaveValues([]))
+          }))
+        }), timeout)
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

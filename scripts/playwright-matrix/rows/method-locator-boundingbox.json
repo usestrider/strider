@@ -3,15 +3,29 @@
   "upstream": [
     "method:Locator.boundingBox"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
-  "capabilities": [],
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.boundingBox",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.boundingBox"
+    }
+  ],
+  "notes": "Immediate strict readonly read of the browser-derived axis-aligned rect in top-level viewport CSS pixels, composed through frames including borders/padding. Option.none means no layout box; hidden, transparent and zero-size boxes remain. Reads never wait for a missing match. Target transforms, motion paths and camera clipping follow browser rects, rather than original corner accuracy. Firefox frame rect composition supports positive axis-aligned scaling, CSS zoom and translation; rotation, skew, reflection, 3D, perspective and motion paths on frame ancestors fail with descriptive typed `Unsupported`. Stock defaults are unchanged; no launch profile or preference is required. These documented composition limits belong to the rect contract; immediate reads are a separate design difference.",
+  "capabilities": [
+    "boundingBox.frameTransforms"
+  ],
   "audit": {
     "sources": [
       "packages/browser/src/Locator.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Retrying expectations: a retry has a name and is asked for in code.",
+    "revision": "23b54562877b42279640e7baef1568cc4994aacf"
+  }
 }

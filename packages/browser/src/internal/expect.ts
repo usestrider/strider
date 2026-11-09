@@ -56,7 +56,7 @@ export const classifyFailure = (
         ? "URL"
         : matcherName === "toHaveTitle"
         ? "Title"
-        : matcherName === "toHaveValue"
+        : (matcherName === "toHaveValue" || matcherName === "toHaveValues")
         ? "Value"
         : Sources.kind(source) ?? "Other"
     )
@@ -368,7 +368,7 @@ export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) 
 // ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
 
 const stateOf =
-  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable") =>
+  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable" | "Empty") =>
   (matcherName: string, condition: string) =>
   (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
 
@@ -378,6 +378,7 @@ export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")
 export const toBeDisabled = stateOf("Disabled")("toBeDisabled", "to be disabled")
 export const toBeChecked = stateOf("Checked")("toBeChecked", "to be checked")
 export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
+export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
 export const toHaveText = (
@@ -422,6 +423,14 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     { _tag: "Value", expected: matcher(expected, true) },
     "toHaveValue",
     `to have the value ${show(expected)}`
+  )
+
+export const toHaveValues = (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+  expectLocator(
+    locator,
+    { _tag: "Values", expected: expected.map((value) => matcher(value, true)) },
+    "toHaveValues",
+    `to have the values [${expected.map(show).join(", ")}]`
   )
 
 export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>

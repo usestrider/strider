@@ -35,6 +35,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
@@ -107,6 +108,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "partial", [
         "without the Cookie header, which WebKitGTK's network process doesn't report"
       ]),

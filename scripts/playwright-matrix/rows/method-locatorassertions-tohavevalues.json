@@ -3,9 +3,15 @@
   "upstream": [
     "method:LocatorAssertions.toHaveValues"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveValues",
+      "url": "/docs/api/browser/Expect#toHaveValues"
+    }
+  ],
+  "notes": "Ordered exact strings or regular expressions on one multiple select, including label retargeting. Invalid controls and multiple matches retry to a typed ExpectationFailed instead of throwing immediately.",
   "capabilities": [],
   "requirements": []
 }

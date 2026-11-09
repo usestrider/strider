@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Locator#ReadonlyLocator.isEditable"
     }
   ],
-  "notes": "Immediate strict read of the same Editable predicate as Strider actions and expectations: enabled, not read-only, and a text/settable input, textarea or contenteditable element. Unsupported kinds return false, including selects, checkboxes and ARIA-only textboxes; Playwright accepts more kinds and throws for unsupported elements. Native readOnly and the element\u2019s exact aria-readonly=\"true\" prevent editing; aria-disabled=\"true\" on any ancestor disables it. Hidden/inert elements may read true. NoMatch and StrictViolation fail immediately; no attachment wait. Uses the existing owned read path, including frame targets, access release and operation deadlines. Contenteditable follows native isContentEditable; WebKit may report false for hidden or inert contenteditable elements.",
+  "notes": "Immediate strict read of the same Editable predicate as Strider actions and expectations: enabled, not read-only, and a text/settable input, textarea or contenteditable element. Unsupported kinds return false, including selects, checkboxes and ARIA-only textboxes; Playwright accepts more kinds and throws for unsupported elements. Native readOnly and the element’s exact aria-readonly=\"true\" prevent editing; aria-disabled=\"true\" on any ancestor disables it. Hidden/inert elements may read true. NoMatch and StrictViolation fail immediately; no attachment wait. Uses the existing owned read path, including frame targets, access release and operation deadlines. Contenteditable follows native isContentEditable; WebKit may report false for hidden or inert contenteditable elements.",
   "capabilities": [],
   "audit": {
     "sources": [

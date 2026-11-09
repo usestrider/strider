@@ -32,6 +32,7 @@ import * as Capture from "./bidiAdapter/capture.ts"
 import * as Contexts from "./bidiAdapter/contexts.ts"
 import * as Declare from "./bidiAdapter/declare.ts"
 import * as Evaluation from "./bidiAdapter/evaluation.ts"
+import * as Geometry from "./bidiAdapter/geometry.ts"
 import * as Input from "./bidiAdapter/input.ts"
 import * as Navigation from "./bidiAdapter/navigation.ts"
 import * as Network from "./bidiAdapter/network.ts"
@@ -74,6 +75,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),
+      entry("boundingBox.frameTransforms", "partial", [
+        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+      ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
         "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new document itself"
@@ -101,6 +105,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.failure", "partial", ["BiDi reports failure text without a cancellation flag"]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -352,6 +357,8 @@ export const connect: (
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
+      releaseNodes: () => Effect.void,
+      geometry: (node, kind) => Geometry.read(state, node, kind),
       setInputFiles: (node, files) => Input.setInputFiles(state, node, files),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),

@@ -6,6 +6,7 @@ import {
   Capability,
   Deadline,
   Download,
+  Expect,
   JSHandle,
   Locator,
   NetworkRequest,
@@ -30,6 +31,7 @@ describe("access is typed", () => {
   })
 
   it("a page you may only inspect offers no actions", () => {
+    expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
     expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")
     expect(page.locator("input").selectText()).type.not.toRaiseError()
@@ -38,6 +40,14 @@ describe("access is typed", () => {
     )
     expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
     expect(page.getByRole("button").blur()).type.not.toRaiseError()
+  })
+
+  it("selected-value expectations need only inspect access and preserve typed failures", () => {
+    expect(reader.locator("select").pipe(Expect.toHaveValues(["red", /green/] as const))).type.toBe<
+      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone>
+    >()
+    expect(Expect.toHaveValues(reader.locator("select"), [])).type.not.toRaiseError()
+    expect(observed.locator("select").pipe(Expect.toHaveValues([]))).type.toRaiseError()
   })
 
   it("editability needs only inspect access and preserves read failures", () => {

@@ -5,7 +5,7 @@
   ],
   "status": "missing",
   "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract\u2019s actionability, atomicity or handle semantics.",
+  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
   "capabilities": [],
   "audit": {
     "sources": [

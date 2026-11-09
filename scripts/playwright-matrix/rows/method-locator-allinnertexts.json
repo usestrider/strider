@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
     }
   ],
-  "notes": "Read all, then Effect.forEach over locator.evaluate to read each element\u2019s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+  "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
   "capabilities": [],
   "audit": {
     "sources": [

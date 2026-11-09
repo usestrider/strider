@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
     }
   ],
-  "notes": "readText uses Strider\u2019s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement\u2019s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
+  "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed. This uses a lazy locator instead of fixed ElementHandle identity.",
   "capabilities": [],
   "audit": {
     "sources": [

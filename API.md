@@ -537,6 +537,7 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   readonly isChecked: Effect<boolean, LocatorError>      // a checkbox's, a radio's or an ARIA checkable's; else WrongElement
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, LocatorError>   // pinned to the current nth matches
   readAttribute(name: string): Effect<Option<string>, LocatorError>
+  readonly boundingBox: Effect<Option<Locator.BoundingBox>, LocatorError> // main-frame viewport CSS pixels
   snapshot(options?: Snapshot.Options | undefined): Effect<Snapshot.Snapshot<ReadonlyLocator>, LocatorError>   // this element's subtree
   evaluate<Args extends ReadonlyArray<unknown>, B>(      // the isolated world, with the element first; strict: exactly one match
     fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
@@ -656,6 +657,7 @@ Focus or selection handlers can change the resulting selection. The action does 
 - **Strictness.** An action needs exactly one match, and ambiguity fails immediately with `StrictViolation`. There is no retry window. Strictness counts every match, hidden ones included, and the hint says when narrowing would fix it, e.g. "1 of 2 matches is visible; add `.filter({ visible: true })`". If duplicates are expected to be transient (a fading toast), say so in the code: `yield* toast.pipe(Expect.toHaveCount(0))` before acting.
 - **`has:` takes only a `RelativeLocator`.** That makes Playwright's silent "page-rooted locator inside `has`" mismatch a type error.
 - **Once only.** An action dispatches at most once per call. If a later step fails after input may have reached the page, the error carries that evidence and the action is never replayed. The exception is input a guard stopped before its native mutation: an intercepted pointer gesture, or design-mode fill whose insertion was cancelled before any text was inserted.
+- **Bounding boxes describe browser rects.** `boundingBox` reads the browser's own axis-aligned border rect in main-frame viewport CSS pixels, composed through child frames including their borders and padding. Scrolling can make coordinates negative. It returns `None` for elements without layout boxes (`display: none`, `display: contents`), but retains hidden, transparent and zero-size boxes. It never scrolls, focuses or waits for visibility. Target transforms, motion paths and camera clipping follow the browser's `getBoundingClientRect`; this is not an original-corner or painted-pixel hull. Reliable native frame point conversion includes transformed frame planes on Chromium and WebKit. Firefox frame rect composition supports positive axis-aligned scaling, CSS zoom and translation; rotation, skew, reflection, 3D, perspective and motion paths on frame ancestors fail with descriptive typed `Unsupported`. Browser defaults are unchanged and no launch profile or preference is required. Geometry runs only for this read.
 - **Reads are strict and immediate.** A read needs exactly one match: several fail with `StrictViolation`, as an action does, and none fails at once with `NoMatch`, since a read never waits. `readText` is the engine's text, the whitespace-collapsed text content `getByText` matches, so a locator found by a text reads that text back; `innerText` depends on layout and differs between engines. `count` and `all` take any number of matches.
 
 ## Keyboard, mouse, frames and handles
@@ -714,7 +716,7 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
 // no extra arguments: the matcher itself is the function
 //   locator.pipe(Expect.toBeVisible)   or   Expect.toBeVisible(locator)
 declare const toBeVisible: Matcher<Locator.ReadonlyLocator>   // Matcher<S> = (subject: S) => Effect<void, ExpectationFailed | TargetGone>
-// toBeHidden (passes when the element is missing), toBeEnabled, toBeDisabled, toBeChecked, toBeFocused, toBeEditable
+// toBeHidden (passes when the element is missing), toBeEnabled, toBeDisabled, toBeChecked, toBeFocused, toBeEditable, toBeEmpty (raw input/textarea value, otherwise trimmed textContent)
 // with arguments: dual
 //   locator.pipe(Expect.toHaveText("1 item"))   or   Expect.toHaveText(locator, "1 item")
 declare const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [options?: { ratio?: number; inViewport?: boolean }]> // defaults: ratio 0, inViewport true
@@ -723,6 +725,7 @@ declare const toHaveAccessibleName: DualMatcher<Locator.ReadonlyLocator, [expect
 declare const toHaveClass: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>]>
 declare const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
 declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>
+declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
@@ -850,6 +853,14 @@ Each module has the most specific accurate name, with a prefix only where a bare
 - **Only state the model folds from protocol events is watchable.** Reads that need a round trip (DOM reads, `title`) stay plain `Effect`s rather than hiding a poll. An event log is not state: its changes are just the events again, and a level-triggered wait on it would match old events.
 
 ## Network
+
+`NetworkRequest.failure(target, request): Effect<Option<NetworkRequest.Failure>, NetworkRequest.RequestError>`
+reads an original request observation immediately from the existing bounded hop index. `None` means pending or
+successfully finished, including HTTP error statuses and redirect hops. `Some` preserves `errorText` and
+`canceled: Option<boolean>`: Chromium and WebKit report a cancellation flag; BiDi leaves it unknown. Text alone
+does not establish cancellation. Unknown, copied/decoded, evicted or foreign requests are `RequestUnavailable`.
+Owner or connection loss takes precedence even over a completed failure; save a returned value for later use.
+The read adds no retention or instrumentation and follows [Pay for what you use](docs/decisions.md#pay-for-what-you-use).
 
 ```ts
 // Route

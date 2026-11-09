@@ -222,6 +222,32 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
 export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeFocused(locator)
 
 /**
+ * Expects the one match to have an empty value or no text apart from whitespace.
+ *
+ * **Details**
+ *
+ * Inputs and textareas use their current value without trimming. Other elements use trimmed
+ * `textContent`, including descendant text. Missing or multiple matches keep retrying until the
+ * deadline. Failure evidence reports match counts or whether the element is empty.
+ *
+ * **Example** (Waiting for a field to clear)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+ *   yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeEmpty: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeEmpty(locator)
+
+/**
  * Expects the one match to accept input.
  *
  * **Example** (Waiting for an address field to unlock)
@@ -399,6 +425,37 @@ export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: stri
 export const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
   2,
   (locator: Locator.ReadonlyLocator, expected: string | RegExp) => ExpectImpl.toHaveValue(locator, expected)
+)
+
+/**
+ * Expects the selected values of one multiple select to match in option order.
+ *
+ * **Details**
+ *
+ * Strings match exactly, including whitespace; regular expressions test each value.
+ * An empty array expects no selected options. Labels resolve to their associated control.
+ * Missing or multiple matches and controls other than a multiple select retry until the deadline,
+ * then fail with `ExpectationFailed` evidence.
+ *
+ * **Example** (Checking selected colors)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const colors = Effect.fn("colors")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByLabel("Colors").pipe(Expect.toHaveValues(["red", /green/]))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+    ExpectImpl.toHaveValues(locator, expected)
 )
 
 /**

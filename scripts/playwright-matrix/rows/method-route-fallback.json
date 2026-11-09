@@ -18,7 +18,7 @@
   "decision": {
     "file": "docs/decisions.md",
     "anchor": "effectful-handler-decisions",
-    "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<\u2026>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
+    "quote": "Route's constructors and the decisions on `Dialog.Pending` and `FileChooser.Pending` provide `Effect<Decision<…>>`, so a handler can return `Route.abort()` or `dialog.accept` directly.",
     "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
   },
   "audit": {

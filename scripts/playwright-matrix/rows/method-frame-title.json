@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
     }
   ],
-  "notes": "Evaluate the frame\u2019s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
+  "notes": "Evaluate the frame’s root locator and read element.ownerDocument.title. This is an immediate element read, fails NoMatch when the frame/root is absent, and does not wait for load.",
   "capabilities": [],
   "audit": {
     "sources": [

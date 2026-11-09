@@ -3,9 +3,15 @@
   "upstream": [
     "method:LocatorAssertions.toBeEmpty"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeEmpty",
+      "url": "/docs/api/browser/Expect#toBeEmpty"
+    }
+  ],
+  "notes": "Input and textarea values are untrimmed; other elements use trimmed textContent. Missing or multiple matches retry until the deadline.",
   "capabilities": [],
   "requirements": []
 }

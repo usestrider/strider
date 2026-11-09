@@ -3,15 +3,29 @@
   "upstream": [
     "method:Request.failure"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-  "capabilities": [],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "failure",
+      "url": "/docs/api/browser/NetworkRequest#failure"
+    }
+  ],
+  "notes": "Immediate failure observation from the existing bounded hop index. None means pending or successfully finished, including HTTP errors and redirect hops. Failure preserves errorText and canceled: Option<boolean>; BiDi cancellation is unknown. Requires the original request instance and its live page/context; copied, evicted, foreign or owner-lost requests fail with RequestUnavailable. Save returned failure data before owner closure. No additional retention or instrumentation.",
+  "capabilities": [
+    "network.failure"
+  ],
   "audit": {
     "sources": [
       "packages/browser/src/NetworkRequest.ts"
     ],
-    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+    "scope": "Public immediate-read failure contract, original-instance ownership, bounded retention and protocol cancellation evidence inspected."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "request-failure-observations",
+    "quote": "Request failure reads inspect the existing bounded hop index immediately, using the original request instance",
+    "revision": "881ad51ccc49add1b842de8b4a12c9cb212cb58e"
+  }
 }
