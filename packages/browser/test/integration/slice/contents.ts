@@ -1000,6 +1000,27 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("leaves the callback's free identifiers to its realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            // Names the argument wrapper might bind must resolve as they would in the callback's own realm
+            assert.deepStrictEqual(
+              yield* evaluate((value: number) => [
+                // @ts-expect-error: undeclared on purpose
+                typeof kinds,
+                // @ts-expect-error: undeclared on purpose
+                typeof args,
+                // @ts-expect-error: undeclared on purpose
+                typeof decode,
+                value
+              ], 1),
+              ["undefined", "undefined", "undefined", 1]
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
