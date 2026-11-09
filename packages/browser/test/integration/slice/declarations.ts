@@ -88,11 +88,11 @@ export const declarations = (
             assert.deepStrictEqual(yield* later.viewportSize, Option.some({ width: 640, height: 480 }))
             yield* later.close()
             const first = yield* page.emulate({ viewport: { width: 400, height: 300 } })
-            const latest = yield* page.emulate({ viewport: { width: 320, height: 240 } })
+            const latest = yield* page.emulate({ viewport: { width: 500, height: 400 } })
             const contextLatest = yield* context.emulate({ viewport: { width: 800, height: 600 } })
-            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 320, height: 240 }))
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
             yield* first.remove
-            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 320, height: 240 }))
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
             yield* latest.remove
             assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 800, height: 600 }))
             yield* contextLatest.remove
