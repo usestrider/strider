@@ -190,7 +190,8 @@ for (const javaScript of ["enabled", "disabled"] as const) {
                 }
               })
               expect(measurement.scrollWidth, `${path} document at ${width}px`).toBeLessThanOrEqual(measurement.width)
-              expect(measurement.controls).toHaveLength(7)
+              // The home link, the three sections, the night toggle and the repository link
+              expect(measurement.controls).toHaveLength(6)
               for (const control of measurement.controls) {
                 expect(control.left, `${path} control left at ${width}px`).toBeGreaterThanOrEqual(0)
                 expect(control.right, `${path} control right at ${width}px`).toBeLessThanOrEqual(measurement.width)
