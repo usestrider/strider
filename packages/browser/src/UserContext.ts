@@ -390,6 +390,14 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  */
 export interface Options {
   /**
+   * Collects native request phase timings for this new context, read with `NetworkRequest.timing`.
+   * No timing state is collected when false or omitted. Cannot enable timings on an existing context.
+   *
+   * @default false
+   */
+  readonly requestTiming?: boolean | undefined
+
+  /**
    * Accepts HTTPS certificate errors in this context alone.
    *
    * **Details**

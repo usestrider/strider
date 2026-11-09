@@ -53,6 +53,11 @@ const dropDocument = (state: State, document: DocumentEntry, reason: L1Target.Cl
 /** Ends a frame and everything below it, deepest first. */
 export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.CloseReason, evidence: string) =>
   Kit.removeNavigable(state.buffer, frame, reason, evidence, (frame, reason) => {
+    if (frame.page.context.requestTiming !== undefined) {
+      for (const [hop, timing] of frame.page.context.requestTiming) {
+        if (timing.owner === frame.id) frame.page.context.requestTiming.delete(hop)
+      }
+    }
     if (state.frames.get(frame.frameId) === frame) state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
     if (frame.document !== undefined) dropDocument(state, frame.document, reason)

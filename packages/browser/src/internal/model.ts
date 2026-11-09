@@ -340,6 +340,7 @@ export interface ContextState {
 }
 
 export interface ContextEntry {
+  timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
   readonly id: UserContext.Id
   /** Fixed: the default context exists for the whole connection. */
   readonly isDefault: boolean

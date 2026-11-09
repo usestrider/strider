@@ -766,3 +766,19 @@ They are observed ranges, not confidence or prediction intervals for future jobs
 Head/Playwright figures retain the existing library defaults and timing boundaries described above. In particular,
 lifecycle cases compare different readiness/release paths and resources; their ratios are not isolated protocol
 costs. Ratios from these controls describe this source revision and these runners, not a general parity claim.
+
+The `role-presentation` workload counts 100 headings with `role="none" tabindex="0.5"` twenty times per sample.
+Preparation is outside the timer. It exercises role traversal and the presentation-conflict tabindex predicate
+without using `Expect.toHaveRole`; Strider and Playwright must each return 100 every time. Ordinary `locator-read`,
+`click` and `visible` exercise the role engine on their default fixture, but do not directly stress presentation
+conflicts. `read-snapshot-100` and `read-snapshot-1000` evaluate a main-world input-property function; they measure
+DOM evaluation and value transfer, not ARIA role traversal or the accessibility snapshot API.
+
+For shared role-engine diagnosis, dispatch `benchmarks.yml` with `workload=bench`, `only=role-engine-diagnostic`, `base` naming the original
+engine and `head` the reviewed engine. The driver supplies the optimized engine; when its engine is unchanged,
+the harness labels the combined candidate explicitly. Six serialized engine variants run interleaved on one
+page (use 24 measured rounds to balance its rotations) over focusable/non-focusable presentation headings and list/table inheritance. Every `engine.run` count
+query clears its caches. Original list/table outputs are recorded as incorrect and are excluded from
+old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
+hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
+but does not eliminate JIT, GC, scheduling, order or thermal effects.
