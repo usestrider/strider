@@ -22,7 +22,10 @@ const request: Engine.CooperativeRequest = {
   cap: 1000
 }
 
-const scenario = (resumes: ReadonlyArray<Engine.CooperativeResponse> = []) => {
+const scenario = (
+  resumes: ReadonlyArray<Engine.CooperativeResponse> = [],
+  afterResume: () => Effect.Effect<void> = () => Effect.void
+) => {
   let resumed = 0
   const commands: Array<Engine.CooperativeCommand> = []
   const evaluations: Array<"install" | "run" | "cooperate"> = []
@@ -59,7 +62,12 @@ const scenario = (resumes: ReadonlyArray<Engine.CooperativeResponse> = []) => {
               ? { _tag: "Restart" }
               : { _tag: "Done", response: ordinary })
           return { _tag: "Value", value: { type: "string", value: JSON.stringify(response) } } as const
-        })
+        }).pipe(Effect.tap(() => {
+          if (call.functionDeclaration !== Engine.cooperate) return Effect.void
+          const arg = call.arguments[0]
+          assert(arg?._tag === "Value" && arg.value.type === "string")
+          return JSON.parse(arg.value.value).command === "resume" ? afterResume() : Effect.void
+        }))
     })))
   )
   return { layer, commands, evaluations }
@@ -179,6 +187,44 @@ describe("cooperative runtime", () => {
         }
         assert.deepStrictEqual(commands.map((command) => command.command), ["start", "resume", "cancel"])
       }).pipe(Effect.scoped, Effect.provide(layer))
+    }))
+
+  it.effect("reroutes a disposed waiting round only after departure without renewing its budget", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      let depart: Effect.Effect<void> = Effect.void
+      let departures = 0
+      const { layer, commands } = scenario([{ _tag: "Disposed" }], () => departures++ === 0 ? depart : Effect.void)
+      yield* Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const owner = (page.locator("#ready") as LocatorImpl).owner
+        depart = Effect.andThen(TestClock.adjust("40 millis"), page.goto("https://example.test/next")).pipe(
+          Effect.asVoid,
+          Effect.orDie
+        )
+        const answer = yield* run(owner, () => Effect.succeed("continue" as const)).pipe(
+          Deadline.within("100 millis")
+        )
+        assert(!("_tag" in answer))
+        const starts = commands.filter((command) => command.command === "start")
+        assert.strictEqual(starts.length, 2)
+        assert.notStrictEqual(starts[0]!.document, starts[1]!.document)
+        assert.notStrictEqual(starts[0]!.session, starts[1]!.session)
+        assert.strictEqual(starts[0]!.operation, starts[1]!.operation)
+        assert.strictEqual(starts[0]!.budget, 100)
+        assert.strictEqual(starts[1]!.budget, 60)
+        // Only the new document's continuation can complete; the old token is never replayed.
+        const resumes = commands.filter((command) => command.command === "resume")
+        assert.strictEqual(resumes.length, 2)
+        assert.notStrictEqual(resumes[0]!.document, resumes[1]!.document)
+        assert.deepStrictEqual(commands.map((command) => command.command), [
+          "start",
+          "resume",
+          "cancel",
+          "start",
+          "resume"
+        ])
+      }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }))
 
   it.effect("collects failed observations after the absolute deadline without checking again", () =>
