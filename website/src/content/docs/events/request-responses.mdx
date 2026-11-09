@@ -26,9 +26,10 @@ arrived or waits under the [deadline](/docs/deadlines) in force when it runs. A 
 a response, including a failed or canceled request, returns `Option.none`. Each redirect hop resolves independently.
 
 Acquire while the request is still among the model's last 1000 retained hops, using the page or context that
-observed it. Acquisition does not recover an evicted hop. The wait fails with `RequestError`, whose
-`ResponseUnavailable` reason distinguishes an evicted hop, a foreign target, a released scope and a target
-closing before arrival. Closing the scope releases the reference and wakes pending waits.
+observed it. Acquisition does not recover an evicted hop. The wait fails with
+[RequestError](/docs/api/browser/NetworkRequest#RequestError), whose
+[ResponseUnavailable](/docs/api/browser/NetworkRequest#ResponseUnavailable) reason distinguishes an evicted hop,
+a foreign target, a released scope and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
 
 This retains response metadata only. To read a body, set up a [response-body subscription](/docs/events/network#decoding-bodies)
 before the request starts. Continue a routed request before awaiting its response, so the browser can send it.
