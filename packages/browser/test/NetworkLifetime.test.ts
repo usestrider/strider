@@ -277,7 +277,7 @@ describe("Request response lifetime", () => {
         grant: Option.none()
       })
       assert.strictEqual(
-        (yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))).reason.why,
+        unavailableWhy(yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))),
         "foreignTarget"
       )
     })))
@@ -291,7 +291,7 @@ describe("Request response lifetime", () => {
       }
       assert.strictEqual(unavailableWhy(yield* Effect.flip(wait)), "evicted")
       assert.strictEqual(
-        (yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))).reason.why,
+        unavailableWhy(yield* Effect.flip(Effect.asVoid(NetworkRequest.response(target, sent)))),
         "evicted"
       )
     })))
@@ -329,7 +329,7 @@ describe("Request response lifetime", () => {
         grant: Option.none()
       })
       const error = yield* NetworkRequest.response(target, sent).pipe(Effect.asVoid, Effect.flip)
-      assert.strictEqual(error.reason.why, "foreignTarget")
+      assert.strictEqual(unavailableWhy(error), "foreignTarget")
     })))
 
   it.effect("bounds waits by the operation deadline", () =>
@@ -345,5 +345,7 @@ describe("Request response lifetime", () => {
 const unavailableWhy = (error: NetworkRequest.RequestError | Deadline.Timeout) => {
   assert.strictEqual(error._tag, "RequestError")
   if (error._tag !== "RequestError") throw error
+  assert.strictEqual(error.reason._tag, "ResponseUnavailable")
+  if (error.reason._tag !== "ResponseUnavailable") throw error
   return error.reason.why
 }

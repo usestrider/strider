@@ -110,6 +110,22 @@ export const capabilities = (
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.requestBody.redirects", "partial", ["earlier hops require complete event-carried data"]),
+      entry("network.requestBody.absence", "supported", [
+        "native hasPostData reports body presence; empty fallback reports are refused"
+      ]),
+      entry("network.requestBody.empty", "partial", [
+        "requires complete event-carried bytes; empty fallback reports are refused"
+      ]),
+      entry("network.requestBody.multipart", "unsupported", [
+        "multipart file completeness cannot be established from the native report"
+      ]),
+      entry("network.requestBody.bytes", "partial", [
+        "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
+      ]),
+      entry("network.requestBody.text", "partial", [
+        "requires a complete collected body; multipart and empty fallback reports are refused"
+      ]),
       entry("network.failure", "supported"),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
@@ -348,6 +364,7 @@ export const connect: (
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       downloadPath: (download) => Contexts.downloadPath(state, download),
       cancelDownload: (download) => Contexts.cancelDownload(state, download)

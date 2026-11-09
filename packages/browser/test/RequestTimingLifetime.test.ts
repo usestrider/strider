@@ -83,7 +83,7 @@ describe("request timing ownership and isolation", () => {
       assert.instanceOf(Option.getOrThrow(onOwner).timings, Map)
       const refused = yield* NetworkRequest.timing(off.page, off.request).pipe(Effect.flip)
       assert.strictEqual(refused.reason._tag, "RequestUnavailable")
-      assert.strictEqual(refused.reason.why, "timingNotEnabled")
+      assert.deepInclude(refused.reason, { _tag: "RequestUnavailable", why: "timingNotEnabled" })
       yield* off.fold.sink({ _tag: "HopTiming", hop: off.request.hop, timing: empty() })
       assert.isUndefined(Option.getOrThrow(offOwner).timings)
       assert.deepStrictEqual((yield* NetworkRequest.timing(on.page, on.request)).responseEnd, Option.none())
@@ -112,14 +112,14 @@ describe("request timing lifecycle", () => {
       const b = yield* setup()
       for (const request of [new NetworkRequest.NetworkRequest({ ...a.request }), b.request]) {
         const error = yield* NetworkRequest.timing(a.page, request).pipe(Effect.flip)
-        assert.strictEqual(error.reason.why, "notRetained")
+        assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "notRetained" })
       }
       const owner = Option.getOrThrow(Option.getOrThrow(a.fold.hop(a.request.hop)).context)
       yield* a.fold.sink({ _tag: "HopTiming", hop: a.request.hop, timing: empty() })
       yield* a.fold.loseConnection
       assert.strictEqual(owner.timings?.size, 0)
       const error = yield* NetworkRequest.timing(a.page, a.request).pipe(Effect.flip)
-      assert.strictEqual(error.reason.why, "ownerLost")
+      assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
     }))
   it.effect("bounds timing retention by hop eviction", () =>
     Effect.gen(function*() {
@@ -129,7 +129,7 @@ describe("request timing lifecycle", () => {
       for (let i = 0; i < Fold.maxHops; i++) yield* fold.sink({ _tag: "RequestSent", request: sent(`other-${i}`) })
       assert.strictEqual(owner.timings?.size, 0)
       const error = yield* NetworkRequest.timing(page, request).pipe(Effect.flip)
-      assert.strictEqual(error.reason.why, "notRetained")
+      assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "notRetained" })
     }))
 })
 
@@ -148,7 +148,7 @@ it.effect("refuses another live target and removes a detached frame's retained t
     const other = {} as Page.ObservedPage
     Handles.registerPage(other, { runtime, entry: Option.getOrThrow(fold.page(otherId)), grant: Option.none() })
     const error = yield* NetworkRequest.timing(other, request).pipe(Effect.flip)
-    assert.strictEqual(error.reason.why, "foreignTarget")
+    assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "foreignTarget" })
     const frame = "frame" as Target.NavigableId
     yield* fold.sink({ _tag: "FrameAdded", frame, parent: pageId, page: pageId })
     const child = sent("child", { _tag: "Document", navigable: frame, navigation: Option.none() })
@@ -166,5 +166,5 @@ it.effect("refuses another live target and removes a detached frame's retained t
     yield* fold.sink({ _tag: "HopTiming", hop: child.hop, timing: empty() })
     assert.strictEqual(context.timings?.size, 0, "late facts cannot revive a removed owner's timing")
     const unavailable = yield* NetworkRequest.timing(page, child).pipe(Effect.flip)
-    assert.strictEqual(unavailable.reason.why, "ownerLost")
+    assert.deepInclude(unavailable.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
   }))

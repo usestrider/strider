@@ -3,15 +3,34 @@
   "upstream": [
     "method:Request.postData"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "NetworkRequest is an immutable request-event snapshot; it does not expose this request body, terminal outcome, timing or object-navigation operation. Paused routes can read request bodies, but that is a distinct lifetime.",
-  "capabilities": [],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "next",
+      "url": "/docs/api/browser/NetworkRequest#next"
+    },
+    {
+      "module": "NetworkRequest",
+      "symbol": "stream",
+      "url": "/docs/api/browser/NetworkRequest#stream"
+    }
+  ],
+  "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.text; stock WebKit returns only nonempty native reported text and refuses empty or missing reports because Blob/File data may be omitted. Chromium empty fallback reports are also refused.",
+  "capabilities": [
+    "network.requestBody.text"
+  ],
   "audit": {
     "sources": [
       "packages/browser/src/NetworkRequest.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "pay-for-what-you-use",
+    "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+    "revision": "1355f0fc36330c95e7aae4b012f55db079543b8c"
+  }
 }

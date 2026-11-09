@@ -171,8 +171,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             return { page, request }
           }))
           const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
-          assert.strictEqual(error.reason._tag, "RequestUnavailable")
-          assert.strictEqual(error.reason.why, "ownerLost")
+          assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
         })))
 
       it.effect("associates an observed request with its response before and after arrival", () =>
@@ -200,7 +199,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
           assert.deepStrictEqual(yield* (yield* NetworkRequest.response(page.context, request)), Option.some(arrived))
           const foreign = yield* Browser.newContext()
           const error = yield* NetworkRequest.response(foreign, request).pipe(Effect.asVoid, Effect.flip)
-          assert.strictEqual(error.reason.why, "foreignTarget")
+          assert.deepInclude(error.reason, { _tag: "ResponseUnavailable", why: "foreignTarget" })
         })))
 
       it.effect("returns no response for a request aborted before receiving headers", () =>

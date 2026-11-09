@@ -67,6 +67,36 @@ const site = Effect.gen(function*() {
 export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} request timings`, () => {
     layer(backend, { excludeTestServices: true, timeout: 60_000 })((it) => {
+      it.effect("keeps body capture independent of original-request timing ownership", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const context = yield* Browser.newContext({ requestTiming: true, acceptInsecureCerts: false })
+          const page = yield* context.newPage
+          yield* page.goto(served.origin)
+          const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/stream` })
+          const captured = yield* NetworkRequest.next(page, {
+            url: `${served.origin}/stream`,
+            body: (message) => message.text
+          })
+          const headers = yield* NetworkResponse.next(page, { url: `${served.origin}/stream` })
+          const fetched = yield* page.evaluateInMainWorld(async () =>
+            (await fetch("/stream", { method: "POST", body: "submitted" })).text()
+          ).pipe(Effect.forkScoped)
+          const original = yield* sent
+          const owned = yield* captured
+          assert.strictEqual(owned.hop, original.hop)
+          assert.deepStrictEqual(owned.body, Option.some("submitted"))
+          yield* headers
+          const before = yield* NetworkRequest.timing(page, original)
+          assert.isTrue(Option.isSome(before.startTime))
+          assert.deepStrictEqual(before.responseEnd, Option.none())
+          const refused = yield* NetworkRequest.timing(page, owned).pipe(Effect.flip)
+          assert.deepInclude(refused.reason, { _tag: "RequestUnavailable", why: "notRetained" })
+          served.release()
+          assert.strictEqual(yield* Fiber.join(fetched), "first\nlast\n")
+          assert.deepStrictEqual(owned.body, Option.some("submitted"))
+        }).pipe(Effect.scoped), 60_000)
+
       it.effect(
         "keeps redirect hops separate and publishes body end only after streamed completion",
         () =>
@@ -162,7 +192,7 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
             const observed = yield* NetworkRequest.next(other, { url: served.origin + "/" })
             yield* other.goto(served.origin)
             const refused = yield* NetworkRequest.timing(other, yield* observed).pipe(Effect.flip)
-            assert.strictEqual(refused.reason.why, "timingNotEnabled")
+            assert.deepInclude(refused.reason, { _tag: "RequestUnavailable", why: "timingNotEnabled" })
           }).pipe(Effect.scoped),
         60_000
       )

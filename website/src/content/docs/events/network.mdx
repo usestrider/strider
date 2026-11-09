@@ -99,6 +99,9 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
 })
 ```
 
+A request can also be captured with a decoder; see [Request bodies](/docs/events/request-bodies) for submitted
+text, JSON, forms, byte limits and browser restrictions.
+
 ## Streams and history
 
 `stream` gives every match from now on. Given a context rather than a page, it watches every page in it, and on

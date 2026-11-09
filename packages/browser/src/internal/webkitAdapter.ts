@@ -223,6 +223,7 @@ export const connect: (
         return { document: node.document, data }
       }),
       contentFrame: refuse("frames.contentFrame", "stock WebKit's inspector can't say which frame an iframe holds"),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),
       pausedResponseBody: (obligation) => Obligations.pausedResponseBody(state, obligation),
