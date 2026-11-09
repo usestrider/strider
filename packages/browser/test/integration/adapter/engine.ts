@@ -5,12 +5,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as Engine from "../../../src/internal/engine.ts"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as Operation from "../../../src/internal/operation.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
 
@@ -150,12 +155,56 @@ const revalidate = Effect.fnUntraced(function*(
   return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
 })
 
+/** Count live browser resources, rather than assuming that a canceled host fiber stops page execution. */
+const trackCooperativeResources = `() => {
+  const resources = globalThis.engineTestResources = { timers: new Set(), frames: new Set(), observers: new Set(), listeners: new Set() }
+  const timer = globalThis.setTimeout.bind(globalThis)
+  const clear = globalThis.clearTimeout.bind(globalThis)
+  const frame = globalThis.requestAnimationFrame.bind(globalThis)
+  const cancel = globalThis.cancelAnimationFrame.bind(globalThis)
+  globalThis.setTimeout = (callback, delay) => {
+    const id = timer(() => { resources.timers.delete(id); callback() }, delay)
+    resources.timers.add(id)
+    return id
+  }
+  globalThis.clearTimeout = (id) => { resources.timers.delete(id); clear(id) }
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = frame((time) => { resources.frames.delete(id); callback(time) })
+    resources.frames.add(id)
+    return id
+  }
+  globalThis.cancelAnimationFrame = (id) => { resources.frames.delete(id); cancel(id) }
+  const Observer = globalThis.MutationObserver
+  globalThis.MutationObserver = class extends Observer {
+    observe(...args) { resources.observers.add(this); return super.observe(...args) }
+    disconnect() { resources.observers.delete(this); return super.disconnect() }
+  }
+  const add = globalThis.addEventListener.bind(globalThis)
+  const remove = globalThis.removeEventListener.bind(globalThis)
+  globalThis.addEventListener = (type, callback, options) => {
+    resources.listeners.add(callback)
+    add(type, callback, options)
+  }
+  globalThis.removeEventListener = (type, callback, options) => {
+    resources.listeners.delete(callback)
+    remove(type, callback, options)
+  }
+  Object.defineProperty(globalThis, Symbol.for("@usestrider/browser/clock/real"), {
+    value: {
+      setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
+      requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame,
+      now: performance.now.bind(performance)
+    }
+  })
+  globalThis.cancelAnimationFrame = () => { throw Error("The engine canceled a virtual frame") }
+}`
+
 /** Execute the opt-in wire protocol in one evaluation to control frame ordering. */
 const cooperativeExercise = Effect.fnUntraced(function*(
   call: Effect.Success<ReturnType<typeof open>>["call"],
   script: string
 ) {
-  const declaration = (Engine as unknown as { readonly cooperate: string }).cooperate
+  const declaration = Engine.cooperate
   assert.strictEqual(typeof declaration, "string", "The engine must expose cooperative execution")
   const result = yield* call(
     `async () => {
@@ -237,12 +286,21 @@ export const engine = (backend: Backend) =>
               const before = globalThis.engineTestFrames
               reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
               while (reply._tag === "Check") reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
-              return JSON.stringify({ reply, frames: globalThis.engineTestFrames - before })
+              const frames = globalThis.engineTestFrames - before
+              const fresh = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              const beforeRendered = globalThis.engineTestFrames
+              const invalidated = await command({ command: "resume", token: fresh.token, left: 2000, decision: "invalidate" })
+              const renderedFrames = globalThis.engineTestFrames - beforeRendered
+              const completed = await command({ command: "resume", token: invalidated.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ reply, frames, invalidated, renderedFrames, completed })
             `
             )
             assert.strictEqual(result.reply.response._tag, "Ready")
             assert.include(result.reply.response.element, "New")
             assert.strictEqual(result.frames, 2)
+            assert.strictEqual(result.invalidated._tag, "Check")
+            assert.strictEqual(result.renderedFrames, 1)
+            assert.strictEqual(result.completed.response._tag, "Ready")
           }), timeout)
         it.effect("cooperative final checks restart before in-page application", () =>
           Effect.gen(function*() {
@@ -274,20 +332,114 @@ export const engine = (backend: Backend) =>
               call,
               `
               const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const wrongDocument = await command({ command: "resume", document: "other", token: first.token, left: 2000, decision: "continue" })
               const foreign = await command({ command: "resume", operation: "other", token: first.token, left: 2000, decision: "continue" })
               const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
               const replay = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
               await command({ command: "cancel" })
               const canceled = await pending
-              await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const second = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
               dispatchEvent(new Event("pagehide"))
-              const afterNavigation = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
-              return JSON.stringify({ foreign, replay, canceled, afterNavigation })
+              const afterNavigation = await command({ command: "resume", token: second.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ wrongDocument, foreign, replay, canceled, afterNavigation })
             `
             )
             for (const response of Object.values(result)) {
               assert.strictEqual((response as { _tag: string })._tag, "Disposed")
             }
+          }), timeout)
+        it.effect("cooperative cancellation and deadline expiry release observers, frames, timers and listeners", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"done\" hidden>Done</div>", trackCooperativeResources)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const request = { op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Visible" }, cap: 2000 }
+              const first = await command({ command: "start", budget: 2000, request })
+              const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              await command({ command: "cancel" })
+              await pending
+              const afterCancel = Object.values(globalThis.engineTestResources).map((set) => set.size)
+              const second = await command({ command: "start", budget: 2000, request })
+              const expired = await command({ command: "resume", token: second.token, left: 0, decision: "continue" })
+              const afterExpiry = Object.values(globalThis.engineTestResources).map((set) => set.size)
+              return JSON.stringify({ afterCancel, expired, afterExpiry })
+            `
+            )
+            assert.deepStrictEqual(result.afterCancel, [0, 0, 0, 0])
+            assert.strictEqual(result.expired._tag, "Done")
+            assert.isFalse(result.expired.response.passed)
+            assert.deepStrictEqual(result.afterExpiry, [0, 0, 0, 0])
+          }), timeout)
+        it.effect("cooperative runtime probes a top-document trigger while the target is cross-origin", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const browser = BrowserImpl.layer((sink) =>
+              backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                adapter
+              ))
+            )
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const child = `${served.crossSite}/fixture?html=${encodeURIComponent("<button id=\"go\">Go</button>")}`
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<div id="overlay">Overlay</div><iframe src="${child.replaceAll("&", "&amp;")}"></iframe>`
+                  )
+                }`
+              )
+              const target = page.frame(page.locator("iframe")).locator("#go") as LocatorImpl
+              const trigger = page.locator("#overlay") as LocatorImpl
+              let probes = 0
+              let removals = 0
+              const reply = yield* Effect.gen(function*() {
+                const record = yield* Operation.record
+                return yield* Runtime.sendCooperative(
+                  target.owner.runtime,
+                  target.owner.page,
+                  {
+                    op: "expect",
+                    steps: target.steps,
+                    expectation: { _tag: "Visible" },
+                    cap: 2000
+                  },
+                  record.id,
+                  record.budget.at,
+                  (routed, final) =>
+                    Effect.gen(function*() {
+                      assert.isFalse(final)
+                      const visible = yield* Runtime.send(
+                        trigger.owner.runtime,
+                        trigger.owner.page,
+                        { op: "visible", steps: trigger.steps },
+                        record.id,
+                        record.budget.at
+                      )
+                      assert.strictEqual(visible._tag, "Visible")
+                      const top = yield* Runtime.openState(trigger.owner.page, record.id)
+                      assert.notStrictEqual(routed.document, top.document.id)
+                      assert.strictEqual(routed.hops.length, 1)
+                      probes++
+                      if (visible._tag === "Visible" && visible.visible) {
+                        yield* page.evaluateInMainWorld(() =>
+                          document.querySelector("#overlay")!.setAttribute("hidden", "")
+                        )
+                        removals++
+                        return "invalidate" as const
+                      }
+                      return "continue" as const
+                    })
+                )
+              }).pipe(Operation.named("Test.cooperativeFrame"))
+              assert(!("_tag" in reply))
+              assert.strictEqual(reply.response._tag, "Expected")
+              if (reply.response._tag === "Expected") {
+                assert.isTrue(reply.response.passed)
+              }
+              assert.isAtLeast(probes, 1)
+              assert.strictEqual(removals, 1)
+            }).pipe(Effect.scoped, Effect.provide(browser))
           }), timeout)
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {

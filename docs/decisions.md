@@ -1364,6 +1364,17 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Cooperative readiness checks
+
+Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
+and evaluation helpers, following [Pay for what you use](#pay-for-what-you-use). Single-use continuations yield to
+the host before checking; callbacks invalidate samples and final checks can restart before application. Sessions
+own and dispose their timers, observers and references on every exit. Ordinary loops have no handler branches or
+continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing
+an observer against an already-running check, which cannot prevent that check from passing or applying; and
+always-on hooks in ordinary loops, which charge unused contexts for the feature. Cross-frame host probes remain
+sequential observations, not an atomic browser snapshot.
+
 ## Editability reads share editing rules
 
 `isEditable` reads the same predicate as editing actions and `toBeEditable`: an enabled text or settable
