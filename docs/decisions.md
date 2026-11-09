@@ -424,6 +424,13 @@ along with negative indexing, which removes a useful selection.
 index. Rejected: canonicalizing `nth(0)` to `first` and `nth(-1)` to `last`, which hides the call a user
 needs to find and, for a negative index, would name a different selection.
 
+**Options a caller writes carry no `_tag`.** A choice with no data is a string literal (`area: "fullPage"`,
+`format: "jpeg"`); one with data is told apart by its keys (`area: { clip }` or `{ element }`, a cookie's
+`scope: { url }` or `{ domain, path }`, a test's `attach({ trace })`), each member ruling out the others' keys with
+`?: never` where a caller could write both, so the union stays exclusive. Outputs keep `_tag`, since a caller matches on them. Rejected: tagged objects, which made callers spell
+`{ _tag: "FullPage" }` for a choice with nothing in it; and constructors (`Screenshot.fullPage`), which add a module
+to import for plain data.
+
 **Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions and snapshots. ARIA keywords `true`, `false`, `mixed` and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio and switch; on checkbox, menuitemcheckbox, option and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states. Snapshot representation remains a positive checked marker, not a mixed-state encoding.
 
 **Checking a label prefers its own checked state and clicks the label.** `check` and `uncheck` read the

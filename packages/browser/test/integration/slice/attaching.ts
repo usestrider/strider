@@ -185,7 +185,7 @@ export const attaching = (
           let page: Page.Page | undefined
           yield* Effect.scoped(Effect.gen(function*() {
             context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             page = yield* context.newPage
             yield* page.goto(
               fixtureUrl(
