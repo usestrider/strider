@@ -177,16 +177,18 @@ export const source = String.raw`(() => {
  * (`"v"` for a value, `"h"` for a handle) first and the arguments after.
  */
 export const call = (fn: string, mode: "value" | "handle", awaitResult: boolean): string =>
-  `function(kinds, ...args) { return this.run((${fn}), kinds, args, ${JSON.stringify(mode)}, ${awaitResult}) }`
+  `((fn) => function(kinds, ...args) { return this.run(fn, kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) })((${fn}))`
 
 /**
  * The function declaration that runs `fn` through the helper, called on another object with the helper first, the
  * argument kinds next and the arguments after: its result joins that object's group (Q132).
  */
 export const callBeside = (fn: string, mode: "value" | "handle", awaitResult: boolean): string =>
-  `function(helper, kinds, ...args) { return helper.run((${fn}), kinds, args, ${
+  `((fn) => function(helper, kinds, ...args) { return helper.run(fn, kinds, args, ${
     JSON.stringify(mode)
-  }, ${awaitResult}) }`
+  }, ${awaitResult}) })((${fn}))`
 
 /** The function declaration that takes a batch of nodes, as an array. */
 export const takeNodes = "function(id) { return this.takeNodes(id) }"

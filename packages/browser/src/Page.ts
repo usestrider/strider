@@ -715,7 +715,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
    * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
-   * their own enumerable string keys.
+   * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
    * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
    * separate from `JSHandle.Serialized`, which describes the returned value.
    *
@@ -946,7 +946,7 @@ export interface Page extends ReadonlyPage {
    *
    * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
    * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
-   * their own enumerable string keys.
+   * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
    * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
    * separate from `JSHandle.Serialized`, which describes the returned value.
    *

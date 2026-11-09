@@ -48,6 +48,9 @@ export const decoder = String.raw`((BigIntType, DateType, RegExpType, SetType, M
   }
 })(BigInt, Date, RegExp, Set, Map)`
 
-/** Reconstructs value arguments while leaving remote handles and nodes untouched. */
+/**
+ * Reconstructs value arguments while leaving remote handles and nodes untouched. The callback is constructed
+ * outside the wrapper's scope so its free names (including an arrow's arguments) resolve in the realm.
+ */
 export const call = (fn: string): string =>
-  `function(kinds, ...args) { const decode = ${decoder}; return Reflect.apply((${fn}), this, args.map((arg, i) => kinds[i] === "v" ? decode(arg) : arg)) }`
+  `((fn, decode) => function(kinds, ...args) { return Reflect.apply(fn, this, args.map((arg, i) => kinds[i] === "v" ? decode(arg) : arg)) })((${fn}), ${decoder})`
