@@ -3667,6 +3667,38 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("reads isEditable using the action and expectation rules", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="text"><input id="date" type="date"><textarea id="readonly" readonly></textarea>
+             <fieldset disabled><input id="disabled"></fieldset>
+             <div contenteditable><span id="inherited">edit</span><span id="off" contenteditable="false">off</span></div>
+             <input id="aria" aria-readonly="true"><input id="case" aria-readonly="TRUE">
+             <div aria-disabled="true"><input id="ariaDisabled"></div>
+             <div id="inert" contenteditable inert hidden>edit</div>
+             <select id="select"></select><input id="checkbox" type="checkbox"><div id="role" role="textbox"></div>
+             <p class="two">a</p><p class="two">b</p>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (const id of ["text", "date", "inherited", "case", "inert"]) {
+              assert.isTrue(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            for (const id of ["readonly", "disabled", "off", "aria", "ariaDisabled", "select", "checkbox", "role"]) {
+              assert.isFalse(yield* page.locator(`#${id}`).isEditable, id)
+            }
+            for (const [selector, tag] of [["#absent", "NoMatch"], [".two", "StrictViolation"]] as const) {
+              const error = yield* page.locator(selector).isEditable.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error) && error.reason._tag === tag, String(error))
+            }
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#text")!.readOnly = true
+            })
+            assert.isFalse(yield* page.locator("#text").isEditable)
+          }))
+        }), timeout)
+
       it.effect("reads one match at once: text, value, html, attributes, states", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

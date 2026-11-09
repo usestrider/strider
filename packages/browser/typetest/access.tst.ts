@@ -30,6 +30,12 @@ describe("access is typed", () => {
     expect(page.getByRole("button").blur()).type.not.toRaiseError()
   })
 
+  it("editability needs only inspect access and preserves read failures", () => {
+    const read = reader.getByRole("textbox").isEditable
+    expect(read).type.toBe<Effect.Effect<boolean, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>>()
+    expect(observed.locator("input").isEditable).type.toRaiseError()
+  })
+
   it("a snapshot carries its page's access, so its refs can't act either", () => {
     expect<Effect.Success<ReturnType<typeof reader.snapshot>>>().type.toBe<Snapshot.Snapshot<Locator.ReadonlyLocator>>()
     expect<Effect.Success<ReturnType<typeof page.snapshot>>>().type.toBe<Snapshot.Snapshot<Locator.Locator>>()
