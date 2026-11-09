@@ -1,6 +1,6 @@
 /** Redirect identity and bounded evidence access without browser traffic. */
 import { assert, describe, it } from "@effect/vitest"
-import { NetworkRequest, NetworkResponse, Page, Target, Url, UserContext } from "@usestrider/browser"
+import { NetworkRequest, NetworkResponse, Page, PageNavigation, Target, Url, UserContext } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -29,14 +29,14 @@ const setup = Effect.fnUntraced(function*() {
     entry: Option.getOrThrow(fold.page(id)),
     grant: Option.none()
   })
-  const send = (hop: string) => {
+  const send = (hop: string, navigation: Option.Option<PageNavigation.Id> = Option.none()) => {
     const request = new NetworkRequest.NetworkRequest({
       hop: hop as NetworkRequest.HopId,
       method: "GET",
       url: "https://example.com/repeated" as Url.Url,
       headers: Headers.empty,
       resourceType: "document",
-      initiator: { _tag: "Document", navigable: id, navigation: Option.none() },
+      initiator: { _tag: "Document", navigable: id, navigation },
       at: 0 as NetworkRequest.NetworkRequest["at"]
     })
     return fold.sink({ _tag: "RequestSent", request }).pipe(Effect.as(request))
@@ -51,7 +51,7 @@ describe("Scoped redirect evidence", () => {
       const links = yield* NetworkRequest.redirects(page)
       const first = yield* send("chain.0")
       assert.isTrue(Option.isNone(yield* links.from(first)))
-      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "pending")
+      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "inFlight")
       const second = yield* send("chain.1")
       const last = yield* send("chain.2")
       assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
@@ -81,10 +81,13 @@ describe("Scoped redirect evidence", () => {
           at: request.at
         })
         yield* fold.sink({ _tag: "ResponseReceived", response })
-        assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "pending")
+        assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "inFlight")
         yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
-        if (status === 302) assert.strictEqual((yield* Effect.flip(links.to(request))).reason.why, "unavailable")
-        else assert.isTrue(Option.isNone(yield* links.to(request)))
+        if (status === 302) {
+          const unknown = yield* Effect.flip(links.to(request))
+          assert.strictEqual(unknown.reason._tag, "RedirectUnknown")
+          assert.strictEqual(unknown.reason.why, "completedRedirect")
+        } else assert.isTrue(Option.isNone(yield* links.to(request)))
       }
       const missing = yield* send("no-response.0")
       yield* fold.sink({ _tag: "RequestFinished", hop: missing.hop, encodedBytes: 0, at: missing.at })
@@ -129,7 +132,7 @@ describe("Scoped redirect evidence", () => {
       assert.strictEqual(lookups, 1)
     }))
 
-  it.effect("keeps a completed redirect pending before its successor is folded", () =>
+  it.effect("reports unknown before a completed redirect successor is folded", () =>
     Effect.gen(function*() {
       const { page, send, fold } = yield* setup()
       const links = yield* NetworkRequest.redirects(page)
@@ -149,9 +152,99 @@ describe("Scoped redirect evidence", () => {
       })
       // Firefox reports responseCompleted before the next beforeRequestSent. No next hop is visible yet.
       yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
-      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "pending")
+      const unknown = yield* Effect.flip(links.to(first))
+      assert.strictEqual(unknown.reason._tag, "RedirectUnknown")
+      assert.strictEqual(unknown.reason.why, "completedRedirect")
       const second = yield* send("gap.1")
       assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
+    }))
+
+  it.effect("proves a redirect navigation boundary only from the exact committed hop", () =>
+    Effect.gen(function*() {
+      const { page, send, fold } = yield* setup()
+      const links = yield* NetworkRequest.redirects(page)
+      const navigation = "navigation" as PageNavigation.Id
+      yield* fold.sink({
+        _tag: "NavigationStarted",
+        navigation,
+        navigable: "page" as Target.NavigableId,
+        url: "https://example.com/repeated" as Url.Url,
+        initiatedAs: "command"
+      })
+      const first = yield* send("navigation.0", Option.some(navigation))
+      yield* fold.sink({
+        _tag: "ResponseReceived",
+        response: new NetworkResponse.NetworkResponse({
+          hop: first.hop,
+          url: first.url,
+          status: 302 as NetworkResponse.StatusCode,
+          statusText: "Found",
+          httpVersion: Option.none(),
+          headers: Headers.empty,
+          servedBy: "network",
+          at: first.at
+        })
+      })
+      yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+      const unknown = yield* Effect.flip(links.to(first))
+      assert.strictEqual(unknown.reason._tag, "RedirectUnknown")
+      yield* fold.sink({
+        _tag: "NavigationEnded",
+        navigation,
+        outcome: { _tag: "Committed", document: "document" as Target.DocumentId, response: Option.some(first.hop) },
+        evidence: "test"
+      })
+      assert.isTrue(Option.isNone(yield* links.to(first)))
+      // An observed link remains authoritative even if older terminal evidence is retained.
+      const second = yield* send("navigation.1", Option.some(navigation))
+      assert.strictEqual(Option.getOrThrow(yield* links.to(first)), second)
+    }))
+
+  it.effect("collapses only unknown with catchReason and preserves ownership, eviction and lifetime errors", () =>
+    Effect.gen(function*() {
+      const { page, send, fold } = yield* setup()
+      const links = yield* NetworkRequest.redirects(page)
+      const first = yield* send("recovery.0")
+      const seen = (effect: Effect.Effect<Option.Option<NetworkRequest.NetworkRequest>, NetworkRequest.RequestError>) =>
+        effect.pipe(Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone))
+      assert.isTrue(Option.isNone(yield* seen(links.to(first))))
+      const clone = new NetworkRequest.NetworkRequest({ ...first })
+      assert.strictEqual((yield* Effect.flip(seen(links.to(clone)))).reason.why, "unavailable")
+      const foreign = {} as Page.Page
+      yield* fold.sink({
+        _tag: "PageAdded",
+        page: "foreign" as Target.NavigableId,
+        context: "foreign-context" as UserContext.Id,
+        kind: "tab",
+        origin: { _tag: "Created" },
+        url: "about:blank" as Url.Url
+      })
+      Handles.registerPage(foreign, {
+        runtime: { model: fold } as unknown as Runtime.Runtime,
+        entry: Option.getOrThrow(fold.page("foreign" as Target.NavigableId)),
+        grant: Option.none()
+      })
+      const foreignLinks = yield* NetworkRequest.redirects(foreign)
+      assert.strictEqual((yield* Effect.flip(seen(foreignLinks.to(first)))).reason.why, "foreignTarget")
+      const scope = yield* Scope.make()
+      const released = yield* NetworkRequest.redirects(page).pipe(Scope.provide(scope))
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual((yield* Effect.flip(seen(released.to(first)))).reason.why, "released")
+      for (let i = 0; i < Fold.maxHops; i++) yield* send(`evict-${i}.0`)
+      assert.strictEqual((yield* Effect.flip(seen(links.to(first)))).reason.why, "evicted")
+      yield* fold.loseConnection
+      assert.strictEqual((yield* Effect.flip(seen(links.to(first)))).reason.why, "targetClosed")
+      const other = { _tag: "Other" as const }
+      const failed: Effect.Effect<
+        Option.Option<NetworkRequest.NetworkRequest>,
+        NetworkRequest.RequestError | typeof other
+      > = Effect.fail(other)
+      assert.strictEqual(
+        yield* Effect.flip(
+          failed.pipe(Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone))
+        ),
+        other
+      )
     }))
 
   it.effect("requires a completed source for the successor retention invariant", () =>
@@ -179,8 +272,8 @@ describe("Scoped redirect evidence", () => {
       const first = yield* send("chain.0")
       const second = yield* send("chain.1")
       for (let i = 0; i < Fold.maxHops - 1; i++) yield* send(`other-${i}.0`)
-      assert.strictEqual((yield* Effect.flip(links.from(second))).reason.why, "unavailable")
-      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "unavailable")
+      assert.strictEqual((yield* Effect.flip(links.from(second))).reason.why, "evicted")
+      assert.strictEqual((yield* Effect.flip(links.to(first))).reason.why, "evicted")
     }))
 
   it.effect("revokes access on scope release and target removal", () =>

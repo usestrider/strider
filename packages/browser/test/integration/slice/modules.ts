@@ -624,16 +624,16 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.isTrue(Option.isNone(yield* links.from(first)))
             assert.isTrue(Option.isNone(yield* links.to(third)))
             const foreign = yield* NetworkRequest.redirects(other)
-            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "unavailable")
+            assert.strictEqual((yield* Effect.flip(foreign.from(first))).reason.why, "foreignTarget")
             yield* other.goto(`${origin}/redirect-repeat`)
             const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
             assert.strictEqual(otherRequests.length, 3)
-            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "unavailable")
+            assert.strictEqual((yield* Effect.flip(links.from(otherRequests[0]!))).reason.why, "foreignTarget")
             const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
             yield* page.evaluateInMainWorld(() => {
               void fetch("/events")
             })
-            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "pending")
+            assert.strictEqual((yield* Effect.flip(links.to(yield* streaming))).reason.why, "inFlight")
             yield* Scope.close(scope, Exit.void)
             assert.strictEqual((yield* Effect.flip(links.from(first))).reason.why, "released")
             const live = yield* NetworkRequest.redirects(page)
@@ -690,7 +690,14 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const request = yield* manual
             const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
             yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
-            const next = yield* links.to(request)
+            const outcome = yield* links.to(request).pipe(Effect.result)
+            if (outcome._tag === "Failure") {
+              assert.strictEqual(outcome.failure.reason._tag, "RedirectUnknown")
+              assert.strictEqual(outcome.failure.reason.why, "completedRedirect")
+            }
+            const next = yield* links.to(request).pipe(
+              Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+            )
             if (Option.isSome(next)) {
               // Chromium reports a successor attempt, also exposed by Playwright, then cancels it.
               const attempt = Option.getOrThrow(Handles.page(page).runtime.model.hop(next.value.hop))
