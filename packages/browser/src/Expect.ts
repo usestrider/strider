@@ -222,6 +222,32 @@ export const toBeChecked: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
 export const toBeFocused: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeFocused(locator)
 
 /**
+ * Expects the one match to have an empty value or no text apart from whitespace.
+ *
+ * **Details**
+ *
+ * Inputs and textareas use their current value without trimming. Other elements use trimmed
+ * `textContent`, including descendant text. Missing or multiple matches keep retrying until the
+ * deadline. Failure evidence reports match counts or whether the element is empty.
+ *
+ * **Example** (Waiting for a field to clear)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+ *   yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeEmpty: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeEmpty(locator)
+
+/**
  * Expects the one match to accept input.
  *
  * **Example** (Waiting for an address field to unlock)
@@ -430,6 +456,39 @@ export const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: Reado
   2,
   (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
     ExpectImpl.toHaveValues(locator, expected)
+)
+
+/**
+ * Expects the one match to have exactly the given computed ARIA role, explicit or implicit.
+ *
+ * **Details**
+ *
+ * Retries until the deadline, including when zero or multiple elements match. Matching is case-sensitive and
+ * does not follow the ARIA role hierarchy: a switch does not match `"checkbox"`. Hidden elements are included.
+ * Plain elements such as `div` retain the shared engine's HTML-AAM `generic` role; Playwright reports no role
+ * for them. Presentation conflicts and required-child inheritance follow the same rules as role locators and
+ * snapshots. Tabindex focusability follows HTML integer parsing, so `"2abc"` counts and non-ASCII leading
+ * whitespace does not; pinned Playwright uses JavaScript number conversion and differs on those inputs.
+ * An element without a role is observed as an empty string. Failure history records the role or match count.
+ *
+ * **Example** (Checking a custom control's role)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkSave = Effect.fn("checkSave")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]> = dual(
+  2,
+  (locator: Locator.ReadonlyLocator, expected: string) => ExpectImpl.toHaveRole(locator, expected)
 )
 
 /**

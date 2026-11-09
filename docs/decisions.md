@@ -305,6 +305,15 @@ world and document. Removing a script affects future documents only, and nothing
 from the parent's engine works only for same-origin frames, and a cross-site frame needs the per-document route
 anyway. One path for both keeps locating independent of what a page's script can reach. Parent-frame clipping follows the same boundary: L1 reads visible iframe content bounds in each parent document and passes their intersection in child viewport coordinates to the target engine. Viewport scrolling uses geometric fragment presence, independently of coverage. With pointer checks enabled, the browser hit-tests fragment centres in order, and L1 selects the first reaching the target or a descendant and its iframe in every parent document. If none reaches it locally, the first geometric candidate preserves local Covered; if all locally reachable candidates are blocked by parents, the first parent Covered is retained. Candidates are fresh on each round and under the input permit. This permits a later uncovered line when an earlier line is covered. Disabled pointer checks use the first geometric candidate without probing coverage; explicit offsets are never substituted. Parent candidate probes use each document’s engine across origins and processes. Rejected: restarting at the first child candidate after a parent rejects it, which never reaches an available later line, and carrying candidate coordinates across attempts or permit acquisition, which could reuse stale geometry. Rejected: inferring ancestor clipping from computed overflow and containing-block styles, which duplicates an incomplete layout model and misclassifies inline boxes, SVG and top-layer elements. Rejected: inspecting `window.parent` for same-origin frames, which would give cross-origin frames different pointer behavior, and selecting the first fragment before translating it, which can aim outside the page's visible viewport.
 
+Bounding-box reads use the browser's axis-aligned rect in top-level viewport CSS pixels, composed through
+frames, rather than reconstructing layout or original corners. Native frame conversion is used where
+reliable; stock Firefox supports positive axis-aligned frame scaling, zoom and translation, and refuses
+rotation, skew, reflection, 3D, perspective and frame motion paths with descriptive typed Unsupported.
+Target camera clipping and motion paths retain the browser rect. Stock defaults remain unchanged, without a
+launch-profile prerequisite. Rejected: layout solvers, handwritten CSS grouping/layout rules, original-
+corner accuracy as the rect contract, and enabling a page-visible native-quad preference for unrelated
+contexts. Optional geometry runs only for a bounding-box request.
+
 **Stability measures from the current rectangle across the requested rendering updates.** The first rectangle is
 sampled immediately; the following samples still require native rendering. Checks run again after acquiring the
 input permit, so a queued action never uses the preliminary check's stale geometry or element.
@@ -1382,6 +1391,10 @@ browsers. Reject name-to-constructor inference tables and emulation of missing c
 those hide browser differences and make the library define DOM behavior. Missing constructors are typed refusals.
 
 Dispatch follows [Pay for what you use](#pay-for-what-you-use): its event function is sent only when invoked.
+
+## Shared DOM roles
+
+Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`. This keeps existing locator and snapshot meaning consistent even where Playwright omits generic roles. Presentation conflicts and required-child inheritance are resolved in that shared computation, including inherited-role exceptions on the child and cancellation on its parent. Tabindex focusability uses HTML integer parsing: skip ASCII whitespace, accept an optional sign and leading ASCII digits, and ignore trailing text. This agrees with native focus behavior for `0.5` and `2abc`; copying Playwright’s JavaScript number conversion would reject `2abc` and accept non-ASCII leading whitespace. Rejected: a matcher-specific role model that changes the meaning of the same element between querying, asserting and inspecting it, and copying upstream inheritance where it conflicts with ARIA's focusability or global-property exceptions.
 
 ## Retrying CSS assertion cardinality
 

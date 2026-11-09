@@ -311,6 +311,19 @@ interface AdapterConnection {
 }
 ```
 
+Element geometry is a readonly adapter request naming a node binding and returning its coordinate document.
+Targets use their browser `getBoundingClientRect`, not reconstructed corners. Frame mapping composes that
+rect into the top-level viewport. CDP native frame box-model points can already include same-process frame
+transforms; an out-of-process session has its own root viewport. The adapter restores root CSS units using
+the child/root device-pixel-ratio ratio. Stock WebKit converts renderer-local frame points to document
+coordinates, normalizing CSS zoom, device-pixel-snapped borders and scroll, and validating against native bounds.
+Only the remaining frame boundaries are mapped. BiDi uses frame rect scale/origin for positive axis-aligned
+scaling and translation. Flat-tree ancestor inspection, including native serialization of closed roots, rejects
+ambiguous orientation: rotation, skew, reflection, 3D, perspective and frame motion paths are typed Unsupported
+on stock Firefox. It does not solve layout positions, recover hidden corners or reproduce CSS grouping rules.
+Top-level target rects retain the browser's own camera clipping and motion-path behavior. No preferences are
+changed or required. Geometry scripts run only for this read, outside the ordinary query engine.
+
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:

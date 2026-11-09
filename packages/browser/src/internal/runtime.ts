@@ -396,7 +396,7 @@ type Element =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
   | { readonly _tag: "Response"; readonly response: Engine.Response }
 
-const elementIn = (
+export const elementIn = (
   runtime: Runtime,
   document: Target.DocumentId,
   steps: ReadonlyArray<Engine.Step>,

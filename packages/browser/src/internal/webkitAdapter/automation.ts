@@ -259,6 +259,7 @@ export const createUserContextLaunched = Effect.fnUntraced(
       )
     )
     const entry: ContextEntry = {
+      ...(options.requestTiming ? { requestTiming: new Map() } : {}),
       id: state.ids.userContext(),
       browserContextId: process.key,
       isDefault: false,
@@ -266,7 +267,14 @@ export const createUserContextLaunched = Effect.fnUntraced(
     }
     state.contexts.set(entry.id, entry)
     state.contextsByWk.set(process.key, entry)
-    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+    yield* state.buffer.run(() =>
+      state.buffer.emit({
+        _tag: "UserContextAdded",
+        context: entry.id,
+        isDefault: false,
+        ...(options.requestTiming ? { requestTiming: true } : {})
+      })
+    )
     return entry.id
   }
 )

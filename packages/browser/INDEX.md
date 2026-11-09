@@ -608,6 +608,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeDisabled: Matcher<Locator.ReadonlyLocator>`
 - `const toBeChecked: Matcher<Locator.ReadonlyLocator>`
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
+- `const toBeEmpty: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toHaveAccessibleName: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined] >`
@@ -615,6 +616,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>`
+- `const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
 - `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
@@ -899,6 +901,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 
 *models*
 
+- `type BoundingBox = typeof BoundingBox.Type`
 - `interface RoleOptions`
   - `readonly level?: number | undefined`
   - `readonly checked?: boolean | undefined`
@@ -938,6 +941,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `describe(label: string): ReadonlyLocator`
   - `readonly count: Effect.Effect<number, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readText: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly boundingBox: Effect.Effect<Option.Option<BoundingBox>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readValue: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
@@ -1033,6 +1037,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
 
 *schemas*
 
+- `const BoundingBox = Schema.Struct({ x: Schema.Number.check(Schema.isFinite()), y: Schema.Number.check(Schema.isFinite()), width: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)), height: Schema.N…`
 - `const LocatorErrorReason = Schema.Union([StrictViolation, StaleRef, NoMatch, WrongElement, StateUnchanged, NotEditable, FileUnreadable, Reason.InvalidInput, Reason.EvaluationThrown, Reason.NotSerializable, Reason.NotPermitted,…`
 
 *constructors*
@@ -1163,6 +1168,7 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `class Timing: Schema.Class { startTime, domainLookupStart, domainLookupEnd, connectStart, connectEnd, secureConnectionStart, requestStart, responseStart, responseEnd }`
 
 *schemas*
 
@@ -1182,6 +1188,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
+- `const timing: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Timing, RequestError>`
 
 *converting*
 
@@ -1193,6 +1200,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 *reasons*
 
+- `class RequestUnavailable: Schema.Error { why }`
 - `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
@@ -1938,6 +1946,7 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly requestTiming?: boolean | undefined`
   - `readonly acceptInsecureCerts?: boolean | undefined`
   - `readonly httpCredentials?: { readonly origin?: string | undefined readonly username: string readonly password: Redacted.Redacted<string> } | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`

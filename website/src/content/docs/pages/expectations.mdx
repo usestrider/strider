@@ -38,14 +38,35 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+
+Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
+case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
+`generic` role; Playwright reports no role for them. Role assertions share presentation conflict resolution and
+required-child inheritance with role locators and snapshots. Tabindex focusability follows HTML integer parsing:
+ASCII whitespace, an optional sign and leading digits are accepted, with trailing text ignored. Thus `2abc` counts
+as focusable and non-ASCII leading whitespace does not, unlike pinned Playwright's number conversion.
+They include hidden elements and retry missing or
+multiple matches until the deadline, reporting the role or match count if they fail:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveRole = Effect.fn("saveRole")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+  yield* page.locator("div#container").pipe(Expect.toHaveRole("generic"))
+})
+```
 
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
@@ -77,6 +98,20 @@ const checkClasses = Effect.fn("checkClasses")(function*(page: Page.ReadonlyPage
   yield* page.getByRole("listitem").pipe(Expect.toHaveClass(["selected", /^pending/]))
 })
 ```
+
+`Expect.toBeEmpty` waits for one match with an empty input or textarea value, or only whitespace
+in another element's text. Whitespace in a field value counts as nonempty; missing or multiple
+matches retry until the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+  yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+})
+```
+
 
 Selected values match exactly, including whitespace, or by regular expression, in option order.
 `toHaveValues([])` waits for an empty selection; the locator must still match one `<select multiple>`.
