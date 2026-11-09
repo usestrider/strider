@@ -19,6 +19,7 @@ import {
   Page,
   PageNavigation,
   Popup,
+  Reason,
   Target,
   Trace
 } from "@usestrider/browser"
@@ -373,6 +374,51 @@ describe("Recordings", () => {
       assert.include(failures[2].message, "[Unprintable observed value]")
       assert.notInclude(files.get("trace.trace")!, "wrapped-secret")
       assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("projects locator handler failures into trace messages without serializing original callback data", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "handler-error.zip")
+      const original: { message: string; custom: string; self?: unknown } = {
+        message: "dismiss callback failed",
+        custom: "private-custom-payload"
+      }
+      original.self = original
+      const handlerFailure = new Reason.LocatorHandlerFailed({
+        error: original,
+        trigger: "#overlay",
+        hint: original.message
+      })
+      const error = new Expect.ExpectationFailed({
+        subject: "cart",
+        condition: "to be visible",
+        handlerFailure,
+        last: Option.none(),
+        history: [],
+        elapsed: Duration.millis(1),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-handler" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const received = yield* Recorders.observe(
+          "Expect.toBeVisible",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(received, error)
+        assert.strictEqual(error.handlerFailure!.error, original)
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const content = (yield* unzip(out)).get("trace.trace")!
+      assert.include(content, "dismiss callback failed")
+      assert.include(content, "#overlay")
+      assert.notInclude(content, "private-custom-payload")
+      assert.strictEqual(original.self, original)
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("strips classified value evidence from exported expectation errors", () =>
