@@ -356,16 +356,19 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* Browser.newPage()
-          yield* page.goto(fixtureUrl(
-            origin,
-            `<body style="margin:0;height:3000px">
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0;height:3000px">
             <input id="focus"><div id="box" style="position:absolute;left:30px;top:40px;width:20px;height:10px;transform:translate(5px,7px) scale(2);transform-origin:0 0"></div>
             <div id="hidden" style="display:none"></div>
             <div id="contents" style="display:contents"><span>child</span></div>
             <div id="invisible" style="visibility:hidden;width:20px;height:10px"></div>
             <div id="transparent" style="opacity:0;width:20px;height:10px"></div>
             <div id="zero" style="width:0;height:0"></div></body>`
-          ))
+            ),
+            { waitUntil: "load" }
+          )
           yield* page.evaluateInMainWorld(() =>
             document.querySelector("input")!.focus()
           )
@@ -420,7 +423,8 @@ export const contents = (
               `<body style="margin:0"><iframe id="outer" style="position:absolute;left:23px;top:29px;border:5px solid;padding:6px" src="${
                 middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
               }"></iframe></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           const outer = page.frame(page.locator("#outer"))
           const target = outer.frame(outer.locator("#inner")).locator("#target")
@@ -463,10 +467,13 @@ export const contents = (
             origin,
             `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
           )
-          yield* page.goto(fixtureUrl(
-            origin,
-            `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
           yield* page.evaluateInMainWorld(() => {
             document.querySelector("#host")!.attachShadow({ mode: "open" }).innerHTML =
               `<div style="position:absolute;left:0;top:0;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
@@ -484,10 +491,13 @@ export const contents = (
             origin,
             `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:rgb(255,0,0)"></div></body>`
           )
-          yield* page.goto(fixtureUrl(
-            origin,
-            `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
           yield* page.evaluateInMainWorld(() => {
             document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
               `<div style="position:absolute;left:0;top:0;zoom:1.25;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
@@ -531,7 +541,8 @@ export const contents = (
             fixtureUrl(
               origin,
               `<body style="margin:0"><div id="host"><iframe id="frame" style="border:0" src="${child}"></iframe></div></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           yield* page.evaluateInMainWorld(() => {
             document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
@@ -597,7 +608,8 @@ export const contents = (
               fixtureUrl(
                 origin,
                 `<body style="margin:0;width:3000px;height:3000px"><div style="position:absolute;left:20px;top:30px;width:800px;height:800px;${rule.world}"><iframe id="frame" style="${boxStyle}" src="${child}"></iframe><div style="${boxStyle};pointer-events:none"><div style="position:relative;width:200px;height:150px"><div id="expected" style="${targetStyle}"></div></div></div></div></body>`
-              )
+              ),
+              { waitUntil: "load" }
             )
             const target = page.frame(page.locator("#frame")).locator("#target")
             for (const scrolled of [false, true]) {
@@ -652,7 +664,8 @@ export const contents = (
               `<body style="margin:0"><iframe id="outer" style="${outerStyle}" src="${
                 middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
               }"></iframe><div style="${outerStyle};pointer-events:none"><div style="position:relative;width:300px;height:250px"><div style="${innerStyle}"><div style="position:relative;width:100px;height:80px"><div id="expected" style="${targetStyle}"></div></div></div></div></div></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           const outer = page.frame(page.locator("#outer"))
           const target = outer.frame(outer.locator("#inner")).locator("#target")
@@ -702,7 +715,8 @@ export const contents = (
               `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
                 text.replace("id=\"target\"", "id=\"expected\"")
               }</div></div></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           const target = page.frame(page.locator("#frame")).locator("#target")
           if (yield* frameRectRefused(target.boundingBox)) {
@@ -733,7 +747,8 @@ export const contents = (
               `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
                 svg.replace("id=\"target\"", "id=\"expected\"")
               }</div></div></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           const target = page.frame(page.locator("#frame")).locator("#target")
           if (yield* frameRectRefused(target.boundingBox)) {
@@ -774,7 +789,8 @@ export const contents = (
             fixtureUrl(
               origin,
               `<body style="margin:0"><div id="target" style="position:absolute;left:200px;top:100px;width:30px;height:20px;offset-path:path('M 0 0 L 100 100');offset-distance:50%;offset-rotate:auto;offset-anchor:0 0"></div></body>`
-            )
+            ),
+            { waitUntil: "load" }
           )
           const expected = yield* page.evaluateInMainWorld(() => {
             const r = document.querySelector("#target")!.getBoundingClientRect()
