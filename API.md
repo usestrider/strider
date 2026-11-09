@@ -479,7 +479,8 @@ Notes:
   loads resources under the document's origin and security policy. Relative URLs use the document's base URL,
   including any `base` element supplied. The default `waitUntil: "load"` waits for resources and child frames;
   `"domContentLoaded"` waits for parsing and deferred scripts, and `"commit"` only writes and closes. No navigation
-  result or new document id is created. One operation deadline bounds replacement and readiness. Interruption or
+  result or new document id is created. The HTML write waits for exclusive page input access before removing
+  listeners; resource-readiness waiting does not hold that access. One operation deadline bounds replacement and readiness. Interruption or
   timeout ends the wait without rolling back the DOM or stopping started scripts/requests; readiness cleanup runs with a separate one-second budget, and failures are recorded in diagnostics. Navigation during replacement can end its realm with `TargetGone`. Concurrent replacements and
   page scripts that tamper with document methods follow main-world browser behavior.
   Earlier resource requests can continue delaying load after replacement; parsing readiness does not wait for them.

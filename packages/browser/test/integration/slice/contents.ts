@@ -164,6 +164,13 @@ export const contents = (
                 assert.strictEqual(yield* target.readText, "new")
                 yield* page.setContent(replacement)
                 assert.strictEqual(yield* page.locator("#other").readValue, "replacement")
+                const pending = yield* page.setContent("<input id=\"while-loading\"><img src=\"/pending-image\">").pipe(
+                  Effect.forkScoped
+                )
+                yield* page.locator("#while-loading").fill("still usable").pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(pending.pollUnsafe(), undefined, "resource readiness must still be pending")
+                yield* Fiber.interrupt(pending).pipe(Deadline.within("2 seconds"))
+                assert.strictEqual(yield* page.locator("#while-loading").readValue, "still usable")
               }),
             () =>
               Deferred.succeed(release, undefined).pipe(
