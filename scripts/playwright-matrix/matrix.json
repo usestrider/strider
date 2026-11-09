@@ -28560,13 +28560,13 @@
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         "firefox.launched": {
@@ -28626,7 +28626,7 @@
           "url": "/docs/api/browser/NetworkRequest#stream"
         }
       ],
-      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.arrayBuffer; stock WebKit cannot report original bytes.",
+      "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.arrayBuffer; stock WebKit cannot report original bytes. Chromium requires complete event-carried bytes for an empty payload and refuses empty fallback reports.",
       "capabilities": [
         "network.requestBody.bytes"
       ],
@@ -28634,13 +28634,13 @@
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+            "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+            "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
           ]
         },
         "firefox.launched": {
@@ -28708,13 +28708,13 @@
         "chromium.launched": {
           "status": "different",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         "chromium.attached": {
           "status": "different",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         "firefox.launched": {
@@ -113442,7 +113442,7 @@
     "packages/browser/src/chromium/Chromium.ts": "1210708e0613554b5dc9c38731d74be9eca7c2a4fae47ff4f15f7424e8588234",
     "packages/browser/src/firefox/Firefox.ts": "e3dbe4150abe117599d227671bfc160c49b2064c867b20452d0ce51445e3c4fc",
     "packages/browser/src/internal/bidiAdapter.ts": "09cfdfb5adb9ee3ed6c668ba0c053b97f7d6b28295d6f8d052f9cafd7f45ed39",
-    "packages/browser/src/internal/cdpAdapter.ts": "79f4eb68b01087aad05c5e68df627c086fd8a90d032a567ae57dbcb82a2a0a56",
+    "packages/browser/src/internal/cdpAdapter.ts": "d55c9e686fe728264c7e0b3a393ec507be738b56f3046a7e621436e7e499ca7d",
     "packages/browser/src/internal/webkitAdapter.ts": "3c2ad76e787f787ce28b25bd08611747d94543020e42352bc9d6bf7cc8808883",
     "packages/browser/src/internal/webkitAdapter/capabilities.ts": "a4c087ebcaafb7874d649352a7d1c97704a4b05bf82cab381737d33b20e60ce8",
     "packages/browser/src/webkit/WebKit.ts": "efbb00343f6e318db31ba5be0be7692dd65bc092795a3d75ad298de6c01562d1",

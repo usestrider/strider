@@ -154,8 +154,10 @@
         },
         {
           "name": "network.requestBody.empty",
-          "status": "supported",
-          "limitations": []
+          "status": "partial",
+          "limitations": [
+            "requires complete event-carried bytes; empty fallback reports are refused"
+          ]
         },
         {
           "name": "network.requestBody.multipart",
@@ -168,14 +170,14 @@
           "name": "network.requestBody.bytes",
           "status": "partial",
           "limitations": [
-            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+            "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
           ]
         },
         {
           "name": "network.requestBody.text",
           "status": "partial",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         {
@@ -620,8 +622,10 @@
         },
         {
           "name": "network.requestBody.empty",
-          "status": "supported",
-          "limitations": []
+          "status": "partial",
+          "limitations": [
+            "requires complete event-carried bytes; empty fallback reports are refused"
+          ]
         },
         {
           "name": "network.requestBody.multipart",
@@ -634,14 +638,14 @@
           "name": "network.requestBody.bytes",
           "status": "partial",
           "limitations": [
-            "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+            "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
           ]
         },
         {
           "name": "network.requestBody.text",
           "status": "partial",
           "limitations": [
-            "requires a complete collected body; multipart fallback is refused"
+            "requires a complete collected body; multipart and empty fallback reports are refused"
           ]
         },
         {

@@ -104,15 +104,17 @@ export const capabilities = (
       entry("network.requestBody.absence", "supported", [
         "native hasPostData reports body presence; empty fallback reports are refused"
       ]),
-      entry("network.requestBody.empty", "supported", []),
+      entry("network.requestBody.empty", "partial", [
+        "requires complete event-carried bytes; empty fallback reports are refused"
+      ]),
       entry("network.requestBody.multipart", "unsupported", [
         "multipart file completeness cannot be established from the native report"
       ]),
       entry("network.requestBody.bytes", "partial", [
-        "requires scoped body collection; multipart fallback may omit files and is refused; earlier hops require event-carried bytes"
+        "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
       ]),
       entry("network.requestBody.text", "partial", [
-        "requires a complete collected body; multipart fallback is refused"
+        "requires a complete collected body; multipart and empty fallback reports are refused"
       ]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
