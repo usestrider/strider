@@ -4213,6 +4213,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "expects no accessible name where the element's role prohibits naming",
+        () =>
+          Effect.gen(function*() {
+            // Roles such as generic, paragraph and code cannot be named, so their author label is not their name.
+            const { url } = yield* fixture(() =>
+              `<div id="generic" aria-label="Region">Text</div><p id="paragraph" aria-label="Note">Text</p><code id="code" aria-label="Snippet">x</code>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              for (const id of ["#generic", "#paragraph", "#code"]) {
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""), Deadline.within("300 millis"))
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("expects what changes later, in the page, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
