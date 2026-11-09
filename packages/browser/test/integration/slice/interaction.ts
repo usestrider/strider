@@ -4167,13 +4167,14 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       it.effect("expects exact computed roles and retries role mutations", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
-            `<button id="implicit" hidden>Save</button><div id="explicit" role="switch checkbox"></div><div id="later"></div><custom-control id="no-role"></custom-control><span class="many"></span><span class="many"></span>`
+            `<button id="implicit" hidden>Save</button><div id="explicit" role="switch checkbox"></div><div id="later"></div><custom-control id="no-role"></custom-control><div id="ordinary"></div><span class="many"></span><span class="many"></span>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
             yield* page.locator("#implicit").pipe(Expect.toHaveRole("button"))
             yield* Expect.toHaveRole(page.locator("#explicit"), "switch")
+            yield* page.locator("#ordinary").pipe(Expect.toHaveRole("generic"))
             const waiting = yield* page.locator("#later").pipe(Expect.toHaveRole("button"), Effect.forkChild)
             yield* page.evaluateInMainWorld(() => {
               setTimeout(() => document.querySelector("#later")!.setAttribute("role", "button"), 100)
@@ -4214,7 +4215,57 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
             yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
             yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
-            yield* page.locator("#owned").pipe(Expect.toHaveRole("presentation"), Deadline.within("1 second"))
+            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+          }))
+        }), timeout)
+
+      it.effect("shares presentation boundaries with role queries and snapshots", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<p id="description">Details</p>
+            <ul role="presentation"><li id="plain">Flattened<button>Nested button</button><ul><li id="nested">Nested item</li></ul></li><li id="explicit" role="treeitem">Explicit</li><li id="focus" tabindex="-1">Focusable</li><li id="global" aria-describedby="description">Described</li><li id="local" aria-level="2">Local</li></ul>
+            <ul role="presentation" aria-label="Named list"><li id="named">Named child</li></ul>
+            <table role="none"><tbody><tr><td id="cell">Flat cell</td></tr></tbody></table>
+            <h2 id="local-heading" role="presentation" aria-level="2">Flat heading</h2>
+            <p id="prohibited" role="none" aria-label="Ignored">Paragraph</p>
+            <h2 id="deprecated" role="none" aria-disabled="true">Deprecated global</h2>
+            <button id="disabled" disabled tabindex="0" role="none">Disabled</button>
+            <h2 id="invalid-tabindex" tabindex="invalid" role="none">Invalid tabindex</h2>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [id, role] of [
+                ["plain", "presentation"],
+                ["nested", "listitem"],
+                ["explicit", "treeitem"],
+                ["focus", "listitem"],
+                ["global", "listitem"],
+                ["local", "presentation"],
+                ["named", "listitem"],
+                ["cell", "none"],
+                ["local-heading", "presentation"],
+                ["prohibited", "none"],
+                ["deprecated", "none"],
+                ["disabled", "none"],
+                ["invalid-tabindex", "none"]
+              ] as const
+            ) {
+              yield* page.locator(`#${id}`).pipe(Expect.toHaveRole(role), Deadline.within("1 second"))
+            }
+            yield* page.getByRole("listitem").pipe(Expect.toHaveCount(4))
+            yield* page.getByRole("button", { name: "Nested button" }).pipe(Expect.toHaveCount(1))
+            yield* page.getByRole("treeitem", { name: "Explicit" }).pipe(Expect.toHaveCount(1))
+            const snapshot = yield* page.snapshot()
+            const nodes = [...snapshot.refs.values()]
+            assert.strictEqual(
+              nodes.filter((node) => node.role._tag === "Aria" && node.role.role === "listitem").length,
+              4
+            )
+            assert.isFalse(nodes.some((node) =>
+              node.role._tag === "Aria" && ["cell", "row", "rowgroup", "table", "heading"].includes(node.role.role)
+            ))
           }))
         }), timeout)
 
