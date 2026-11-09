@@ -67,7 +67,10 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
 Use an accessible-name expectation to check what assistive technology calls a control, including names from labels
 and ARIA references. Strings match the whole name with whitespace normalized; `ignoreCase` overrides a regular
 expression's case flag. A hidden element has an empty name, while a hidden label can still name a visible control.
-Missing or multiple matches retry until the deadline and report their count on failure.
+Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an ARIA label.
+Their content can still name another element, and an explicit nameable role overrides the implicit role. Role
+locators use this same name computation. Missing or multiple matches retry until the deadline and report their
+count on failure.
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"

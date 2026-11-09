@@ -637,6 +637,26 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
+  /** Roles that prohibit a name for the element itself (accname 1.2, step 1). */
+  const NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "mark",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "suggestion",
+    "superscript",
+    "term",
+    "time"
+  ])
+
   /** Roles whose name comes from their content (accname 1.2, step 2F). */
   const NAME_FROM_CONTENT = new Set([
     "button",
@@ -1064,7 +1084,9 @@ export function engine(render: (root: SnapNode) => string) {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
-    const name = collapse(
+    const role = roleOf(element)
+    // This restriction is on the root, not on descendants or references contributing to another element's name.
+    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
       nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
     if (provenance && contribution.fieldContent) namesFromFields.add(element)

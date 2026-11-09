@@ -244,7 +244,9 @@ export const toHaveText: DualMatcher<
  * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
  * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
- * visible element. Missing or multiple matches keep retrying and fail with their match count.
+ * visible element. Roles that prohibit naming, such as generic, paragraph and code, have an empty name;
+ * their content can still contribute to another element's name. An explicit nameable role can override the
+ * implicit role. Missing or multiple matches keep retrying and fail with their match count.
  *
  * **Example** (Checking a save button's accessible name)
  *

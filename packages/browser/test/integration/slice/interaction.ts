@@ -4185,8 +4185,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               )
               yield* page.locator("#field").pipe(Expect.toHaveAccessibleName("Email address"))
               // Wait for a real mismatching engine round before changing the label.
-              assert(named instanceof LocatorImpl)
-              const adapter = named.owner.runtime.model.adapter
+              const impl = named as LocatorImpl
+              assert(impl instanceof LocatorImpl)
+              const adapter = impl.owner.runtime.model.adapter
               const original = adapter.evaluate
               const initial = yield* Deferred.make<void>()
               const evaluate: typeof original = (realm, call) =>
