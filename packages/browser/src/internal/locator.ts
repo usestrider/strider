@@ -1094,17 +1094,15 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       editChecks,
       { _tag: "Fill", value: text },
-      (ready, io) =>
-        ready.fill === "set"
-          ? Effect.succeed("done" as const)
-          : Effect.as(
-            io.send(
-              text === ""
-                ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
-                : [{ _tag: "InsertText", text }]
-            ),
-            "done" as const
-          ),
+      (ready, io) => {
+        if (ready.fill === "set") return Effect.succeed("done" as const)
+        const insert = io.send(
+          text === ""
+            ? Input.press(this.owner.page.inputState, Keys.definition("Delete")!)
+            : [{ _tag: "InsertText", text }]
+        )
+        return ready.fill === "guarded" ? io.guardFill(insert) : Effect.as(insert, "done" as const)
+      },
       { redacted: Redacted.isRedacted(value) }
     )
   }
@@ -1174,6 +1172,87 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         }).pipe(
           // A guard left armed would stop the page's next gesture: any failure after arming it removes it
           Effect.onError(() => guard ? Effect.ignore(io.disarm) : Effect.void)
+        )
+    )
+  }
+
+  /** Brackets a design-mode insertion, including interruption while its guard is being installed. */
+  private guardFill(
+    operation: string,
+    document: Target.DocumentId,
+    record: Operation.Record,
+    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+  ) {
+    const call = (request: Engine.Request) =>
+      Runtime.sendToDocument(
+        this.owner.runtime,
+        this.owner.page,
+        document,
+        request,
+        record.id
+      ).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record)),
+        Effect.flatMap((response) =>
+          Option.isSome(response) && response.value._tag === "FillGuard"
+            ? Effect.succeed(response.value)
+            : Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "fill guard",
+                hint: "The insertion guard could not confirm the native input"
+              }),
+              record.id,
+              record.dispatch
+            ))
+        )
+      )
+    let released = false
+    const disarm = call({ op: "fillDisarm" }).pipe(Effect.tap(() =>
+      Effect.sync(() => {
+        released = true
+      })
+    ))
+    return Effect.acquireUseRelease(
+      Effect.void,
+      () =>
+        Effect.gen({ self: this }, function*() {
+          let guard = yield* call({ op: "fillGuard", steps: Runtime.split(this.steps).last })
+          if (guard.blocked === null) {
+            yield* insert
+            guard = yield* disarm
+          }
+          if (guard.unsafe) {
+            return yield* Effect.fail(this.error(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "native insertion",
+                hint: "Focus or selection changed; native input may already have changed the page"
+              }),
+              record.id,
+              record.dispatch
+            ))
+          }
+          return guard.blocked === null
+            ? "done" as const
+            : { retry: { _tag: "PreparingFocus", from: guard.blocked } as Engine.NotReady }
+        }),
+      () =>
+        released ? Effect.void : this.owner.page.input.withPermit(
+          Effect.gen({ self: this }, function*() {
+            const cleanup = yield* Operation.record
+            yield* Runtime.releaseInDocument(this.owner.runtime, document, { op: "fillDisarm" }, cleanup.id)
+          }).pipe(
+            Operation.named(`${operation}.guardCleanup`, { attributes: { "browser.page.id": this.owner.page.id } }),
+            Operation.detached,
+            Effect.ignore
+          )
+        ).pipe(
+          // Queue before releasing the action's input permit. Later input waits for this cleanup, while
+          // interruption returns promptly even when a dialog prevents the document from executing it.
+          Effect.forkIn(this.owner.runtime.model.scope, { startImmediately: true }),
+          Effect.asVoid
         )
     )
   }
@@ -1258,6 +1337,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
+        readonly guardFill: (
+          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+        ) => Effect.Effect<
+          "done" | { readonly retry: Engine.NotReady },
+          Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+        >
       },
       record: Operation.Record
     ) => Effect.Effect<
@@ -1464,7 +1549,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             if (Option.isNone(again)) return "again" as const
             // A trial stops at the last check, holding the permit as the action would
             if (options?.trial === true) return "done" as const
-            const done = yield* perform(again.value.response, { send: send(again.value), disarm }, record)
+            const done = yield* perform(again.value.response, {
+              send: send(again.value),
+              disarm,
+              guardFill: (insert) => this.guardFill(operation, again.value.routed.document, record, insert)
+            }, record)
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()

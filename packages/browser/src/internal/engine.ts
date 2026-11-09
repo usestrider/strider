@@ -277,6 +277,8 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
+  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step> }
+  | { readonly op: "fillDisarm" }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
@@ -345,7 +347,7 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -361,6 +363,7 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("FillGuard", { blocked: Schema.NullOr(Schema.String), unsafe: Schema.Boolean }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("Expected", {
@@ -1742,6 +1745,77 @@ export function engine(render: (root: SnapNode) => string) {
     guard = current
   }
 
+  // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
+  // form control after selection, so validate at the cancellable native event, before its default mutation.
+  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean } | null = null
+  const fillDisarm = () => {
+    const current = fillGuard
+    fillGuard = null
+    current?.remove()
+    return { _tag: "FillGuard" as const, blocked: current?.blocked ?? null, unsafe: current?.unsafe ?? false }
+  }
+  const armFill = (steps: ReadonlyArray<Step>) => {
+    fillDisarm()
+    const matches = resolve(steps)
+    const element = matches.length === 1 ? matches[0]! : null
+    let started = false
+    const blocker = (): string | null => {
+      const active = deepActive()
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return describe(active)
+      const selection = getSelection()
+      if (element === null || !element.isConnected || selection?.rangeCount !== 1) {
+        return "the selection left the target"
+      }
+      const selected = selection.getRangeAt(0)
+      if (started && element.contains(selected.startContainer) && element.contains(selected.endContainer)) return null
+      // WebKit canonicalizes element-edge ranges to text-node edges. Ascend equivalent edges rather
+      // than treating those native representations as different selections.
+      const atEdge = (node: Node, offset: number, end: boolean): boolean => {
+        while (node !== element) {
+          const length = node instanceof CharacterData ? node.length : node.childNodes.length
+          if (offset !== (end ? length : 0) || node.parentNode === null) return false
+          const parent = node.parentNode
+          offset = Array.prototype.indexOf.call(parent.childNodes, node) + (end ? 1 : 0)
+          node = parent
+        }
+        return offset === (end ? element.childNodes.length : 0)
+      }
+      return atEdge(selected.startContainer, selected.startOffset, false) &&
+          atEdge(selected.endContainer, selected.endOffset, true)
+        ? null
+        : "the selection left the target"
+    }
+    const types = ["keydown", "keypress", "keyup", "beforeinput"]
+    const current = {
+      remove: () => {
+        for (const type of types) removeEventListener(type, handler, true)
+      },
+      blocked: blocker(),
+      unsafe: false
+    }
+    const handler = (event: Event) => {
+      if (!event.isTrusted || (event.type === "keyup" && current.blocked === null)) return
+      const recipient = event.composedPath()[0]
+      const elsewhere = recipient instanceof Element && element !== null &&
+          !composedContains(recipient, element) && !composedContains(element, recipient)
+        ? describe(recipient)
+        : null
+      const blocked = current.blocked ?? elsewhere ?? blocker()
+      if (blocked === null) {
+        if (event.type === "beforeinput") started = true
+        return
+      }
+      // Once an input was allowed through, or cancellation is unavailable, replay is unsafe.
+      if (started || (current.blocked === null && !event.cancelable)) current.unsafe = true
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.defaultPrevented) current.blocked = blocked
+    }
+    for (const type of types) addEventListener(type, handler, true)
+    fillGuard = current
+    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false }
+  }
+
   // ── Actions ──
 
   let stabilitySequence = 0
@@ -1949,7 +2023,7 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | null
+      fill: null as "type" | "set" | "guarded" | null
     }
     switch (action._tag) {
       case "Point": {
@@ -2023,7 +2097,13 @@ export function engine(render: (root: SnapNode) => string) {
         if (checks.editable && !editableKind(element)) {
           return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-        return recheckFill() ?? { ...answer, fill: "type" }
+        return recheckFill() ?? {
+          ...answer,
+          fill: document.designMode === "on" &&
+              !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) ?
+            "guarded" :
+            "type"
+        }
       }
       case "Select": {
         const select = element as HTMLSelectElement
@@ -2808,6 +2888,10 @@ export function engine(render: (root: SnapNode) => string) {
         }
         case "act":
           return JSON.stringify(await act(request))
+        case "fillGuard":
+          return JSON.stringify(armFill(request.steps) satisfies Response)
+        case "fillDisarm":
+          return JSON.stringify(fillDisarm() satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":

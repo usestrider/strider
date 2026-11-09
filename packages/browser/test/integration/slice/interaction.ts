@@ -8,6 +8,7 @@ import {
   Browser,
   Condition,
   Deadline,
+  Dialog,
   Expect,
   FileInput,
   Keyboard,
@@ -2105,12 +2106,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
-        "guards native design-mode fill when focus changes after preparation",
+        "guards native design-mode fill when focus or selection changes after preparation",
         (context) =>
           Effect.gen(function*() {
             if (!(yield* supports("input.topLevelDesignMode"))) context.skip()
             const { url } = yield* fixture(() =>
-              `<input id="other" value="other"><p id="target">old</p><script>document.designMode="on";
+              `<input id="other" value="other"><p id="target">old</p><p id="alternate">safe</p><script>document.designMode="on";
             document.addEventListener("beforeinput", e => {
               if (e.target.id === "other") document.body.dataset.wrong = "yes";
             });</script>`
@@ -2123,30 +2124,154 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(target instanceof LocatorImpl)
               const adapter = target.owner.runtime.model.adapter
               const original = adapter.dispatchInput
-              for (const value of ["new", ""] as const) {
+              for (const [value, change] of [["new", "focus"], ["", "focus"], ["new", "selection"]] as const) {
                 yield* page.evaluateInMainWorld(() => {
                   document.getElementById("target")!.textContent = "old"
                   delete document.body.dataset.wrong
                 })
                 let changed = false
-                const dispatchInput: typeof original = (...args) =>
-                  Effect.gen(function*() {
+                const dispatchInput: typeof original = Effect.fnUntraced(
+                  function*(...args: Parameters<typeof original>) {
                     if (!changed) {
                       changed = true
-                      yield* page.evaluateInMainWorld(() =>
-                        (document.getElementById("other") as HTMLInputElement).focus()
-                      )
+                      yield* (change === "focus"
+                        ? page.evaluateInMainWorld(() => (document.getElementById("other") as HTMLInputElement).focus())
+                        : page.evaluateInMainWorld(() => {
+                          const range = document.createRange()
+                          range.selectNodeContents(document.getElementById("alternate")!)
+                          const selection = getSelection()!
+                          selection.removeAllRanges()
+                          selection.addRange(range)
+                        })).pipe(Effect.orDie)
                     }
                     return yield* original(...args)
-                  })
+                  }
+                )
                 yield* Effect.acquireUseRelease(
                   Effect.sync(() => Object.assign(adapter, { dispatchInput })),
-                  () => target.fill(value),
+                  () => target.fill(value).pipe(Deadline.within("2 seconds")),
                   () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
                 )
                 assert.strictEqual(yield* page.locator("#other").readValue, "other")
                 assert.strictEqual(yield* target.readText, value)
+                assert.strictEqual(yield* page.locator("#alternate").readText, "safe")
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.wrong), undefined)
+              }
+              yield* page.evaluateInMainWorld(() => {
+                const other = document.getElementById("other") as HTMLInputElement
+                other.focus()
+                other.setSelectionRange(5, 5)
+              })
+              yield* page.keyboard.insertText("x")
+              assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "releases design-mode insertion guards on failure and interruption",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Native top-level design-mode focus is unsupported")
+            }
+            const { url } = yield* fixture(() =>
+              `<input id="other" value="other"><p id="target">old</p><script>document.designMode="on";</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.activate
+              const target = page.locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const shown = yield* Deferred.make<void>()
+              const releaseDialog = yield* Deferred.make<void>()
+              yield* Dialog.handle(page, (dialog) =>
+                Deferred.succeed(shown, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDialog)),
+                  Effect.andThen(Dialog.dismissAll(dialog))
+                ))
+              for (const phase of ["failure", "interruption", "dialog"] as const) {
+                const armed = yield* Deferred.make<void>()
+                const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                  const result = yield* original(realm, call)
+                  const argument = call.arguments[0]
+                  if (
+                    call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string" &&
+                    (JSON.parse(argument.value.value) as Engine.Request).op === "fillGuard"
+                  ) {
+                    yield* Deferred.succeed(armed, undefined)
+                    if (phase === "failure") return yield* Effect.die("injected after installing the insertion guard")
+                    return yield* Effect.never
+                  }
+                  return result
+                })
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { evaluate })),
+                  () =>
+                    Effect.gen(function*() {
+                      const fiber = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                      yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                      if (phase === "interruption") yield* Fiber.interrupt(fiber)
+                      const exit = yield* Fiber.await(fiber)
+                      assert(Exit.isFailure(exit))
+                    }),
+                  () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+                )
+                yield* page.evaluateInMainWorld(() => {
+                  const other = document.getElementById("other") as HTMLInputElement
+                  other.value = "other"
+                  other.focus()
+                  other.setSelectionRange(5, 5)
+                })
+                yield* page.keyboard.insertText("x")
+                assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+                assert.strictEqual(yield* target.readText, "old")
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "does not replay partially inserted design-mode text after focus moves",
+        (context) =>
+          Effect.gen(function*() {
+            if (!(yield* supports("input.topLevelDesignMode"))) {
+              context.skip("Native top-level design-mode focus is unsupported")
+            }
+            const { url } = yield* fixture(() =>
+              `<input id="other" value="other"><p id="target">old</p><script>
+            document.designMode="on";
+            document.addEventListener("input", () => {
+              document.body.dataset.inputs = String(Number(document.body.dataset.inputs ?? 0) + 1);
+              document.getElementById("other").focus();
+            });</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.activate
+              const result = yield* page.locator("#target").fill("new").pipe(
+                Deadline.within("2 seconds"),
+                Effect.result
+              )
+              assert.strictEqual(yield* page.locator("#other").readValue, "other")
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.inputs), "1")
+              const text = yield* page.locator("#target").readText
+              if (result._tag === "Success") assert.strictEqual(text, "new")
+              else {
+                assert(
+                  Locator.isLocatorError(result.failure) && result.failure.reason._tag === "BackendFailure",
+                  String(result.failure)
+                )
+                assert.isAbove(text.length, 0)
+                assert.isBelow(text.length, 3)
+                assert("new".startsWith(text))
               }
             }))
           }),

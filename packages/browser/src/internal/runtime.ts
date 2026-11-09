@@ -649,7 +649,7 @@ export const sendToDocument = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>
