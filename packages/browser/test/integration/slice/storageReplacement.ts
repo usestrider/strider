@@ -1,6 +1,6 @@
 /** Existing-context storage replacement, including closed origins and pre-mutation refusals. */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Capability, StorageState, type UserContext } from "@usestrider/browser"
+import { Browser, Capability, Expect, StorageState, type UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -41,6 +41,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
               request.onerror = () => reject(request.error)
             })
           })
+          yield* page.frame(page.locator("iframe")).getByText("seeded").pipe(Expect.toBeVisible)
           const saved = yield* context.exportStorageState
           assert.isTrue(saved.origins.some((entry) => entry.partition._tag === "Partitioned"))
           const target = new StorageState.StorageState({
