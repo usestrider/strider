@@ -4,6 +4,7 @@
  * the network received for them, in whatever order the browser's events come; a realm that ended takes its handles.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
@@ -120,7 +121,8 @@ describe("CDP click cleanup", () => {
         page.id,
         Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
       ).pipe(Effect.exit)
-      assert.isTrue(Exit.isInterrupted(exit))
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
       assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
     }).pipe(Effect.scoped))
 })
