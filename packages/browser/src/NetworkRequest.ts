@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as HttpMethod from "effect/http/HttpMethod"
+import type * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -25,6 +26,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import * as NetworkRequestImpl from "./internal/networkRequest.ts"
 import * as Redaction from "./internal/redaction.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
+import type * as NetworkResponse from "./NetworkResponse.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import * as Target from "./Target.ts"
@@ -420,6 +422,30 @@ export class RequestUnavailable
 }
 
 /**
+ * Reason a request's response association is no longer available.
+ *
+ * **Details**
+ *
+ * `evicted` means the bounded request index forgot the hop. `foreignTarget` means the retained hop belongs to
+ * another page or context. `released` means the acquiring scope closed. `targetClosed` means the target closed
+ * before a response arrived. A network failure without a response instead succeeds with `Option.none`.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ResponseUnavailable
+  extends Schema.Error<ResponseUnavailable>("@usestrider/browser/NetworkRequest/ResponseUnavailable")({
+    _tag: Schema.tag("ResponseUnavailable"),
+    why: Schema.Literals(["evicted", "foreignTarget", "released", "targetClosed"])
+  })
+{
+  override get message(): string {
+    return `Request response unavailable: ${this.why}`
+  }
+}
+
+/**
  * Error for a request observation that cannot be read from its target.
  *
  * @stability unstable
@@ -427,9 +453,9 @@ export class RequestUnavailable
  * @since 0.1.0
  */
 export class RequestError
-  extends Schema.TaggedError<RequestError>("~@usestrider/browser/NetworkRequest/RequestError")("RequestError", {
+  extends Schema.TaggedError<RequestError>("@usestrider/browser/NetworkRequest/RequestError")("RequestError", {
     hop: HopId,
-    reason: Schema.Union([RequestUnavailable]),
+    reason: Schema.Union([RequestUnavailable, ResponseUnavailable]),
     diagnostics: Diagnostics.Diagnostics
   })
 {
@@ -507,3 +533,48 @@ export const timing = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   request: NetworkRequest
 ): Effect.Effect<Timing, RequestError> => NetworkRequestImpl.timing(target, request)
+
+/**
+ * Retains one request hop in the caller's scope and returns a wait for its response, without collecting its body.
+ *
+ * **Details**
+ *
+ * Acquire on the page or context that observed the request, while it is still among the last 1000 retained hops.
+ * Each redirect hop has its own response. The returned effect gives an already-arrived response immediately, or
+ * waits under the deadline in force when it runs. A request that ends without a response gives `Option.none`.
+ * In-flight model eviction fails with `ResponseUnavailable`; scope closure releases the hop and fails pending
+ * and subsequent waits with `released`. Closing the target before arrival fails with `targetClosed`.
+ * Only this explicit acquisition retains the hop beyond a lookup; it enables no browser instrumentation or body capture.
+ *
+ * **Gotchas**
+ *
+ * Awaiting a response inside a request-phase route handler before continuing that request prevents it from being
+ * sent. Continue the request first. Response bodies require a separate `NetworkResponse` body subscription set
+ * up before the request.
+ *
+ * **Example** (Finding the response to an observed request)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const status = Effect.fn("status")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com/")
+ *   const response = yield* NetworkRequest.response(page, yield* sent)
+ *   return yield* response
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category subscriptions
+ * @since 0.1.0
+ */
+export const response = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<
+  Effect.Effect<Option.Option<NetworkResponse.NetworkResponse>, RequestError | Deadline.Timeout>,
+  RequestError,
+  Scope.Scope
+> => NetworkRequestImpl.response(target, request)

@@ -39,7 +39,7 @@ import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Devices from "./devices.ts"
-import type * as Engine from "./engine.ts"
+import * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
@@ -1563,11 +1563,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       const emulatesFocus = yield* Filters.supported(owner.runtime, "emulation.focus")
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
-      const inRound = action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
-        action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
+      const inRound = Engine.appliesInRound(action)
       const round = (cap: number, apply: boolean, stability?: string) =>
         Effect.suspend(() => {
-          if (apply && inRound) record.markSent()
           return Runtime.sendRouted(
             owner.runtime,
             owner.page,

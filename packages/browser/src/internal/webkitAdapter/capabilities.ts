@@ -32,6 +32,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
+      entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("isolatedWorlds", "unsupported", [
@@ -201,6 +202,7 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     "network.timing": ["partial", [
       "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
     ]],
+    acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "userContexts.proxy": ["supported", [
       "isolated process environment; HTTP proxy endpoints only; loopback stays direct"

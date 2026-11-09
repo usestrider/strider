@@ -449,3 +449,60 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     `to match ${AriaPatterns.describe(data)}`
   )
 }
+
+export const toBeInViewport = (
+  locator: Locator.ReadonlyLocator,
+  options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+) => {
+  const ratio = options?.ratio ?? 0
+  const inViewport = options?.inViewport ?? true
+  return expectLocator(
+    locator,
+    { _tag: "Viewport", ratio, inViewport },
+    "toBeInViewport",
+    `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
+  )
+}
+/** Accessible names use the shared engine only when this expectation is requested. */
+export const toHaveAccessibleName = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) => {
+  const ignoreCase = options?.ignoreCase
+  const flags = typeof expected === "string" ? "" : expected.flags
+  const text = typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  }
+  return expectLocator(
+    locator,
+    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    "toHaveAccessibleName",
+    `to have the accessible name ${show(expected)}${
+      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+    }`
+  )
+}
+
+export const toHaveCSS = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected: string | RegExp,
+  options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined }
+) =>
+  expectLocator(
+    locator,
+    {
+      _tag: "CSS",
+      name,
+      expected: matcher(expected, true),
+      not: options?.not ?? false,
+      pseudo: options?.pseudo ?? null
+    },
+    "toHaveCSS",
+    `${options?.not ? "not " : ""}to have the computed CSS ${name}${options?.pseudo ? ` on ::${options.pseudo}` : ""} ${
+      show(expected)
+    }`
+  )

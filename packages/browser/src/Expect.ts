@@ -76,6 +76,46 @@ export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
 export const toBeVisible: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectImpl.toBeVisible(locator)
 
 /**
+ * Expects the one match to intersect the viewport at the requested ratio.
+ *
+ * **Details**
+ *
+ * Uses the browser's intersection ratio, including clipping by ancestors. A positive ratio is required even
+ * when `ratio` is zero. Opacity and overlapping elements do not affect the ratio. With `inViewport: false`,
+ * waits for the condition's inverse, and also passes when nothing matches. Multiple matches never pass.
+ * Observation belongs to this expectation and is released when it ends; it does not scroll the element.
+ *
+ * **Example** (Waiting for half a card)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const card = Effect.fn("card")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("article").pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [
+  options?: {
+    /** Minimum intersection ratio. @default 0 */
+    readonly ratio?: number | undefined
+    /** Whether to require intersection or its inverse. @default true */
+    readonly inViewport?: boolean | undefined
+  } | undefined
+]> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+  ) => ExpectImpl.toBeInViewport(locator, options)
+)
+
+/**
  * Expects no match to be visible: passes when every match is hidden, or when nothing matches.
  *
  * **Example** (Waiting for a spinner to go)
@@ -237,6 +277,48 @@ export const toHaveText: DualMatcher<
 )
 
 /**
+ * Expects the one match's accessible name to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
+ * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
+ * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
+ * visible element. Roles that prohibit naming, such as generic, paragraph and code, have an empty name;
+ * their content can still contribute to another element's name. An explicit nameable role can override the
+ * implicit role. Missing or multiple matches keep retrying and fail with their match count.
+ *
+ * **Example** (Checking a save button's accessible name)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkSave = Effect.fn("checkSave")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByTestId("save").pipe(Expect.toHaveAccessibleName("Save changes"))
+ *   yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
+ *     ignoreCase: true
+ *   })
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleName: DualMatcher<
+  Locator.ReadonlyLocator,
+  [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleName(locator, expected, options)
+)
+
+/**
  * Expects the one match's class string to match `expected`, or, given a list, as many matches as the list has entries,
  * each matching its entry in order.
  *
@@ -346,6 +428,51 @@ export const toHaveAttribute: DualMatcher<
   (args) => Locator.isLocator(args[0]),
   (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
     ExpectImpl.toHaveAttribute(locator, name, expected)
+)
+
+/**
+ * Expects the one match's computed CSS property to equal a string or match a regular expression.
+ *
+ * **Details**
+ *
+ * Strings compare exactly, without whitespace normalization. CSS values use the browser's serialization.
+ * Missing and multiple matches retry until exactly one matches, including with `not: true`.
+ * Unlike Playwright's immediate strictness error, multiple matches fail at the deadline with match-count evidence.
+ * Failure history records the computed string, or the match count when there is no single element.
+ *
+ * **Example** (Waiting for a layout)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const layout = Effect.fn("layout")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("navigation").pipe(Expect.toHaveCSS("display", "flex"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveCSS: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    name: string,
+    expected: string | RegExp,
+    options?: {
+      /** Negates the value comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+      /** Reads the named pseudo-element instead of the element. @default undefined */
+      readonly pseudo?: "before" | "after" | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.ReadonlyLocator, name: string, expected: string | RegExp, options?: {
+    readonly not?: boolean | undefined
+    readonly pseudo?: "before" | "after" | undefined
+  }) => ExpectImpl.toHaveCSS(locator, name, expected, options)
 )
 
 /**

@@ -9,8 +9,14 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Browser from "../../../src/Browser.ts"
+import * as Expect from "../../../src/Expect.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
+import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as Engine from "../../../src/internal/engine.ts"
+import type { LocatorImpl } from "../../../src/internal/locator.ts"
+import * as Operation from "../../../src/internal/operation.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { type Backend, makeRecorder, site } from "./harness.ts"
 
@@ -154,6 +160,118 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("owns viewport observers only during requested rounds and releases them independently", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<div id="go" style="position:absolute;top:100000px;width:100px;height:100px"></div>`,
+              `function() {
+                globalThis.viewportActive = 0;
+                globalThis.viewportCreated = 0;
+                const Native = globalThis.IntersectionObserver;
+                globalThis.IntersectionObserver = class {
+                  active = true;
+                  constructor(callback, options) {
+                    this.native = new Native(callback, options);
+                    globalThis.viewportActive++;
+                    globalThis.viewportCreated++;
+                  }
+                  observe(element) { this.native.observe(element); }
+                  disconnect() {
+                    if (this.active) { globalThis.viewportActive--; this.active = false; }
+                    this.native.disconnect();
+                  }
+                };
+              }`
+            )
+            yield* send({ op: "count", steps: [] })
+            const result = yield* call(
+              `async function() {
+              const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})];
+              const unused = globalThis.viewportCreated;
+              const request = { op: 'expect', steps: [{ _tag: 'Css', selector: '#go' }],
+                expectation: { _tag: 'Viewport', ratio: 0, inViewport: true }, cap: 10000 };
+              const first = engine.run(JSON.stringify({ ...request, token: 'first' }));
+              const second = engine.run(JSON.stringify({ ...request, token: 'second' }));
+              const during = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ op: 'expectStop', token: 'first' }));
+              await first;
+              const remaining = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ op: 'expectStop', token: 'second' }));
+              await second;
+              const stopped = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ ...request, cap: 100, token: 'timeout' }));
+              const timedOut = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ ...request, token: 'success', expectation: {
+                ...request.expectation, inViewport: false
+              } }));
+              return JSON.stringify({ unused, during, remaining, stopped, timedOut, success: globalThis.viewportActive });
+            }`,
+              []
+            )
+            assert(result._tag === "Value")
+            assert(result.value.type === "string")
+            assert.deepStrictEqual(JSON.parse(result.value.value), {
+              unused: 0,
+              during: 2,
+              remaining: 1,
+              stopped: 0,
+              timedOut: 0,
+              success: 0
+            })
+          }), timeout)
+
+        for (const publicExpectation of [false, true]) {
+          it.effect(
+            `${
+              publicExpectation ? "public expectation" : "ordinary runtime"
+            } follows a navigation during a waiting round`,
+            () =>
+              Effect.gen(function*() {
+                const served = yield* site
+                const browser = BrowserImpl.layer((sink) =>
+                  backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                    adapter
+                  ))
+                )
+                yield* Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  const next = `${served.origin}/fixture?html=${encodeURIComponent("<div id=\"done\">Done</div>")}`
+                  // Replace the document while the engine is waiting for the hidden target.
+                  yield* page.goto(
+                    `${served.origin}/fixture?html=${
+                      encodeURIComponent(
+                        `<div id="done" hidden>Done</div><script>setTimeout(() => { location.href = ${
+                          JSON.stringify(next)
+                        } }, 300)</script>`
+                      )
+                    }`
+                  )
+                  if (publicExpectation) {
+                    yield* page.locator("#done").pipe(Expect.toBeVisible)
+                    return
+                  }
+                  const target = page.locator("#done") as LocatorImpl
+                  const reply = yield* Effect.gen(function*() {
+                    const record = yield* Operation.record
+                    return yield* Runtime.send(
+                      target.owner.runtime,
+                      target.owner.page,
+                      { op: "expect", steps: target.steps, expectation: { _tag: "Visible" }, cap: 2000 },
+                      record.id,
+                      record.budget.at
+                    )
+                  }).pipe(Operation.named("Test.ordinaryNavigation"), Effect.result)
+                  assert(reply._tag === "Success", JSON.stringify(reply))
+                  assert.strictEqual(reply.success._tag, "Expected")
+                  if (reply.success._tag === "Expected") {
+                    assert.isTrue(reply.success.passed)
+                  }
+                }).pipe(Effect.scoped, Effect.provide(browser))
+              }),
+            timeout
+          )
+        }
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
@@ -416,6 +534,31 @@ export const engine = (backend: Backend) =>
             })
             assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
           }), timeout)
+
+        it.effect("reports accessible-name mismatches and cardinality on an immediate check", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="named" aria-label="Updated"></button><button class="many">One</button><button class="many">Two</button>`
+            )
+            for (
+              const [selector, expected, observed] of [
+                ["#named", { _tag: "String", value: "updated", exact: true }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "updated", flags: "" }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "Updated  ", flags: "" }, "Updated"],
+                ["#missing", { _tag: "String", value: "", exact: true }, { matches: 0 }],
+                [".many", { _tag: "RegExp", source: "One", flags: "" }, { matches: 2 }]
+              ] as const
+            ) {
+              const response = yield* send({
+                op: "expect",
+                steps: [{ _tag: "Css", selector }],
+                cap: 0,
+                expectation: { _tag: "AccessibleName", expected, ignoreCase: false }
+              })
+              assert.deepStrictEqual(response, { _tag: "Expected", passed: false, observed, changed: false })
+            }
+          }))
 
         it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
           Effect.gen(function*() {

@@ -179,6 +179,7 @@ export type ObligationSubject =
     readonly request: NetworkRequest.NetworkRequest
     readonly phase: "request" | "response" | "auth"
     readonly response: Option.Option<NetworkResponse.NetworkResponse>
+    readonly authSource?: "server" | "proxy" | undefined
     readonly challenge: Option.Option<{ readonly origin: string; readonly scheme: string; readonly realm: string }>
   }
   | {
@@ -604,7 +605,12 @@ export type Decision =
    * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
-  | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
+  | {
+    readonly _tag: "ProvideCredentials"
+    readonly username: string
+    readonly password: string
+    readonly once?: boolean | undefined
+  }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
   | { readonly _tag: "Accept"; readonly promptText: Option.Option<string> }
@@ -916,6 +922,8 @@ export interface AdapterConnection {
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
   ) => Effect.Effect<void, AdapterError>
+  /** Reads the viewport declaration in force, without measuring the browser window. */
+  readonly viewportSize: (page: Target.NavigableId) => Effect.Effect<Option.Option<Page.ViewportSize>, AdapterError>
   readonly activatePage: (page: Target.NavigableId) => Effect.Effect<void, AdapterError>
 
   // Navigation

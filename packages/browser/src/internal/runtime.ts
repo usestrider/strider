@@ -6,8 +6,9 @@
  * locator's frame boundaries lead to: each iframe on the way is found by the engine of
  * the document it is in, and the adapter names the frame it holds. The engine is installed in a document on first
  * use; when a document on the way changes under a request (a navigation committed, the realm went), the request
- * goes again from the page's document, within the operation's deadline. Nothing the engine does dispatches input,
- * so sending a request again is always safe. A frame that isn't there yet is a request that matches nothing.
+ * goes again from the page's document, within the operation's deadline. A round that may already have applied
+ * an action fails instead: its lost reply cannot establish whether the action happened. A frame that isn't there
+ * yet is a request that matches nothing.
  *
  * A dialog pauses its page, and on some backends every evaluation with it. A request waits for
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
@@ -316,25 +317,41 @@ export const fromAdapter = (
  * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
  * lost its engine, so the caller goes again.
  */
-const callEngine = (
+const callEngine = Effect.fnUntraced(function*(
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
   request: string | Effect.Effect<string>,
   id: Diagnostics.OperationId,
-  releaseResult?: boolean
-): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
-  engineRealm(runtime, document).pipe(
+  releaseResult?: boolean,
+  replay = true
+) {
+  let sent = false
+  return yield* engineRealm(runtime, document).pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
         typeof request === "string" ? Effect.succeed(request) : request,
-        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+        Effect.fnUntraced(function*(encoded: string) {
+          // Realm lookup and installation cannot apply this round. Its own evaluation may do so once started.
+          if (!replay) {
+            const record = yield* Operation.current
+            if (Option.isSome(record)) record.value.markSent()
+          }
+          sent = true
+          return yield* call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+        })
       )
     ),
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
-        return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none<Adapter.RemoteResult>())
+        return Cache.invalidate(runtime.engineRealms, document).pipe(
+          Effect.andThen(
+            replay || !sent
+              ? Effect.succeed(Option.none<Adapter.RemoteResult>())
+              : Effect.fail(fromAdapter(error, id, runtime.backend))
+          )
+        )
       }
       return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
@@ -344,12 +361,17 @@ const callEngine = (
         if (result._tag === "Exception") return Effect.die(new Error(`The engine threw: ${result.text}`))
         if (result.value.type === "string" && result.value.value === Engine.missing) {
           // A realm that lost its engine, as a reused realm can: install again
-          return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          return Effect.flatMap(Operation.current, (record) => {
+            // The engine answered before running the request, so this round applied nothing.
+            if (!replay && Option.isSome(record)) record.value.markNotSent()
+            return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          })
         }
         return Effect.succeed(Option.some(result.value))
       }
     }))
   )
+})
 
 /**
  * The engine's answer, decoded. One that isn't an answer the engine gives fails as `IncompatibleResponse`: where
@@ -576,14 +598,21 @@ export const sendRouted = (
             clip = answer.value.viewport
           }
         }
-        return yield* callEngine(
+        const token = request.op === "expect" && request.expectation._tag === "Viewport"
+          ? crypto.randomUUID()
+          : undefined
+        const pending = callEngine(
           runtime,
           routed.document,
           Engine.run,
           Effect.gen(function*() {
             // Recompute after every route and install, including a stale realm's replacement.
             const current = request.op === "expect"
-              ? { ...request, cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at))) }
+              ? {
+                ...request,
+                ...(token === undefined ? {} : { token }),
+                cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
+              }
               : request
             return JSON.stringify(
               retarget(
@@ -593,8 +622,22 @@ export const sendRouted = (
               )
             )
           }),
-          id
-        ).pipe(
+          id,
+          undefined,
+          request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
+        )
+        const owned = token === undefined ? pending : pending.pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) ?
+              Effect.void :
+              releaseInDocument(runtime, routed.document, { op: "expectStop", token }, id).pipe(
+                Operation.detached,
+                Effect.catchCause((cause) => Effect.logWarning("Viewport observation cleanup failed", cause)),
+                Effect.forkIn(runtime.model.scope, { startImmediately: true })
+              )
+          )
+        )
+        return yield* owned.pipe(
           Effect.flatMap(Option.match({
             onNone: () => Effect.succeedNone,
             onSome: (value) =>
@@ -652,7 +695,7 @@ export const sendToDocument = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>

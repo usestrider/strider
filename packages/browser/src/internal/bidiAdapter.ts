@@ -41,6 +41,7 @@ import * as Storage from "./bidiAdapter/storage.ts"
 import * as Tree from "./bidiAdapter/tree.ts"
 import * as BidiWire from "./bidiWire.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
@@ -66,6 +67,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),
@@ -336,6 +338,11 @@ export const connect: (
       removeUserContext: (id) => Contexts.removeUserContext(state, id),
       createPage: (id) => Contexts.createPage(state, id),
       closePage: (id, options) => Contexts.closePage(state, id, options),
+      viewportSize: (id) =>
+        Effect.map(
+          State.navigableById(state, id),
+          (page) => Declarations.viewportSize(state.registry, State.placement(page))
+        ),
       activatePage: (id) => Contexts.activatePage(state, id),
       navigate: (id, url, options) => Navigation.navigate(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),

@@ -72,7 +72,7 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
         () =>
           Effect.gen(function*() {
             const served = yield* site
-            const context = yield* Browser.newContext({ requestTiming: true })
+            const context = yield* Browser.newContext({ requestTiming: true, acceptInsecureCerts: false })
             const page = yield* context.newPage
             yield* page.goto(served.origin)
             const redirected = yield* NetworkRequest.next(page, { url: `${served.origin}/redirect` })
@@ -88,6 +88,8 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
             const first = yield* redirected
             const last = yield* sent
             yield* headers
+            const associated = yield* NetworkRequest.response(page, last)
+            assert.strictEqual(Option.getOrThrow(yield* associated).hop, last.hop)
             const before = yield* NetworkRequest.timing(page, last)
             assert.isTrue(Option.isSome(before.startTime))
             assert.isTrue(Option.isSome(before.responseStart))

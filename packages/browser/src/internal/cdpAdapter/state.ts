@@ -137,6 +137,7 @@ export interface Attribution {
 }
 
 export interface RequestEntry {
+  credentialsAttempted?: boolean | undefined
   readonly id: NetworkRequest.Id
   readonly target: TargetEntry
   readonly requestId: string
