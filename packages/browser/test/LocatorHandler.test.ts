@@ -413,6 +413,25 @@ await runtime.dispose()
     }).pipe(Effect.scoped, Effect.provide(f.layer))
   })
 
+  it.effect("preserves typed callback errors whose message getter throws", () => {
+    const f = fixture()
+    return Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const original = Object.defineProperty(new Error(), "message", {
+        get: () => {
+          throw new Error("unprintable message")
+        }
+      })
+      yield* page.addLocatorHandler(page.locator("#overlay"), () => Effect.fail(original))
+      const failure = yield* page.locator("#target").focus().pipe(Effect.flip)
+      assert.strictEqual(failure._tag, "LocatorError")
+      if (failure._tag === "LocatorError" && failure.reason._tag === "LocatorHandlerFailed") {
+        assert.strictEqual(failure.reason.error, original)
+        assert.include(failure.message, "#overlay")
+      } else assert.fail("Expected an original typed callback failure")
+    }).pipe(Effect.scoped, Effect.provide(f.layer))
+  })
+
   it.effect("isolates active dispatch to its page and restores ordinary reads and actions", () => {
     const f = fixture()
     return Effect.gen(function*() {
