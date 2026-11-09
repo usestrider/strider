@@ -601,6 +601,8 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 
 *matchers*
 
+- `const toBeAttached: Matcher<Locator.ReadonlyLocator>`
+- `const toBeDetached: Matcher<Locator.ReadonlyLocator>`
 - `const toBeVisible: Matcher<Locator.ReadonlyLocator>`
 - `const toBeHidden: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEnabled: Matcher<Locator.ReadonlyLocator>`

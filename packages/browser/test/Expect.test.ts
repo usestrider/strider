@@ -1,6 +1,6 @@
 /** Page rounds must use the time left after cold engine setup. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Expect, Target } from "@usestrider/browser"
+import { Browser, Deadline, Expect, type Locator, Target } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -15,64 +15,70 @@ import * as Fake from "../src/internal/fake.ts"
 const observed = { matches: 2, visible: 2 }
 
 /** Real routing, engine cache and bounded adapter; only page execution is simulated. */
-const scenario = Effect.fnUntraced(function*(setup: number) {
-  const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
-  const caps: Array<number> = []
-  let installs = 0
-  const layer = BrowserImpl.layer((sink) =>
-    Fake.connect([], {
-      info: new Browser.Info(Fake.info),
-      capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
-    })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
-      ...adapter,
-      realm: () => Effect.succeed("expect-realm" as Target.RealmId),
-      evaluate: Effect.fnUntraced(function*(_realm, call) {
-        if (call.functionDeclaration === Engine.install) {
-          installs++
-          yield* clock.sleep(setup)
-          return { _tag: "Value", value: { type: "string", value: "installed" } } as const
-        }
-        const argument = call.arguments[0]
-        assert(argument?._tag === "Value" && argument.value.type === "string")
-        const request = JSON.parse(argument.value.value) as Engine.Request
-        if (request.op === "expect") {
-          caps.push(request.cap)
-          // Simulate the page's never-passing round, using the actual transmitted cap.
-          yield* clock.sleep(request.cap)
+const scenario = Effect.fnUntraced(
+  function*(setup: number, matcher: Expect.Matcher<Locator.ReadonlyLocator> = Expect.toBeVisible) {
+    const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+    const caps: Array<number> = []
+    let installs = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("expect-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            installs++
+            yield* clock.sleep(setup)
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          const argument = call.arguments[0]
+          assert(argument?._tag === "Value" && argument.value.type === "string")
+          const request = JSON.parse(argument.value.value) as Engine.Request
+          if (request.op === "expect") {
+            assert.strictEqual(
+              request.expectation._tag,
+              matcher === Expect.toBeAttached ? "Attached" : matcher === Expect.toBeDetached ? "Detached" : "Visible"
+            )
+            caps.push(request.cap)
+            // Simulate the page's never-passing round, using the actual transmitted cap.
+            yield* clock.sleep(request.cap)
+            return {
+              _tag: "Value",
+              value: {
+                type: "string",
+                value: JSON.stringify({ _tag: "Expected", passed: false, observed, changed: true })
+              }
+            } as const
+          }
+          assert.strictEqual(request.op, "explain")
           return {
             _tag: "Value",
             value: {
               type: "string",
-              value: JSON.stringify({ _tag: "Expected", passed: false, observed, changed: true })
+              value: JSON.stringify({ _tag: "Explained", matched: true, nearest: null, suggestions: [], prefix: 1 })
             }
           } as const
-        }
-        assert.strictEqual(request.op, "explain")
-        return {
-          _tag: "Value",
-          value: {
-            type: "string",
-            value: JSON.stringify({ _tag: "Explained", matched: true, nearest: null, suggestions: [], prefix: 1 })
-          }
-        } as const
-      })
-    })))
-  )
-  const error = yield* Effect.scoped(Effect.gen(function*() {
-    const page = yield* Browser.newPage()
-    const pending = yield* page.getByText("item").pipe(
-      Expect.toBeVisible,
-      Deadline.within("500 millis"),
-      Effect.flip,
-      Effect.forkChild
+        })
+      })))
     )
-    // Failure explanation has its own 1000 ms budget after the 500 ms expectation.
-    yield* TestClock.adjust("1500 millis")
-    return yield* Fiber.join(pending)
-  })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
-  assert(Expect.isExpectationFailed(error), String(error))
-  return { error, caps, installs }
-})
+    const error = yield* Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const pending = yield* page.getByText("item").pipe(
+        matcher,
+        Deadline.within("500 millis"),
+        Effect.flip,
+        Effect.forkChild
+      )
+      // Failure explanation has its own 1000 ms budget after the 500 ms expectation.
+      yield* TestClock.adjust("1500 millis")
+      return yield* Fiber.join(pending)
+    })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+    assert(Expect.isExpectationFailed(error), String(error))
+    return { error, caps, installs }
+  }
+)
 
 const assertObserved = (error: Expect.ExpectationFailed) => {
   assert.deepStrictEqual(error.history.map((entry) => entry.value), [observed])
@@ -110,4 +116,16 @@ describe("attachment matchers", () => {
     assert.strictEqual(typeof Expect.toBeAttached, "function")
     assert.strictEqual(typeof Expect.toBeDetached, "function")
   })
+})
+
+describe("attachment failure evidence", () => {
+  for (const matcher of [Expect.toBeAttached, Expect.toBeDetached]) {
+    it.effect("preserves observations and the operation condition", () =>
+      Effect.gen(function*() {
+        const { error, installs } = yield* scenario(0, matcher)
+        assertObserved(error)
+        assert.strictEqual(installs, 1)
+        assert.strictEqual(error.condition, matcher === Expect.toBeAttached ? "to be attached" : "to be detached")
+      }))
+  }
 })

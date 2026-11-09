@@ -157,13 +157,37 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("retries attachment transitions and refuses a closed page", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(
+            `<button onclick="setTimeout(() => document.querySelector('#slot').innerHTML='<i></i>', 100)">Attach</button>
+<button onclick="setTimeout(() => document.querySelector('#slot').innerHTML='', 100)">Detach</button><button onclick="document.querySelector('#slot').innerHTML='<i></i><i></i>'">Multiple</button><div id="slot"></div>`
+          )
+          const scope = yield* Scope.make()
+          const page = yield* Browser.newPage().pipe(Scope.provide(scope))
+          yield* Effect.gen(function*() {
+            yield* page.goto(url)
+            yield* page.getByRole("button", { name: "Attach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeAttached)
+            yield* page.getByRole("button", { name: "Multiple", exact: true }).click()
+            yield* page.getByRole("button", { name: "Attach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeAttached)
+            yield* page.getByRole("button", { name: "Detach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeDetached)
+          }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+          const error = yield* page.locator("i").pipe(Expect.toBeDetached, Effect.flip)
+          assert.strictEqual(error._tag, "TargetGone")
+        }), timeout)
+
       it.effect("checks attachment independently of visibility and reports missing or multiple matches", () =>
         Effect.gen(function*() {
-          const url = yield* fixture("<div id=\"hidden\" style=\"display:none\"></div><i></i><i></i>")
+          const url = yield* fixture(`<div id="hidden" style="display:none"></div><i></i><i></i><div id="host"></div>
+<script>document.querySelector("#host").attachShadow({mode:"open"}).innerHTML="<b id=shadow></b>"</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             yield* page.locator("#hidden").pipe(Expect.toBeAttached)
+            yield* page.locator("#shadow").pipe(Expect.toBeAttached)
             yield* page.locator("#absent").pipe(Expect.toBeDetached)
             for (
               const [selector, matcher, matches] of [

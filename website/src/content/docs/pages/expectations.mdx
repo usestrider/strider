@@ -31,6 +31,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 
 | Matcher                                        | Passes when                                                      |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `toBeAttached`, `toBeDetached` | exactly one connected element, including hidden elements; or no elements |
 | `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or no match is visible, however many match |
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
@@ -42,6 +43,18 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+
+Attachment does not require visibility. Use detachment to wait for removal rather than hiding; multiple matches retry until the deadline and failures record their match counts.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const waitForRemoval = Effect.fn("waitForRemoval")(function*(page: Page.ReadonlyPage) {
+  yield* page.locator("#status").pipe(Expect.toBeAttached)
+  yield* page.locator("#spinner").pipe(Expect.toBeDetached)
+})
+```
 
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
