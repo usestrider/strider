@@ -449,3 +449,17 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     `to match ${AriaPatterns.describe(data)}`
   )
 }
+
+export const toBeInViewport = (
+  locator: Locator.ReadonlyLocator,
+  options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+) => {
+  const ratio = options?.ratio ?? 0
+  const inViewport = options?.inViewport ?? true
+  return expectLocator(
+    locator,
+    { _tag: "Viewport", ratio, inViewport },
+    "toBeInViewport",
+    `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
+  )
+}

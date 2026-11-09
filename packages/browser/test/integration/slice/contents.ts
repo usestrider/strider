@@ -121,6 +121,48 @@ export const contents = (
 ) =>
   describe(`${name} contents`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("releases the requesting viewport round when its fiber is interrupted", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<div id="target" style="position:absolute;top:100000px;width:100px;height:100px"></div>`
+              )
+            )
+            const target = page.locator("#target")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const entered = yield* Deferred.make<void>()
+            const released = yield* Deferred.make<void>()
+            let token: string | undefined
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string; token?: string }
+                : undefined
+              const result = original(realm, options)
+              if (request?.op === "expect" && request.token !== undefined) {
+                token = request.token
+                return Deferred.succeed(entered, undefined).pipe(Effect.andThen(result))
+              }
+              if (request?.op === "expectStop") {
+                assert.strictEqual(request.token, token)
+                return result.pipe(Effect.tap(() => Deferred.succeed(released, undefined)))
+              }
+              return result
+            })
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            const pending = yield* page.locator("#target").pipe(Expect.toBeInViewport(), Effect.forkChild)
+            yield* Deferred.await(entered)
+            yield* Fiber.interrupt(pending)
+            yield* Deferred.await(released)
+          }))
+        }), timeout)
+
       it.effect("setContent waits for guarded native insertion before replacing the document", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site

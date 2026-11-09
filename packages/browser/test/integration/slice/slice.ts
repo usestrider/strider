@@ -184,15 +184,18 @@ export const slice = (
           const url = yield* fixture(`<style>body{margin:0}.box{width:100px;height:100px}</style>
 <div style="width:50px;overflow:hidden"><div id="half" class="box" style="opacity:0"></div></div>
 <div id="outside" class="box" style="position:absolute;top:100000px"></div>
-<div id="hidden" class="box" style="display:none"></div>`)
+<div id="hidden" class="box" style="display:none"></div>
+<div id="edge" class="box" style="position:fixed;top:0;left:-100px"></div>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             yield* page.locator("#half").pipe(Expect.toBeInViewport())
             yield* Expect.toBeInViewport(page.locator("#half"), { ratio: 0.5 })
+            yield* page.locator("#half").pipe(Expect.toBeInViewport({ ratio: 0.5000000005 }))
             yield* page.locator("#half").pipe(Expect.toBeInViewport({ ratio: 0.6, inViewport: false }))
             yield* page.locator("#outside").pipe(Expect.toBeInViewport({ inViewport: false }))
             yield* page.locator("#hidden").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* page.locator("#edge").pipe(Expect.toBeInViewport({ inViewport: false }))
             yield* page.locator("#missing").pipe(Expect.toBeInViewport({ inViewport: false }))
           }))
         }), timeout)
@@ -203,24 +206,49 @@ export const slice = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            for (const [selector, options, observed] of [
-              ["#missing", {}, { matches: 0 }],
-              [".box", { inViewport: false }, { matches: 2 }],
-              [".box:first-child", { inViewport: false }, { matches: 1, ratio: 1 }]
-            ] as const) {
+            for (
+              const [selector, options, observed] of [
+                ["#missing", {}, { matches: 0 }],
+                [".box", {}, { matches: 2 }],
+                [".box", { inViewport: false }, { matches: 2 }],
+                [".box:first-child", { inViewport: false }, { matches: 1, ratio: 1 }]
+              ] as const
+            ) {
               const error = yield* page.locator(selector).pipe(
-                Expect.toBeInViewport(options), Deadline.within("300 millis"), Effect.flip
+                Expect.toBeInViewport(options),
+                Deadline.within("300 millis"),
+                Effect.flip
               )
               assert(Expect.isExpectationFailed(error), String(error))
-              assert.isTrue(error.history.some((entry) => JSON.stringify(entry.value) === JSON.stringify(observed)))
+              assert.isTrue(error.history.some((entry) =>
+                JSON.stringify(entry.value) === JSON.stringify(observed)
+              ))
             }
           }))
         }), timeout)
 
-      it.effect("retries viewport observation after scrolling and replacing a match", () =>
+      it.effect("retries viewport observation after replacing a match", () =>
         Effect.gen(function*() {
-          const url = yield* fixture(`<div id="target" style="position:absolute;top:100000px;width:100px;height:100px"></div>
-<button style="position:fixed" onclick="document.querySelector('#target').outerHTML='<div id=target style=width:100px;height:100px></div>'">Replace</button>`)
+          const url = yield* fixture(
+            `<div id="target" style="position:absolute;top:100000px;width:100px;height:100px"></div>
+<button style="position:fixed" onclick="document.querySelector('#target').outerHTML='<div id=target style=width:100px;height:100px></div>'">Replace</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* Effect.all([
+              page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
+              page.getByRole("button").click()
+            ], { concurrency: "unbounded" })
+          }))
+        }), timeout)
+
+      it.effect("retries viewport observation after scrolling without a DOM mutation", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(
+            `<div id="target" style="position:absolute;top:2000px;width:100px;height:100px"></div>
+<button style="position:fixed" onclick="window.scrollTo(0,2000)">Scroll</button>`
+          )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)

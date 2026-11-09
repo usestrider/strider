@@ -576,14 +576,21 @@ export const sendRouted = (
             clip = answer.value.viewport
           }
         }
-        return yield* callEngine(
+        const token = request.op === "expect" && request.expectation._tag === "Viewport"
+          ? crypto.randomUUID()
+          : undefined
+        const pending = callEngine(
           runtime,
           routed.document,
           Engine.run,
           Effect.gen(function*() {
             // Recompute after every route and install, including a stale realm's replacement.
             const current = request.op === "expect"
-              ? { ...request, cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at))) }
+              ? {
+                ...request,
+                ...(token === undefined ? {} : { token }),
+                cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
+              }
               : request
             return JSON.stringify(
               retarget(
@@ -594,7 +601,19 @@ export const sendRouted = (
             )
           }),
           id
-        ).pipe(
+        )
+        const owned = token === undefined ? pending : pending.pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) ?
+              Effect.void :
+              releaseInDocument(runtime, routed.document, { op: "expectStop", token }, id).pipe(
+                Operation.detached,
+                Effect.catchCause((cause) => Effect.logWarning("Viewport observation cleanup failed", cause)),
+                Effect.forkIn(runtime.model.scope, { startImmediately: true })
+              )
+          )
+        )
+        return yield* owned.pipe(
           Effect.flatMap(Option.match({
             onNone: () => Effect.succeedNone,
             onSome: (value) =>
@@ -652,7 +671,7 @@ export const sendToDocument = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>
