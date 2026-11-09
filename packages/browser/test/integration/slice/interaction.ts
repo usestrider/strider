@@ -2205,6 +2205,145 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "holds already queued ordinary input until interrupted fill guards are removed",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const child = fixtureUrl(origin, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const armed = yield* Deferred.make<void>()
+              const cleaning = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              const queued = yield* Deferred.make<void>()
+              const input = target.owner.page.input
+              const withPermit = input.withPermit.bind(input)
+              const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                const argument = call.arguments[0]
+                const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string"
+                  ? JSON.parse(argument.value.value) as Engine.Request :
+                  undefined
+                if (request?.op === "fillDisarm") {
+                  yield* Deferred.succeed(cleaning, undefined)
+                  yield* Deferred.await(release)
+                }
+                const result = yield* original(realm, call)
+                if (request?.op === "fillGuard" && !request.ancestor) {
+                  yield* Deferred.succeed(armed, undefined)
+                  return yield* Effect.never
+                }
+                return result
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { evaluate })),
+                () =>
+                  Effect.gen(function*() {
+                    const fill = yield* target.fill("new").pipe(Effect.forkScoped)
+                    yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                    yield* page.evaluateInMainWorld(() => {
+                      const other = document.getElementById("other") as HTMLInputElement
+                      other.focus()
+                      other.setSelectionRange(5, 5)
+                    })
+                    yield* Effect.sync(() =>
+                      Object.assign(input, {
+                        withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+                          Deferred.succeed(queued, undefined).pipe(Effect.andThen(withPermit(effect)))
+                      })
+                    )
+                    const ordinary = yield* page.keyboard.insertText("x").pipe(Effect.forkScoped)
+                    yield* Deferred.await(queued)
+                    yield* Effect.yieldNow
+                    yield* Fiber.interrupt(fill).pipe(Deadline.within("2 seconds"))
+                    yield* Deferred.await(cleaning).pipe(Deadline.within("2 seconds"))
+                    assert.strictEqual(
+                      ordinary.pollUnsafe(),
+                      undefined,
+                      "queued input must remain blocked during cleanup"
+                    )
+                    yield* Deferred.succeed(release, undefined)
+                    yield* Fiber.join(ordinary).pipe(Deadline.within("2 seconds"))
+                    assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+                    assert.strictEqual(yield* target.readText, "old")
+                  }),
+                () =>
+                  Effect.gen(function*() {
+                    yield* Deferred.succeed(release, undefined)
+                    yield* Effect.sync(() => {
+                      Object.assign(adapter, { evaluate: original })
+                      Object.assign(input, { withPermit })
+                    })
+                  })
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps ordinary input blocked when fill guard cleanup fails in a live document",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const child = fixtureUrl(origin, `<p id="target">old</p><script>document.designMode="on";</script>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
+              const target = page.frame(page.locator("iframe")).locator("#target")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const armed = yield* Deferred.make<void>()
+              const failed = yield* Deferred.make<void>()
+              const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                const argument = call.arguments[0]
+                const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string"
+                  ? JSON.parse(argument.value.value) as Engine.Request :
+                  undefined
+                if (request?.op === "fillDisarm") {
+                  yield* Deferred.succeed(failed, undefined)
+                  return yield* Effect.die("injected cleanup failure in a still-live document")
+                }
+                const result = yield* original(realm, call)
+                if (request?.op === "fillGuard" && !request.ancestor) {
+                  yield* Deferred.succeed(armed, undefined)
+                  return yield* Effect.never
+                }
+                return result
+              })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { evaluate })),
+                () =>
+                  Effect.gen(function*() {
+                    const fill = yield* target.fill("new").pipe(Effect.forkScoped)
+                    yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
+                    yield* Fiber.interrupt(fill).pipe(Deadline.within("2 seconds"))
+                    yield* Deferred.await(failed).pipe(Deadline.within("2 seconds"))
+                    yield* page.evaluateInMainWorld(() => {
+                      const other = document.getElementById("other") as HTMLInputElement
+                      other.focus()
+                      other.setSelectionRange(5, 5)
+                    })
+                    const exit = yield* page.keyboard.insertText("x").pipe(Deadline.within("100 millis"), Effect.exit)
+                    assert(Exit.isFailure(exit), "unconfirmed cleanup must prevent native input from being sent")
+                    assert.strictEqual(yield* page.locator("#other").readValue, "other")
+                    assert.strictEqual(yield* target.readText, "old")
+                  }),
+                () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "releases design-mode insertion guards on failure, interruption and dialogs",
         () =>
           Effect.gen(function*() {
