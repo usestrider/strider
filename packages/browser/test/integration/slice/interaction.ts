@@ -2205,20 +2205,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
-        "releases design-mode insertion guards on failure and interruption",
-        (context) =>
+        "releases design-mode insertion guards on failure, interruption and dialogs",
+        () =>
           Effect.gen(function*() {
-            if (!(yield* supports("input.topLevelDesignMode"))) {
-              context.skip("Native top-level design-mode focus is unsupported")
-            }
-            const { url } = yield* fixture(() =>
-              `<input id="other" value="other"><p id="target">old</p><script>document.designMode="on";</script>`
+            const { origin, crossSite } = yield* site
+            const child = fixtureUrl(
+              crossSite,
+              `<p id="probe">child</p><p id="target">old</p><script>document.designMode="on";</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
               yield* page.activate
-              const target = page.locator("#target")
+              const frame = page.frame(page.locator("iframe"))
+              const target = frame.locator("#target")
+              const probe = frame.locator("#probe")
               assert(target instanceof LocatorImpl)
               const adapter = target.owner.runtime.model.adapter
               const original = adapter.evaluate
@@ -2229,18 +2230,19 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   Effect.andThen(Deferred.await(releaseDialog)),
                   Effect.andThen(Dialog.dismissAll(dialog))
                 ))
+              let probes = 0
               for (const phase of ["failure", "interruption", "dialog"] as const) {
                 const armed = yield* Deferred.make<void>()
                 const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
                   const result = yield* original(realm, call)
                   const argument = call.arguments[0]
-                  if (
-                    call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
-                    argument.value.type === "string" &&
-                    (JSON.parse(argument.value.value) as Engine.Request).op === "fillGuard"
-                  ) {
+                  const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                      argument.value.type === "string"
+                    ? JSON.parse(argument.value.value) as Engine.Request :
+                    undefined
+                  if (request?.op === "fillGuard" && !request.ancestor) {
                     yield* Deferred.succeed(armed, undefined)
-                    if (phase === "failure") return yield* Effect.die("injected after installing the insertion guard")
+                    if (phase === "failure") return yield* Effect.die("injected after installing the insertion guards")
                     return yield* Effect.never
                   }
                   return result
@@ -2251,9 +2253,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     Effect.gen(function*() {
                       const fiber = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
                       yield* Deferred.await(armed).pipe(Deadline.within("2 seconds"))
-                      if (phase === "interruption") yield* Fiber.interrupt(fiber)
+                      let opening: Fiber.Fiber<unknown, unknown> | undefined
+                      if (phase === "dialog") {
+                        opening = yield* page.evaluateInMainWorld(() => alert("hold insertion cleanup")).pipe(
+                          Effect.forkScoped
+                        )
+                        yield* Deferred.await(shown).pipe(Deadline.within("2 seconds"))
+                      }
+                      if (phase !== "failure") yield* Fiber.interrupt(fiber)
                       const exit = yield* Fiber.await(fiber)
                       assert(Exit.isFailure(exit))
+                      if (phase === "dialog") {
+                        yield* Deferred.succeed(releaseDialog, undefined)
+                        yield* page.status.waitFor((status) => status._tag === "Open" && Option.isNone(status.prompt))
+                          .pipe(Deadline.within("2 seconds"))
+                        if (opening !== undefined) yield* Fiber.await(opening)
+                      }
                     }),
                   () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
                 )
@@ -2265,6 +2280,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 })
                 yield* page.keyboard.insertText("x")
                 assert.strictEqual(yield* page.locator("#other").readValue, "otherx")
+                yield* probe.click()
+                yield* probe.press("End")
+                yield* probe.press("x")
+                probes++
+                assert.strictEqual(yield* probe.readText, "child" + "x".repeat(probes))
                 assert.strictEqual(yield* target.readText, "old")
               }
             }))
@@ -2272,46 +2292,46 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
-      it.effect(
-        "does not replay partially inserted design-mode text after focus moves",
-        (context) =>
-          Effect.gen(function*() {
-            if (!(yield* supports("input.topLevelDesignMode"))) {
-              context.skip("Native top-level design-mode focus is unsupported")
-            }
-            const { url } = yield* fixture(() =>
-              `<input id="other" value="other"><p id="target">old</p><script>
-            document.designMode="on";
-            document.addEventListener("input", () => {
-              document.body.dataset.inputs = String(Number(document.body.dataset.inputs ?? 0) + 1);
-              document.getElementById("other").focus();
-            });</script>`
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.activate
-              const result = yield* page.locator("#target").fill("new").pipe(
-                Deadline.within("2 seconds"),
-                Effect.result
+      it.effect("does not replay partially inserted design-mode text after focus moves", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture((origin) =>
+            `<input id="other" value="other"><iframe src="${
+              fixtureUrl(
+                origin,
+                `<p id="target">old</p><output id="events">0</output><script>
+              document.designMode="on";
+              document.addEventListener("input", () => {
+                const events = document.getElementById("events");
+                events.textContent = String(Number(events.textContent) + 1);
+                parent.document.getElementById("other").focus();
+              });</script>`
               )
-              assert.strictEqual(yield* page.locator("#other").readValue, "other")
-              assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.inputs), "1")
-              const text = yield* page.locator("#target").readText
-              if (result._tag === "Success") assert.strictEqual(text, "new")
-              else {
-                assert(
-                  Locator.isLocatorError(result.failure) && result.failure.reason._tag === "BackendFailure",
-                  String(result.failure)
-                )
-                assert.isAbove(text.length, 0)
-                assert.isBelow(text.length, 3)
-                assert("new".startsWith(text))
-              }
-            }))
-          }),
-        timeout
-      )
+            }"></iframe>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.activate
+            const frame = page.frame(page.locator("iframe"))
+            const result = yield* frame.locator("#target").fill("new").pipe(Deadline.within("2 seconds"), Effect.result)
+            assert.strictEqual(yield* page.locator("#other").readValue, "other")
+            const inputs = Number(yield* frame.locator("#events").readText)
+            const text = yield* frame.locator("#target").readText
+            if (result._tag === "Success") {
+              assert.strictEqual(text, "new")
+              assert.isAtLeast(inputs, 1)
+            } else {
+              assert(
+                Locator.isLocatorError(result.failure) && result.failure.reason._tag === "BackendFailure",
+                String(result.failure)
+              )
+              assert.strictEqual(inputs, 1)
+              assert.isAbove(text.length, 0)
+              assert.isBelow(text.length, 3)
+              assert("new".startsWith(text))
+            }
+          }))
+        }), timeout)
 
       it.effect(
         "fills safely or reports the blocker when a top-level design-mode blur handler refocuses the input",

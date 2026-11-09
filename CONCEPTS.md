@@ -617,6 +617,8 @@ An action's `visible` check requires CSS visibility, content visibility and a no
 
 There are no time-window predicates such as network idle or DOM quiet: waiting for T ms of silence is a heuristic (rule 23). Compatible instantaneous checks are batched in one injected evaluation. No batch is an atomic guarantee that covers the input that follows it.
 
+A design-mode fill guards the native insertion after focus and selection, in the target document and each ancestor document. Cancellable events that would edit another target are stopped before their native mutation. Native ancestor-body keys may precede editing in the focused child; once a keyboard or input event was allowed, a later block cannot justify replay. Only cancellation before any input was allowed permits another attempt; partial or unconfirmed insertion fails without replay. On failure or interruption, guard cleanup is queued in the connection's scope on the input permit before later input, including while a dialog blocks the document. Ordinary fills install no such guards.
+
 ## 9. Operations
 
 - **Interruption and records.** Caller cancellation remains Effect interruption. Each user operation has a record (§2) linked to its span.
@@ -654,7 +656,7 @@ There are no time-window predicates such as network idle or DOM quiet: waiting f
 - **Retries.** Retry decisions depend on the operation, its phase, the target binding, dispatch evidence and the remaining deadline, never on an error tag alone.
   - Locators re-resolve before dispatch.
   - Explicit refs never rebind.
-  - Nothing that may have dispatched is repeated automatically, except a gesture the guard stopped (§8, ReceivesPointer), which proves the page's handlers never saw it.
+  - Nothing that may have dispatched is repeated automatically, except input a guard stopped before its native mutation: an intercepted pointer gesture (§8, ReceivesPointer), or design-mode insertion cancelled before any input was allowed.
 - **Errors (L1 view).** Lifetime ends surface as `TargetGone{reason: CloseReason}` and deadlines as `Timeout`. Everything else is the error of the module whose operation failed (`LocatorError`, `PageError`, …; one per module), whose `reason` includes the shared `NotPermitted`, `Unsupported` and `BackendFailure{Rejected | IncompatibleResponse}`. L0 hands over a normalized `RejectReason`, which L1 maps using its own state (`NoSuchNode` becomes `StaleRef{Detached}`); reasons it doesn't map surface as `BackendFailure{Rejected}`. All of them carry the diagnostic envelope, and every reason carries a one-line remediation `hint`. Defects are reserved for bugs, and for gaps: a member the interfaces declare that isn't built yet fails as the defect `NotBuilt{member}`, loud and never a no-op, because no caller could handle it as a condition of the browser. A module-level function that isn't built stays a declaration, absent at run time, unless its module needs the binding to load: `Route.continue` is a decision nothing reads yet. `SessionSwapped` is internal.
 - **Caller locations.** Operations capture their caller stacks when constructed, including operations built before recording starts. Formatting and filtering wait until a recording or failure rendering consumes the frame. Library frames from both source and compiled modules are excluded. When capture is enabled but no user caller is available, failure rendering retains the operation name without a location; source exports omit unavailable locations.
 - **State and event streams have different contracts.**

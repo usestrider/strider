@@ -1179,18 +1179,17 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   /** Brackets a design-mode insertion, including interruption while its guard is being installed. */
   private guardFill(
     operation: string,
-    document: Target.DocumentId,
+    routed: Runtime.Routed,
     record: Operation.Record,
     insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
   ) {
-    const call = (request: Engine.Request) =>
-      Runtime.sendToDocument(
-        this.owner.runtime,
-        this.owner.page,
-        document,
-        request,
-        record.id
-      ).pipe(
+    const targets = [
+      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false }
+    ]
+    const documents = targets.map((target) => target.document)
+    const call = (document: Target.DocumentId, request: Engine.Request) =>
+      Runtime.sendToDocument(this.owner.runtime, this.owner.page, document, request, record.id).pipe(
         Effect.mapError((failure) => this.sendFailure(operation, failure, record)),
         Effect.flatMap((response) =>
           Option.isSome(response) && response.value._tag === "FillGuard"
@@ -1208,21 +1207,29 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         )
       )
     let released = false
-    const disarm = call({ op: "fillDisarm" }).pipe(Effect.tap(() =>
-      Effect.sync(() => {
-        released = true
-      })
-    ))
+    const disarm = Effect.forEach(documents, (document) => call(document, { op: "fillDisarm" })).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          released = true
+        })
+      )
+    )
     return Effect.acquireUseRelease(
       Effect.void,
       () =>
         Effect.gen({ self: this }, function*() {
-          let guard = yield* call({ op: "fillGuard", steps: Runtime.split(this.steps).last })
-          if (guard.blocked === null) {
-            yield* insert
-            guard = yield* disarm
-          }
-          if (guard.unsafe) {
+          const guards = yield* Effect.forEach(targets, (target) =>
+            call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
+          if (
+            guards.every((guard) =>
+              guard.blocked === null
+            )
+          ) yield* insert
+          const outcomes = yield* disarm
+          const blocked = outcomes.find((guard) => guard.blocked !== null)?.blocked ?? null
+          if (
+            outcomes.some((guard) => guard.unsafe) || (blocked !== null && outcomes.some((guard) => guard.accepted))
+          ) {
             return yield* Effect.fail(this.error(
               operation,
               new Reason.BackendFailure({
@@ -1234,15 +1241,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               record.dispatch
             ))
           }
-          return guard.blocked === null
+          return blocked === null
             ? "done" as const
-            : { retry: { _tag: "PreparingFocus", from: guard.blocked } as Engine.NotReady }
+            : { retry: { _tag: "PreparingFocus", from: blocked } as Engine.NotReady }
         }),
       () =>
         released ? Effect.void : this.owner.page.input.withPermit(
           Effect.gen({ self: this }, function*() {
             const cleanup = yield* Operation.record
-            yield* Runtime.releaseInDocument(this.owner.runtime, document, { op: "fillDisarm" }, cleanup.id)
+            yield* Effect.forEach(documents, (document) =>
+              Runtime.releaseInDocument(
+                this.owner.runtime,
+                document,
+                { op: "fillDisarm" },
+                cleanup.id
+              ), { discard: true })
           }).pipe(
             Operation.named(`${operation}.guardCleanup`, { attributes: { "browser.page.id": this.owner.page.id } }),
             Operation.detached,
@@ -1552,7 +1565,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             const done = yield* perform(again.value.response, {
               send: send(again.value),
               disarm,
-              guardFill: (insert) => this.guardFill(operation, again.value.routed.document, record, insert)
+              guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
             }, record)
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again

@@ -277,7 +277,7 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
-  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step> }
+  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
   | { readonly op: "fillDisarm" }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
@@ -363,7 +363,11 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
-  Schema.TaggedStruct("FillGuard", { blocked: Schema.NullOr(Schema.String), unsafe: Schema.Boolean }),
+  Schema.TaggedStruct("FillGuard", {
+    blocked: Schema.NullOr(Schema.String),
+    unsafe: Schema.Boolean,
+    accepted: Schema.Boolean
+  }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("Expected", {
@@ -1747,19 +1751,35 @@ export function engine(render: (root: SnapNode) => string) {
 
   // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
   // form control after selection, so validate at the cancellable native event, before its default mutation.
-  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean } | null = null
+  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
   const fillDisarm = () => {
     const current = fillGuard
     fillGuard = null
     current?.remove()
-    return { _tag: "FillGuard" as const, blocked: current?.blocked ?? null, unsafe: current?.unsafe ?? false }
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current?.blocked ?? null,
+      unsafe: current?.unsafe ?? false,
+      accepted: current?.accepted ?? false
+    }
   }
-  const armFill = (steps: ReadonlyArray<Step>) => {
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
     fillDisarm()
     const matches = resolve(steps)
     const element = matches.length === 1 ? matches[0]! : null
-    let started = false
+    const types = ["keydown", "keypress", "keyup", "beforeinput"]
+    const current = {
+      remove: () => {
+        for (const type of types) removeEventListener(type, handler, true)
+      },
+      blocked: null as string | null,
+      unsafe: false,
+      accepted: false,
+      inserting: false
+    }
     const blocker = (): string | null => {
+      // Ancestors should receive no insertion event: correct input reaches the target document instead.
+      if (ancestor) return null
       const active = deepActive()
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return describe(active)
       const selection = getSelection()
@@ -1767,7 +1787,9 @@ export function engine(render: (root: SnapNode) => string) {
         return "the selection left the target"
       }
       const selected = selection.getRangeAt(0)
-      if (started && element.contains(selected.startContainer) && element.contains(selected.endContainer)) return null
+      if (current.inserting && element.contains(selected.startContainer) && element.contains(selected.endContainer)) {
+        return null
+      }
       // WebKit canonicalizes element-edge ranges to text-node edges. Ascend equivalent edges rather
       // than treating those native representations as different selections.
       const atEdge = (node: Node, offset: number, end: boolean): boolean => {
@@ -1782,38 +1804,56 @@ export function engine(render: (root: SnapNode) => string) {
       }
       return atEdge(selected.startContainer, selected.startOffset, false) &&
           atEdge(selected.endContainer, selected.endOffset, true)
-        ? null
-        : "the selection left the target"
-    }
-    const types = ["keydown", "keypress", "keyup", "beforeinput"]
-    const current = {
-      remove: () => {
-        for (const type of types) removeEventListener(type, handler, true)
-      },
-      blocked: blocker(),
-      unsafe: false
+        ? null :
+        "the selection left the target"
     }
     const handler = (event: Event) => {
       if (!event.isTrusted || (event.type === "keyup" && current.blocked === null)) return
       const recipient = event.composedPath()[0]
-      const elsewhere = recipient instanceof Element && element !== null &&
-          !composedContains(recipient, element) && !composedContains(element, recipient)
-        ? describe(recipient)
-        : null
-      const blocked = current.blocked ?? elsewhere ?? blocker()
-      if (blocked === null) {
-        if (event.type === "beforeinput") started = true
+      // MiniBrowser can deliver keys to the ancestor body while inserting in a selected child frame.
+      // Let those keys retain native behavior, but remember that page handlers may already have run.
+      if (
+        steps === null && event.type !== "beforeinput" &&
+        (recipient === document.body || recipient === document.documentElement)
+      ) {
+        current.accepted = true
         return
       }
-      // Once an input was allowed through, or cancellation is unavailable, replay is unsafe.
-      if (started || (current.blocked === null && !event.cancelable)) current.unsafe = true
+      const elsewhere = ancestor ?
+        (recipient instanceof Element ? describe(recipient) : "another document")
+        : recipient instanceof Element && element !== null &&
+            !composedContains(recipient, element) && !composedContains(element, recipient)
+        ? describe(recipient) :
+        null
+      const blocked = current.blocked ?? elsewhere ?? blocker()
+      if (blocked === null) {
+        current.accepted = true
+        if (event.type === "beforeinput") current.inserting = true
+        return
+      }
+      // Cancellation must be confirmed locally; the host also combines accepted input across documents.
+      if (current.blocked === null && !event.cancelable) current.unsafe = true
       event.preventDefault()
       event.stopImmediatePropagation()
       if (event.defaultPrevented) current.blocked = blocked
     }
-    for (const type of types) addEventListener(type, handler, true)
+    if (ancestor) {
+      if (!(element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement)) {
+        current.blocked = "the frame no longer matches"
+      } else {
+        const active = deepActive()
+        if (active !== element) {
+          current.blocked = active === null ? "another document" : describe(active)
+          element.focus()
+        }
+      }
+    }
+    current.blocked ??= blocker()
+    // A preparation blocker sends no native input. Recheck through the ordinary action loop after focusing the frame,
+    // whose handlers may replace the target or change readiness, before installing an insertion guard.
+    if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
-    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false }
+    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
   }
 
   // ── Actions ──
@@ -2889,7 +2929,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "act":
           return JSON.stringify(await act(request))
         case "fillGuard":
-          return JSON.stringify(armFill(request.steps) satisfies Response)
+          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
         case "disarm":
