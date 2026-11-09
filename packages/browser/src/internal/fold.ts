@@ -1034,8 +1034,9 @@ export const make = Effect.fnUntraced(function*(options: {
     if (Option.isNone(owner)) return
     const listener = observers?.get(owner.value.context)
     if (listener === undefined) return
-    listener.origins.set(fact.navigable, fact.origin)
-    const chain = [fact.origin]
+    const origin = fact.url.startsWith("file:") ? "file://" : fact.origin
+    listener.origins.set(fact.navigable, origin)
+    const chain = [origin]
     let current = fact.navigable
     const state = yield* owner.value.state.get
     while (current !== owner.value.id) {

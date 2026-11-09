@@ -781,12 +781,18 @@ interface History {
   readonly origins: Map<string, ReadonlyArray<string>>
   readonly cookieOrigins: Set<string>
   replacing: boolean
+  unsupportedHistory: boolean
 }
 const histories = new WeakMap<Model.ContextEntry, History>()
 
 /** A native partition is reproduced by its ancestor origins, including their ports and cross-site ancestors. */
 const remember = (history: History, chain: ReadonlyArray<string>) => {
-  if (!chain.every((origin) => /^https?:\/\//.test(origin))) return
+  const leaf = chain[chain.length - 1]
+  if (leaf === undefined || URL.parse(leaf) === null) return
+  if (!chain.every((origin) => /^https?:\/\//.test(origin))) {
+    history.unsupportedHistory = true
+    return
+  }
   history.origins.set(JSON.stringify(chain), chain)
   // Storage-access grants can expose the first-party area from a partitioned frame.
   const firstParty = [chain[chain.length - 1]!]
@@ -825,7 +831,12 @@ const chainOf = (origin: typeof StorageState.OriginState.Type): ReadonlyArray<st
 /** Installs history only for a context that requested it, before import or the first user page. */
 export const track = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, entry: Model.ContextEntry, state?: StorageState.StorageState) {
-    const history: History = { origins: new Map(), cookieOrigins: new Set(), replacing: false }
+    const history: History = {
+      origins: new Map(),
+      cookieOrigins: new Set(),
+      replacing: false,
+      unsupportedHistory: false
+    }
     for (const origin of state?.origins ?? []) remember(history, chainOf(origin))
     for (const cookie of state?.cookies ?? []) rememberCookie(history, cookie.domain, cookie.secure)
     histories.set(entry, history)
@@ -872,6 +883,17 @@ export const replaceState = (
               refuse("Release acquired virtual authenticators before replacing storage")
             )
           }
+          if (history.unsupportedHistory) {
+            return yield* Effect.fail(contextError(
+              new Reason.Unsupported({
+                capability: "storageState.history",
+                backend: runtime.backend,
+                hint: "Visited non-HTTP(S) storage or an opaque ancestor partition cannot be reproduced"
+              }),
+              id,
+              operation
+            ))
+          }
           const partitions = yield* unsupportedPartitions(runtime, state)
           if (partitions.length > 0) {
             return yield* Effect.fail(
@@ -886,6 +908,17 @@ export const replaceState = (
             )
           }
           for (const origin of state.origins) {
+            if (!chainOf(origin).every((part) => /^https?:\/\//.test(part))) {
+              return yield* Effect.fail(contextError(
+                new Reason.Unsupported({
+                  capability: "storageState.origin",
+                  backend: runtime.backend,
+                  hint: "Replacement requires HTTP(S) origins and partition ancestors"
+                }),
+                id,
+                operation
+              ))
+            }
             if (
               origin.partition._tag === "Partitioned" && Option.isSome(origin.partition.crossSiteAncestor) &&
               !origin.partition.crossSiteAncestor.value

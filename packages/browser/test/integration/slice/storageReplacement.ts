@@ -174,7 +174,45 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             if (error._tag !== "UserContextError") return yield* Effect.die(error)
             assert.equal(error.reason._tag, "Unsupported")
             assert.equal(clear.mock.calls.length, 0)
+            const nonHttp = yield* context.setStorageState(
+              new StorageState.StorageState({
+                cookies: [],
+                origins: [{
+                  origin: Url.Origin.make("ftp://example.com"),
+                  partition: { _tag: "Unpartitioned" },
+                  localStorage: [],
+                  indexedDb: []
+                }]
+              })
+            ).pipe(Effect.flip)
+            if (nonHttp._tag !== "UserContextError") return yield* Effect.die(nonHttp)
+            assert.equal(nonHttp.reason._tag, "Unsupported")
+            assert.equal(clear.mock.calls.length, 0)
             assert.lengthOf(yield* context.pages, 0)
+          })),
+        60000
+      )
+      it.effect(
+        "refuses history whose storage partition has an opaque ancestor",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const context = yield* tracked()
+            const page = yield* context.newPage
+            yield* page.route(
+              "http://example.com/opaque-child",
+              () => Route.fulfill(HttpServerResponse.text("<p>loaded</p>", { contentType: "text/html" }))
+            )
+            yield* page.goto(
+              `data:text/html,${encodeURIComponent("<iframe src=\"http://example.com/opaque-child\"></iframe>")}`
+            )
+            yield* page.frame(page.locator("iframe")).getByText("loaded").pipe(Expect.toBeVisible)
+            const { runtime } = Handles.page(page)
+            const clear = vi.spyOn(runtime.model.adapter, "clearCookies")
+            yield* Effect.addFinalizer(() => Effect.sync(() => clear.mockRestore()))
+            const error = yield* context.setStorageState(empty).pipe(Effect.flip)
+            if (error._tag !== "UserContextError") return yield* Effect.die(error)
+            assert.equal(error.reason._tag, "Unsupported")
+            assert.equal(clear.mock.calls.length, 0)
           })),
         60000
       )

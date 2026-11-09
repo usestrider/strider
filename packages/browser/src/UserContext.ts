@@ -231,7 +231,7 @@ export interface UserContext extends ObservedUserContext {
    * **Details**
    *
    * Requires `storageStateTracking: true` at context creation. Untracked contexts and contexts with acquired
-   * virtual authenticators refuse before mutation. Clears cookies, localStorage, IndexedDB and available origin-private
+   * virtual authenticators refuse before mutation. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB and available origin-private
    * files for incoming and previously visited origins and partitions, then writes the supplied state.
    * Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
    *
