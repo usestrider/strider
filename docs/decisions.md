@@ -1392,3 +1392,11 @@ context headers. This matches BiDi's native header merging and Playwright's cont
 whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
+
+## Bounded redirect evidence
+
+Redirect neighbor access reads the existing bounded hop index through a scoped page or context handle. It
+adds no request tracking or cache, following [Pay for what you use](#pay-for-what-you-use). Exact original
+snapshots and model ownership establish which target can read a link. Missing retained evidence and unfinished
+chains fail explicitly rather than inventing a boundary. Unlimited object links were rejected because they retain
+requests for an unbounded lifetime; a second opt-in cache was rejected because the existing hop facts suffice.
