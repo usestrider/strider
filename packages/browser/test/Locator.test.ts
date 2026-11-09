@@ -12,14 +12,83 @@ import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
-import type * as Adapter from "../src/internal/adapter.ts"
+import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
 import { LocatorImpl } from "../src/internal/locator.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as Runtime from "../src/internal/runtime.ts"
+
+it.effect("runtime never reroutes an applying engine round after its realm ends", () =>
+  Effect.gen(function*() {
+    let calls = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("action-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          calls++
+          if (calls === 1) {
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "action-realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          }
+          return {
+            _tag: "Value",
+            value: { type: "string", value: JSON.stringify({ _tag: "Count", count: 1 }) }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const result = yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        return yield* Runtime.send(
+          runtime,
+          entry,
+          {
+            op: "act",
+            steps: [],
+            action: { _tag: "Focus" },
+            apply: true,
+            cap: 100,
+            checks: {
+              rendered: false,
+              visible: false,
+              enabled: false,
+              editable: false,
+              notInert: false,
+              inViewport: false,
+              stable: 0,
+              receivesPointer: false
+            }
+          },
+          record.id,
+          record.budget.at
+        )
+      }).pipe(Operation.named("test.applyingRound"), Effect.result)
+      assert.strictEqual(result._tag, "Failure")
+      if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "Gone")
+      assert.strictEqual(calls, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }).pipe(Effect.scoped))
 
 describe("Locator.fill", () => {
   for (
