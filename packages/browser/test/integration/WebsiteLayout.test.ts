@@ -158,15 +158,16 @@ for (const javaScript of ["enabled", "disabled"] as const) {
 
 // Exercise every integer viewport width, rather than relying on selected phone sizes.
 for (const javaScript of ["enabled", "disabled"] as const) {
-  it(`header fits every width from 320–640px (${javaScript} JavaScript)`, async () => {
+  it(`pages fit every width from 320–640px (${javaScript} JavaScript)`, async () => {
     await Effect.runPromise(
       Effect.scoped(Effect.gen(function*() {
         const browser = yield* Browser.Browser
         assertPinned("Chromium", browser.info.version, chromium.version)
         const context = yield* Browser.newContext({ emulation: { javaScript } })
         const page = yield* context.newPage
-        for (const path of ["", "playwright/"]) {
-          yield* page.goto(`${base}/docs/${path}`, { waitUntil: "load" })
+        // The changelog's notes carry long unbroken flag lists and qualified calls
+        for (const path of ["/docs/", "/docs/playwright/", "/changelog/"]) {
+          yield* page.goto(`${base}${path}`, { waitUntil: "load" })
           yield* page.evaluateInMainWorld(() => document.fonts.ready.then(() => true))
           for (let width = 320; width <= 640; width++) {
             yield* Effect.scoped(Effect.gen(function*() {
@@ -200,7 +201,7 @@ for (const javaScript of ["enabled", "disabled"] as const) {
             }))
           }
         }
-        console.log(`Checked all 321 widths on both pages (${javaScript} JavaScript)`)
+        console.log(`Checked all 321 widths on the three pages (${javaScript} JavaScript)`)
       })).pipe(
         Effect.provide(Chromium.layer({ executablePath: chromium.executable, headless: true })),
         Effect.provide(NodeServices.layer)

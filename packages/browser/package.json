@@ -1,6 +1,6 @@
 {
   "name": "@usestrider/browser",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "license": "MIT",
   "homepage": "https://usestrider.dev",
@@ -97,8 +97,8 @@
     "check": "tsc -b tsconfig.json"
   },
   "peerDependencies": {
-    "@effect/platform-node": "^4.0.6",
-    "effect": "^4.0.6"
+    "@effect/platform-node": "^4.1.2",
+    "effect": "^4.1.2"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
@@ -106,8 +106,8 @@
     }
   },
   "devDependencies": {
-    "@effect/platform-node": "^4.0.6",
+    "@effect/platform-node": "^4.1.2",
     "@usestrider/utils": "workspace:^",
-    "effect": "^4.0.6"
+    "effect": "^4.1.2"
   }
 }

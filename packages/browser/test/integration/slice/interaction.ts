@@ -24,6 +24,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -56,7 +57,7 @@ const recordsClick =
   `<script>document.addEventListener("pointerdown",e=>document.getElementById("out").textContent=JSON.stringify({target:e.target.id,x:e.clientX,y:e.clientY}));document.addEventListener("click",e=>e.preventDefault())</script>`
 
 /** Observe the real engine boundary, counting rendering callbacks only while a check is in progress. */
-const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
+const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl, notifyFocus = false) {
   const adapter = locator.owner.runtime.model.adapter
   const original = adapter.evaluate
   const rounds: Array<{
@@ -67,13 +68,22 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl) {
   const measured = `async function(request) {
     let frames = 0;
     let handle;
+    const focus = HTMLElement.prototype.focus;
+    // Inject missing focus notifications after native focus; insertion remains native.
+    if (${notifyFocus}) HTMLElement.prototype.focus = function(options) {
+      focus.call(this, options);
+      if (this.hasAttribute("onfocus")) this.dispatchEvent(new FocusEvent("focus"));
+    };
     const tick = () => { frames++; handle = requestAnimationFrame(tick); };
     handle = requestAnimationFrame(tick);
     try {
       const result = JSON.parse(await (${Engine.run})(request));
       result.__testFrames = frames;
       return JSON.stringify(result);
-    } finally { cancelAnimationFrame(handle); }
+    } finally {
+      cancelAnimationFrame(handle);
+      HTMLElement.prototype.focus = focus;
+    }
   }`
   const evaluate: typeof original = (realm, call) =>
     Effect.suspend(() => {
@@ -806,7 +816,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "domContentLoaded" })
               const seen = yield* page.evaluateInMainWorld(() => {
                 const go = document.querySelector("#go")!
                 const box = go.getBoundingClientRect()
@@ -1377,6 +1387,90 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }),
           timeout
         )
+      }
+
+      for (
+        const [change, handler, reason] of [
+          ["hidden target", `this.style.visibility='hidden'`, "NotVisible"],
+          ["inert target", `this.inert=true`, "Inert"]
+        ] as const
+      ) {
+        it.effect(
+          `checks fill rendering after focus-time ${change} before native insertion`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="go" value="old" onfocus="this.removeAttribute('onfocus');${handler}" oninput="out.textContent=this.value+':'+event.isTrusted"><output id="out">untouched</output>`
+              )
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const target = page.locator("#go")
+              assert(target instanceof LocatorImpl)
+              // Stock WebKit needs a synthetic missing-focus notification; this does not cover native focus events.
+              yield* observeChecks(target, true)
+              const error = yield* target.fill("filled").pipe(Deadline.within("1 second"), Effect.flip)
+              assert(Deadline.isTimeout(error), String(error))
+              assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === reason))
+              assert.strictEqual(yield* target.readValue, "old")
+              assert.strictEqual(yield* page.locator("#out").readText, "untouched")
+            })),
+          timeout
+        )
+      }
+
+      for (const type of ["text", "date"] as const) {
+        for (
+          const [property, block, restore, check, reason] of [
+            ["hidden", "this.style.visibility='hidden'", "this.style.visibility='visible'", "visible", "NotVisible"],
+            ["inert", "this.inert=true", "this.inert=false", "notInert", "Inert"]
+          ] as const
+        ) {
+          for (
+            const mode of type === "text"
+              ? ["recovery", "override"] as const
+              : ["blocked", "recovery", "override"] as const
+          ) {
+            it.effect(`focus-time rendering: ${type} ${property} ${mode}`, () =>
+              Effect.scoped(Effect.gen(function*() {
+                const old = type === "date" ? "2020-03-02" : "old"
+                const value = type === "date" ? "2020-03-03" : "filled"
+                const { url } = yield* fixture(() =>
+                  `<input id="go" type="${type}" value="${old}" onfocus="this.removeAttribute('onfocus');${block};${
+                    mode === "recovery"
+                      ? `setTimeout(() => { before.textContent=this.value+'|'+out.textContent; ${restore} }, 250)`
+                      : ""
+                  }" oninput="out.textContent='input'" onchange="out.textContent+=';change'"><output id="out">untouched</output><output id="before"></output>`
+                )
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                // WebKit uses a synthetic missing-focus notification with native insertion, not native focus-event coverage.
+                yield* observeChecks(target, true)
+                const result = yield* target.fill(value, {
+                  checks: mode === "override" ? { [check]: false } : {}
+                }).pipe(Deadline.within("1 second"), Effect.result)
+                if (mode === "blocked") {
+                  assert(result._tag === "Failure")
+                  assert(Deadline.isTimeout(result.failure), String(result.failure))
+                  assert(result.failure.history.some((entry) => (entry.value as { _tag: string })._tag === reason))
+                  assert.strictEqual(yield* target.readValue, old)
+                  assert.strictEqual(yield* page.locator("#out").readText, "untouched")
+                } else {
+                  assert.strictEqual(result._tag, "Success")
+                  if (mode === "recovery") {
+                    assert.strictEqual(yield* page.locator("#before").readText, old + "|untouched")
+                    assert.strictEqual(yield* target.readValue, value)
+                    assert.isTrue((yield* page.locator("#out").readText).startsWith("input"))
+                  } else if (type === "date") {
+                    assert.strictEqual(yield* target.readValue, value)
+                    assert.strictEqual(yield* page.locator("#out").readText, "input;change")
+                  }
+                  // An override skips readiness; native typing can still refuse a hidden or inert target.
+                }
+              })), timeout)
+          }
+        }
       }
 
       // A text input takes the typing path; a focus handler can make it read-only there too.
@@ -2752,6 +2846,36 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("label descendant geometry requires the parsed fixture", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url, origin } = yield* fixture(() =>
+            `<script src="/parser-gate.js"></script><label><input id="box" type="checkbox"><span id="target">Toggle</span></label>`
+          )
+          const page = yield* newPage
+          const requested = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          yield* page.route(`${origin}/parser-gate.js`, () =>
+            Effect.gen(function*() {
+              yield* Deferred.succeed(requested, undefined)
+              yield* Deferred.await(release)
+              return yield* Route.fulfill(HttpServerResponse.text("", { contentType: "text/javascript" }))
+            }))
+          // Hold parsing at a real resource boundary, without a sleep or machine load.
+          yield* Effect.gen(function*() {
+            const navigation = yield* page.goto(url, { waitUntil: "domContentLoaded" }).pipe(Effect.forkScoped)
+            yield* Deferred.await(requested)
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.querySelector("#target") === null))
+            yield* Deferred.succeed(release, undefined)
+            yield* Fiber.join(navigation)
+            const width = yield* page.evaluateInMainWorld(() =>
+              document.querySelector("#target")!.getBoundingClientRect().width
+            )
+            assert.isAbove(width, 0)
+            yield* page.locator("#target").check()
+            assert.isTrue(yield* page.locator("#box").isChecked)
+          }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+        })), timeout)
+
       // A label acts for its control, or the target is checkable itself, both ways. Every other kind is refused before
       // any input, the same way for check and uncheck, so each is one of the engine's rules, checked once: `button`
       // stands for the elements interactive by their tag, and `a`, `video` and `img` are interactive by an attribute,
@@ -2849,7 +2973,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   )
                   yield* Effect.scoped(Effect.gen(function*() {
                     const page = yield* newPage
-                    yield* page.goto(url)
+                    yield* page.goto(url, { waitUntil: "domContentLoaded" })
                     const target = page.locator("#target")
                     // CDP accepts fractional viewport input; BiDi and WebKit require integer coordinates.
                     const roundsInput = (yield* Browser.Browser).info.protocol !== "cdp"

@@ -16,7 +16,9 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import type * as CommandLine from "effect/process/CommandLine"
 import * as Random from "effect/Random"
+import * as Redacted from "effect/Redacted"
 import { createServer, type Server, type Socket } from "node:net"
 import * as Launch from "../../src/internal/launch.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
@@ -24,6 +26,9 @@ import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
 import { useXvfb } from "./stockWebKit.ts"
+
+/** A child process's argument or environment value as the test wrote it. */
+const plain = (word: CommandLine.Word): string => Redacted.isRedacted(word) ? Redacted.value(word) : word
 
 const timeout = 90_000
 
@@ -179,7 +184,7 @@ describe("Stock WebKit, launched in automation mode", () => {
               if (command._tag === "StandardCommand") {
                 const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
                 if (endpoint !== undefined) {
-                  const port = Number(endpoint.split(":")[1])
+                  const port = Number(plain(endpoint).split(":")[1])
                   ports.push(port)
                 }
               }
@@ -274,9 +279,9 @@ describe("Stock WebKit, launched in automation mode", () => {
               if (endpoint !== undefined) {
                 children.push({
                   pid: Number(handle.pid),
-                  port: Number(endpoint.split(":")[1]),
+                  port: Number(plain(endpoint).split(":")[1]),
                   executable: command.command,
-                  args: command.args
+                  args: command.args.map(plain)
                 })
               }
             }

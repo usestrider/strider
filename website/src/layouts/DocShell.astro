@@ -13,6 +13,8 @@ interface Props {
 }
 
 const { title, description, area, crumbs } = Astro.props
+// What the sidebar lists, named on the bar that opens it below md
+const contents = { guides: "Chapters", scenarios: "Scenarios", reference: "Modules", changelog: "Packages" }[area]
 ---
 
 <BaseLayout title={title} description={description}>
@@ -30,8 +32,17 @@ const { title, description, area, crumbs } = Astro.props
     </ol>
   </nav>
   <div class="grid md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_15rem]">
+    <!-- Below md the sidebar folds under the band, opened by this bar; a checkbox, so it works without JavaScript -->
+    <input id="contents-toggle" type="checkbox" class="peer absolute opacity-0" aria-label={contents} />
+    <label
+      for="contents-toggle"
+      class="label flex cursor-pointer items-center justify-between border-b border-hairline px-6 py-3 peer-focus-visible:outline-2 md:hidden"
+      data-contents-toggle
+    >
+      {contents} <span aria-hidden="true" class="contents-caret">▾</span>
+    </label>
     <aside
-      class="sticky top-0 hidden h-screen overflow-y-auto border-r border-hairline px-6 pb-16 md:block"
+      class="hidden border-hairline px-6 peer-checked:block max-md:border-b max-md:pb-6 md:sticky md:top-0 md:block md:h-screen md:overflow-y-auto md:border-r md:pb-16"
       data-sidebar
     >
       <slot name="sidebar" />
@@ -53,3 +64,9 @@ const { title, description, area, crumbs } = Astro.props
     </aside>
   </div>
 </BaseLayout>
+
+<style>
+  #contents-toggle:checked + label .contents-caret {
+    transform: rotate(180deg);
+  }
+</style>

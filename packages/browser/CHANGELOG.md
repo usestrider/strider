@@ -1,5 +1,27 @@
 # @usestrider/browser
 
+## 0.7.0
+
+### Breaking changes
+
+- **Requires Effect 4.1.2** (#188): `effect` and `@effect/platform-node` `^4.1.2`. A program on Effect 4.0 upgrades both, to the same version.
+
+### Added
+
+- **`strider export test --state <path>` for forked sessions** (#182): writes the state the session started from to `<path>`, with mode `0600`, and the exported test loads it. Without the flag, a forked session's test still starts empty. Sessions started with `--user-data-dir` can't be exported this way.
+- **A warning when Git could commit saved credentials** (#177): `strider state save` and `export test --state` warn on stderr when the file is in a Git work tree and not ignored. Saving still succeeds.
+- **Unknown secret placeholders are reported** (#174): a `%name%` that names no configured secret is reported in toolkit results, CLI output and exported tests, with a suggestion when it's a near miss of a configured name. The text is still sent as written.
+
+### Fixed
+
+- **Firefox locator checks after a navigation** (#180): a check that was waiting in a page the navigation replaced now continues in the new page, instead of waiting until its timeout.
+- **Chromium download settings and closing contexts** (#181): restoring a context's download settings no longer races the context closing, and restores only the contexts it affects.
+- **Stock WebKit opens a page after another closed** (#135): a new page in a launched context whose previous page had closed waited until its deadline.
+
+### Documentation
+
+- A route applies to requests that start after it's declared (#175). On Chromium, a request already underway may miss a response route declared later.
+
 ## 0.6.0
 
 ### Breaking changes
@@ -102,7 +124,7 @@
 
 - 2cf324b: Enable Chromium's CDPScreenshotNewSurface in the default automation and concurrent launch profiles, changing the capture rendering path for headed and headless launches. Captures can drive rendering observable to the page; no capture non-observability guarantee applies. This changes the previous unstable default/contract, including CLI launches.
   
-  Stock, attached browsers and independently constructed custom profiles are unchanged. Caller switches remain verbatim: a later --enable-features list replaces the preset list, so include CDPScreenshotNewSurface in it to retain the new path. Chromium also replaces repeated --disable-features lists. To opt out while preserving the preset's five existing disabled features, supply --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface as one combined list. Strider does not merge feature lists. Validated on Chromium 155.0.8059.79; other Chrome and Edge versions remain unverified.
+  Stock, attached browsers and independently constructed custom profiles are unchanged. Caller switches remain verbatim: a later `--enable-features` list replaces the preset list, so include `CDPScreenshotNewSurface` in it to retain the new path. Chromium also replaces repeated `--disable-features` lists. To opt out while preserving the preset's five existing disabled features, supply `--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface` as one combined list. Strider does not merge feature lists. Validated on Chromium 155.0.8059.79; other Chrome and Edge versions remain unverified.
 - b0c0931: Restrict Page.route and UserContext.route handlers to the phases selected by options, including the request default. Calls that previously inferred response or authentication phases from their handlers must now pass `{ phase: "response" }` or `{ phase: "auth" }` explicitly. Explicit type arguments cannot override the default. When phase options are optional or unions, use a handler compatible with every possible phase (including request when phase can be omitted), or narrow the options before registering a phase-specific handler.
 - dabf930: Make strict CLI and MCP find search only redacted snapshot content, preserving label searches and role filters.
   Mask semantic and plaintext-only editable content and all page-supplied exception details under strict capture,

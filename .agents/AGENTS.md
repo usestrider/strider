@@ -23,7 +23,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
-    `test/integration/`: the browser integration tests. The full Linux suite runs in the Nix environment that fixes
+    `test/integration/`: the browser integration tests. The Linux suites run in the Nix environment that fixes
     the machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
@@ -43,7 +43,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
     capability table rather than its name (`slice/capabilities.ts`), checking the refusal where it can't. With
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
-    drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
+    drift test (`test/integration/record.ts`): `pnpm test:integration:full --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
   - `INDEX.md`: every declaration and member, generated.
   - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
@@ -95,25 +95,56 @@ and stock WebKit, and every member the API declares is built. One declared befor
 
 Use the narrowest check that covers the change:
 
-| Change                                | Run                                                                                                                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration    | `pnpm check`, `pnpm lint-fix`                                                                                                            |
-| A new, renamed or removed module      | `pnpm codegen`, then `pnpm check`                                                                                                        |
-| Protocol corrections or annotations   | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
-| Keyboard layouts                      | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
-| Runtime behavior                      | `pnpm test --run <file>`                                                                                                                 |
-| The protocol client or transports     | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
-| A backend adapter or launcher         | `pnpm test:integration`                                                                                                                  |
-| The model, engine, locators or pages  | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
-| The `strider` command                 | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
-| Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
-| JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                        | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
-| A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
-| The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
-| The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
-| The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
-| Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+| Change                                                                            | Run                                                                                                                                      |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration                                                | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module                                                  | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations                                               | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Keyboard layouts                                                                  | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
+| Runtime behavior                                                                  | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports                                                 | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher                                                     | `pnpm test:integration`                                                                                                                  |
+| The model, engine, locators or pages                                              | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
+| The `strider` command                                                             | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
+| Uploads or file transfer (including `setInputFiles` and the upload transfer path) | `pnpm test:integration:heavy`, in addition to the ordinary relevant checks                                                               |
+| Access rules or other type behavior                                               | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links                                                   | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                                                                    | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
+| A guide's code                                                                    | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
+| The website or the reference's tools                                              | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
+| The packages' exports, files or peers                                             | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| The root `README.md`                                                              | `pnpm readme`, which writes the README npm shows from it                                                                                 |
+| Before a commit that touches `src/`                                               | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+
+Linux commands are serial: `pnpm test:integration` excludes the twelve large local-file upload cases;
+`pnpm test:integration:heavy` opts into all twelve (32/256/600 MiB on four backends), and
+`pnpm test:integration:full` runs the complete suite in one invocation. Nightly and dispatched Linux CI use the
+full command for each of the four `STRIDER_INTEGRATION_JOB` selections; unset the variable for a local full-suite
+run. Files run serially within each job and in local runs. macOS keeps its full selection. Timing directories identify
+both command group and job (`all` locally), and snapshots record both, so combined artifacts do not overwrite.
+The full report also splits measured case time/counts by group, while shared hooks/startup remain in the complete
+run totals. Moving cases out of the default command does not reduce the full nightly cost.
+
+Keep integration tests cheap: share setup only where cases do not need isolated contexts, keep a fresh scoped page
+and explicit cleanup, and add cases for distinct behavior rather than needless combinations. Preserve assertions,
+deadlines and normal failure tracing when measuring changes. The Linux reporter in
+`packages/browser/test/integration/timingReporter.ts` prints the slowest files and cases and writes
+`.data/integration-timings/<group>/<job>/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
+`integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
+if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
+Files that fail collection or are never collected have null case totals and execution durations; observed case
+counts may be incomplete. File errors and failed-file counts stay visible even when a failed shared fixture makes
+Vitest mark its cases skipped. Case outcomes are preserved; pending cases and null durations are not passes or
+zero-cost tests.
+Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
+execution and the complete hosted job duration. The agreed operating goals for the four-job Linux workflow are
+**1200 seconds per complete Linux job** and **3300 seconds aggregate file execution**, including heavy coverage.
+These replace the earlier 1500-second serial goal; there is no hard gate until runner variation is known.
+The post-matrix Linux budget summary reports actual GitHub start-to-completion elapsed time for each job
+(including setup, tests and upload, excluding pre-start queueing), and sums file execution from all four full/job
+snapshots separately. It labels missing, partial, failed or mismatched evidence without an under-goal conclusion.
+`scripts/integration-budget.ts` writes the report to the workflow job summary on every nightly/dispatched run.
+Moving work between jobs must not conceal aggregate growth; preserve all coverage.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
 
