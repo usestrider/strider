@@ -158,6 +158,19 @@ export const requestBodies = (name: string, backend: Layer.Layer<Browser.Browser
         timeout
       )
 
+      it.effect("never reports a Blob body as absent or empty", () =>
+        Effect.gen(function*() {
+          const { page } = yield* open()
+          const wait = yield* NetworkRequest.next(page, { url: "**/echo", body: (message) => message.text })
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/echo", { method: "POST", body: new Blob(["blob-content"]) }).catch(() => {})
+          })
+          const exit = yield* Effect.exit(wait)
+          // The browser sent twelve bytes: they are delivered, or the read fails as a typed refusal.
+          if (Exit.isSuccess(exit)) assert.deepStrictEqual(exit.value.body, Option.some("blob-content"))
+          else assert.isTrue(Exit.isFailure(exit))
+        }), timeout)
+
       it.effect("does not decode multipart reports with unknown completeness", () =>
         Effect.gen(function*() {
           const { page } = yield* open()
