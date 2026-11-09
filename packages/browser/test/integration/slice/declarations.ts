@@ -67,20 +67,26 @@ export const declarations = (
           const read: Page.ReadonlyPage = page
           assert.deepStrictEqual(yield* read.viewportSize, Option.none())
           // A real window has dimensions even when no viewport was declared.
-          const measured = yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight])
-          assert.isAbove(measured[0], 0)
-          assert.isAbove(measured[1], 0)
+          const measured = yield* page.evaluateInMainWorld(() =>
+            [innerWidth, innerHeight] as const
+          )
+          assert.isAbove(measured[0]!, 0)
+          assert.isAbove(measured[1]!, 0)
           if (!(yield* supports("emulation.viewport"))) {
             const error = yield* page.emulate({ viewport: { width: 640, height: 480 } }).pipe(Effect.flip)
             assert.strictEqual(error._tag, "DeclarationError")
             assert.deepStrictEqual(yield* read.viewportSize, Option.none())
           } else {
-            const inherited = yield* browser.defaultContext.emulate({ viewport: { width: 900, height: 700 } })
+            const defaultContext = yield* browser.defaultContext.control
+            const inherited = yield* defaultContext.emulate({ viewport: { width: 900, height: 700 } })
             // The default context declaration does not reach this page.
             assert.deepStrictEqual(yield* read.viewportSize, Option.none())
             yield* inherited.remove
             const base = yield* context.emulate({ viewport: { width: 640, height: 480 } })
             assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 640, height: 480 }))
+            const later = yield* context.newPage
+            assert.deepStrictEqual(yield* later.viewportSize, Option.some({ width: 640, height: 480 }))
+            yield* later.close()
             const first = yield* page.emulate({ viewport: { width: 400, height: 300 } })
             const latest = yield* page.emulate({ viewport: { width: 320, height: 240 } })
             const contextLatest = yield* context.emulate({ viewport: { width: 800, height: 600 } })

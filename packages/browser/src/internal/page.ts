@@ -316,6 +316,16 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    get viewportSize() {
+      return Effect.gen(function*() {
+        const record = yield* Operation.record
+        const { id } = record
+        yield* Runtime.openState(entry, id).pipe(Effect.mapError(fromSend("Page.viewportSize", record)))
+        return yield* adapter.viewportSize(entry.id).pipe(
+          Effect.mapError((error) => failure("Page.viewportSize", id, error))
+        )
+      }).pipe(Operation.named("Page.viewportSize", { attributes: { "browser.page.id": entry.id } }))
+    },
     get title() {
       return ExpectSource.mark(
         Effect.gen(function*() {

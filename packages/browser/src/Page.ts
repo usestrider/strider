@@ -53,6 +53,24 @@ import type * as Watchable from "./Watchable.ts"
 const TypeId = "~@usestrider/browser/Page"
 
 /**
+ * Schema for configured viewport dimensions in CSS pixels.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const ViewportSize = Schema.Struct({ width: Schema.Number, height: Schema.Number })
+
+/**
+ * Configured viewport dimensions in CSS pixels.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ViewportSize = typeof ViewportSize.Type
+
+/**
  * Schema for the state of a page's current document.
  *
  * @stability unstable
@@ -504,6 +522,34 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
  * @since 0.1.0
  */
 export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator> {
+  /**
+   * Reads the effective viewport dimensions configured through this connection, or `None` when unset.
+   *
+   * **Details**
+   *
+   * Page declarations take precedence over context and browser declarations; the most recent declaration
+   * at the same scope wins. Removing it restores the next declaration. This reads configuration without
+   * querying the browser. Window resizing, document layout and settings made by another client are not measured.
+   * A closed page fails with `TargetGone`.
+   *
+   * **Example** (Read the configured viewport)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const configured = Effect.scoped(Effect.gen(function*() {
+   *   const page = yield* Browser.newPage({
+   *     emulation: { viewport: { width: 640, height: 480 } }
+   *   })
+   *   return yield* page.viewportSize
+   * }))
+   * ```
+   *
+   * @see {@link Emulation.Viewport}
+   */
+  readonly viewportSize: Effect.Effect<Option.Option<ViewportSize>, PageError | Target.TargetGone | Deadline.Timeout>
+
   /**
    * Enters an iframe by its element.
    *
