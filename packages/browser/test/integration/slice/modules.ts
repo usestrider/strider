@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 import { navigationFailure } from "./navigationFailure.ts"
@@ -592,6 +593,133 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.isFalse(yield* Deferred.isDone(interrupted))
             yield* Scope.close(collection, Exit.void)
             assert.isTrue(yield* Deferred.isDone(interrupted))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "reads scoped redirect neighbors across repeated URLs without tracking other contexts",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const other = yield* Browser.newPage()
+            const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const links = yield* NetworkRequest.redirects(page).pipe(Scope.provide(scope))
+            const firstSent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-repeat` })
+            const completed = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-repeat`,
+              status: 200,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-repeat`)
+            yield* completed
+            const first = yield* firstSent
+            const second = Option.getOrThrow(yield* links.to(first))
+            const third = Option.getOrThrow(yield* links.to(second))
+            assert.strictEqual(first.url, third.url)
+            assert.notStrictEqual(first.hop, third.hop)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(third)), second)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(second)), first)
+            assert.isTrue(Option.isNone(yield* links.from(first)))
+            assert.isTrue(Option.isNone(yield* links.to(third)))
+            const foreign = yield* NetworkRequest.redirects(other)
+            const redirectError1 = yield* Effect.flip(foreign.from(first))
+            assert(redirectError1.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError1.reason.why, "foreignTarget")
+            yield* other.goto(`${origin}/redirect-repeat`)
+            const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
+            assert.strictEqual(otherRequests.length, 3)
+            const redirectError2 = yield* Effect.flip(links.from(otherRequests[0]!))
+            assert(redirectError2.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError2.reason.why, "foreignTarget")
+            const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/events")
+            })
+            const redirectError3 = yield* Effect.flip(links.to(yield* streaming))
+            assert(redirectError3.reason._tag === "RedirectUnknown")
+            assert.strictEqual(redirectError3.reason.why, "inFlight")
+            yield* Scope.close(scope, Exit.void)
+            const redirectError4 = yield* Effect.flip(links.from(first))
+            assert(redirectError4.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError4.reason.why, "released")
+            const live = yield* NetworkRequest.redirects(page)
+            yield* page.close()
+            const redirectError5 = yield* Effect.flip(live.from(first))
+            assert(redirectError5.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError5.reason.why, "targetClosed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "ends the redirect chain at a redirect status the browser doesn't follow",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            const request = yield* sent
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            // The model's completion signal avoids depending on response-body collection to test links.
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.head.innerHTML),
+              "<title>unfollowed</title>"
+            )
+            assert.isTrue(Option.isNone(yield* links.from(request!)))
+            assert.isTrue(Option.isNone(yield* links.to(request!)))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "ends manual redirects using the browser completion evidence",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<title>fetch redirects</title>")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            yield* page.goto(url)
+            const followed = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const successor = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+            yield* page.evaluateInMainWorld(async () => {
+              await (await fetch("/redirect")).text()
+            })
+            yield* successor
+            assert.isTrue(Option.isSome(yield* links.to(yield* followed)))
+            const manual = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const type = yield* page.evaluateInMainWorld(async () =>
+              (await fetch("/redirect", { redirect: "manual" })).type
+            )
+            assert.strictEqual(type, "opaqueredirect")
+            // Flush earlier protocol events through an explicit browser command, without a delay or retry.
+            yield* page.evaluateInMainWorld(() => undefined)
+            const request = yield* manual
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            const outcome = yield* links.to(request).pipe(Effect.result)
+            // Nothing proves a manual fetch's chain ended: it reads as the observed attempt or as unknown, never `None`
+            if (outcome._tag === "Failure") {
+              assert(outcome.failure.reason._tag === "RedirectUnknown")
+              assert.strictEqual(outcome.failure.reason.why, "completedRedirect")
+            } else {
+              assert.isTrue(Option.isSome(outcome.success))
+            }
+            const next = yield* links.to(request).pipe(
+              Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+            )
+            if (Option.isSome(next)) {
+              // Chromium reports a successor attempt, also exposed by Playwright, then cancels it.
+              const attempt = Option.getOrThrow(Handles.page(page).runtime.model.hop(next.value.hop))
+              const end = yield* Deferred.await(attempt.end).pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(end._tag, "Failed")
+              if (end._tag === "Failed") assert.isTrue(end.canceled)
+              assert.isTrue(Option.isNone(yield* links.to(next.value)))
+            }
           })),
         timeout
       )
