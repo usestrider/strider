@@ -102,6 +102,20 @@ describe("WebKit evaluation retirement", () => {
       assert.strictEqual(f.calls(), 1)
     }).pipe(Effect.scoped))
 
+  it.live("ends a pending caller evaluation on page closure without dispatching it again", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const fiber = yield* Effect.forkChild(Effect.result(f.run))
+      yield* Deferred.await(f.sent)
+      Kit.removeRealm(f.buffer, f.realm, new Target.PageClosed({ by: "command" }), () => {})
+      yield* f.buffer.flush
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result._tag, "Failure")
+      if (result._tag === "Failure") assert.strictEqual(result.failure.reason._tag, "Gone")
+      assert.strictEqual(f.calls(), 1)
+      assert.strictEqual(f.interrupted(), 1)
+    }).pipe(Effect.scoped, Effect.timeout("1 second")))
+
   it.live("does not retire on unrelated or same-document flushes and preserves interruption", () =>
     Effect.gen(function*() {
       const f = yield* fixture()
