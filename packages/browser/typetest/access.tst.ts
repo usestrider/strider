@@ -110,7 +110,7 @@ describe("access is typed", () => {
           NetworkRequest.CapturedRequest<string>,
           NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
         >,
-        Subscription.SubscriptionError | Deadline.Timeout,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
         Scope.Scope
       >
     >()
@@ -123,7 +123,7 @@ describe("access is typed", () => {
           NetworkRequest.CapturedRequest<string>,
           "decoder-error" | "predicate-error" | NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
         >,
-        Subscription.SubscriptionError | Deadline.Timeout,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
         Scope.Scope | RequestDecoderService | RequestPredicateService
       >
     >()

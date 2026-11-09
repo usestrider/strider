@@ -34,7 +34,7 @@ incomplete body fails with `BodyTruncated` before the decoder runs. Invalid JSON
 schema failures remain the decoder's own errors.
 
 Collection needs [read access](/docs/pages/attaching#access-levels), starts before the subscription returns, and
-ends with its scope. The limit defaults to 10 MiB and applies separately to each subscription. Decoder results
+ends with its scope or when borrowed inspect access is released. The limit defaults to 10 MiB and applies separately to each subscription. Decoder results
 outlive the scope and page. Without a decoder, request subscriptions and history collect no bodies.
 
 `stream` accepts the same decoder and begins capturing before the returned stream is consumed:

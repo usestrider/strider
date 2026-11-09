@@ -1,14 +1,17 @@
 import * as ByteSize from "effect/ByteSize"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
+import * as Exit from "effect/Exit"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Redactable from "effect/Redactable"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Reason from "../Reason.ts"
 import * as Subscription from "../Subscription.ts"
 import type * as Url from "../Url.ts"
+import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
 import type * as Model from "./model.ts"
@@ -175,12 +178,14 @@ class Captured<B> extends Inspectable.Class implements NetworkRequest.CapturedRe
 
 const delivery = (
   runtime: Runtime.Runtime,
+  grant: Option.Option<Access.Grant>,
   decoder: NetworkRequest.BodyDecoder<unknown, unknown, unknown>,
   context: Context.Context<unknown>,
   limit: number,
   budget: Duration.Duration
 ): Events.Delivery<NetworkRequest.NetworkRequest, NetworkRequest.CapturedRequest<unknown>, unknown> => ({
   deliver: Effect.fnUntraced(function*(request) {
+    yield* Access.check(grant)
     const result = yield* runtime.model.adapter.captureRequestBody(request, limit).pipe(Effect.mapError((error) => {
       const mapped = Operation.fromAdapter(error, Operation.idNow(), runtime.backend)
       return mapped._tag === "Timeout"
@@ -281,6 +286,22 @@ const kind = (
   deliver: (request) => new Captured(request, Option.none())
 })
 
+/** A body subscription cannot outlive the borrowed access that allowed collecting it. */
+const withGrant = Effect.fnUntraced(
+  function*<A, E, R>(found: ReturnType<typeof Handles.target>, self: Effect.Effect<A, E, R>) {
+    const grant = found.behind.grant
+    yield* Access.check(grant)
+    if (Option.isNone(grant)) return yield* self
+    const lifetime = yield* Scope.fork(yield* Effect.scope)
+    const close = Scope.close(lifetime, Exit.void)
+    const result = yield* self.pipe(Scope.provide(lifetime), Effect.onError(() => close))
+    // Register after acquisition: release during acquisition closes everything once its native resources exist.
+    yield* grant.value.onRelease(close)
+    yield* Access.check(grant)
+    return result
+  }
+)
+
 export const next = (
   target: Target,
   filter: BodyFilter & { readonly url: string | Url.Pattern },
@@ -291,21 +312,24 @@ export const next = (
   return Effect.flatMap(
     prepare(target, filter, "NetworkRequest.next"),
     ({ found, channel, accepts }) =>
-      Effect.gen(function*() {
-        const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
-        const budget = yield* Deadline.DefaultBudget
-        yield* collect(found, limit, "NetworkRequest.next")
-        const context = Context.omit(Context.Service<never, unknown>(Operation.CurrentKey), Deadline.CurrentDeadline)(
-          yield* Effect.context<unknown>()
-        )
-        return yield* Events.next(
-          kind("NetworkRequest.next"),
-          channel,
-          accepts,
-          where,
-          delivery(found.behind.runtime, decoder, context, limit, budget)
-        )
-      })
+      withGrant(
+        found,
+        Effect.gen(function*() {
+          const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
+          const budget = yield* Deadline.DefaultBudget
+          yield* collect(found, limit, "NetworkRequest.next")
+          const context = Context.omit(Context.Service<never, unknown>(Operation.CurrentKey), Deadline.CurrentDeadline)(
+            yield* Effect.context<unknown>()
+          )
+          return yield* Events.next(
+            kind("NetworkRequest.next"),
+            channel,
+            accepts,
+            where,
+            delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, budget)
+          )
+        })
+      )
   ).pipe(Operation.named("NetworkRequest.next"))
 }
 
@@ -315,32 +339,35 @@ export const stream = (target: Target, filter?: BodyFilter, where?: Subscription
   return Effect.flatMap(
     prepare(target, filter, "NetworkRequest.stream"),
     ({ found, channel, accepts }) =>
-      Effect.gen(function*() {
-        const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
-        const budget = yield* Deadline.DefaultBudget
-        yield* collect(found, limit, "NetworkRequest.stream")
-        const context = Context.omit(Context.Service<never, unknown>(Operation.CurrentKey), Deadline.CurrentDeadline)(
-          yield* Effect.context<unknown>()
-        )
-        const stream = yield* Events.stream(
-          kind("NetworkRequest.stream"),
-          channel,
-          accepts,
-          undefined,
-          delivery(found.behind.runtime, decoder, context, limit, budget)
-        )
-        const filtered = where === undefined ?
-          stream :
-          stream.pipe(
-            Stream.filterEffect((request) =>
-              Effect.provideContext(where(request), context).pipe(Operation.apart("NetworkRequest.where", budget))
-            )
+      withGrant(
+        found,
+        Effect.gen(function*() {
+          const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
+          const budget = yield* Deadline.DefaultBudget
+          yield* collect(found, limit, "NetworkRequest.stream")
+          const context = Context.omit(Context.Service<never, unknown>(Operation.CurrentKey), Deadline.CurrentDeadline)(
+            yield* Effect.context<unknown>()
           )
-        // Start capture at acquisition, rather than waiting for the caller to consume the stream.
-        const queue = yield* Stream.toQueue(filtered, { capacity: yield* Subscription.Capacity }).pipe(
-          Operation.detached
-        )
-        return Stream.fromQueue(queue)
-      })
+          const stream = yield* Events.stream(
+            kind("NetworkRequest.stream"),
+            channel,
+            accepts,
+            undefined,
+            delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, budget)
+          )
+          const filtered = where === undefined ?
+            stream :
+            stream.pipe(
+              Stream.filterEffect((request) =>
+                Effect.provideContext(where(request), context).pipe(Operation.apart("NetworkRequest.where", budget))
+              )
+            )
+          // Start capture at acquisition, rather than waiting for the caller to consume the stream.
+          const queue = yield* Stream.toQueue(filtered, { capacity: yield* Subscription.Capacity }).pipe(
+            Operation.detached
+          )
+          return Stream.fromQueue(queue)
+        })
+      )
   ).pipe(Operation.named("NetworkRequest.stream"))
 }

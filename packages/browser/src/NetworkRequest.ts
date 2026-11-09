@@ -226,6 +226,7 @@ export interface Filter {
  * this returns and needs inspect access. Capture starts when a matching request arrives, without waiting for
  * its response. The decoded result is owned and available as `Option`; `None` means no body was reported.
  * Firefox reports both an empty payload and no payload that way. Missing or incomplete data fails instead.
+ * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
  * Without `body`, this collects no body data.
  *
  * Text uses the declared charset, or UTF-8 by default; unknown charsets fall back to UTF-8 and invalid sequences
@@ -261,7 +262,7 @@ export const next: {
     where?: Subscription.Where<CapturedRequest<B>, PE, PR> | undefined
   ): Effect.Effect<
     Effect.Effect<CapturedRequest<B>, DE | PE | RequestError | Target.TargetGone | Deadline.Timeout>,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(
@@ -313,7 +314,7 @@ export const stream: {
       CapturedRequest<B>,
       DE | PE | RequestError | Subscription.EventOverflow | Target.TargetGone | Deadline.Timeout
     >,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(

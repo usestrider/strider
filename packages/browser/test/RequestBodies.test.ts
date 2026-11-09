@@ -256,19 +256,21 @@ describe("Request body subscriptions", () => {
       const error = yield* Stream.runHead(stream).pipe(Effect.flip)
       assert.isTrue(Deadline.isTimeout(error))
     })))
-  it.live("releases body collection with borrowed inspect access and refuses an expired grant", () => Effect.scoped(Effect.gen(function*() {
-    const accessScope = yield* Scope.make()
-    const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
-    const world = setup(bytes("owned"), Option.some(grant))
-    const wait = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text })
-    Events.publish(world.channel, sent())
-    const captured = yield* wait
-    yield* Scope.close(accessScope, (yield* Effect.exit(Effect.void)))
-    assert.strictEqual(world.released(), 1)
-    assert.deepStrictEqual(captured.body, Option.some("owned"))
-    const error = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text }).pipe(Effect.flip)
-    assert.strictEqual(error._tag, "TargetGone")
-    assert.strictEqual(world.declarations.length, 1)
-  })))
-
+  it.live("releases body collection with borrowed inspect access and refuses an expired grant", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const accessScope = yield* Scope.make()
+      const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
+      const world = setup(bytes("owned"), Option.some(grant))
+      const wait = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text })
+      Events.publish(world.channel, sent())
+      const captured = yield* wait
+      yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))
+      assert.strictEqual(world.released(), 1)
+      assert.deepStrictEqual(captured.body, Option.some("owned"))
+      const error = yield* NetworkRequest.next(world.page, { url: "**/send", body: (message) => message.text }).pipe(
+        Effect.flip
+      )
+      assert.strictEqual(error._tag, "TargetGone")
+      assert.strictEqual(world.declarations.length, 1)
+    })))
 })
