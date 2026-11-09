@@ -37,6 +37,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
@@ -88,6 +89,26 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
   yield* results.pipe(Expect.toHaveText(["Grey heron", /^Great blue heron/]))
   yield* page.pipe(Expect.toHaveTitle(/heron/))
   yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
+})
+```
+
+Use an accessible-name expectation to check what assistive technology calls a control, including names from labels
+and ARIA references. Strings match the whole name with whitespace normalized; `ignoreCase` overrides a regular
+expression's case flag. A hidden element has an empty name, while a hidden label can still name a visible control.
+Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an ARIA label.
+Their content can still name another element, and an explicit nameable role overrides the implicit role. Role
+locators use this same name computation. Missing or multiple matches retry until the deadline and report their
+count on failure.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveAccessibleName("Save changes"))
+  yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
+    ignoreCase: true
+  })
 })
 ```
 

@@ -6,7 +6,10 @@ import * as Effect from "effect/Effect"
 import * as http from "node:http"
 import * as net from "node:net"
 
-export const proxy = (credentials?: { readonly username: string; readonly password: string }) =>
+export const proxy = (
+  credentials?: { readonly username: string; readonly password: string },
+  options?: { readonly websiteChallenge?: boolean | undefined }
+) =>
   Effect.acquireRelease(
     Effect.callback<{
       readonly server: http.Server
@@ -29,7 +32,10 @@ export const proxy = (credentials?: { readonly username: string; readonly passwo
       }
       const server = http.createServer((request, response) => {
         if (!authorized(request)) {
-          response.writeHead(407, { "proxy-authenticate": "Basic realm=\"local-proxy\"" })
+          response.writeHead(407, {
+            "proxy-authenticate": "Basic realm=\"local-proxy\"",
+            ...(options?.websiteChallenge === true ? { "www-authenticate": "Basic realm=\"local-proxy\"" } : {})
+          })
           response.end()
           return
         }
@@ -58,7 +64,9 @@ export const proxy = (credentials?: { readonly username: string; readonly passwo
       server.on("connect", (request, socket, head) => {
         if (!authorized(request)) {
           socket.end(
-            "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"local-proxy\"\r\nContent-Length: 0\r\n\r\n"
+            "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"local-proxy\"\r\n" +
+              (options?.websiteChallenge === true ? "WWW-Authenticate: Basic realm=\"local-proxy\"\r\n" : "") +
+              "Content-Length: 0\r\n\r\n"
           )
           return
         }
