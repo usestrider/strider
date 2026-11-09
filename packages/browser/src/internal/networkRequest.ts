@@ -104,7 +104,7 @@ export const response = (
         Effect.flatMap(hop.state.get, (state) =>
           Option.isSome(state.response) ?
             Effect.succeed(state.response)
-            : Deferred.isDoneUnsafe(targetClosed) ?
+            : end._tag === "Failed" && end.connectionLost === true ?
             Effect.fail(unavailable("targetClosed"))
             : end._tag === "Forgotten" ?
             Effect.fail(unavailable("evicted"))
@@ -116,7 +116,9 @@ export const response = (
         Stream.runHead
       )
       const closed = Deferred.await(targetClosed).pipe(
-        Effect.andThen(Effect.fail(unavailable("targetClosed")))
+        Effect.andThen(Effect.suspend(() =>
+          Deferred.isDoneUnsafe(hop.end) ? ended : Effect.fail(unavailable("targetClosed"))
+        ))
       )
       const release = Deferred.await(released).pipe(Effect.andThen(Effect.fail(unavailable("released"))))
       return yield* record.bound(
