@@ -35,6 +35,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),

@@ -113,6 +113,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("popups.opener", "supported"),
   entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
   entry("engine", "unsupported", [noDom]),
+  entry("boundingBox.frameTransforms", "unsupported", [noDom]),
   entry("isolatedWorlds", "unsupported", [noDom]),
   entry("input.native", "unsupported", [noDom]),
   entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
@@ -371,6 +372,8 @@ export const connect = (
       releaseHandles: () => Effect.void,
       dispatchInput: () => unsupported("input.native"),
       contentFrame: () => unsupported("engine"),
+      releaseNodes: () => Effect.void,
+      geometry: () => unsupported("Locator.boundingBox"),
       resolve: (obligation, decision) =>
         Effect.suspend(() => {
           const open = prompts.get(obligation)

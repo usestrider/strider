@@ -401,3 +401,16 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
       : Runtime.releaseObject({ objectId: released.handle.objectId as Runtime.RemoteObjectId }).pipe(
         Protocol.on(released.handle.session)
       )).pipe(Effect.ignore), { concurrency: "unbounded", discard: true })
+
+/** Temporary node reads own their inspector objects only until the read ends. */
+export const releaseNodes = (state: State, nodes: ReadonlyArray<Adapter.NodeBinding>) =>
+  Effect.forEach(nodes, (node) => {
+    const document = state.documents.get(node.document)
+    const realm = document === undefined ? undefined : [...document.realms].find((realm) => !realm.ended)
+    return realm === undefined
+      ? Effect.void
+      : Runtime.releaseObject({ objectId: node.binding as Runtime.RemoteObjectId }).pipe(
+        Protocol.on(realm.session),
+        Effect.ignore
+      )
+  }, { discard: true })
