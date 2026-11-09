@@ -375,6 +375,51 @@ export const toHaveAttribute: DualMatcher<
 )
 
 /**
+ * Expects the one match's computed CSS property to equal a string or match a regular expression.
+ *
+ * **Details**
+ *
+ * Strings compare exactly, without whitespace normalization. CSS values use the browser's serialization.
+ * Missing and multiple matches retry until exactly one matches, including with `not: true`.
+ * Unlike Playwright's immediate strictness error, multiple matches fail at the deadline with match-count evidence.
+ * Failure history records the computed string, or the match count when there is no single element.
+ *
+ * **Example** (Waiting for a layout)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const layout = Effect.fn("layout")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("navigation").pipe(Expect.toHaveCSS("display", "flex"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveCSS: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    name: string,
+    expected: string | RegExp,
+    options?: {
+      /** Negates the value comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+      /** Reads the named pseudo-element instead of the element. @default undefined */
+      readonly pseudo?: "before" | "after" | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.ReadonlyLocator, name: string, expected: string | RegExp, options?: {
+    readonly not?: boolean | undefined
+    readonly pseudo?: "before" | "after" | undefined
+  }) => ExpectImpl.toHaveCSS(locator, name, expected, options)
+)
+
+/**
  * Expects exactly `count` matches.
  *
  * **Example** (Checking how many results a search gave)
