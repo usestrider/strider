@@ -46630,37 +46630,56 @@
         "method:Browser.newContext"
       ],
       "option": "extraHTTPHeaders",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider operation or setting.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Emulation",
+          "symbol": "Emulation",
+          "url": "/docs/api/browser/Emulation#Emulation"
+        }
+      ],
+      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. See scoped whole-map precedence when a page later overrides the context.",
+      "capabilities": [
+        "emulation.extraHTTPHeaders"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Emulation domain",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ]
     },
     {
       "id": "option-browser-newcontext-forcedcolors",
@@ -48247,37 +48266,56 @@
         "method:Browser.newPage"
       ],
       "option": "extraHTTPHeaders",
-      "status": "missing",
-      "api": [],
-      "notes": "No corresponding public Strider operation or setting.",
-      "capabilities": [],
+      "status": "has",
+      "api": [
+        {
+          "module": "Emulation",
+          "symbol": "Emulation",
+          "url": "/docs/api/browser/Emulation#Emulation"
+        }
+      ],
+      "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. See scoped whole-map precedence when a page later overrides the context.",
+      "capabilities": [
+        "emulation.extraHTTPHeaders"
+      ],
       "browsers": {
         "chromium.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "chromium.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.launched": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "firefox.attached": {
-          "status": "missing",
+          "status": "has",
           "limitations": []
         },
         "webkit.launched": {
-          "status": "missing",
-          "limitations": []
+          "status": "has",
+          "limitations": [
+            "each context is a browser process of its own"
+          ]
         },
         "webkit.attached": {
           "status": "missing",
-          "limitations": []
+          "limitations": [
+            "stock WebKit's inspector has no Emulation domain",
+            "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
+          ]
         }
       },
-      "requirements": []
+      "requirements": [
+        {
+          "capability": "userContexts",
+          "file": "packages/browser/src/internal/webkitAdapter.ts",
+          "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+        }
+      ]
     },
     {
       "id": "option-browser-newpage-forcedcolors",
@@ -60275,7 +60313,7 @@
       "option": "extraHTTPHeaders",
       "status": "missing",
       "api": [],
-      "notes": "No corresponding public Strider operation or setting.",
+      "notes": "No launch-time context emulation option. A controlled default context can emulate extraHTTPHeaders after launch, but this does not configure requests sent before that registration.",
       "capabilities": [],
       "browsers": {
         "chromium.launched": {
