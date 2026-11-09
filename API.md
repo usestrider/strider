@@ -389,6 +389,8 @@ interface Page extends ReadonlyPage {
   goto(url: Url.Url | string, options?: GotoOptions | undefined): Effect<PageNavigation.PageNavigation, PageError>
     // waitUntil default "commit"; accept: ["download", "noContent"] returns those as navigations, and by default
     // a download fails with BecameDownload, a 204 with NoContent; either way the page stays where it was
+  setContent(html: string, options?: { readonly waitUntil?: PageNavigation.LoadState | undefined } | undefined): Effect<void, PageError | TargetGone | Timeout>
+    // default "load"; document.open/write/close replaces the DOM, preserving URL, history and document identity
   reload(options?: ReloadOptions | undefined): Effect<PageNavigation.PageNavigation, PageError>   // waitUntil, bypassCache
   back(options?: TraverseOptions | undefined): Effect<Option<PageNavigation.PageNavigation>, PageError>   // None: no history entry
   forward(options?: TraverseOptions | undefined): Effect<Option<PageNavigation.PageNavigation>, PageError>
@@ -472,6 +474,15 @@ Notes:
 - **Chromium screencast acquisition shares the renderer layout read.** Before starting a screencast, Chromium reads layout metrics once to order acquisition after tracked navigation processing, because `frameNavigated` can precede browser-side frame activation. The read adds renderer responsiveness and style/layout work within acquisition's existing deadline; its error can surface before start, and a slow or paused renderer can exhaust the budget. Timeout hints remain conservatively `dispatchedUnconfirmed` even when start was never sent. Interruption prevents a late metrics reply from starting acquisition; the frame subscription belongs to the caller's scope. The read grants no activation lease across another navigation or detach, and adds no load wait, retry or delay. On Chromium, `Trace.record(page, { screencast: "native" })` acquires the same capability and shares this read under the trace's detached acquisition budget. Trace recording ignores acquisition errors and does not retry that page, so a failed acquisition, including a renderer paused past the budget, can leave it without frames for the rest of the trace. Ignoring acquisition errors and omitting those frames is existing trace behavior.
 
 - **Chromium screencasts share a session-wide stream.** Each acquisition reserves a consumer before its metrics read; a confirmed stream is reused without another native start. If an earlier owned start remains unconfirmed, Chromium's specific “Screencast is already active” reply can confirm joining that stream; other errors retain their mapping. Acquisition failure or caller scope closure releases that reservation. Closing the scope also interrupts an unfinished acquisition, including metrics or transport writing, before cleanup can be overtaken by a later start write. Scope closure and late successful starts cannot send stop while another consumer is acquiring or live. The last release stops a stream known to have started. An abandoned start releases its reservation promptly and immediately supplies uncertain-start cleanup evidence, unless a stop has already been attempted since that start; there is no grace interval or wait for its reply. Cleanup runs when no consumer remains, including when the start never replies. A success arriving during or after that cleanup can require another stop, still only when no consumer remains; it cannot confirm sharing if a stop was dispatched since that start. A known rejected start needs no stop; a rejection arriving after abandonment adds no cleanup, though uncertainty may already have caused a stop. Ended sessions receive no further stops. A new start waits for an in-flight stop exchange within its own acquisition deadline. Cleanup has a fresh one-second browser-clock budget covering the transport write and reply, independent of acquisition's deadline; rejection or missing confirmation is ignored. Transport work must honor interruption for that budget to bound waiting, and missing confirmation cannot prove that the remote stream ended. The session dispatches frames to its consumers and acknowledges each native frame once after all have taken it or released their scopes. A slow consumer backpressures frame delivery, and joining an idle confirmed stream replays the latest image without another acknowledgement.
+- **Replacing HTML.** `setContent` writes through the browser's parser in the current main-world realm. It keeps the
+  URL, history entry, document identity and globals, replaces the DOM and its listeners, and executes scripts and
+  loads resources under the document's origin and security policy. Relative URLs use the document's base URL,
+  including any `base` element supplied. The default `waitUntil: "load"` waits for resources and child frames;
+  `"domContentLoaded"` waits for parsing and deferred scripts, and `"commit"` only writes and closes. No navigation
+  result or new document id is created. One operation deadline bounds replacement and readiness. Interruption or
+  timeout ends the wait without rolling back the DOM or stopping started scripts/requests; readiness cleanup runs with a separate one-second budget, and failures are recorded in diagnostics. Navigation during replacement can end its realm with `TargetGone`. Concurrent replacements and
+  page scripts that tamper with document methods follow main-world browser behavior.
+  Earlier resource requests can continue delaying load after replacement; parsing readiness does not wait for them.
 - **Captures map onto every backend's options.** An `Element` area is the element's box in the document, its frame's included, measured now: a capture never waits, so a locator that matches nothing is `Locator.NoMatch`, one that matches several is `StrictViolation`, and a stale ref is `InvalidInput`. `scale: "css"` and `omitBackground` are `Unsupported` on Firefox (`screenshot.cssScale`, `screenshot.omitBackground`), headers, footers and `preferCssPageSize` too (`pdf.headerFooter`, `pdf.preferCssPageSize`), and WebKit has no PDF (`pdf`). `readHtml` is the doctype and the root's `outerHTML`.
 - **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
 - **Page failures are `Page.PageError`.** It covers navigation (`NavigationFailed{netError}`, `NavigationCanceled{why}`, `NavigationSuperseded{by}`, `BecameDownload`, `NoContent`, all declared in `PageNavigation`), evaluation (`EvaluationThrown`, `NotSerializable`), reads and captures (`CaptureInvalidated{document, replacement}` on Chromium `page.screenshot`; a capture's element: `Locator.NoMatch` or `StrictViolation`), setup (`InitializationFailed{step}`), a refused close (`CloseCanceled`), and the shared `InvalidInput`, `NotPermitted`, `Unsupported` and `BackendFailure`. `operation` names the call.
@@ -507,6 +518,8 @@ interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equa
   readonly readValue: Effect<string, LocatorError>       // an input's, a textarea's or a select's; else WrongElement
   readonly readHtml: Effect<string, LocatorError>        // outerHTML
   readonly isVisible: Effect<boolean, LocatorError>
+  // Same Editable predicate as actions/expectations; unsupported kinds return false. Strict, immediate read.
+  readonly isEditable: Effect<boolean, LocatorError>
   readonly isEnabled: Effect<boolean, LocatorError>
   readonly isChecked: Effect<boolean, LocatorError>      // a checkbox's, a radio's or an ARIA checkable's; else WrongElement
   readonly all: Effect<ReadonlyArray<ReadonlyLocator>, LocatorError>   // pinned to the current nth matches
@@ -537,6 +550,7 @@ interface Locator extends ReadonlyLocator {             // queries, chainers and
   check(options?: PointerOptions | undefined): Effect<void, LocatorError>            // confirms it became checked
   uncheck(options?: PointerOptions | undefined): Effect<void, LocatorError>
   focus(options?: ActionOptions | undefined): Effect<void, LocatorError>
+  selectText(options?: ActionOptions | undefined): Effect<void, LocatorError>
   blur(options?: ActionOptions | undefined): Effect<void, LocatorError>
   clear(options?: ActionOptions | undefined): Effect<void, LocatorError>
   scrollIntoView(options?: ActionOptions | undefined): Effect<void, LocatorError>    // the toolkit's scroll
@@ -594,6 +608,16 @@ the deadline, the timeout reports focus preparation in its history. Firefox cann
 document, so filling that input is unsupported; text intended for it can reach the document body instead.
 Strider does not change design mode or synthesize input to work around this browser limitation.
 
+`selectText` waits for one visible match, follows labels and their noninteractive descendants to the associated
+control, and attempts to focus the target. Descendants of buttons and button, checkbox or radio roles target
+that interactive ancestor. Inputs and textareas use native `select()`; other elements use a DOM range over their
+contents. Number inputs support selection; inputs without selectable text, such as checkboxes, can succeed
+without selecting text. Native behavior depends on the browser and input type; Strider does not emulate selection.
+It requires owned access, works inside frames, and makes no enabled, editable, inert, viewport, stability or pointer checks. Native focus may scroll.
+Multiple matches fail with `StrictViolation`. Missing or hidden matches wait under the current deadline.
+Visibility is checked on the matched element before label retargeting. `trial: true` leaves focus and selection
+unchanged; `checks: { visible: false }` bypasses visibility. There is no blanket force.
+Focus or selection handlers can change the resulting selection. The action does not insert text or emit input/change events.
 
 - **How a locator finds elements** is CONCEPTS.md §8, Queries: one engine of ours, in each document's utility world, the same on every backend. Text is text content with whitespace collapsed, never `innerText`; `getByText` finds the smallest element that says it; `getByRole` uses the explicit or HTML-AAM implicit role and the accname 1.2 name.
 - **Actionability is the CONCEPTS.md §8 predicate set**, evaluated together in the target document per attempt, with frame bounds read from each parent document. Except for `dispatchEvent`, an attempt checks at each animation frame, in the page, for up to a second; when the checks pass, the action takes the page's input permit, checks once more, and dispatches (CONCEPTS.md §5, Actions). At the deadline it fails with `Timeout{phase}`, `waitingForCondition`, or `resolving` when nothing ever matched, whose hint explains the last reason: "Another element covers the element's action point: div.toast "Saved"". Each action documents its checks:

@@ -43,6 +43,16 @@ describe("Locator.fill", () => {
   }
 })
 
+describe("Locator.selectText", () => {
+  it.effect("uses the owned action path and reports the backend's typed refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#field").selectText().pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Locator.pressSequentially", () => {
   for (
     const [label, value] of [
@@ -520,3 +530,38 @@ it.effect("evaluateAll preserves deadlines before and after dispatch without rep
       assert.strictEqual(calls, 1)
     })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
   }).pipe(Effect.scoped))
+describe("Locator.isEditable", () => {
+  it.effect("reads through the engine without dispatching input", () => {
+    let reads = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("editable-realm" as Target.RealmId),
+        dispatchInput: () => Effect.die("a read must never dispatch input"),
+        evaluate: (_realm, call) =>
+          Effect.sync(() => {
+            if (call.functionDeclaration === Engine.install) {
+              return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+            }
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            assert(request.op === "read" && request.read._tag === "Editable")
+            reads++
+            return {
+              _tag: "Value",
+              value: { type: "string", value: JSON.stringify({ _tag: "Read", value: true }) }
+            } as const
+          })
+      })))
+    )
+    return Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.isTrue(yield* page.locator("#field").isEditable)
+      assert.strictEqual(reads, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  })
+})

@@ -36,6 +36,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | [`hover()`](/docs/api/browser/Locator#Locator.hover) | moves the pointer over the element                                         |
 | `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkable unless it's already in that state, then confirms the change |
 | `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
+| [`selectText()`](/docs/api/browser/Locator#Locator.selectText) | selects a control value or an element’s contents and attempts to focus it |
 | `clear()`                     | empties a field                                                            |
 | `press(key)`                  | focuses the element and presses a key                                      |
 | `pressSequentially(text)`     | focuses the element and types the text key by key                         |
@@ -44,6 +45,27 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
+
+Select text to inspect a selection or prepare it for the next key without replacing the contents:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const selectName = Effect.fn("selectName")(function*(page: Page.Page) {
+  yield* page.getByLabel("Name").selectText()
+})
+```
+
+Inputs and textareas use native selection of their value; other elements select their contents with a DOM range.
+Labels and their noninteractive descendants select the associated control. Descendants of buttons and button,
+checkbox or radio roles target that interactive ancestor. The action attempts to focus the target; unfocusable
+elements can still have a selection. Number inputs support selection, while inputs without selectable text,
+such as checkboxes, can succeed without selecting text. Strider preserves native browser behavior.
+Selection waits for exactly one visible match under the current [deadline](/docs/deadlines), checking the matched
+element's visibility before label retargeting, without requiring viewport position or checking enabled, editable,
+inert or pointer coverage. Native focus may scroll. The settings below apply: trial preserves focus and selection,
+and the visibility check can be turned off. Focus and selection handlers can change what remains selected.
 
 [`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer.
 Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't have focus
@@ -103,7 +125,7 @@ Before sending anything, an action waits, checking at each animation frame, unti
 
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 
-An action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable and not inert; `focus`, `press` and `pressSequentially` require not inert; `selectOption` requires enabled; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
+An action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable and not inert; `focus`, `press` and `pressSequentially` require not inert; `selectOption` requires enabled; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
   "Not inert": not under an `inert` attribute, nor outside an open modal dialog.

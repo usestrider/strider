@@ -655,6 +655,38 @@ export interface ReadonlyLocator
    */
   readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Whether the one match is editable now, using the same rules as fill and toBeEditable.
+   *
+   * **Details**
+   *
+   * Text inputs, settable inputs (date, datetime-local, month, week, time, color and range),
+   * textareas and inherited contenteditable elements qualify when enabled and not read-only.
+   * Native disabled state, including disabled fieldsets, and aria-disabled="true" on the element
+   * or an ancestor disable editing. Native readOnly or aria-readonly="true" on the element
+   * prevent editing. ARIA tokens are case-sensitive. Visibility and inertness are not checked.
+   * Other kinds, including selects, checkboxes and ARIA-only textboxes, return false.
+   *
+   * **Gotchas**
+   *
+   * Fails with NoMatch or StrictViolation unless exactly one element matches; never waits.
+   * Unlike Playwright, unsupported kinds return false, and only kinds supported by Strider's
+   * editing actions qualify. Strider also honors aria-readonly on native inputs and contenteditable
+   * elements, and aria-disabled on ancestors regardless of role. Use toBeEditable when the state
+   * needs time to change.
+   *
+   * **Example** (Reading whether a name can be changed)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const canRename = Effect.fn("canRename")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByRole("textbox", { name: "Name" }).isEditable
+   * })
+   * ```
+   */
+  readonly isEditable: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Whether the one match is enabled now.
    *
    * **Example** (Reading whether checkout is available)
@@ -802,7 +834,7 @@ export interface ReadonlyLocator
  * The action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable and not inert; `focus`, `press` and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
- * `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
+ * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
  * **Example** (Clicking a button that keeps pulsing)
  *
@@ -1420,6 +1452,43 @@ export interface Locator extends ReadonlyLocator {
    * ```
    */
   pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect
+  /**
+   * Selects the matched element's text without changing its contents.
+   *
+   * **Details**
+   *
+   * Waits for one visible match under the current deadline. Labels and their noninteractive descendants
+   * select the associated control; descendants of buttons and button, checkbox or radio roles target
+   * that interactive ancestor. Inputs and textareas use native `select()`; other elements use a DOM
+   * range over their contents, including nested text. Attempts to focus the target; an unfocusable
+   * element can still have its contents selected. Requires owned access on every backend.
+   *
+   * **Gotchas**
+   *
+   * Native input selection depends on the browser and input type: number inputs support selection,
+   * while inputs without selectable text, such as checkboxes, can succeed without selecting text.
+   * Multiple matches fail with `StrictViolation`; an absent or hidden match waits until the deadline.
+   * Checks only the matched element's visibility, before label retargeting, with no viewport, pointer
+   * hit test, enabled, editable or inert check. Native focus may scroll. `trial: true` checks without
+   * focus or selection; `checks: { visible: false }` skips visibility. There is no blanket force option.
+   * Focus and selection handlers can change the resulting selection; this operation does not lock it.
+   *
+   * **Example** (Selecting a field's text)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const selectName = Effect.fn("selectName")(function*(page: Page.Page) {
+   *   yield* page.getByLabel("Name").selectText()
+   * })
+   * ```
+   *
+   * @stability unstable
+   * @since 0.1.0
+   */
+  selectText(options?: ActionOptions | undefined): ActionEffect
+
   /**
    * Chooses options of a `<select>`, by value, label or index. Checks: visible, enabled.
    *

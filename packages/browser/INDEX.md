@@ -936,6 +936,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `readonly readHtml: Effect.Effect<string, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readAttribute(name: string): Effect.Effect<Option.Option<string>, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isVisible: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
+  - `readonly isEditable: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isEnabled: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly isChecked: Effect.Effect<boolean, LocatorError | Target.TargetGone | Deadline.Timeout>`
   - `readonly all: Effect.Effect<ReadonlyArray<ReadonlyLocator>, LocatorError | Target.TargetGone | Deadline.Timeout>`
@@ -1002,6 +1003,7 @@ Locators: how to find elements on a page, and the actions and reads that use the
   - `fill(value: string | Redacted.Redacted<string>, options?: ActionOptions | undefined): ActionEffect`
   - `press(key: Keyboard.Key | string, options?: PressOptions | undefined): ActionEffect`
   - `pressSequentially(text: string | Redacted.Redacted<string>, options?: TypeOptions | undefined): ActionEffect`
+  - `selectText(options?: ActionOptions | undefined): ActionEffect`
   - `selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): ActionEffect`
   - `setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: ActionOptions | undefined): ActionEffect`
   - `dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect`
@@ -1390,6 +1392,7 @@ Pages, at three access levels: `ObservedPage` ⊂ `ReadonlyPage` ⊂ `Page`, lik
   - `readonly sessionStorage: OriginStorage.OriginStorage`
   - `readonly context: UserContext.UserContext`
   - `goto(url: Url.Url | string, options?: GotoOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
+  - `setContent(html: string, options?: { readonly waitUntil?: PageNavigation.LoadState | undefined } | undefined): Effect.Effect<void, PageError | Target.TargetGon…`
   - `reload(options?: ReloadOptions | undefined): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>`
   - `back(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
   - `forward(options?: TraverseOptions | undefined): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>`
