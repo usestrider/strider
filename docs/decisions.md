@@ -1469,7 +1469,10 @@ and their ancestor origins only for those contexts. Cookie hosts also come from 
 tracked and incoming storage before restoring saved state, and refuses untracked contexts or held virtual
 authenticators before mutation. This follows “Pay for what you use”: native protocols cannot enumerate and clear
 all closed origins across the supported browsers without destroying the context. Always-on history and context
-replacement were rejected. Running writers and open storage handles can cause typed partial failure; IndexedDB
+replacement were rejected. Dispatch reads the listener field on the context already resolved by ordinary request
+or document folding; only a registered listener parses origins or retains history. Untracked contexts still pay
+that field read/branch (plus the request owner-presence check), independently of whether a sibling is tracked;
+a browser-wide observer wrapper, repeated owner resolution and observer-map lookup were rejected. Running writers and open storage handles can cause typed partial failure; IndexedDB
 requests cannot be cancelled and may delete data after interruption or failure. Atomic rollback, silently merging
 state and claiming full Playwright equivalence were rejected. HTTP cache, existing-page sessionStorage and service
 worker registrations remain outside this saved-state operation; callers must quiesce their writers explicitly.

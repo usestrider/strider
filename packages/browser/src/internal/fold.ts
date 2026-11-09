@@ -599,16 +599,24 @@ export const make = Effect.fnUntraced(function*(options: {
           })
           if (page === undefined) {
             // A frame's document: the frame's entry follows it
-            yield* update(owner!.state, (state) => ({
-              ...state,
-              frames: state.frames.map((frame) =>
-                frame.id === fact.navigable ? { ...frame, document: Option.some(fact.document), url: fact.url } : frame
-              )
-            }))
+            yield* update(owner!.state, (state) => {
+              const listener = owner!.contextEntry.storageSources
+              if (listener !== undefined) committedStorage(listener, owner!, state, fact)
+              return {
+                ...state,
+                frames: state.frames.map((frame) =>
+                  frame.id === fact.navigable
+                    ? { ...frame, document: Option.some(fact.document), url: fact.url }
+                    : frame
+                )
+              }
+            })
             return
           }
-          yield* update(page.state, (state): Model.PageState =>
-            state.status._tag === "Closed" ? state : {
+          yield* update(page.state, (state): Model.PageState => {
+            const listener = page.contextEntry.storageSources
+            if (listener !== undefined) committedStorage(listener, page, state, fact)
+            return state.status._tag === "Closed" ? state : {
               ...state,
               status: {
                 _tag: "Open",
@@ -617,7 +625,8 @@ export const make = Effect.fnUntraced(function*(options: {
                 prompt: state.status._tag === "Open" ? state.status.prompt : Option.none(),
                 undecided: state.status._tag === "Open" ? state.status.undecided : Option.none()
               }
-            })
+            }
+          })
           return
         }
         case "DocumentUrlChanged": {
@@ -732,6 +741,13 @@ export const make = Effect.fnUntraced(function*(options: {
             navigationHops.add(fact.request.hop)
           }
           const owner = ownerOfRequest(fact.request)
+          if (Option.isSome(owner.context)) {
+            const listener = owner.context.value.storageSources
+            if (listener !== undefined) {
+              const url = URL.parse(fact.request.url)
+              if (url !== null) listener.observe([url.origin], true)
+            }
+          }
           hops.keep(fact.request.hop, {
             request: fact.request,
             state: yield* cell<Model.HopState>({
@@ -1005,41 +1021,17 @@ export const make = Effect.fnUntraced(function*(options: {
   const scoped = (add: Effect.Effect<void>, remove: Effect.Effect<void>): Effect.Effect<void, never, Scope.Scope> =>
     Effect.acquireRelease(apply(add), () => apply(remove))
 
-  // The ordinary sink is unchanged until a context explicitly requests document history.
-  let receive = fold
-  let observers:
-    | Map<
-      UserContext.Id,
-      {
-        observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
-        origins: Map<Target.NavigableId, string>
-      }
-    >
-    | undefined
-  const observing = Effect.fnUntraced(function*(fact: Adapter.Fact) {
-    yield* fold(fact)
-    if (fact._tag === "RequestSent") {
-      const owner = ownerOfRequest(fact.request)
-      if (Option.isSome(owner.context)) {
-        const listener = observers?.get(owner.context.value.id)
-        if (listener !== undefined) {
-          const url = URL.parse(fact.request.url)
-          if (url !== null) listener.observe([url.origin], true)
-        }
-      }
-      return
-    }
-    if (fact._tag !== "DocumentCommitted") return
-    const owner = pageOf(fact.navigable)
-    if (Option.isNone(owner)) return
-    const listener = observers?.get(owner.value.context)
-    if (listener === undefined) return
+  const committedStorage = (
+    listener: Model.StorageSourceObserver,
+    page: Model.PageEntry,
+    state: Model.PageState,
+    fact: Extract<Adapter.Fact, { _tag: "DocumentCommitted" }>
+  ) => {
     const origin = fact.url.startsWith("file:") ? "file://" : fact.origin
     listener.origins.set(fact.navigable, origin)
     const chain = [origin]
     let current = fact.navigable
-    const state = yield* owner.value.state.get
-    while (current !== owner.value.id) {
+    while (current !== page.id) {
       const parent = state.frames.find((frame) => frame.id === current)?.parent
       if (parent === undefined) return
       const origin = listener.origins.get(parent)
@@ -1048,23 +1040,17 @@ export const make = Effect.fnUntraced(function*(options: {
       current = parent
     }
     listener.observe(chain)
-  })
+  }
 
   const self: Fold = {
-    sink: (fact) => apply(receive(fact)),
+    sink: (fact) => apply(fold(fact)),
     observeStorageSources: (context, observe) =>
       scoped(
         Effect.sync(() => {
-          observers ??= new Map()
-          observers.set(context.id, { observe, origins: new Map() })
-          receive = observing
+          context.storageSources = { observe, origins: new Map() }
         }),
         Effect.sync(() => {
-          observers?.delete(context.id)
-          if (observers?.size === 0) {
-            receive = fold
-            observers = undefined
-          }
+          delete context.storageSources
         })
       ),
     obligations,

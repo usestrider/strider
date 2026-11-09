@@ -339,7 +339,13 @@ export interface ContextState {
   readonly grants: ReadonlyArray<GrantEntry>
 }
 
+export interface StorageSourceObserver {
+  readonly observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  readonly origins: Map<Target.NavigableId, string>
+}
+
 export interface ContextEntry {
+  storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
   readonly id: UserContext.Id
   /** Fixed: the default context exists for the whole connection. */
