@@ -124,6 +124,7 @@ export type Action =
     readonly guard: boolean
   }
   | { readonly _tag: "Focus" }
+  | { readonly _tag: "SelectText" }
   | { readonly _tag: "Blur" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
@@ -1506,12 +1507,33 @@ export function engine(render: (root: SnapNode) => string) {
     ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
   }
 
+  const enclosingLabel = (element: Element): HTMLLabelElement | null => {
+    let label: Element | null = element
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    return label
+  }
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = element
+    if (!target.matches("input, textarea, select") && !contentEditable(target)) {
+      target = target.closest("button, [role=button], [role=checkbox], [role=radio]") ?? target
+    }
+    if (
+      !target.matches(
+        "a, input, textarea, button, select, [role=link], [role=button], [role=checkbox], [role=radio]"
+      ) &&
+      !contentEditable(target)
+    ) {
+      target = enclosingLabel(target)?.control ?? target
+    }
+    return target
+  }
+
   /** Association stays in the DOM; slots can add refusals without choosing another label. */
   const checkableForAction = (element: Element): Element | null => {
     const own = checkedOf(element)
     if (own !== null) return element
-    let label: Element | null = element
-    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    const label = enclosingLabel(element)
     if (label === null || label.control === null) return null
     for (
       let ancestor: Element | null = element;
@@ -1960,6 +1982,23 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (!apply) return answer
     switch (action._tag) {
+      case "SelectText": {
+        const target = textSelectionTarget(element)
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          target.select()
+          target.focus()
+        } else {
+          if (target instanceof HTMLElement || target instanceof SVGElement) target.focus()
+          const range = document.createRange()
+          range.selectNodeContents(target)
+          const selection = getSelection()
+          if (selection !== null) {
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+        }
+        return answer
+      }
       case "Focus":
         if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
         return answer

@@ -43,6 +43,16 @@ describe("Locator.fill", () => {
   }
 })
 
+describe("Locator.selectText", () => {
+  it.effect("uses the owned action path and reports the backend's typed refusal", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#field").selectText().pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Locator.pressSequentially", () => {
   for (
     const [label, value] of [

@@ -117,6 +117,248 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       const it = SharedContext.guard(suite)
 
       it.effect(
+        "selectText selects control values and DOM contents without editing",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p><p id="unfocusable">unfocusable text</p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [id, text] of [["input", "Ada Lovelace"], ["area", "two lines"], ["editable", "nested text"], [
+                "plain",
+                "plain text"
+              ]] as const
+            ) {
+              const target = page.locator(`#${id}`)
+              yield* target.selectText()
+              const selected = yield* page.evaluateInMainWorld((id: string) => {
+                const element = document.getElementById(id)!
+                if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+                  return element.value.slice(element.selectionStart ?? 0, element.selectionEnd ?? 0)
+                }
+                return element.ownerDocument.getSelection()?.toString() ?? ""
+              }, id)
+              assert.strictEqual(selected, text)
+              assert.isTrue(yield* page.evaluateInMainWorld((id: string) => document.activeElement?.id === id, id))
+            }
+            yield* page.locator("#unfocusable").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "unfocusable text")
+            assert.isFalse(
+              yield* page.evaluateInMainWorld(() => document.activeElement?.id === "unfocusable")
+            )
+            assert.strictEqual(yield* page.locator("#input").readValue, "Ada Lovelace")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText selects email values without relying on selection offsets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="email" value="ada@example.com">`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const email = page.locator("input")
+            yield* email.selectText()
+            assert.strictEqual(yield* email.readValue, "ada@example.com")
+            yield* email.press("Backspace")
+            assert.strictEqual(yield* email.readValue, "")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText follows associated labels and preserves interactive targets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<label id="explicit" for="field"><span id="nested">Name</span><button id="button"><span id="buttonText">button text</span></button></label><input id="field" value="hello"><label id="implicit">Other<input id="other" value="world"></label><label id="unassociated">own text</label>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            for (
+              const [label, control] of [["explicit", "field"], ["nested", "field"], ["implicit", "other"]] as const
+            ) {
+              yield* page.locator(`#${label}`).selectText({ trial: true })
+              assert.isFalse(
+                yield* page.evaluateInMainWorld((id: string) => document.activeElement?.id === id, control)
+              )
+              yield* page.locator(`#${label}`).selectText()
+              assert.deepStrictEqual(
+                yield* page.evaluateInMainWorld((id: string) => {
+                  const input = document.getElementById(id) as HTMLInputElement
+                  const result = [document.activeElement?.id, input.selectionStart, input.selectionEnd]
+                  input.blur()
+                  input.setSelectionRange(0, 0)
+                  return result
+                }, control),
+                [control, 0, 5]
+              )
+            }
+            yield* page.locator("#buttonText").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => [document.activeElement?.id, getSelection()?.toString()]),
+              ["button", "button text"]
+            )
+            yield* page.locator("#unassociated").selectText()
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "own text")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText uses native number selection and accepts inputs without selectable text",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="number" type="number" value="42"><input id="checkbox" type="checkbox" checked>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const number = page.locator("#number")
+            yield* number.selectText()
+            yield* number.press("Backspace")
+            assert.strictEqual(yield* number.readValue, "")
+            yield* number.press("7")
+            assert.strictEqual(yield* number.readValue, "7")
+            yield* page.locator("#checkbox").selectText({ trial: true })
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "number"))
+            yield* page.locator("#checkbox").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("checkbox") as HTMLInputElement
+                return [document.activeElement?.id, input.checked, input.selectionStart, input.selectionEnd]
+              }),
+              ["checkbox", true, null, null]
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText checks the matched label visibility before retargeting",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<label id="hiddenLabel" for="visible" style="display:none">Hidden</label><input id="visible" value="hello"><label id="visibleLabel" for="hidden">Visible</label><input id="hidden" value="world" style="display:none">`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const hiddenLabel = page.locator("#hiddenLabel")
+            const error = yield* hiddenLabel.selectText({ trial: true }).pipe(
+              Deadline.within("150 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(error))
+            yield* hiddenLabel.selectText({ checks: { visible: false } })
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "visible"))
+            yield* page.locator("#visibleLabel").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("hidden") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd]
+              }),
+              [0, 5]
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText trial preserves focus and selection; visibility can be overridden",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" value="hello"><p id="hidden" style="display:none">hidden text</p>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText({ trial: true })
+            assert.isFalse(yield* page.evaluateInMainWorld(() => document.activeElement?.id === "field"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                (document.getElementById("field") as HTMLInputElement).selectionEnd
+              ),
+              0
+            )
+            const hidden = page.locator("#hidden")
+            const error = yield* hidden.selectText().pipe(Deadline.within("150 millis"), Effect.flip)
+            assert(Deadline.isTimeout(error))
+            yield* hidden.selectText({ checks: { visible: false } })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText rejects ambiguous matches and waits for absent targets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input type="number" value="42"><p>one</p><p>two</p>`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("p").selectText().pipe(Effect.flip)
+            assert(Locator.isLocatorError(error))
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            const missing = yield* page.locator("#missing").selectText().pipe(
+              Deadline.within("150 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(missing))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectText permits readonly, disabled, inert and covered targets without input events",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div inert><input id="field" readonly disabled value="unchanged"></div><div style="position:fixed;inset:0">cover</div><label id="label" for="field">label text</label><script>window.edits=0;document.addEventListener('input',()=>window.edits++);document.addEventListener('change',()=>window.edits++);</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const field = page.locator("#field")
+            yield* field.selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("field") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd, input.value]
+              }),
+              [0, 9, "unchanged"]
+            )
+            yield* page.locator("#label").selectText()
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                const input = document.getElementById("field") as HTMLInputElement
+                return [input.selectionStart, input.selectionEnd]
+              }),
+              [0, 9]
+            )
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as unknown as { edits: number }).edits), 0)
+          })),
+        timeout
+      )
+
+      it.effect("selectText selects within the target frame document", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<iframe srcdoc='<p id="target" tabindex="0">frame text</p>'></iframe>`)
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("#target")
+          yield* target.selectText()
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              (document.querySelector("iframe") as HTMLIFrameElement).contentDocument!.getSelection()?.toString()
+            ),
+            "frame text"
+          )
+          assert.strictEqual(yield* page.evaluateInMainWorld(() => getSelection()?.toString()), "")
+        })), timeout)
+
+      it.effect(
         "dispatchEvent constructs an explicit custom event on a hidden disabled target exactly once",
         () =>
           Effect.scoped(Effect.gen(function*() {
