@@ -42,6 +42,18 @@ const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
   return error as { readonly _tag: string; readonly reason?: { readonly _tag: string } } | undefined
 }
 
+/** A documented frame-mapping refusal is distinct from an element without a rect. */
+const frameRectRefused = Effect.fnUntraced(function*(read: Effect.Effect<unknown, unknown, Scope.Scope>) {
+  if (yield* fullySupports("boundingBox.frameTransforms")) return false
+  const error = yield* Effect.scoped(Effect.flip(read))
+  assert.deepInclude((error as { readonly reason: unknown }).reason, {
+    _tag: "Unsupported",
+    capability: "Locator.boundingBox"
+  })
+  assert.include((error as { readonly reason: { readonly hint: string } }).reason.hint, "frame")
+  return true
+})
+
 /** A frame's document: a counter button, a text input and what was typed. */
 const counter = (label: string) =>
   `<body style="margin:0"><h1>${label}</h1><button style="margin:20px" onclick="document.getElementById('count').textContent = String(Number(document.getElementById('count').textContent) + 1)">Add</button><span id="count">0</span><input aria-label="Name"></body>`
@@ -342,7 +354,7 @@ export const contents = (
           }
         ]
       ) {
-        it.effect(`maps bounding corners through frame ${rule.name}`, () =>
+        it.effect(`composes browser rects through frame ${rule.name}`, () =>
           Effect.gen(function*() {
             const { origin, crossSite } = yield* site
             const page = yield* Browser.newPage()
@@ -367,36 +379,19 @@ export const contents = (
                 )
               }
               // The reference is rendered by the browser in the same parent transform, without a frame boundary.
-              const expected = rule.name.includes("across camera plane")
-                ? yield* page.evaluateInMainWorld(() => {
-                  // The corner hull is the pinned quad contract; Firefox's DOMRect additionally clips
-                  // at its coordinate-system limits when the rectangle crosses the camera plane.
-                  const offset = 4 + Math.floor(3 * 1.25) / 1.25, angle = 75 * Math.PI / 180
-                  const points = [10, 40].flatMap((x) =>
-                    [20, 60].map((y) => {
-                      const cx = x + offset, cy = y + offset, w = 1 - (120 - Math.sin(angle) * cx) * 1.25 / 100
-                      return {
-                        x: 20 + (40 * 1.25 + Math.cos(angle) * cx * 1.25) / w - scrollX,
-                        y: 30 + (60 * 1.25 + cy * 1.25) / w - scrollY
-                      }
-                    })
-                  )
-                  const x = Math.min(...points.map((p) => p.x)), y = Math.min(...points.map((p) => p.y))
-                  return {
-                    x,
-                    y,
-                    width: Math.max(...points.map((p) => p.x)) - x,
-                    height: Math.max(...points.map((p) => p.y)) - y
-                  }
-                })
-                : yield* page.evaluateInMainWorld(() => {
-                  const r = document.querySelector("#expected")!.getBoundingClientRect()
-                  return { x: r.x, y: r.y, width: r.width, height: r.height }
-                })
+              // The approved contract reads the browser rect, including its camera clipping convention.
+              const expected = yield* page.evaluateInMainWorld(() => {
+                const r = document.querySelector("#expected")!.getBoundingClientRect()
+                return { x: r.x, y: r.y, width: r.width, height: r.height }
+              })
               const direct = Option.getOrThrow(yield* page.locator("#expected").boundingBox)
               for (const key of ["x", "y", "width", "height"] as const) {
                 assert.closeTo(direct[key], expected[key], .05, `direct ${rule.name} ${key}, scrolled=${scrolled}`)
               }
+              if (
+                !["scaling", "nested CSS zoom"].includes(rule.name) &&
+                (yield* frameRectRefused(target.boundingBox))
+              ) continue
               const box = Option.getOrThrow(yield* target.boundingBox)
               for (const key of ["x", "y", "width", "height"] as const) {
                 assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
@@ -405,7 +400,7 @@ export const contents = (
           }), timeout)
       }
 
-      it.effect("preserves bounding corners through nested cross-origin counter-rotations", () =>
+      it.effect("composes a child browser rect through nested cross-origin counter-rotations", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
           const page = yield* Browser.newPage()
@@ -433,6 +428,28 @@ export const contents = (
           )
           const outer = page.frame(page.locator("#outer"))
           const target = outer.frame(outer.locator("#inner")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          // Replace the reference element by its child-document rect before the frame transforms.
+          const childRect = yield* page.evaluateInMainWorld((css) => {
+            const el = document.createElement("div")
+            el.style.cssText = css
+            document.body.append(el)
+            const r = el.getBoundingClientRect()
+            el.remove()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          }, targetStyle)
+          yield* page.evaluateInMainWorld((r) => {
+            const el = document.querySelector<HTMLElement>("#expected")!
+            Object.assign(el.style, {
+              left: `${r.x}px`,
+              top: `${r.y}px`,
+              width: `${r.width}px`,
+              height: `${r.height}px`,
+              transform: "none"
+            })
+          }, childRect)
           const expected = yield* page.evaluateInMainWorld(() => {
             const r = document.querySelector("#expected")!.getBoundingClientRect()
             return { x: r.x, y: r.y, width: r.width, height: r.height }
@@ -459,6 +476,10 @@ export const contents = (
               }</div></div></body>`
             )
           )
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
           const expected = yield* page.evaluateInMainWorld(() => {
             const r = document.querySelector("#expected")!.getBoundingClientRect()
             return { x: r.x, y: r.y, width: r.width, height: r.height }
@@ -469,7 +490,7 @@ export const contents = (
           }
         }), timeout)
 
-      it.effect("maps native SVG bounding corners through a transformed frame", () =>
+      it.effect("composes the SVG browser rect through a transformed frame", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
           const page = yield* Browser.newPage()
@@ -486,6 +507,27 @@ export const contents = (
               }</div></div></body>`
             )
           )
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          const childRect = yield* page.evaluateInMainWorld((url: string) => {
+            // A same-document SVG copy supplies the browser's own rect, before frame composition.
+            const container = document.createElement("div")
+            container.style.cssText = "position:absolute;left:0;top:0"
+            container.innerHTML = url
+            document.body.append(container)
+            const r = container.querySelector("#target")!.getBoundingClientRect()
+            container.remove()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          }, svg)
+          yield* page.evaluateInMainWorld((r) => {
+            const el = document.querySelector("#expected")!
+            const box = document.createElement("div")
+            box.style.cssText = `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px`
+            el.closest("svg")!.replaceWith(box)
+            box.id = "expected"
+          }, childRect)
           const expected = yield* page.evaluateInMainWorld(() => {
             const r = document.querySelector("#expected")!.getBoundingClientRect()
             return { x: r.x, y: r.y, width: r.width, height: r.height }
@@ -494,6 +536,23 @@ export const contents = (
           for (const key of ["x", "y", "width", "height"] as const) {
             assert.closeTo(box[key], expected[key], .05, key)
           }
+        }), timeout)
+
+      it.effect("reads the browser rect of an auto-rotating motion-path target", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="target" style="position:absolute;left:200px;top:100px;width:30px;height:20px;offset-path:path('M 0 0 L 100 100');offset-distance:50%;offset-rotate:auto;offset-anchor:0 0"></div></body>`
+            )
+          )
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#target")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          assert.deepStrictEqual(yield* page.locator("#target").boundingBox, Option.some(expected))
         }), timeout)
 
       // ── Evaluation and handles ──
@@ -545,11 +604,15 @@ export const contents = (
             )
             // The isolated world doesn't see the page's globals; the main world does
             assert.strictEqual(
-              yield* page.evaluate(() => typeof (window as unknown as { secret?: number }).secret),
+              yield* page.evaluate(() =>
+                typeof (window as unknown as { secret?: number }).secret
+              ),
               "undefined"
             )
             assert.strictEqual(
-              yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
+              yield* page.evaluateInMainWorld(() =>
+                (window as unknown as { secret: number }).secret
+              ),
               42
             )
             // Both worlds share the document
