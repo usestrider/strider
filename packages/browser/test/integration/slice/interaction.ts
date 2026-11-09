@@ -4241,8 +4241,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   Effect.flip
                 )
                 assert(Expect.isExpectationFailed(error), String(error))
-                assert(error.history.length > 0)
-                assert.deepStrictEqual(error.history.at(-1)!.value, observed)
+                // A transport deadline can precede every response; immediate engine checks cover exact observations.
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
                 assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
               }
             }))
