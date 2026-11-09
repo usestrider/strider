@@ -12,7 +12,10 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
 import * as Network from "../../cdp/Network.ts"
@@ -26,9 +29,11 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget } from "./declare.ts"
+import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
 
@@ -232,6 +237,48 @@ const snapshot = Effect.fnUntraced(function*(
   configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>
 ) {
   const on = Protocol.on(target.session)
+  // An anchor-created popup has no document yet. Its Page/Runtime enables wait for debugger resume.
+  // Only opted-in contexts batch their bindings and preload ahead of resume. Early binding messages are held
+  // until their live contexts have been installed into the frame-tree snapshot.
+  let early:
+    | { readonly contexts: Array<Runtime.ExecutionContextCreatedParams>; readonly scope: Scope.Closeable }
+    | undefined
+  if (target.kind === "page" && target.url === "" && page?.context.webSocketDeclarations !== undefined) {
+    const bundles = state.registry.bundles(placement(page))
+    const bridges = bundles.get("")?.webSockets
+    if (bridges !== undefined) {
+      const scope = yield* Scope.fork(state.cleanupScope)
+      const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
+      const main = yield* Deferred.make<void>()
+      const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
+      yield* events.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            contexts.push(event)
+            if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
+              Deferred.doneUnsafe(main, Effect.void)
+            }
+          })
+        ),
+        Effect.forkIn(scope)
+      )
+      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Runtime.enable().pipe(on),
+        ...bindings.map((binding) => binding.pipe(on)),
+        ...[...bundles].map(([key, bundle]) =>
+          Page.addScriptToEvaluateOnNewDocument({
+            source: bundle.source,
+            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
+          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
+        ),
+        Runtime.runIfWaitingForDebugger().pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      yield* Deferred.await(main)
+      early = { contexts, scope }
+    }
+  }
   yield* Effect.all([
     Page.enable().pipe(on),
     Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
@@ -249,10 +296,25 @@ const snapshot = Effect.fnUntraced(function*(
     filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
   }).pipe(on)
   const failure = yield* configure.pipe(Effect.flip, Effect.option)
+  const liveContexts: Array<Runtime.ExecutionContextCreatedParams> = []
+  if (early !== undefined) {
+    for (const context of early.contexts.slice()) {
+      const live = yield* Runtime.evaluate({ expression: "0", uniqueContextId: context.context.uniqueId }).pipe(
+        on,
+        Effect.exit
+      )
+      if (Exit.isSuccess(live)) liveContexts.push(context)
+    }
+    yield* Scope.close(early.scope, Exit.void)
+  }
   return {
     through: received,
     apply: Effect.suspend(() => {
       installTree(state, target, result.frameTree, adopted)
+      if (early !== undefined) {
+        for (const context of liveContexts) Evaluation.contextCreated(state, target, context)
+        WebSocketBridge.flush(state, target)
+      }
       if (page !== undefined && target.kind === "page") {
         if (failure._tag === "Some") {
           state.buffer.emit({ _tag: "PageInitializationFailed", page: page.id, description: failure.value.message })
@@ -313,7 +375,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         : state.registry.workerBundle(placement(target.page))
       state.buffer.later(
         Effect.all([
-          Option.isNone(bundle) ? Effect.void : Runtime.evaluate({ expression: bundle.value }).pipe(on),
+          Option.isNone(bundle) ? Effect.void : WebSocketBridge.prepare(state, target).pipe(
+            Effect.andThen(Runtime.evaluate({ expression: bundle.value }).pipe(on))
+          ),
           // Disabling the debugger clears its breakpoint
           Debugger.resume({}).pipe(on),
           Debugger.disable().pipe(on)

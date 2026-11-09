@@ -310,3 +310,9 @@ export * as Watchable from "./Watchable.ts"
  * @since 0.1.0
  */
 export * as WebAuthn from "./WebAuthn.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as WebSocketRoute from "./WebSocketRoute.ts"

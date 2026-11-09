@@ -532,10 +532,25 @@ export type Override =
   | { readonly _tag: "FocusEmulation"; readonly enabled: boolean }
   | { readonly _tag: "CacheDisabled"; readonly disabled: boolean }
 
+/** Internal host transport belonging only to a WebSocket routing declaration. */
+export interface WebSocketBridge {
+  readonly name: string
+  readonly token: string
+  readonly scope: Scope.Scope
+  readonly receive: (
+    realm: Target.RealmId,
+    payload: Effect.Effect<string, AdapterError>,
+    origin: import("../WebSocketRoute.ts").Origin
+  ) => boolean
+  readonly ended: (realm: Target.RealmId) => void
+  readonly failed: (realm: Target.RealmId) => void
+}
+
 /** A registration: what it declares, where, and when it was made. */
 export type Declaration =
   | {
     readonly _tag: "InitScript"
+    readonly webSocket?: WebSocketBridge | undefined
     readonly source: string
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */

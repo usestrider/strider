@@ -21,6 +21,7 @@ import * as ProtocolClient from "../protocolClient.ts"
 import * as Cleanup from "./cleanup.ts"
 import { bidiHeaders, coveringPattern } from "./mapping.ts"
 import { placement, scopeParams, type State } from "./state.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** Where a document's preload scripts keep which of them ran. */
 const ranKey = "@usestrider/browser/initScripts/ran"
@@ -61,7 +62,12 @@ const applyScripts = Effect.fnUntraced(function*(state: State) {
       ? body
       : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
     const { script } = yield* state.send(Script.addPreloadScript({
-      functionDeclaration: `() => { ${gated} }`,
+      functionDeclaration: entry.declaration.webSocket === undefined ?
+        `() => { ${gated} }` :
+        `(send) => { globalThis[${JSON.stringify(entry.declaration.webSocket.name)}] = send; ${gated} }`,
+      ...(entry.declaration.webSocket === undefined
+        ? {}
+        : { arguments: [WebSocketBridge.channel(entry.declaration.webSocket)] }),
       ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
       ...scopeParams(state, entry.scope)
     }))
@@ -336,6 +342,9 @@ export const declare = Effect.fnUntraced(
   function*(state: State, scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
     const refused = refusal(declaration)
     if (refused !== undefined) return yield* Effect.fail(refused)
+    if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
+      yield* WebSocketBridge.prepare(state, scope, declaration.webSocket)
+    }
     const id = state.ids.registration()
     state.registry.add(scope, declaration, id)
     const registrationContext = yield* Effect.context<never>()

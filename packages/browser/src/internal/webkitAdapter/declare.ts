@@ -16,6 +16,7 @@ import { pageHandleOf, processOfContext, resizeWindow } from "./automation.ts"
 import { overrideCapability } from "./capabilities.ts"
 import { type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import * as Viewport from "./viewport.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -121,6 +122,9 @@ const applyBootstrap = (state: State, target: TargetEntry) =>
   Effect.suspend(() => {
     const bundles = state.registry.bundles(placement(target.page))
     const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
+    if (main?.webSockets !== undefined || target.webSocketConsole !== undefined) {
+      WebSocketBridge.prepare(state, target, main?.webSockets ?? [])
+    }
     return Page.setBootstrapScript(main === undefined ? {} : { source: main.source }).pipe(
       Protocol.on(target.session)
     )

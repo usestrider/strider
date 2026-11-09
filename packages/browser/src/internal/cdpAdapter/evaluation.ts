@@ -24,8 +24,9 @@ import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
+import { contextKey, documentOf, type Event, frameOf, realmOf, type State, type TargetEntry } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -162,60 +163,70 @@ const callValue = (value: Adapter.RemoteValue): Runtime.CallArgument => {
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Replays an early paused popup's context after its frame-tree snapshot is installed. */
+export const contextCreated = (
+  state: State,
+  target: TargetEntry,
+  params: Runtime.ExecutionContextCreatedParams
+): void => {
+  const context = params.context
+  if (context.uniqueId !== undefined && state.realmsByUnique.has(context.uniqueId)) return
+  const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
+  const base = {
+    uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
+    contextId: context.id as number,
+    target,
+    origin: context.origin
+  }
+  if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
+    const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
+    target.realm = realm
+    state.buffer.emit({
+      _tag: "RealmAdded",
+      realm: realm.id,
+      origin: context.origin,
+      kind: {
+        _tag: "Worker",
+        worker: target.kind === "worker"
+          ? { _tag: "Dedicated", owner: Option.none() }
+          : target.kind === "shared_worker"
+          ? { _tag: "Shared" }
+          : { _tag: "Service", scope: Option.none() },
+        url: Urls.reported(target.url),
+        page: Option.fromUndefinedOr(target.page?.id),
+        context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
+      }
+    })
+    return
+  }
+  const frame = frameOf(state, auxData.frameId)
+  const document = frame?.document
+  if (frame === undefined || document === undefined) return
+  const realm = addRealm(state, {
+    ...base,
+    frame,
+    world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
+  })
+  // During a traversal, Chromium creates a restored document's realm before its commit
+  if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
+    realm.pending = true
+    frame.pendingRealms.push(realm)
+    return
+  }
+  document.realms.add(realm)
+  state.buffer.emit({
+    _tag: "RealmAdded",
+    realm: realm.id,
+    origin: context.origin,
+    kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
+  })
+  WebSocketBridge.flush(state, target)
+}
+
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Runtime.executionContextCreated, (params, { state, target }) => {
-      if (target === undefined) return
-      const context = params.context
-      const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
-      const base = {
-        uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
-        contextId: context.id as number,
-        target,
-        origin: context.origin
-      }
-      if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
-        const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
-        target.realm = realm
-        state.buffer.emit({
-          _tag: "RealmAdded",
-          realm: realm.id,
-          origin: context.origin,
-          kind: {
-            _tag: "Worker",
-            worker: target.kind === "worker"
-              ? { _tag: "Dedicated", owner: Option.none() }
-              : target.kind === "shared_worker"
-              ? { _tag: "Shared" }
-              : { _tag: "Service", scope: Option.none() },
-            url: Urls.reported(target.url),
-            page: Option.fromUndefinedOr(target.page?.id),
-            context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
-          }
-        })
-        return
-      }
-      const frame = frameOf(state, auxData.frameId)
-      const document = frame?.document
-      if (frame === undefined || document === undefined) return
-      const realm = addRealm(state, {
-        ...base,
-        frame,
-        world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
-      })
-      // During a traversal, Chromium creates a restored document's realm before its commit
-      if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
-        realm.pending = true
-        frame.pendingRealms.push(realm)
-        return
-      }
-      document.realms.add(realm)
-      state.buffer.emit({
-        _tag: "RealmAdded",
-        realm: realm.id,
-        origin: context.origin,
-        kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
-      })
+      if (target !== undefined) contextCreated(state, target, params)
     })
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return

@@ -94,6 +94,7 @@ export const capabilities = (
           : ["Chromium pauses popups only browser-wide, so an attached browser's popups aren't paused"]
       ),
       entry("input.native", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),

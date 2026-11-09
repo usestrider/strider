@@ -1,0 +1,124 @@
+---
+title: Mocking WebSockets
+description: Scoped WebSocket mocks and browser-native proxies, with explicit script consent and bounded admission.
+order: 9
+---
+
+A live socket server can make a test depend on timing or unavailable services. A scoped WebSocket route answers
+messages in the test or changes selected messages while the browser connects to the real server.
+
+## Create a mock
+
+Register before navigating. The required `implementation: "script"` option permits a main-world constructor shim;
+this does not intercept native network frames. Removing the registration, or closing its scope, closes its sockets.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mockChat = Effect.fn("mockChat")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.open({
+        fromPage: (message, page) => page.send(message)
+      }),
+    { implementation: "script" }
+  )
+  yield* page.goto("https://chat.example.com")
+})
+```
+
+The handler opens explicitly so its message handler is ready before application code sends. Text stays text;
+binary is exact bytes, including a typed-array view's offset and length. Accepted mutable buffers are copied
+synchronously; asynchronous Blob conversion preserves send order. An absent mock handler discards page messages.
+
+## Connect to the real server
+
+A proxy uses the saved native constructor in the originating browser realm, preserving browser cookies, origin,
+TLS and proxy configuration. Absent directional handlers forward unchanged. A provided handler takes ownership of
+its direction: send explicitly to forward or replace, or return without sending to drop.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const redactChat = Effect.fn("redactChat")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.connectToServer({
+        fromPage: (message, endpoints) =>
+          message._tag === "Text"
+            ? endpoints.server.send({
+              _tag: "Text",
+              data: message.data.replaceAll("secret", "redacted")
+            })
+            : endpoints.server.send(message)
+      }).pipe(Effect.asVoid),
+    { implementation: "script" }
+  )
+})
+```
+
+The handlers are fixed before opening. The connection's passive event stream reports messages and closes without
+changing forwarding. A failing handler closes the socket and reports the failure; it never falls back to a live
+server. Stream overflow fails that observer; transport overflow closes the affected connection.
+
+## Admission and cleanup
+
+The admission ceilings are:
+
+- 1 MiB per application message;
+- 256 pending messages or 4 MiB per browser direction;
+- 16 MiB of issued reservations and admitted payload per registration, across all its realms;
+- 1024 admitted connections, with at most 16 pending constructor requests per realm;
+- 64 early CDP envelopes per target while its realm is being announced;
+- 4096 pending host envelopes per registration, at most 2 MiB of JSON text per envelope, and 256 concurrent host
+  sends per connection;
+- 8192 characters in a matched URL, 128 requested subprotocols, and 8192 bytes across those subprotocols.
+
+Each admitted connection receives a fixed 1 MiB in each browser direction before its open event. Unused issued
+credits remain charged until acknowledged draining or confirmed realm destruction. Local credit exhaustion can
+therefore close a socket while capacity is reserved elsewhere. These ceilings do not guarantee usable queue
+capacity and do not bound encoded copies, browser-native buffers or total process memory. Idle documents receive
+no message-credit reservation. A rejected constructor retains no shim lookup entry. Pending constructors are
+counted across the routes sharing a realm. Control-envelope overload fails the affected realm closed until its
+registration is removed or that realm is destroyed; ordinary per-socket overflow closes that socket.
+
+An overflow closes with an error and a synthetic abnormal page close. Native failure cleanup uses application
+code 4000; normal removal uses 1000. Caller-supplied native codes must be 1000 or 3000–4999, with a reason of at
+most 123 UTF-8 bytes. Synthetic observations such as code 1006 are distinguished from native closes and never
+passed to the browser's native close operation.
+
+Newest matching registration wins when a socket is constructed. Later registrations do not take over existing
+sockets. Removing one closes only its sockets and leaves other registrations in force. Navigation, frame/worker
+termination and scope closure release its handlers and reservations; conversion work is drained before surrender.
+
+## Browser coverage
+
+Launched Chromium and Firefox reach existing documents and future pages/frames, including cross-origin frames.
+Only constructions after installation are captured. Chromium and stock WebKit can also cover dedicated workers
+started later when `workers: true` is explicit; Firefox refuses that option. Shared/service workers, saved
+constructors, existing sockets, WebSocketStream and custom socket clients remain outside this shim.
+
+Stock WebKit and attached Chromium cannot guarantee first-script popup installation. They reject the default
+required timing before installing anything; choose `timing: "bestEffort"` explicitly to accept that limit:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const bestEffortMock = Effect.fn("bestEffortMock")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) => connection.open({}),
+    { implementation: "script", timing: "bestEffort", workers: true }
+  )
+})
+```
+
+The constructor and events are synthetic. Native event trust, constructor identity, buffering, wire fragments,
+compression and security-policy fidelity of a fully mocked socket are not emulated. Native passthrough still
+obeys browser connection policy. Native [connection observations](/docs/events/network) remain distinct from
+mock traffic. Contexts without a route receive no shim, binding/channel or message state for this feature.

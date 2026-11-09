@@ -29,6 +29,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
       entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
+      entry("webSocketRouting", "partial", [
+        "explicit script consent and bestEffort timing; admission ceilings; main-world WebSocket only"
+      ]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),

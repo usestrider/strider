@@ -27,6 +27,7 @@ import {
 
 export const removeRealm = (state: State, realm: RealmEntry, reason: L1Target.CloseReason) =>
   Kit.removeRealm(state.buffer, realm, reason, (realm) => {
+    realm.target.webSocketEnded?.(realm.id, reason)
     state.realms.delete(realm.id)
     if (realm.contextId !== undefined) state.realmsByContext.delete(contextKey(realm.target, realm.contextId))
     realm.document?.realms.delete(realm)

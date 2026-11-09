@@ -356,6 +356,17 @@ Adapter responsibilities:
   - Overrides take the most specific scope (page, then context, then browser), then the most recent, and releasing one in any order recomputes the effective value and applies it, or resets it.
   - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
   - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
+- **Script WebSocket routing** adds private transport metadata to an environment init script only in the
+  requesting context. CDP installs Runtime bindings on covered targets (at the existing before-script breakpoint
+  in dedicated workers). A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
+  before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
+  binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Stock WebKit captures console.debug and sends a fresh object per envelope, carrying an exact marker and
+  payload. Its target-local classifier consumes those objects before ordinary console publication, derives the
+  realm from injectedScriptId, and releases every consumed remote object after extraction. Ordinary string and
+  object console messages are unchanged. No polling supplies the bridge. Required context timing is refused
+  before installation on stock WebKit and attached Chromium. Firefox refuses dedicated-worker preloads; shared
+  and service workers are outside this feature. None of these protocols offers native message interception.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
   - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
   - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;

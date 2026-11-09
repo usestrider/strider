@@ -42,6 +42,7 @@ import * as StorageState from "./StorageState.ts"
 import type * as Target from "./Target.ts"
 import type * as Url from "./Url.ts"
 import type * as Watchable from "./Watchable.ts"
+import type * as WebSocketRoute from "./WebSocketRoute.ts"
 
 /**
  * Schema for the id of a user context.
@@ -293,6 +294,40 @@ export interface UserContext extends ObservedUserContext {
     handler: RoutePhaseDiagnostic.Handler<E, R, NoInfer<P> | "request", D>,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  /**
+   * Mocks or proxies future WebSocket constructions in this context for the caller's scope.
+   *
+   * **Details**
+   *
+   * Requires explicit script consent. The shim also reaches loaded documents, but cannot capture existing sockets
+   * or constructors saved before installation. Newest matching registration wins. WebKit and attached Chromium
+   * require explicit bestEffort timing; Firefox refuses workers. Only dedicated workers started later are covered.
+   *
+   * **Example** (Echoing a mocked connection)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const mockSocket = Effect.fn("mockSocket")(function*(page: Page.Page) {
+   *   yield* page.context.routeWebSocket(
+   *     "ws://example.invalid/socket",
+   *     (connection) =>
+   *       connection.open({ fromPage: (message, page) => page.send(message) }),
+   *     { implementation: "script" }
+   *   )
+   * })
+   * ```
+   */
+  routeWebSocket<E, R>(
+    pattern: Url.Pattern | string,
+    handler: (connection: WebSocketRoute.Connection) => Effect.Effect<void, E, R>,
+    options: WebSocketRoute.Options
+  ): Effect.Effect<
+    WebSocketRoute.Registration,
+    WebSocketRoute.WebSocketRouteError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope | R
+  >
   /**
    * Runs a script in every new document of every page while the registration lives.
    *

@@ -28,6 +28,7 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  webSocketDeclarations?: number | undefined
   readonly requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
   proxy?: Adapter.ProxyOptions | undefined
   readonly id: UserContext.Id

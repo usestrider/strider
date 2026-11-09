@@ -26,6 +26,7 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
 const nothing = "strider-intercepts-nothing:"
@@ -256,6 +257,7 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     }
   }
   for (const [key, bundle] of bundles) {
+    if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
@@ -446,6 +448,19 @@ export const declare = Effect.fnUntraced(function*(
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ) {
+  if (declaration._tag === "InitScript" && declaration.webSocket !== undefined && scope._tag === "UserContext") {
+    const context = state.contexts.get(scope.context)
+    if (context !== undefined) {
+      context.webSocketDeclarations = (context.webSocketDeclarations ?? 0) + 1
+      yield* Scope.addFinalizer(
+        yield* Effect.scope,
+        Effect.sync(() => {
+          if (context.webSocketDeclarations === 1) delete context.webSocketDeclarations
+          else if (context.webSocketDeclarations !== undefined) context.webSocketDeclarations--
+        })
+      )
+    }
+  }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
   const registrationContext = yield* Effect.context<never>()

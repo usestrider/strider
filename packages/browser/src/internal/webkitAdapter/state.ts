@@ -65,6 +65,14 @@ export interface PageEntry {
 }
 
 export interface TargetEntry {
+  webSocketEnded?: ((realm: L1Target.RealmId, reason: L1Target.CloseReason) => void) | undefined
+  webSocketConsole?:
+    | ((
+      message: import("../../webkit-stock-protocol/Console.ts").ConsoleMessage,
+      worker: WorkerEntry | undefined
+    ) => boolean)
+    | undefined
+
   readonly targetId: string
   readonly session: ProtocolClient.Session
   readonly page: PageEntry

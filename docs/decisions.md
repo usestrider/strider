@@ -1446,3 +1446,14 @@ reviewing generated results rather than committed snapshot diffs. Generated code
 Rejected: per-module index fragments, which keep redundant output; per-class matrix files, which still couple
 concurrent Locator or Page features; and post-merge generation, which delays validation and needs privileged writes
 unavailable to fork PRs.
+
+## Explicit script WebSocket routing
+
+Context WebSocket mocking requires explicit `implementation: "script"` consent and replaces only the main-world
+constructor. The protocols observe messages but cannot pause or replace them; HTTP interception and a Node-side
+socket cannot preserve this browser contract. Directional handlers are installed before open, while passive
+observation never changes forwarding. Native passthrough uses the originating realm's saved browser constructor.
+Cross-realm capacity is conservative: issued unused credits remain charged, permitting early overflow when credit
+is reserved elsewhere, because an asynchronous host grant cannot precede a synchronous mutable-buffer snapshot.
+Silent emulation, speculative per-realm capacity, blocking dialogs and always-on instrumentation were rejected.
+Optional installation follows [Pay for what you use](#pay-for-what-you-use).
