@@ -382,6 +382,7 @@ export const contents = (
               yield* add.click()
               yield* add.click()
               yield* frame.locator("#count").pipe(Expect.toHaveText("2"))
+              assert.isTrue(yield* frame.getByLabel("Name").isEditable)
               yield* frame.getByLabel("Name").fill(`typed in ${id}`)
               assert.strictEqual(yield* frame.getByLabel("Name").readValue, `typed in ${id}`)
               assert.strictEqual(yield* frame.getByRole("heading").readText, id === "same" ? "Same" : "Cross")

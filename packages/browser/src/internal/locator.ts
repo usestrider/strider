@@ -353,6 +353,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       (value) => Option.fromNullishOr(value as string | null)
     )
   }
+  get isEditable() {
+    return this.readOne("Locator.isEditable", { _tag: "Editable" }, (value) => value as boolean)
+  }
   get isEnabled() {
     return this.readOne("Locator.isEnabled", { _tag: "Enabled" }, (value) => value as boolean)
   }

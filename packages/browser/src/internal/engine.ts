@@ -139,6 +139,7 @@ export type Read =
   | { readonly _tag: "Value" }
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
+  | { readonly _tag: "Editable" }
   | { readonly _tag: "Enabled" }
   | { readonly _tag: "Checked"; readonly followLabel?: boolean; readonly uncheck?: boolean }
 
@@ -2084,6 +2085,8 @@ export function engine(render: (root: SnapNode) => string) {
         return { _tag: "Read", value: element.outerHTML }
       case "Attribute":
         return { _tag: "Read", value: element.getAttribute(request.read.name) }
+      case "Editable":
+        return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {

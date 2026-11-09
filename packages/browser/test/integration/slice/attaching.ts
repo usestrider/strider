@@ -143,6 +143,7 @@ export const attaching = (
               yield* tab.getByRole("button", { name: "Refresh" }).click()
               yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
               assert.strictEqual(yield* blocked.hits, 1)
+              assert.isFalse(yield* tab.getByRole("heading").isEditable)
               kept = tab
             }))
             // Released: what the grant gave fails, and the page stays open
@@ -151,6 +152,8 @@ export const attaching = (
             assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const selected = reasonOf(yield* Effect.exit(kept!.getByRole("heading").selectText()))
             assert.deepStrictEqual((selected as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const editable = reasonOf(yield* Effect.exit(kept!.getByRole("heading").isEditable))
+            assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
@@ -163,6 +166,7 @@ export const attaching = (
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
               assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
+              assert.isFalse(yield* reader.getByRole("heading").isEditable)
               const tab = yield* first.control
               yield* tab.activate
               yield* tab.getByRole("button", { name: "Refresh" }).click()

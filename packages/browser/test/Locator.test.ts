@@ -440,3 +440,39 @@ describe("Locator.blur", () => {
       assert.strictEqual(error.reason._tag, "Unsupported")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Locator.isEditable", () => {
+  it.effect("reads through the engine without dispatching input", () => {
+    let reads = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("editable-realm" as Target.RealmId),
+        dispatchInput: () => Effect.die("a read must never dispatch input"),
+        evaluate: (_realm, call) =>
+          Effect.sync(() => {
+            if (call.functionDeclaration === Engine.install) {
+              return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+            }
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            assert(request.op === "read" && request.read._tag === "Editable")
+            reads++
+            return {
+              _tag: "Value",
+              value: { type: "string", value: JSON.stringify({ _tag: "Read", value: true }) }
+            } as const
+          })
+      })))
+    )
+    return Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.isTrue(yield* page.locator("#field").isEditable)
+      assert.strictEqual(reads, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  })
+})
