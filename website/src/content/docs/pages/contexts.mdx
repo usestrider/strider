@@ -46,6 +46,7 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
   const page = yield* Browser.newPage({
     emulation: {
       viewport: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+      extraHTTPHeaders: { "X-Tenant": "demo" },
       locale: "de-DE",
       timezone: "Europe/Berlin",
       geolocation: { latitude: 52.52, longitude: 13.405 },
@@ -76,6 +77,13 @@ It does not measure the window or document layout, and is available with inspect
 | [`focus`](/docs/tools/testing#concurrent-pages) | `"emulated"` makes every page behave as if focused, not on Firefox or WebKit; otherwise only one has focus, and `toBeFocused` fails on the rest |
 | [`keyboardLayout`](/docs/pages/actions#keys) | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
 | `eventLog`       | how many past events of each kind [`history`](/docs/events/events#history) keeps, for each page and for the context; 100 unless set |
+
+`emulation.extraHTTPHeaders` sends extra headers on navigation and subresource requests. A page's map replaces
+its previous map and merges over context headers; page values win when names match. `{}` retains context
+headers while clearing page-specific ones, and removal restores the previous map.
+Names are case-insensitive, values must be strings valid as HTTP field values, and invalid input fails with
+`InvalidInput`. Request route overrides take precedence; header order is not guaranteed. This setting works on
+Chromium, Firefox and launched stock WebKit; attached stock WebKit refuses it.
 
 A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
 applied. [`browser.capabilities`](/docs/browsers/choosing#capabilities) lists what a backend can do.

@@ -89,6 +89,12 @@ export const declarations = (
             yield* later.close()
             const first = yield* page.emulate({ viewport: { width: 400, height: 300 } })
             const latest = yield* page.emulate({ viewport: { width: 500, height: 400 } })
+            if (yield* supports("emulation.extraHTTPHeaders")) {
+              const headers = yield* page.emulate({ extraHTTPHeaders: { "x-viewport-check": "independent" } })
+              assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+              yield* headers.remove
+              assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+            }
             const contextLatest = yield* context.emulate({ viewport: { width: 800, height: 600 } })
             assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
             yield* first.remove
@@ -568,6 +574,94 @@ export const declarations = (
         }), timeout)
 
       // ── Emulation ──
+
+      it.effect("applies extra request headers and restores scoped replacements", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          const page = yield* Browser.newPage({
+            emulation: { extraHTTPHeaders: { "X-Strider": "context", "x-context": "yes" } }
+          })
+          const sibling = yield* page.context.newPage
+          const isolated = yield* Browser.newPage()
+          const read = (target: Page.Page) =>
+            target.evaluateInMainWorld(() =>
+              fetch("/headers").then((r) =>
+                r.json()
+              ) as Promise<Record<string, string>>
+            )
+          yield* sibling.goto(`${origin}/hello`)
+          assert.strictEqual((yield* read(sibling))["x-strider"], "context")
+          yield* isolated.goto(`${origin}/hello`)
+          assert.strictEqual((yield* read(isolated))["x-strider"], undefined)
+          const temporary = yield* isolated.context.emulate({ extraHTTPHeaders: { "x-temporary": "yes" } })
+          assert.strictEqual((yield* read(isolated))["x-temporary"], "yes")
+          yield* temporary.remove
+          assert.strictEqual((yield* read(isolated))["x-temporary"], undefined)
+          const registration = yield* page.emulate({ extraHTTPHeaders: { "X-Strider": "outer" } })
+          yield* page.goto(fixtureUrl(origin, "<img src=\"/hello?extra-header-resource\">"))
+          assert.strictEqual(
+            served.find((r) =>
+              r.path.includes("extra-header-resource")
+            )?.headers["x-strider"],
+            "outer"
+          )
+          assert.strictEqual(
+            served.find((r) =>
+              r.path.startsWith("/fixture") && r.path.includes("extra-header-resource")
+            )?.headers["x-strider"],
+            "outer"
+          )
+          assert.strictEqual((yield* read(page))["x-context"], "yes")
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* page.emulate({ extraHTTPHeaders: { "x-strider": "inner" } })
+            assert.strictEqual((yield* read(page))["x-strider"], "inner")
+          }))
+          assert.strictEqual((yield* read(page))["x-strider"], "outer")
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* page.emulate({ extraHTTPHeaders: {} })
+            assert.strictEqual((yield* read(page))["x-strider"], "context")
+          }))
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* page.route(`${origin}/headers`, () =>
+              Route.continueWith((request) =>
+                HttpClientRequest.setHeader(request, "x-strider", "route")
+              ))
+            assert.strictEqual((yield* read(page))["x-strider"], "route")
+          }))
+          assert.strictEqual((yield* read(sibling))["x-strider"], "context")
+          yield* registration.remove
+          assert.strictEqual((yield* read(page))["x-strider"], "context")
+          const older = yield* page.emulate({ extraHTTPHeaders: { "x-strider": "older" } })
+          const newer = yield* page.emulate({ extraHTTPHeaders: { "x-strider": "newer" } })
+          yield* older.remove
+          assert.strictEqual((yield* read(page))["x-strider"], "newer")
+          yield* newer.remove
+          assert.strictEqual((yield* read(page))["x-strider"], "context")
+          const contextRegistration = yield* page.context.emulate({ extraHTTPHeaders: { "x-strider": "new-context" } })
+          const later = yield* page.context.newPage
+          yield* later.goto(`${origin}/hello`)
+          assert.strictEqual((yield* read(later))["x-strider"], "new-context")
+          yield* contextRegistration.remove
+          assert.strictEqual((yield* read(later))["x-strider"], "context")
+        }), timeout)
+
+      it.effect("rejects invalid extra headers before applying any field", () =>
+        Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const width = yield* page.evaluateInMainWorld(() =>
+            innerWidth
+          )
+          const error = yield* Effect.flip(
+            page.emulate({ viewport: { width: 640, height: 480 }, extraHTTPHeaders: { "bad name": "value" } })
+          )
+          assert(Declaration.isDeclarationError(error) && error.reason._tag === "InvalidInput")
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              innerWidth
+            ),
+            width
+          )
+        }), timeout)
 
       it.effect("runs call site 6: a context created with a locale", () =>
         Effect.gen(function*() {

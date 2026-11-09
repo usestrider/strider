@@ -255,6 +255,10 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const viewport = reasonOf(yield* Effect.exit(tab.emulate({ viewport: { width: 640, height: 480 } })))
             assert.strictEqual(viewport?.reason?.capability, "emulation.viewport")
             assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const headers = reasonOf(yield* Effect.exit(tab.emulate({ extraHTTPHeaders: { "x-test": "value" } })))
+            assert.strictEqual(headers?.reason?._tag, "Unsupported")
+            assert.strictEqual(headers?.reason?.capability, "emulation.extraHTTPHeaders")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
             // Refused before anything was sent
             const clicked = reasonOf(yield* Effect.exit(tab.getByRole("button", { name: "Refresh" }).click()))
             assert.strictEqual(clicked?.reason?.capability, "input.native")

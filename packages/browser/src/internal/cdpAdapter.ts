@@ -149,6 +149,7 @@ export const capabilities = (
       entry("emulation.network.throttling", "supported"),
       entry("emulation.cpuSlowdown", "supported"),
       entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
+      entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
       entry("screenshot.cssScale", "supported"),
