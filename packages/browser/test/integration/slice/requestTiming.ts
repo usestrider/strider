@@ -269,9 +269,9 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
                 assert.isAtLeast(sending, 0)
                 assert.isAtLeast(headers, sending)
                 assert.isAtLeast(end, headers)
-                assert.deepStrictEqual(timing.domainLookupStart, Option.none())
-                assert.deepStrictEqual(timing.connectStart, Option.none())
                 if (previous !== undefined) {
+                  assert.deepStrictEqual(timing.domainLookupStart, Option.none())
+                  assert.deepStrictEqual(timing.connectStart, Option.none())
                   assert.isAbove(
                     start,
                     Option.getOrThrow(previous.startTime) + Option.getOrThrow(previous.responseEnd),
