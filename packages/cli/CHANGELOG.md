@@ -1,5 +1,11 @@
 # @usestrider/cli
 
+## 0.3.1
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.8.0.
+
 ## 0.3.0
 
 ### Breaking changes

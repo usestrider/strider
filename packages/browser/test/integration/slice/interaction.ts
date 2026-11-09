@@ -4699,6 +4699,74 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "expects computed CSS with exact strings, regex flags and pseudo-elements",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<style>#css { color: rgb(12, 34, 56); --label: Alpha  Beta } #css::before { content: "before" }</style><p id="css">CSS</p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const target = page.locator("#css")
+              yield* Expect.toHaveCSS(target, "color", "rgb(12, 34, 56)")
+              yield* target.pipe(Expect.toHaveCSS("--label", "Alpha  Beta"))
+              yield* target.pipe(Expect.toHaveCSS("--label", /^alpha  beta$/ig))
+              yield* target.pipe(Expect.toHaveCSS("content", "\"before\"", { pseudo: "before" }))
+              yield* target.pipe(Expect.toHaveCSS("--label", "Alpha Beta", { not: true }))
+              yield* target.pipe(Expect.toHaveCSS("color", " rgb(12, 34, 56) ", { not: true }))
+              const error = yield* target.pipe(
+                Expect.toHaveCSS("color", "red"),
+                Deadline.within("1500 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
+              assert.deepStrictEqual(error.last, Option.some(error.history[0]!))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("retries computed CSS after an initial mismatch, including negation", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<p id="css" style="color: red">CSS</p><button onclick="setTimeout(() => document.getElementById('css').style.color = 'blue', 300)">Change</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.getByRole("button").click()
+            yield* page.locator("#css").pipe(Expect.toHaveCSS("color", "rgb(255, 0, 0)", { not: true }))
+            yield* page.reload()
+            yield* page.getByRole("button").click()
+            yield* page.locator("#css").pipe(Expect.toHaveCSS("color", "rgb(0, 0, 255)"))
+          }))
+        }), timeout)
+
+      it.effect(
+        "requires one CSS match even under negation and retains match-count evidence",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<p>One</p><p>Two</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              for (const [selector, matches] of [["#missing", 0], ["p", 2]] as const) {
+                const error = yield* page.locator(selector).pipe(
+                  Expect.toHaveCSS("color", "red", { not: true }),
+                  Deadline.within("1500 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert.deepStrictEqual(error.history.map((entry) => entry.value), [{ matches }])
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "expects raw classes, ordered class arrays and class changes with failure evidence",
         () =>
           Effect.gen(function*() {

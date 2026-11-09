@@ -5,6 +5,7 @@
  * `serialization: "deep"`.
  */
 import * as Cause from "effect/Cause"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
@@ -17,6 +18,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
@@ -322,6 +324,11 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
 export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.RealmId, call: Adapter.EvaluationCall) {
   const realm = yield* realmOf(state, id)
   const on = Protocol.on(realm.target.session)
+  const deadline = yield* ProtocolClient.CommandDeadline
+  const timeout = Option.isSome(deadline)
+    ? Duration.millis(yield* BrowserClock.left(deadline.value))
+    : yield* Protocol.CommandTimeout
+  const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
   const failed = Kit.realmFailure(id, () => realm.ended)
   // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
   // so its object ids are recorded before interruption can skip ownership registration.
@@ -392,7 +399,31 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
               serializationOptions: call.result === "value"
                 ? { serialization: "deep", maxDepth: 64 }
                 : { serialization: "idOnly" }
-            }).pipe(on, Effect.mapError(failed), restore)
+            }).pipe(
+              on,
+              Effect.catch((error) => {
+                const reason = error.reason
+                if (
+                  reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
+                  reason.code !== -32000 || reason.description !== "Inspected target navigated or closed"
+                ) return Effect.fail(error)
+                // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
+                // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
+                // Keep the command's original deadline while those lifecycle events catch up.
+                return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                  BrowserClock.until(at),
+                  Effect.flatMap((ended) =>
+                    Effect.fail(
+                      Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                        reason: new Protocol.NoReply({ method: reason.method, timeout })
+                      })
+                    )
+                  )
+                )
+              }),
+              Effect.mapError(failed),
+              restore
+            )
           )
         )
       if (call.result === "value" && call.releaseResult === true) {
