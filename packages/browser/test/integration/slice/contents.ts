@@ -232,11 +232,18 @@ export const contents = (
             window.scrollTo(0, 100)
           })
           assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 69, y: -21, width: 20, height: 30 }))
-          yield* page.evaluateInMainWorld(() => {
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const reference = document.createElement("div")
+            reference.style.cssText = "position:absolute;left:69px;top:79px;width:20px;height:30px"
+            document.body.append(reference)
             document.body.style.transform = "scale(2)"
+            const r = reference.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
           })
-          const refused = reasonOf(yield* Effect.exit(target.boundingBox))
-          assert.strictEqual(refused?.reason?._tag, "Unsupported")
+          const transformed = Option.getOrThrow(yield* target.boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(transformed[key], expected[key], .05, key)
+          }
           yield* page.evaluateInMainWorld(() => {
             document.body.style.transform = "none"
             document.querySelector<HTMLElement>("#outer")!.style.display = "none"
@@ -244,7 +251,7 @@ export const contents = (
           assert.deepStrictEqual(yield* target.boundingBox, Option.none())
         }), timeout)
 
-      it.effect("refuses frame geometry scaled by a shadow wrapper around a slotted frame", () =>
+      it.effect("maps frame geometry scaled by a shadow wrapper around a slotted frame", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* Browser.newPage()
@@ -262,17 +269,16 @@ export const contents = (
           })
           const target = page.frame(page.locator("#slotted")).locator("#target")
           // The frame's content is drawn at (20, 20) and 40px wide; adding the iframe's origin alone gives (10, 10).
-          const exit = yield* Effect.exit(target.boundingBox)
-          assert.strictEqual(reasonOf(exit)?.reason?._tag, "Unsupported", JSON.stringify(exit))
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 20, y: 20, width: 40, height: 40 }))
         }), timeout)
 
-      it.effect("refuses slotted frame geometry scaled inside a closed shadow root", () =>
+      it.effect("maps slotted frame geometry scaled and zoomed inside a closed shadow root", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* Browser.newPage()
           const child = fixtureUrl(
             origin,
-            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:rgb(255,0,0)"></div></body>`
           )
           yield* page.goto(fixtureUrl(
             origin,
@@ -280,12 +286,31 @@ export const contents = (
           ))
           yield* page.evaluateInMainWorld(() => {
             document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
-              `<div style="position:absolute;left:0;top:0;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
+              `<div style="position:absolute;left:0;top:0;zoom:1.25;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
           })
           const target = page.frame(page.locator("#slotted")).locator("#target")
-          // The frame's content is drawn at (20, 20) and 40px wide; adding the iframe's origin alone gives (10, 10).
-          const exit = yield* Effect.exit(target.boundingBox)
-          assert.strictEqual(reasonOf(exit)?.reason?._tag, "Unsupported", JSON.stringify(exit))
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          const region = pngRegion(yield* page.screenshot(), { x: 0, y: 0, width: 100, height: 100 })
+          const red = region.flatMap((pixel, index) =>
+            pixel[0]! > 240 && pixel[1]! < 10 && pixel[2]! < 10 ? [{ x: index % 100, y: Math.floor(index / 100) }] : []
+          )
+          const painted = {
+            x: Math.min(...red.map((p) =>
+              p.x
+            )),
+            y: Math.min(...red.map((p) =>
+              p.y
+            )),
+            width: Math.max(...red.map((p) => p.x)) - Math.min(...red.map((p) => p.x)) +
+              1,
+            height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
+          }
+          // Stock WebKit paints iframe contents differently from coincident slotted light-DOM boxes.
+          // Native paint is the reference here; rasterized edges may differ by one pixel.
+          assert.isAbove(red.length, 0)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], painted[key], key === "x" || key === "y" ? 1 : .0001, key)
+          }
         }), timeout)
 
       for (
@@ -297,6 +322,23 @@ export const contents = (
             name: "3D and perspective",
             css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
             world: "perspective:600px;perspective-origin:0 0"
+          },
+          {
+            name: "zoomed preserved 3D",
+            css: "zoom:1.5;transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world:
+              "zoom:1.25;transform:rotateY(20deg);transform-style:preserve-3d;perspective:600px;perspective-origin:0 0"
+          },
+          {
+            name: "zoomed preserved 3D across camera plane",
+            css: "zoom:1.25;transform:translateZ(120px) rotateY(75deg)",
+            world: "transform-style:preserve-3d;perspective:100px;perspective-origin:0 0"
+          },
+          {
+            name: "grouped 3D flattening",
+            css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world:
+              "transform:rotateY(20deg);transform-style:preserve-3d;opacity:.8;perspective:600px;perspective-origin:0 0"
           }
         ]
       ) {
@@ -325,10 +367,36 @@ export const contents = (
                 )
               }
               // The reference is rendered by the browser in the same parent transform, without a frame boundary.
-              const expected = yield* page.evaluateInMainWorld(() => {
-                const r = document.querySelector("#expected")!.getBoundingClientRect()
-                return { x: r.x, y: r.y, width: r.width, height: r.height }
-              })
+              const expected = rule.name.includes("across camera plane")
+                ? yield* page.evaluateInMainWorld(() => {
+                  // The corner hull is the pinned quad contract; Firefox's DOMRect additionally clips
+                  // at its coordinate-system limits when the rectangle crosses the camera plane.
+                  const offset = 4 + Math.floor(3 * 1.25) / 1.25, angle = 75 * Math.PI / 180
+                  const points = [10, 40].flatMap((x) =>
+                    [20, 60].map((y) => {
+                      const cx = x + offset, cy = y + offset, w = 1 - (120 - Math.sin(angle) * cx) * 1.25 / 100
+                      return {
+                        x: 20 + (40 * 1.25 + Math.cos(angle) * cx * 1.25) / w - scrollX,
+                        y: 30 + (60 * 1.25 + cy * 1.25) / w - scrollY
+                      }
+                    })
+                  )
+                  const x = Math.min(...points.map((p) => p.x)), y = Math.min(...points.map((p) => p.y))
+                  return {
+                    x,
+                    y,
+                    width: Math.max(...points.map((p) => p.x)) - x,
+                    height: Math.max(...points.map((p) => p.y)) - y
+                  }
+                })
+                : yield* page.evaluateInMainWorld(() => {
+                  const r = document.querySelector("#expected")!.getBoundingClientRect()
+                  return { x: r.x, y: r.y, width: r.width, height: r.height }
+                })
+              const direct = Option.getOrThrow(yield* page.locator("#expected").boundingBox)
+              for (const key of ["x", "y", "width", "height"] as const) {
+                assert.closeTo(direct[key], expected[key], .05, `direct ${rule.name} ${key}, scrolled=${scrolled}`)
+              }
               const box = Option.getOrThrow(yield* target.boundingBox)
               for (const key of ["x", "y", "width", "height"] as const) {
                 assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
@@ -344,13 +412,13 @@ export const contents = (
           const targetStyle =
             "position:absolute;left:10px;top:20px;width:30px;height:40px;transform:rotate(12deg);transform-origin:0 0"
           const child = fixtureUrl(
-            crossSite,
+            origin,
             `<body style="margin:0"><div id="target" style="${targetStyle}"></div></body>`
           )
           const innerStyle =
             "position:absolute;left:30px;top:40px;width:100px;height:80px;border:2px solid;padding:3px;transform:rotate(-25deg) scale(1.2,.8);transform-origin:0 0;box-sizing:content-box"
           const middle = fixtureUrl(
-            origin,
+            crossSite,
             `<body style="margin:0"><iframe id="inner" style="${innerStyle}" src="${child}"></iframe></body>`
           )
           const outerStyle =
@@ -370,7 +438,62 @@ export const contents = (
             return { x: r.x, y: r.y, width: r.width, height: r.height }
           })
           const box = Option.getOrThrow(yield* target.boundingBox)
-          for (const key of ["x", "y", "width", "height"] as const) assert.closeTo(box[key], expected[key], .05, key)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
+        }), timeout)
+
+      it.effect("maps fractional inline bounding geometry through a rotated cross-origin frame", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* Browser.newPage()
+          const text = "<span id=\"target\" style=\"font:13.3px serif\">fractional glyphs</span>"
+          const child = fixtureUrl(crossSite, `<body style="margin:0">${text}</body>`)
+          const style =
+            "position:absolute;left:70px;top:90px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform:rotate(33deg) skew(9deg);transform-origin:0 0"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
+                text.replace("id=\"target\"", "id=\"expected\"")
+              }</div></div></body>`
+            )
+          )
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* page.frame(page.locator("#frame")).locator("#target").boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
+        }), timeout)
+
+      it.effect("maps native SVG bounding corners through a transformed frame", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* Browser.newPage()
+          const svg =
+            "<svg width=\"200\" height=\"150\"><rect id=\"target\" x=\"13\" y=\"17\" width=\"30\" height=\"20\" transform=\"rotate(23 13 17)\" fill=\"red\"/></svg>"
+          const child = fixtureUrl(crossSite, `<body style="margin:0">${svg}</body>`)
+          const style =
+            "position:absolute;left:80px;top:90px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform:rotate(-17deg) scale(.8,1.2);transform-origin:0 0"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
+                svg.replace("id=\"target\"", "id=\"expected\"")
+              }</div></div></body>`
+            )
+          )
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* page.frame(page.locator("#frame")).locator("#target").boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
         }), timeout)
 
       // ── Evaluation and handles ──
@@ -387,7 +510,9 @@ export const contents = (
               ))
             ) {
               assert.strictEqual(
-                yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
+                yield* page.evaluateInMainWorld(() =>
+                  (window as unknown as { secret: number }).secret
+                ),
                 42
               )
               return
@@ -411,7 +536,8 @@ export const contents = (
             assert.deepStrictEqual(value.nested, { list: [1, "two", null] })
             assert.strictEqual(
               yield* page.evaluate(
-                (a: number, b: number) => a + b,
+                (a: number, b: number) =>
+                  a + b,
                 1,
                 2
               ),
@@ -1285,7 +1411,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
