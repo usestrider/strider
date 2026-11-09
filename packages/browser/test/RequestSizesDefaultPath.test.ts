@@ -68,7 +68,7 @@ const setup = Effect.fnUntraced(function*() {
       }
     }
   })
-  const add = (key: string, enabled: boolean, kind: "page" | "iframe" = "page") => {
+  const add = (key: string, enabled: boolean, kind: "page" | "iframe" | "worker" = "page") => {
     const session = { key: key as Protocol.SessionKey } as ProtocolClient.Session
     sessions.set(key, session)
     const context = {
@@ -166,4 +166,16 @@ it.effect("keeps counting during unconfirmed disposal, which may fail", () =>
     assert.strictEqual(on.context.requestSizes!.get(on.hop)!.decoded, 131)
     assert.deepStrictEqual(world.decodes, [method, method])
     assert.deepStrictEqual(world.lost, [])
+  }).pipe(Effect.scoped))
+
+it.effect("keeps native decoded bytes for page-attributed worker sessions", () =>
+  Effect.gen(function*() {
+    const world = yield* setup()
+    const on = world.add("worker", true, "worker")
+    world.send(on, 1, chunk(65))
+    assert.strictEqual(on.ingest.queuedEvents, 1)
+    yield* world.ingestion.worker.pipe(Effect.forkScoped)
+    yield* world.ingestion.drained(on.ingest)
+    assert.strictEqual(on.context.requestSizes!.get(on.hop)!.decoded, 65)
+    assert.deepStrictEqual(world.decodes, [method])
   }).pipe(Effect.scoped))
