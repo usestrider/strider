@@ -51,6 +51,11 @@
           ]
         },
         {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
+        },
+        {
           "name": "isolatedWorlds",
           "status": "supported",
           "limitations": []
@@ -499,6 +504,11 @@
           "limitations": [
             "proxy challenges only; one credential submission per request"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -957,6 +967,13 @@
           "status": "partial",
           "limitations": [
             "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+          ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "partial",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
           ]
         },
         {
@@ -1490,6 +1507,13 @@
           "status": "unsupported",
           "limitations": [
             "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+          ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "partial",
+          "limitations": [
+            "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
           ]
         },
         {
@@ -2029,6 +2053,11 @@
           "limitations": [
             "stock WebKit does not support proxy credentials"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",
@@ -2603,6 +2632,11 @@
           "limitations": [
             "stock WebKit does not support proxy credentials"
           ]
+        },
+        {
+          "name": "boundingBox.frameTransforms",
+          "status": "supported",
+          "limitations": []
         },
         {
           "name": "isolatedWorlds",

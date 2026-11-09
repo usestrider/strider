@@ -43,6 +43,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as WebAuthn from "../WebAuthn.ts"
 import * as BrowserClock from "./browserClock.ts"
+import type * as Geometry from "./geometry.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -955,6 +956,8 @@ export interface AdapterConnection {
    * handles of a realm on BiDi in one `script.disown`, and any other one at a time (Q132).
    */
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
+  /** Releases temporary node bindings where the native protocol holds them as remote objects. */
+  readonly releaseNodes: (nodes: ReadonlyArray<NodeBinding>) => Effect.Effect<void>
 
   // Input
   /**
@@ -969,6 +972,8 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */
   readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
+  /** Geometry includes its coordinate document; native queries can cross same-process frame boundaries. */
+  readonly geometry: (node: NodeBinding, kind: Geometry.Kind) => Effect.Effect<Geometry.Result, AdapterError>
 
   // Obligations and declarations
   readonly resolve: (obligation: ObligationId, decision: Decision) => Effect.Effect<void, AdapterError>
