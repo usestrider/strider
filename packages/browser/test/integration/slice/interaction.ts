@@ -4698,6 +4698,309 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects exact computed roles and retries role mutations", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<button id="implicit" hidden>Save</button><div id="explicit" role="switch checkbox"></div><div id="later"></div><custom-control id="no-role"></custom-control><div id="ordinary"></div><span class="many"></span><span class="many"></span>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#implicit").pipe(Expect.toHaveRole("button"))
+            yield* Expect.toHaveRole(page.locator("#explicit"), "switch")
+            yield* page.locator("#ordinary").pipe(Expect.toHaveRole("generic"))
+            const waiting = yield* page.locator("#later").pipe(Expect.toHaveRole("button"), Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => document.querySelector("#later")!.setAttribute("role", "button"), 100)
+            })
+            yield* Fiber.join(waiting)
+            for (
+              const [selector, role, observed] of [
+                ["#explicit", "checkbox", "switch"],
+                ["#implicit", "Button", "button"],
+                ["#no-role", "button", ""],
+                ["#absent", "button", { matches: 0 }],
+                [".many", "button", { matches: 2 }]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toHaveRole(role),
+                Deadline.within("300 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.condition, `to have the role ${JSON.stringify(role)}`)
+              assert(error.history.length > 0)
+              assert.deepStrictEqual(error.history.at(-1)!.value, observed)
+              assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
+            }
+          }))
+        }), timeout)
+
+      it.effect("computes roles with presentational conflict resolution and inheritance", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<p id="d">Details</p><h2 id="described" role="none" aria-describedby="d">Title</h2><button id="focusable" role="none switch">Go</button><ul role="none"><li id="owned">Item</li></ul><h3 id="decimal-tabindex" role="none" tabindex="0.5" data-tabindex-case>Decimal</h3>
+            <h3 id="trailing-tabindex" role="none" tabindex="2abc" data-tabindex-case>Trailing</h3>
+            <h3 id="ascii-tabindex" role="none" tabindex="&#9;&#10;&#12;&#13; +2abc" data-tabindex-case>ASCII</h3>
+            <h3 id="negative-tabindex" role="none" tabindex="-2tail" data-tabindex-case>Negative</h3>
+            <h3 id="nbsp-tabindex" role="none" tabindex="&#160;2" data-tabindex-case>NBSP</h3>
+            <h3 id="empty-tabindex" role="none" tabindex="" data-tabindex-case>Empty</h3>
+            <h3 id="blank-tabindex" role="none" tabindex="&#9; " data-tabindex-case>Blank</h3>
+            <h3 id="sign-tabindex" role="none" tabindex="+" data-tabindex-case>Sign</h3>
+            <h3 id="sign-space-tabindex" role="none" tabindex="- 2" data-tabindex-case>Sign space</h3>
+            <h3 id="no-digits-tabindex" role="none" tabindex=".5" data-tabindex-case>No digits</h3>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            // Native parsing and focus are checked independently of the role expectation.
+            const focus = yield* page.evaluateInMainWorld(() =>
+              Array.from(document.querySelectorAll<HTMLElement>("[data-tabindex-case]"), (element) => {
+                element.focus()
+                const focused = document.activeElement === element
+                element.blur()
+                return { id: element.id, tabIndex: element.tabIndex, focused }
+              })
+            )
+            assert.deepStrictEqual(focus, [
+              { id: "decimal-tabindex", tabIndex: 0, focused: true },
+              { id: "trailing-tabindex", tabIndex: 2, focused: true },
+              { id: "ascii-tabindex", tabIndex: 2, focused: true },
+              { id: "negative-tabindex", tabIndex: -2, focused: true },
+              ...["nbsp", "empty", "blank", "sign", "sign-space", "no-digits"].map((id) => ({
+                id: `${id}-tabindex`,
+                tabIndex: -1,
+                focused: false
+              }))
+            ])
+            for (const { id, focused } of focus) {
+              yield* page.locator(`#${id}`).pipe(
+                Expect.toHaveRole(focused ? "heading" : "none"),
+                Deadline.within("1 second")
+              )
+            }
+            // A global ARIA attribute or focusability overrides a presentational role with the implicit one, and
+            // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
+            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
+            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
+            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+            yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
+            yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
+            const snapshot = yield* page.locator("#described").snapshot()
+            assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "heading" })
+          }))
+        }), timeout)
+
+      it.effect("shares presentation boundaries with role queries and snapshots", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<p id="description">Details</p>
+            <ul role="presentation"><li id="plain">Flattened<button>Nested button</button><ul><li id="nested">Nested item</li></ul></li><li id="explicit" role="treeitem">Explicit</li><li id="focus" tabindex="-1">Focusable</li><li id="global" aria-describedby="description">Described</li><li id="local" aria-level="2">Local</li></ul>
+            <ul role="presentation" aria-label="Named list"><li id="named">Named child</li></ul>
+            <table role="none"><caption id="caption">Flat caption</caption><tbody><tr><td id="cell">Flat cell</td></tr></tbody></table>
+            <h2 id="local-heading" role="presentation" aria-level="2">Flat heading</h2>
+            <p id="prohibited" role="none" aria-label="Ignored">Paragraph</p>
+            <h2 id="deprecated" role="none" aria-disabled="true">Deprecated global</h2>
+            <button id="disabled" disabled tabindex="0" role="none">Disabled</button>
+            <h2 id="invalid-tabindex" tabindex="invalid" role="none">Invalid tabindex</h2>
+            <fieldset id="role-fieldset" disabled><legend><button id="legend-control" role="none" tabindex="0">Legend control</button></legend><button id="fieldset-control" role="none" tabindex="0">Fieldset control</button><x-role-control id="fieldset-custom" role="none" tabindex="0"></x-role-control></fieldset>
+            <x-role-control id="custom-disabled" disabled role="none" tabindex="0"></x-role-control>
+            <x-role-control id="custom-enabled" role="none" tabindex="0"></x-role-control>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.evaluateInMainWorld(() => {
+              customElements.define(
+                "x-role-control",
+                class extends HTMLElement {
+                  static formAssociated = true
+                  constructor() {
+                    super()
+                    this.attachInternals()
+                  }
+                }
+              )
+            })
+            const disabled = yield* page.evaluateInMainWorld(() =>
+              ["legend-control", "fieldset-control", "fieldset-custom", "custom-disabled", "custom-enabled"].map((id) =>
+                document.getElementById(id)!.matches(":disabled")
+              )
+            )
+            assert.deepStrictEqual(disabled, [false, true, true, true, false])
+            for (
+              const [id, role] of [
+                ["plain", "presentation"],
+                ["nested", "listitem"],
+                ["explicit", "treeitem"],
+                ["focus", "listitem"],
+                ["global", "listitem"],
+                ["local", "presentation"],
+                ["named", "listitem"],
+                ["cell", "none"],
+                ["caption", "none"],
+                ["local-heading", "presentation"],
+                ["prohibited", "none"],
+                ["deprecated", "none"],
+                ["disabled", "none"],
+                ["invalid-tabindex", "none"],
+                ["legend-control", "button"],
+                ["fieldset-control", "none"],
+                ["fieldset-custom", "none"],
+                ["custom-disabled", "none"],
+                ["custom-enabled", ""]
+              ] as const
+            ) {
+              yield* page.locator(`#${id}`).pipe(Expect.toHaveRole(role), Deadline.within("1 second"))
+            }
+            yield* page.getByRole("listitem").pipe(Expect.toHaveCount(4))
+            yield* page.getByRole("button", { name: "Nested button" }).pipe(Expect.toHaveCount(1))
+            yield* page.getByRole("treeitem", { name: "Explicit" }).pipe(Expect.toHaveCount(1))
+            const snapshot = yield* page.snapshot()
+            const nodes = [...snapshot.refs.values()]
+            assert.strictEqual(
+              nodes.filter((node) => node.role._tag === "Aria" && node.role.role === "listitem").length,
+              4
+            )
+            assert.isFalse(nodes.some((node) =>
+              node.role._tag === "Aria" && ["cell", "row", "rowgroup", "table", "heading"].includes(node.role.role)
+            ))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#plain")!.parentElement!.setAttribute("aria-describedby", "description")
+            })
+            yield* page.locator("#plain").pipe(Expect.toHaveRole("listitem"))
+            const changed = yield* page.locator("#plain").snapshot()
+            assert.deepStrictEqual(changed.root.role, { _tag: "Aria", role: "listitem" })
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLFieldSetElement>("#role-fieldset")!.disabled = false
+              document.querySelector("#custom-enabled")!.setAttribute("disabled", "")
+            })
+            yield* page.locator("#fieldset-control").pipe(Expect.toHaveRole("button"))
+            yield* page.locator("#fieldset-custom").pipe(Expect.toHaveRole(""))
+            yield* page.locator("#custom-enabled").pipe(Expect.toHaveRole("none"))
+          }))
+        }), timeout)
+      it.effect(
+        "expects accessible names with normalized strings, regex flags and typed evidence",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<span id="label" hidden>  Save   changes </span><button id="named" aria-labelledby="label">Ignored</button><button id="hidden" hidden aria-label="Secret"></button><label for="field">Email address</label><input id="field"><button class="many">One</button><button class="many">Two</button>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const named = page.locator("#named")
+              yield* named.pipe(Expect.toHaveAccessibleName("  Sa\u200bve\n cha\u00adnges  "))
+              yield* Expect.toHaveAccessibleName(named, /save changes/, { ignoreCase: true })
+              yield* named.pipe(Expect.toHaveAccessibleName(/SAVE CHANGES/i))
+              yield* named.pipe(Expect.toHaveAccessibleName("SAVE CHANGES", { ignoreCase: true }))
+              yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleName(""))
+              yield* page.getByRole("button", { name: "Secret", includeHidden: true }).pipe(
+                Expect.toHaveAccessibleName("")
+              )
+              yield* page.locator("#field").pipe(Expect.toHaveAccessibleName("Email address"))
+              // Wait for a real mismatching engine round before changing the label.
+              const impl = named as LocatorImpl
+              assert(impl instanceof LocatorImpl)
+              const adapter = impl.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              const initial = yield* Deferred.make<void>()
+              const evaluate: typeof original = (realm, call) =>
+                original(realm, call).pipe(
+                  Effect.tap((result) => {
+                    const arg = call.arguments[0]
+                    if (
+                      call.functionDeclaration !== Engine.run || arg?._tag !== "Value" || arg.value.type !== "string"
+                    ) {
+                      return Effect.void
+                    }
+                    const request = JSON.parse(arg.value.value) as Engine.Request
+                    if (request.op !== "expect" || request.expectation._tag !== "AccessibleName") return Effect.void
+                    assert(result._tag === "Value" && result.value.type === "string")
+                    const response = JSON.parse(result.value.value) as Engine.Response
+                    if (response._tag !== "Expected" || response.passed) return Effect.void
+                    assert.strictEqual(response.observed, "Save changes")
+                    return Deferred.succeed(initial, undefined)
+                  })
+                )
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => Object.assign(adapter, { evaluate })),
+                  () => Effect.sync(() => Object.assign(adapter, { evaluate: original }))
+                )
+                const pending = yield* named.pipe(Expect.toHaveAccessibleName("Updated"), Effect.forkChild)
+                yield* Effect.raceFirst(
+                  Deferred.await(initial),
+                  Fiber.join(pending).pipe(
+                    Effect.andThen(Effect.die(new Error("Name expectation passed before mutation")))
+                  )
+                )
+                assert.strictEqual(pending.pollUnsafe(), undefined)
+                yield* page.evaluateInMainWorld(() => {
+                  document.querySelector("#label")!.textContent = "Updated"
+                })
+                yield* Fiber.join(pending)
+              }))
+              for (
+                const [locator, expected, options, observed] of [
+                  [named, /updated/i, { ignoreCase: false }, "Updated"],
+                  [named, "updated", undefined, "Updated"],
+                  [named, /Updated  /, undefined, "Updated"],
+                  [page.locator("#missing"), "", undefined, { matches: 0 }],
+                  [page.locator(".many"), /One/, undefined, { matches: 2 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleName(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                // A transport deadline can precede every response; immediate engine checks cover exact observations.
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects no accessible name where the element's role prohibits naming",
+        () =>
+          Effect.gen(function*() {
+            // Roles such as generic, paragraph and code cannot be named, so their author label is not their name.
+            const { url } = yield* fixture(() =>
+              `<div id="generic" aria-label="Region">Text</div><p id="paragraph" aria-labelledby="reference">Text</p><code id="code" title="Snippet">x</code><span id="reference" aria-label="Reference override">Reference text</span><p id="override" role="button" aria-label="Allowed">Ignored</p><button id="content"><strong>Confirm</strong><code>code</code></button><button id="referenced" aria-labelledby="reference">Ignored</button><label for="native"><span>Native label</span></label><input id="native">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              for (const id of ["#generic", "#paragraph", "#code"]) {
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleName(""), Deadline.within("300 millis"))
+              }
+              yield* page.getByRole("generic", { name: "Region", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("paragraph", { name: "Reference override", exact: true }).pipe(
+                Expect.toHaveCount(0)
+              )
+              yield* page.getByRole("code", { name: "Snippet", exact: true }).pipe(Expect.toHaveCount(0))
+              yield* page.getByRole("button", { name: "Allowed", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#override").pipe(Expect.toHaveAccessibleName("Allowed"))
+              yield* page.getByRole("button", { name: "Confirmcode", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#content").pipe(Expect.toHaveAccessibleName("Confirmcode"))
+              yield* page.getByRole("button", { name: "Reference override", exact: true }).pipe(Expect.toHaveCount(1))
+              yield* page.locator("#referenced").pipe(Expect.toHaveAccessibleName("Reference override"))
+              yield* page.getByRole("textbox", { name: "Native label", exact: true }).pipe(Expect.toHaveCount(1))
+            }))
+          }),
+        timeout
+      )
+
       it.effect(
         "expects computed CSS with exact strings, regex flags and pseudo-elements",
         () =>

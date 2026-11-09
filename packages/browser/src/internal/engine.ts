@@ -151,6 +151,7 @@ export type Read =
 
 /** What an expectation waits for. */
 export type Expectation =
+  | { readonly _tag: "Viewport"; readonly ratio: number; readonly inViewport: boolean }
   | {
     readonly _tag: "CSS"
     readonly name: string
@@ -167,6 +168,8 @@ export type Expectation =
   | { readonly _tag: "Editable" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "Role"; readonly expected: string }
+  | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
@@ -299,10 +302,12 @@ export type Request =
   | {
     readonly op: "expect"
     readonly steps: ReadonlyArray<Step>
+    readonly token?: string | undefined
     readonly expectation: Expectation
     /** Milliseconds this round may wait in the page for the expectation to hold. */
     readonly cap: number
   }
+  | { readonly op: "expectStop"; readonly token: string }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -472,6 +477,7 @@ export function engine(render: (root: SnapNode) => string) {
     | {
       readonly setTimeout: (callback: () => void, delay: number) => number
       readonly clearTimeout: (id: number) => void
+      readonly cancelAnimationFrame: (id: number) => void
       readonly requestAnimationFrame: (callback: () => void) => number
       readonly now: () => number
     }
@@ -659,6 +665,26 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
+  /** Roles that prohibit a name for the element itself (accname 1.2, step 1). */
+  const NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "mark",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "suggestion",
+    "superscript",
+    "term",
+    "time"
+  ])
+
   /** Roles whose name comes from their content (accname 1.2, step 2F). */
   const NAME_FROM_CONTENT = new Set([
     "button",
@@ -685,11 +711,84 @@ export function engine(render: (root: SnapNode) => string) {
     (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
     (element.getAttribute("title") ?? "").trim() !== ""
 
-  const focusable = (element: Element): boolean =>
-    element.hasAttribute("tabindex") ||
-    (element instanceof HTMLAnchorElement && element.hasAttribute("href")) ||
-    ((element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
-      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) && !element.disabled)
+  // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
+  // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
+  const HTML_INTEGER_PREFIX = /^[\t\n\f\r ]*[+-]?[0-9]/
+  const DISABLABLE_TAGS = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
+  const NATIVE_FOCUSABLE_TAGS = new Set(["button", "details", "select", "textarea"])
+  const focusable = (element: Element): boolean => {
+    const tag = element.localName
+    // Custom-element definitions live in the main world. A hyphen conservatively includes form-associated hosts.
+    // Keep the native selector for these and built-in controls: it includes disabled fieldsets and legend exceptions.
+    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && element.matches(":disabled")) return false
+    const tabindex = element.getAttribute("tabindex")
+    return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
+      ((tag === "a" || tag === "area") && element.hasAttribute("href")) ||
+      NATIVE_FOCUSABLE_TAGS.has(tag) ||
+      (element instanceof HTMLInputElement && element.type !== "hidden") ||
+      (element instanceof HTMLElement && element.isContentEditable)
+  }
+
+  // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
+  const GLOBAL_ARIA = new Set([
+    "aria-atomic",
+    "aria-busy",
+    "aria-controls",
+    "aria-current",
+    "aria-describedby",
+    "aria-details",
+    "aria-dropeffect",
+    "aria-flowto",
+    "aria-grabbed",
+    "aria-hidden",
+    "aria-keyshortcuts",
+    "aria-live",
+    "aria-owns",
+    "aria-relevant"
+  ])
+  // Presentation conflicts retain the pinned role-query naming exceptions, distinct from accname root rules.
+  const PRESENTATION_NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "superscript"
+  ])
+  const presentationConflict = (element: Element, implicit: string | null): boolean => {
+    if (focusable(element)) return true
+    // One attribute snapshot avoids probing every possible global property on every presentation candidate.
+    for (const attribute of element.getAttributeNames()) {
+      if (GLOBAL_ARIA.has(attribute)) return true
+      if (
+        (attribute === "aria-label" || attribute === "aria-labelledby") &&
+        !PRESENTATION_NAME_PROHIBITED.has(implicit ?? "")
+      ) return true
+      if (attribute === "aria-roledescription" && implicit !== "generic") return true
+    }
+    return false
+  }
+
+  // Only required structural children inherit presentation, never arbitrary descendants or nested lists/tables.
+  // https://www.w3.org/TR/wai-aria-1.2/#presentation
+  const PRESENTATION_PARENTS = new Map<string, ReadonlyArray<string>>([
+    ["dd", ["dl", "div"]],
+    ["div", ["dl"]],
+    ["dt", ["dl", "div"]],
+    ["li", ["ol", "ul"]],
+    ["caption", ["table"]],
+    ["tbody", ["table"]],
+    ["tfoot", ["table"]],
+    ["thead", ["table"]],
+    ["td", ["tr"]],
+    ["th", ["tr"]],
+    ["tr", ["thead", "tbody", "tfoot", "table"]]
+  ])
 
   const inputRole = (input: HTMLInputElement): string | null => {
     const list = input.hasAttribute("list")
@@ -864,18 +963,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const roleCache = new Map<Element, string | null>()
-  /** An element's role: the first role token the engine knows, or its implicit role. */
+  /** Shared role computation, including ARIA presentation conflict resolution and required-child inheritance. */
   const roleOf = (element: Element): string | null => {
     if (roleCache.has(element)) return roleCache.get(element)!
-    let role: string | null = null
+    let explicit: string | null = null
     for (const token of (element.getAttribute("role") ?? "").split(/\s+/)) {
       if (!KNOWN_ROLES.has(token)) continue
-      // A focusable element can't be presentational (ARIA 1.2, presentational roles conflict resolution)
-      if ((token === "none" || token === "presentation") && focusable(element)) continue
-      role = token
+      explicit = token
       break
     }
-    if (role === null) role = implicitRole(element)
+    let role = explicit
+    if (explicit === null || explicit === "none" || explicit === "presentation") {
+      const implicit = implicitRole(element)
+      role = explicit ?? implicit
+      if (explicit !== null) {
+        // A conflict cancels the first recognized presentation token, not advances to a fallback token.
+        if (presentationConflict(element, implicit)) role = implicit
+      } else if (implicit !== null) {
+        const parents = PRESENTATION_PARENTS.get(element.localName)
+        const parent = parents === undefined ? null : composedParent(element)
+        if (parent !== null && parents!.includes(parent.localName)) {
+          const inherited = roleOf(parent)
+          if ((inherited === "none" || inherited === "presentation") && !presentationConflict(element, implicit)) {
+            role = inherited
+          }
+        }
+      }
+    }
     roleCache.set(element, role)
     return role
   }
@@ -1086,7 +1200,9 @@ export function engine(render: (root: SnapNode) => string) {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
-    const name = collapse(
+    const role = roleOf(element)
+    // This restriction is on the root, not on descendants or references contributing to another element's name.
+    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
       nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
@@ -2331,6 +2447,25 @@ export function engine(render: (root: SnapNode) => string) {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
       }
+      case "Role": {
+        const role = roleOf(element) ?? ""
+        return { passed: role === expectation.expected, observed: role }
+      }
+      case "AccessibleName": {
+        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
+        nameCache.delete(element)
+        const name = accessibleName(element, false)
+        const matcher = expectation.expected
+        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
+        return {
+          passed: matcher._tag === "RegExp"
+            ? new RegExp(matcher.source, matcher.flags).test(name)
+            : expectation.ignoreCase
+            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+            : normalize(name) === normalize(matcher.value),
+          observed: name
+        }
+      }
       case "ContainsText": {
         const text = textOf(element)
         const matcher = expectation.expected
@@ -2382,11 +2517,102 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
+  // Allocated only while a viewport expectation owns observations in this document.
+  let viewportRounds: Map<string, () => void> | undefined
+
+  const expectViewport = (request: Extract<Request, { op: "expect" }>): Promise<Response> =>
+    new Promise((resume, reject) => {
+      const expectation = request.expectation
+      if (expectation._tag !== "Viewport") return
+      let done = false
+      let observer: IntersectionObserver | undefined
+      let frame: number | undefined
+      const next = (callback: () => void) => {
+        frame = onFrame(callback)
+      }
+      let last: { passed: boolean; observed: unknown } = { passed: false, observed: null }
+      let changed = false
+      let samples = 0
+      const finish = (error?: unknown) => {
+        if (done) return
+        done = true
+        observer?.disconnect()
+        if (frame !== undefined) {
+          ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+        }
+        clearTimer(timer)
+        if (request.token !== undefined) {
+          viewportRounds?.delete(request.token)
+          if (viewportRounds?.size === 0) viewportRounds = undefined
+        }
+        if (error !== undefined) reject(error)
+        else resume({ _tag: "Expected", ...last, changed })
+      }
+      const sample = () => {
+        if (done) return
+        changed = samples++ > 0
+        observer?.disconnect()
+        clearTreeCaches()
+        let found: ReadonlyArray<Element>
+        try {
+          found = resolve(request.steps)
+        } catch (error) {
+          finish(error)
+          return
+        }
+        if (found.length !== 1) {
+          last = {
+            passed: found.length === 0 && !expectation.inViewport,
+            observed: { matches: found.length }
+          }
+          if (last.passed) finish()
+          else next(sample)
+          return
+        }
+        if (last.observed === null) last = { passed: false, observed: { matches: 1 } }
+        const element = found[0]!
+        observer = new IntersectionObserver((entries) => {
+          if (done) return
+          observer?.disconnect()
+          // Re-resolve after the asynchronous observation: a detached or replaced match is not evidence.
+          clearTreeCaches()
+          try {
+            const current = resolve(request.steps)
+            if (current.length !== 1 || current[0] !== element) {
+              next(sample)
+              return
+            }
+          } catch (error) {
+            finish(error)
+            return
+          }
+          const ratio = entries[0]!.intersectionRatio
+          const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
+          last = { passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } }
+          if (last.passed) finish()
+          else {
+            changed = true
+            next(sample)
+          }
+        })
+        observer.observe(element)
+        // Firefox needs a rendering opportunity to deliver intersection observations.
+        next(() => {})
+      }
+      const timer = setTimer(finish, Math.max(0, request.cap))
+      if (request.token !== undefined) (viewportRounds ??= new Map()).set(request.token, finish)
+      sample()
+    })
+
   /**
    * One round of an expectation: a check now, then again on each change the page makes (a mutation, an `input`,
    * `change` or focus event, an animation frame) until it holds or the round's cap runs out.
    */
   const expect = (request: Extract<Request, { op: "expect" }>): Promise<Response> => {
+    if (request.expectation._tag === "Viewport") {
+      resolve(request.steps)
+      return expectViewport(request)
+    }
     const first = evaluate(request.steps, request.expectation)
     if (first.passed || request.cap <= 0) {
       return Promise.resolve({ _tag: "Expected", passed: first.passed, observed: first.observed, changed: false })
@@ -3009,6 +3235,9 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
           return JSON.stringify(read(request))
+        case "expectStop":
+          viewportRounds?.get(request.token)?.()
+          return JSON.stringify({ _tag: "Expected", passed: false, observed: null, changed: false } satisfies Response)
         case "expect":
           return JSON.stringify(await expect(request))
         case "title":

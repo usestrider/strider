@@ -34,18 +34,56 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or no match is visible, however many match |
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
+| `toBeInViewport(options?)` | one element intersects the viewport at the requested ratio |
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
 
+Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
+case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
+`generic` role; Playwright reports no role for them. Role assertions share presentation conflict resolution and
+required-child inheritance with role locators and snapshots. Tabindex focusability follows HTML integer parsing:
+ASCII whitespace, an optional sign and leading digits are accepted, with trailing text ignored. Thus `2abc` counts
+as focusable and non-ASCII leading whitespace does not, unlike pinned Playwright's number conversion.
+They include hidden elements and retry missing or
+multiple matches until the deadline, reporting the role or match count if they fail:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveRole = Effect.fn("saveRole")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+  yield* page.locator("div#container").pipe(Expect.toHaveRole("generic"))
+})
+```
+
 An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
 become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
+
+Use `toBeInViewport` when an element can exist outside the visible area. It waits for an intersection without scrolling the page:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cardInView = Effect.fn("cardInView")(function*(page: Page.ReadonlyPage) {
+  const card = page.getByRole("article")
+  yield* card.pipe(Expect.toBeInViewport())
+  yield* card.pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+  yield* card.pipe(Expect.toBeInViewport({ inViewport: false }))
+})
+```
+
+The default ratio is zero, which requires some positive intersection. A requested ratio includes equality with a small floating-point tolerance. Ancestor clipping counts; opacity and overlapping elements do not. `inViewport` defaults to `true`; set it to `false` to wait for the inverse, including a missing element. Multiple matches retry until the locator narrows to one (or disappears for the inverse). Failures include the observed ratio or match count. The observer is released when the expectation ends.
 
 Class strings preserve spacing and class order. Missing class attributes count as empty strings; an array also checks the number of matches. Scalar checks retry until exactly one element matches.
 
@@ -74,6 +112,26 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
   yield* results.pipe(Expect.toHaveText(["Grey heron", /^Great blue heron/]))
   yield* page.pipe(Expect.toHaveTitle(/heron/))
   yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
+})
+```
+
+Use an accessible-name expectation to check what assistive technology calls a control, including names from labels
+and ARIA references. Strings match the whole name with whitespace normalized; `ignoreCase` overrides a regular
+expression's case flag. A hidden element has an empty name, while a hidden label can still name a visible control.
+Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an ARIA label.
+Their content can still name another element, and an explicit nameable role overrides the implicit role. Role
+locators use this same name computation. Missing or multiple matches retry until the deadline and report their
+count on failure.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveAccessibleName("Save changes"))
+  yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
+    ignoreCase: true
+  })
 })
 ```
 

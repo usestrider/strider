@@ -180,6 +180,7 @@ export type ObligationSubject =
     readonly request: NetworkRequest.NetworkRequest
     readonly phase: "request" | "response" | "auth"
     readonly response: Option.Option<NetworkResponse.NetworkResponse>
+    readonly authSource?: "server" | "proxy" | undefined
     readonly challenge: Option.Option<{ readonly origin: string; readonly scheme: string; readonly realm: string }>
   }
   | {
@@ -210,7 +211,12 @@ export interface NodeBinding {
  * `evidence`: the events behind them.
  */
 export type Fact =
-  | { readonly _tag: "UserContextAdded"; readonly context: UserContext.Id; readonly isDefault: boolean }
+  | {
+    readonly _tag: "UserContextAdded"
+    readonly context: UserContext.Id
+    readonly isDefault: boolean
+    readonly requestTiming?: boolean | undefined
+  }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
@@ -300,6 +306,7 @@ export type Fact =
     readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
+  | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
   | {
     readonly _tag: "RequestFinished"
@@ -599,7 +606,12 @@ export type Decision =
    * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
-  | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
+  | {
+    readonly _tag: "ProvideCredentials"
+    readonly username: string
+    readonly password: string
+    readonly once?: boolean | undefined
+  }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
   | { readonly _tag: "Accept"; readonly promptText: Option.Option<string> }
@@ -728,6 +740,7 @@ export interface ProxyOptions {
 
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly requestTiming?: boolean | undefined
   readonly reclaimable?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean

@@ -602,6 +602,7 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 *matchers*
 
 - `const toBeVisible: Matcher<Locator.ReadonlyLocator>`
+- `const toBeInViewport: DualMatcher<Locator.ReadonlyLocator, [options?: { readonly ratio?: number | undefined readonly inViewport?: boolean | undefined } | undefined]>`
 - `const toBeHidden: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEnabled: Matcher<Locator.ReadonlyLocator>`
 - `const toBeDisabled: Matcher<Locator.ReadonlyLocator>`
@@ -609,9 +610,11 @@ Expectations that retry: each `Expect.to*` checks until it passes or the deadlin
 - `const toBeFocused: Matcher<Locator.ReadonlyLocator>`
 - `const toBeEditable: Matcher<Locator.ReadonlyLocator>`
 - `const toHaveText: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
+- `const toHaveAccessibleName: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined] >`
 - `const toHaveClass: DualMatcher< Locator.ReadonlyLocator, [expected: string | RegExp | ReadonlyArray<string | RegExp>] >`
 - `const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
 - `const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]>`
+- `const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>`
 - `const toHaveAttribute: DualMatcher< Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined] >`
 - `const toHaveCSS: DualMatcher< Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined readonly pseudo?: "before" | "after" | undefined } | undefined] >`
 - `const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>`
@@ -1163,6 +1166,7 @@ The requests a page or context sends, as events and as the data routes and respo
   - `readonly url?: Url.Pattern | string | undefined`
   - `readonly method?: HttpMethod.HttpMethod | undefined`
   - `readonly resourceType?: ResourceType | ReadonlyArray<ResourceType> | undefined`
+- `class Timing: Schema.Class { startTime, domainLookupStart, domainLookupEnd, connectStart, connectEnd, secureConnectionStart, requestStart, responseStart, responseEnd }`
 
 *schemas*
 
@@ -1182,6 +1186,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 - `const history: (target: Page.ObservedPage | UserContext.ObservedUserContext, filter?: Filter | undefined) => Effect.Effect<Subscription.History<NetworkRequest>, Subscription.SubscriptionError>`
 - `const headersSent: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Headers.Headers, Deadline.Timeout>`
+- `const timing: (target: Page.ObservedPage | UserContext.ObservedUserContext, request: NetworkRequest) => Effect.Effect<Timing, RequestError>`
 
 *converting*
 
@@ -1193,6 +1198,7 @@ The requests a page or context sends, as events and as the data routes and respo
 
 *reasons*
 
+- `class RequestUnavailable: Schema.Error { why }`
 - `class ResponseUnavailable: Schema.Error { why }`
 
 ### NetworkResponse
@@ -1938,6 +1944,9 @@ User contexts: isolated browser sessions, at two access levels.
   - `emulate(settings: Emulation.Emulation): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout, Scope.Sco…`
   - `grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect.Effect< Declaration.Registration, Declaration.DeclarationError | Targ…`
 - `interface Options`
+  - `readonly requestTiming?: boolean | undefined`
+  - `readonly acceptInsecureCerts?: boolean | undefined`
+  - `readonly httpCredentials?: { readonly origin?: string | undefined readonly username: string readonly password: Redacted.Redacted<string> } | undefined`
   - `readonly proxy?: { readonly server: string readonly bypass?: ReadonlyArray<string> | undefined readonly credentials?: { readonly username: string readonly pass…`
   - `readonly storageState?: StorageState.StorageState | undefined`
   - `readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined`

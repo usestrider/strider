@@ -424,6 +424,14 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     `to have the value ${show(expected)}`
   )
 
+export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>
+  expectLocator(
+    locator,
+    { _tag: "Role", expected },
+    "toHaveRole",
+    `to have the role ${show(expected)}`
+  )
+
 export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
   expectLocator(
     locator,
@@ -447,6 +455,42 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     { _tag: "Aria", pattern: data },
     "toMatchAria",
     `to match ${AriaPatterns.describe(data)}`
+  )
+}
+
+export const toBeInViewport = (
+  locator: Locator.ReadonlyLocator,
+  options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+) => {
+  const ratio = options?.ratio ?? 0
+  const inViewport = options?.inViewport ?? true
+  return expectLocator(
+    locator,
+    { _tag: "Viewport", ratio, inViewport },
+    "toBeInViewport",
+    `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
+  )
+}
+/** Accessible names use the shared engine only when this expectation is requested. */
+export const toHaveAccessibleName = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) => {
+  const ignoreCase = options?.ignoreCase
+  const flags = typeof expected === "string" ? "" : expected.flags
+  const text = typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  }
+  return expectLocator(
+    locator,
+    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    "toHaveAccessibleName",
+    `to have the accessible name ${show(expected)}${
+      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+    }`
   )
 }
 

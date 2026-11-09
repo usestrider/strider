@@ -51,7 +51,7 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*(protocolSession = session) {
+const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
@@ -65,6 +65,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
     release: Responses.release
   })
   const context: State.ContextEntry = {
+    ...(requestTiming ? { requestTiming: new Map() } : {}),
     id: state.defaultContext,
     browserContextId: undefined,
     isDefault: true,
@@ -1535,6 +1536,129 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
+it.effect("waits for observed Network ownership before providing automatic credentials and bounds attempts", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Document",
+      request: sent(`${origin}/auth`).request
+    }, { state, target })
+    const challenge = () =>
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Document",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    challenge()
+    const first = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, first.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "CancelAuth" }
+      }
+    })
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
+    challenge()
+    const second = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, second.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    challenge()
+    const third = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, third.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    })
+    handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    yield* state.buffer.flush
+  }))
+
+it.effect("correlates parent-page Fetch authentication with its worker's Network request", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    handlers.apply("Fetch.authRequired", {
+      requestId: "F1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request,
+      authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+    }, { state, target: parent })
+    const obligation = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, obligation.id, {
+      _tag: "ProvideCredentials",
+      username: "user",
+      password: "secret",
+      once: true
+    })
+    assert.deepStrictEqual(calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
 describe("CDP proxy and website challenge separation", () => {
   for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
     it.effect(`preserves website challenge coverage: ${coverage}`, () =>
@@ -2151,4 +2275,60 @@ it.effect("does not register evaluation cleanup in the connection scope when it 
     assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
     assert.strictEqual(owner.state._tag, "Empty")
     yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))
+
+describe("CDP request timing opt-in dispatch", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`touches native timing only for an enabled context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, enabled)
+        const context = page.context
+        const event = { state, target }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        handlers.apply(
+          "Network.requestWillBeSent",
+          { ...sent(`${origin}/landed`), timestamp: 10, wallTime: 1000 },
+          event
+        )
+        assert.strictEqual(context.requestTiming?.size ?? 0, enabled ? 1 : 0)
+        let nativeReads = 0
+        const native = {
+          ...landed,
+          hasExtraInfo: false,
+          response: {
+            ...landed.response,
+            get timing() {
+              nativeReads++
+              return { requestTime: 10, sendStart: 2, receiveHeadersStart: 3 }
+            }
+          }
+        }
+        handlers.apply("Network.responseReceived", native, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 10.01, encodedDataLength: 0 }, event)
+        yield* state.buffer.flush
+        assert.strictEqual(nativeReads, enabled ? 1 : 0)
+        assert.strictEqual(facts.filter((fact) => fact._tag === "HopTiming").length, enabled ? 2 : 0)
+        assert.strictEqual(context.requestTiming?.size ?? 0, 0, "terminal completion releases the native collector")
+      }).pipe(Effect.scoped))
+  }
+})
+
+it.effect("bounds active native baselines and clears them when their frame closes", () =>
+  Effect.gen(function*() {
+    const { state, target, page } = yield* withPage(session, true)
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    for (let i = 0; i <= 1000; i++) {
+      handlers.apply("Network.requestWillBeSent", {
+        ...sent(`${origin}/landed`),
+        requestId: `timing-${i}`,
+        timestamp: 10 + i,
+        wallTime: 1000 + i
+      }, { state, target })
+    }
+    const store = page.context.requestTiming!
+    assert.strictEqual(store.size, 1000)
+    const oldest = state.requests.get(State.requestKey(target, "timing-0"))!
+    assert.isFalse(store.has(oldest.hop))
+    Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+    assert.strictEqual(store.size, 0)
   }).pipe(Effect.scoped))

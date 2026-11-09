@@ -29,6 +29,7 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  readonly requestTiming?: boolean | undefined
   /** A navigable has existed, so setup rollback cannot establish that the proxy cache stayed unused. */
   proxyUsed?: boolean | undefined
   proxy?: Adapter.ProxyOptions | undefined
@@ -108,6 +109,7 @@ export interface NavigationEntry extends Kit.NavigationNode {
 }
 
 export interface RequestEntry {
+  credentialsAttempted?: boolean | undefined
   readonly id: NetworkRequest.Id
   readonly bidi: Network.Request
   redirects: number

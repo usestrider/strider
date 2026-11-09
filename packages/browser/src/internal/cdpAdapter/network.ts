@@ -12,6 +12,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
@@ -140,6 +141,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         // The redirect says whether `ExtraInfo` comes for the hop it ends
         if (params.redirectHasExtraInfo === true) expectExtraInfo(state, request, ["request", "response"])
         else noExtraInfo(state, request)
+        request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.redirectResponse.timing)
+        request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+        request.frame?.page.context.requestTiming?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -180,6 +184,19 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         }
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
+      }
+      if (request.frame?.page.context.requestTiming !== undefined) {
+        const hop = request.hop
+        Timing.keep(
+          request.frame.page.context.requestTiming,
+          hop,
+          Timing.collector(
+            Timing.cdp,
+            { timestamp: params.timestamp, wallTime: params.wallTime },
+            (timing) => state.buffer.emit({ _tag: "HopTiming", hop, timing }),
+            request.frame.id
+          )
+        )
       }
       state.pendingAttribution.delete(key)
       if (request.navigation !== undefined && (params.requestId as string) === (params.loaderId as string)) {
@@ -229,6 +246,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      request.frame?.page.context.requestTiming?.get(request.hop)?.response(
+        servedBy(request, params.response) === "network" ? params.response.timing : undefined
+      )
       // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow; it
       // is reported with them (QUIRKS.md, Q158). A response from a cache, a service worker or a route can say so
       // too and get none, so only the network's waits; one that gets none was sent with the request event's
@@ -248,6 +268,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+      request.frame?.page.context.requestTiming?.delete(request.hop)
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
@@ -269,6 +291,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      request.frame?.page.context.requestTiming?.delete(request.hop)
       // Keep the failed hop eligible for late sent headers. Earlier redirect obligations
       // still consume their own ExtraInfo first; failure itself settles public waits.
       const phases = new Set<ExtraInfo["phase"]>(["request", ...request.ahead.map((extra) => extra.phase)])
