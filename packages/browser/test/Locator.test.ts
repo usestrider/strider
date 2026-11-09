@@ -930,13 +930,14 @@ it.effect("does not acknowledge native fill while its insertion guard is still p
     })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
   }).pipe(Effect.scoped))
 
-for (const boundary of ["unanswered", "set", "type", "guarded"] as const) {
+for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as const) {
   it.effect(`accounts for fill at the ${boundary} boundary`, () =>
     Effect.gen(function*() {
       const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
       const reached = yield* Deferred.make<void>()
       let record: Operation.Record | undefined
       let inputs = 0
+      let disarms = 0
       const layer = BrowserImpl.layer((sink) =>
         Fake.connect([], {
           info: new Browser.Info(Fake.info),
@@ -946,6 +947,7 @@ for (const boundary of ["unanswered", "set", "type", "guarded"] as const) {
           realm: () => Effect.succeed("fill-boundary-realm" as Target.RealmId),
           dispatchInput: Effect.fnUntraced(function*() {
             inputs++
+            if (boundary === "confirmed") return
             yield* Deferred.succeed(reached, undefined)
             return yield* Effect.never
           }),
@@ -957,6 +959,10 @@ for (const boundary of ["unanswered", "set", "type", "guarded"] as const) {
             assert(argument?._tag === "Value" && argument.value.type === "string")
             const request = JSON.parse(argument.value.value) as Engine.Request
             if (request.op === "fillGuard" || request.op === "fillDisarm") {
+              if (request.op === "fillDisarm" && boundary === "confirmed" && disarms++ === 0) {
+                yield* Deferred.succeed(reached, undefined)
+                return yield* Effect.never
+              }
               return {
                 _tag: "Value",
                 value: {
@@ -989,7 +995,7 @@ for (const boundary of ["unanswered", "set", "type", "guarded"] as const) {
                   point: null,
                   draggable: false,
                   checked: null,
-                  fill: request.apply ? boundary : null
+                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null
                 })
               }
             } as const
@@ -1014,8 +1020,14 @@ for (const boundary of ["unanswered", "set", "type", "guarded"] as const) {
         const error = yield* Fiber.join(pending)
         assert(Deadline.isTimeout(error))
         assert.strictEqual(inputs, boundary === "unanswered" ? 0 : 1)
-        assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
-        assert.strictEqual(error.phase, "dispatchedUnconfirmed")
+        assert.deepStrictEqual(
+          error.diagnostics.dispatch,
+          boundary === "confirmed"
+            ? { _tag: "Acknowledged", result: "ok" }
+            : { _tag: "MayHaveBeenSent" }
+        )
+        assert.strictEqual(error.phase, boundary === "confirmed" ? "postcondition" : "dispatchedUnconfirmed")
+        if (boundary === "confirmed") assert.strictEqual(disarms, 2)
       })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }).pipe(Effect.scoped))
 }
