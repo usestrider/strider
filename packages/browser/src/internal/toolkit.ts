@@ -503,8 +503,12 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     effect.pipe(
       Effect.mapError(toFailure),
       Effect.map((outcome) => conceal({ outcome, sinceLast: digest.splice(0).map((entry) => entry.line) })),
-      // A failure stays a ToolFailure, so its Schema encodes it
-      Effect.mapError((failure) => new Tools.ToolFailure(conceal({ ...failure })))
+      // A failure stays a ToolFailure, so its Schema encodes it, and it reports the digest too, which the next call
+      // then doesn't repeat
+      Effect.mapError((failure) => {
+        const lines = digest.splice(0).map((entry) => entry.line)
+        return new Tools.ToolFailure(conceal({ ...failure, ...(lines.length === 0 ? {} : { sinceLast: lines }) }))
+      })
     )
   const onPage = <A, R>(name: string, f: (page: Page.Page) => Effect.Effect<A, unknown, R>) =>
     run(Effect.flatMap(pageNamed(name), f))

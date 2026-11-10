@@ -313,32 +313,38 @@ export const fromAdapter = (
   return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
 }
 
+/** The title response uses the same decoder and exception handling as engine reads. */
+const titleRead = "function() { return JSON.stringify({ _tag: \"Title\", title: document.title }); }"
+
 /**
- * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
+ * A document's prepared realm and a call to it; `None` when the document or its realm went, or the realm
  * lost its engine, so the caller goes again.
  */
-const callEngine = Effect.fnUntraced(function*(
+const callInDocument = Effect.fnUntraced(function*(
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
-  request: string | Effect.Effect<string>,
+  request: string | Effect.Effect<string> | undefined,
   id: Diagnostics.OperationId,
   releaseResult?: boolean,
-  replay = true
+  replay = true,
+  prepareRealm: Effect.Effect<Target.RealmId, Adapter.AdapterError | Deadline.Timeout> = engineRealm(runtime, document)
 ) {
   let sent = false
-  return yield* engineRealm(runtime, document).pipe(
+  return yield* prepareRealm.pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
-        typeof request === "string" ? Effect.succeed(request) : request,
-        Effect.fnUntraced(function*(encoded: string) {
+        request === undefined || typeof request === "string" ? Effect.succeed(request) : request,
+        Effect.fnUntraced(function*(encoded: string | undefined) {
           // Realm lookup and installation cannot apply this round. Its own evaluation may do so once started.
           if (!replay) {
             const record = yield* Operation.current
             if (Option.isSome(record)) record.value.markSent()
           }
           sent = true
-          return yield* call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+          return yield* encoded === undefined
+            ? call(runtime, realm, functionDeclaration, [], releaseResult)
+            : call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
         })
       )
     ),
@@ -403,7 +409,7 @@ export const elementIn = (
   frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
-  callEngine(
+  callInDocument(
     runtime,
     document,
     Engine.element,
@@ -601,31 +607,45 @@ export const sendRouted = (
         const token = request.op === "expect" && request.expectation._tag === "Viewport"
           ? crypto.randomUUID()
           : undefined
-        const pending = callEngine(
-          runtime,
-          routed.document,
-          Engine.run,
-          Effect.gen(function*() {
-            // Recompute after every route and install, including a stale realm's replacement.
-            const current = request.op === "expect"
-              ? {
-                ...request,
-                ...(token === undefined ? {} : { token }),
-                cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
-              }
-              : request
-            return JSON.stringify(
-              retarget(
-                current.op === "act" && clip !== undefined ? { ...current, clip } : current,
-                last,
-                route._tag === "Missing"
+        // Plain title reads need the same isolated world and replay rules, but none of the query engine.
+        // Backends without isolated worlds retain the existing shared-world engine path.
+        const directTitle = request.op === "title" && !(yield* makesNoWorlds(runtime))
+        const pending = directTitle
+          ? callInDocument(
+            runtime,
+            routed.document,
+            titleRead,
+            undefined,
+            id,
+            undefined,
+            true,
+            runtime.model.adapter.realm(routed.document, utilityWorld)
+          )
+          : callInDocument(
+            runtime,
+            routed.document,
+            Engine.run,
+            Effect.gen(function*() {
+              // Recompute after every route and install, including a stale realm's replacement.
+              const current = request.op === "expect"
+                ? {
+                  ...request,
+                  ...(token === undefined ? {} : { token }),
+                  cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
+                }
+                : request
+              return JSON.stringify(
+                retarget(
+                  current.op === "act" && clip !== undefined ? { ...current, clip } : current,
+                  last,
+                  route._tag === "Missing"
+                )
               )
-            )
-          }),
-          id,
-          undefined,
-          request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
-        )
+            }),
+            id,
+            undefined,
+            request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
+          )
         const owned = token === undefined ? pending : pending.pipe(
           Effect.onExit((exit) =>
             Exit.isSuccess(exit) ?
@@ -675,7 +695,7 @@ export const sendToDocument = (
   Effect.raceFirst(
     Effect.suspend(() =>
       Option.isSome(runtime.model.document(document))
-        ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"
               ? Effect.asSome(decode(value.value.value))
@@ -700,7 +720,7 @@ export const releaseInDocument = (
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() =>
     Option.isSome(runtime.model.document(document))
-      ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+      ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
         Effect.flatMap((value) =>
           Effect.gen(function*() {
             if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
@@ -789,7 +809,7 @@ export const elements = (
           }
           const stale = replaced(routed.document, last)
           if (Option.isSome(stale)) return Option.some({ _tag: "Response" as const, response: stale.value, routed })
-          const result = yield* callEngine(
+          const result = yield* callInDocument(
             runtime,
             routed.document,
             Engine.element,

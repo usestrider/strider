@@ -135,6 +135,33 @@ export const contents = (
   describe(`${name} contents`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
+      it.effect("reads fresh titles before a locator and isolates page-world title overrides", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, "<title>First</title><h1>Ready</h1>"), { waitUntil: "load" })
+            assert.strictEqual(yield* page.title, "First")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("title")!.textContent = "Changed"
+            })
+            assert.strictEqual(yield* page.title, "Changed")
+            if (yield* supports("isolatedWorlds")) {
+              yield* page.evaluateInMainWorld(() => {
+                Object.defineProperty(document, "title", {
+                  get: () =>
+                    "Forged"
+                })
+              })
+              assert.strictEqual(yield* page.title, "Changed")
+            }
+            assert.strictEqual(yield* page.getByRole("heading").readText, "Ready")
+            yield* page.goto(fixtureUrl(origin, "<title>Replacement</title><h1>New</h1>"), { waitUntil: "load" })
+            assert.strictEqual(yield* page.title, "Replacement")
+            assert.strictEqual(yield* page.getByRole("heading").readText, "New")
+          }))
+        }), timeout)
+
       it.effect("releases the requesting viewport round when its fiber is interrupted", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -165,7 +192,9 @@ export const contents = (
               }
               if (request?.op === "expectStop") {
                 assert.strictEqual(request.token, token)
-                return result.pipe(Effect.tap(() => Deferred.succeed(released, undefined)))
+                return result.pipe(Effect.tap(() =>
+                  Deferred.succeed(released, undefined)
+                ))
               }
               return result
             })
@@ -952,7 +981,12 @@ export const contents = (
               42
             )
             // Both worlds share the document
-            assert.strictEqual(yield* page.evaluate(() => document.getElementById("x")!.textContent), "hello")
+            assert.strictEqual(
+              yield* page.evaluate(() =>
+                document.getElementById("x")!.textContent
+              ),
+              "hello"
+            )
           }))
         }), timeout)
 
@@ -1086,9 +1120,7 @@ export const contents = (
               assert.strictEqual(reason.exception.message, "boom")
             }
             const rejected = reasonOf(
-              yield* Effect.exit(evaluate(() =>
-                Promise.reject(new Error("later"))
-              ))
+              yield* Effect.exit(evaluate(() => Promise.reject(new Error("later"))))
             )
             assert.strictEqual((rejected as unknown as Page.PageError).reason._tag, "EvaluationThrown")
             const argument = reasonOf(
@@ -2076,7 +2108,9 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) => cookie.name === "token")!
+            const token = all.find((cookie) =>
+              cookie.name === "token"
+            )!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

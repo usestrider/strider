@@ -126,7 +126,7 @@ describe("integration-only source interception", () => {
   it("attributes runtime replies to their operation, document, realm and distinct round", () => {
     const url = new URL("../src/internal/runtime.ts", import.meta.url)
     const output = instrument(fs.readFileSync(url, "utf8"), url.pathname)!.code
-    const start = output.indexOf("const callEngine =")
+    const start = output.indexOf("const callInDocument =")
     const end = output.indexOf("/**", start)
     const code = stripTypeScriptTypes(output.slice(start, end))
     const entries: Array<{ kind: string; payload: any }> = []
@@ -137,14 +137,14 @@ describe("integration-only source interception", () => {
         value: { type: "string", value: JSON.stringify({ _tag: "NotReady", __rendering: request.__rendering }) }
       })
     }
-    const callEngine = new Function(
+    const callInDocument = new Function(
       "Effect",
       "Option",
       "engineRealm",
       "call",
       "string",
       "__failureConnection",
-      "const Engine = { missing: \"missing\" }; let __roundSequence = 0;" + code + ";return callEngine"
+      "const Engine = { missing: \"missing\" }; let __roundSequence = 0;" + code + ";return callInDocument"
     )(
       Effect,
       Option,
@@ -153,8 +153,8 @@ describe("integration-only source interception", () => {
       (s: string) => s,
       () => (kind: string, payload: any) => entries.push({ kind, payload })
     )
-    Effect.runSync(callEngine({}, "document-a", "run", JSON.stringify({ op: "act", cap: 100 }), "operation-a"))
-    Effect.runSync(callEngine({}, "document-b", "run", JSON.stringify({ op: "act", cap: 50 }), "operation-b"))
+    Effect.runSync(callInDocument({}, "document-a", "run", JSON.stringify({ op: "act", cap: 100 }), "operation-a"))
+    Effect.runSync(callInDocument({}, "document-b", "run", JSON.stringify({ op: "act", cap: 50 }), "operation-b"))
     const replies = entries.filter((entry) => entry.kind === "engine-round-reply").map((entry) => entry.payload)
     expect(replies).toHaveLength(2)
     expect(replies[0]).toMatchObject({

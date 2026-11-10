@@ -126,6 +126,269 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  for (
+    const boundary of [
+      "event-before-reply",
+      "reply-before-event",
+      "interrupted",
+      "overlap",
+      "newer",
+      "url",
+      "identity"
+    ] as const
+  ) {
+    it.effect(`correlates same-document traversal with ${boundary} ownership`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const url = "about:blank#destination"
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          ),
+          "browsingContext.navigate": { navigation: "exact", url }
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        const traversal = page.expected.list[0]!.id
+        let other: PageNavigation.Id | undefined
+        let overlapping: Fiber.Fiber<Option.Option<PageNavigation.Id>, Adapter.AdapterError> | undefined
+        if (boundary === "interrupted") yield* Fiber.interrupt(fiber)
+        if (boundary === "overlap") {
+          overlapping = yield* Effect.forkChild(Navigation.traverse(state, page.id, 1))
+          yield* Effect.yieldNow
+        }
+        if (boundary === "newer" || boundary === "identity") {
+          other = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+        }
+        if (boundary === "url") other = Kit.expect(state.ids, page.expected, url)
+        if (boundary === "reply-before-event") {
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(fiber)
+        }
+        handlers.apply(
+          boundary === "identity" ? "browsingContext.fragmentNavigated" : "browsingContext.historyUpdated",
+          {
+            context: page.bidi,
+            navigation: "exact",
+            url,
+            timestamp: 1
+          },
+          { state }
+        )
+        yield* Deferred.succeed(release, undefined)
+        if (boundary !== "interrupted") yield* Fiber.join(fiber)
+        if (overlapping !== undefined) yield* Fiber.join(overlapping)
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        const end = ends[0]!
+        assert(end._tag === "NavigationEnded")
+        if (boundary === "event-before-reply") {
+          assert.strictEqual(end.navigation, traversal)
+        } else {
+          assert.notStrictEqual(end.navigation, traversal)
+          if (boundary === "url" || boundary === "identity") assert.strictEqual(end.navigation, other)
+        }
+        assert.deepStrictEqual(end.outcome, {
+          _tag: "SameDocument",
+          document: page.document!.id,
+          via: boundary === "identity" ? "fragment" : "historyApi"
+        })
+        assert.strictEqual(page.document!.url, url)
+        assert.isEmpty(page.expected.list)
+        assert.isUndefined(page.restoring)
+        assert.isEmpty(page.traversalCommands)
+      }))
+  }
+
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`leaves a later page-initiated ${event} to the page once a traversal has replied`, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage({ "browsingContext.traverseHistory": {} })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        // Synthetic ownership boundary, not captured Firefox traffic: the traversal replies without
+        // a same-document event or a new realm. An unrelated later event cannot identify that traversal.
+        const traversal = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(traversal))
+        handlers.apply(
+          `browsingContext.${event}`,
+          { context: page.bidi, navigation: "later", url: "about:blank#later", timestamp: 1 },
+          { state }
+        )
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        assert.notStrictEqual(ends[0]!.navigation, traversal.value)
+        const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(starts, 1)
+        assert(starts[0]!._tag === "NavigationStarted")
+        assert.notStrictEqual(starts[0]!.initiatedAs, "traversal")
+        assert.isEmpty(page.expected.list)
+        assert.isUndefined(page.restoring)
+      }))
+  }
+
+  it.effect("claims a same-document event received before the traversal's reply but folded after it", () =>
+    Effect.gen(function*() {
+      // The protocol client resolves a reply in its reader, but folds the events received before it in a
+      // separate worker: the reply can wake the command first. drainObserved completes once those are folded.
+      let queued: (() => void) | undefined
+      const fold = () => {
+        const event = queued
+        queued = undefined
+        event?.()
+      }
+      const root = {
+        send: () =>
+          Effect.flatMap(ProtocolClient.ReplyReceived, (received) =>
+            Effect.sync(() => {
+              received?.(10)
+              return {}
+            })),
+        drainObserved: Effect.sync(fold)
+      } as unknown as ProtocolClient.Session
+      const { facts, page, state } = yield* withPage({}, {}, root)
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      queued = () =>
+        handlers.apply(
+          "browsingContext.historyUpdated",
+          { context: page.bidi, url: "about:blank#earlier", timestamp: 1 },
+          { state, received: 9 }
+        )
+      const traversal = yield* Navigation.traverse(state, page.id, -1)
+      // The worker reaches the event at last, if the command did not wait for it.
+      fold()
+      yield* state.buffer.flush
+      assert(Option.isSome(traversal))
+      const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.lengthOf(ends, 1)
+      assert.strictEqual(ends[0]!.navigation, traversal.value)
+      assert.isEmpty(page.expected.list)
+    }))
+
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`rejects a queued ${event} received after the traversal reply while draining`, () =>
+      Effect.gen(function*() {
+        const root = {
+          send: () =>
+            Effect.flatMap(ProtocolClient.ReplyReceived, (received) =>
+              Effect.sync(() => {
+                received?.(10)
+                return {}
+              })),
+          drainObserved: Effect.sync(() => {
+            handlers.apply(`browsingContext.${event}`, {
+              context: page.bidi,
+              navigation: "later",
+              url: "about:blank#later",
+              timestamp: 1
+            }, { state, received: 11 })
+          })
+        } as unknown as ProtocolClient.Session
+        const { facts, page, state } = yield* withPage({}, {}, root)
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const traversal = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(traversal))
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        assert.notStrictEqual(ends[0]!.navigation, traversal.value)
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.traversalCommands)
+      }))
+  }
+
+  it.effect("drains a real client observation queued before the traversal reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      let state: State.State
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, {
+        fold: () => ({
+          events: handlers.events,
+          apply: Effect.fnUntraced(function*(_session, method, params, received) {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            handlers.apply(method, params, { state, received })
+          }),
+          lost: () => Effect.void,
+          ended: () => Effect.void
+        })
+      })
+      const fixture = yield* withPage({}, {}, client.root)
+      state = fixture.state
+      const fiber = yield* Effect.forkChild(Navigation.traverse(state, fixture.page.id, -1))
+      const sent = yield* browser.next
+      const reserved = fixture.page.expected.list[0]!.id
+      yield* browser.receive({
+        type: "event",
+        method: "browsingContext.historyUpdated",
+        params: {
+          context: fixture.page.bidi,
+          url: "about:blank#earlier",
+          timestamp: 1
+        }
+      })
+      yield* Deferred.await(entered)
+      yield* browser.receive({ type: "success", id: sent.id, result: {} })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe(), "the command must wait for the queued observation")
+      yield* Deferred.succeed(release, undefined)
+      const traversal = yield* Fiber.join(fiber)
+      assert.deepStrictEqual(traversal, Option.some(reserved))
+      yield* state.buffer.flush
+      const ends = fixture.facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.lengthOf(ends, 1)
+      assert.strictEqual(ends[0]!.navigation, reserved)
+      assert.isEmpty(fixture.page.traversalCommands)
+    }))
+
+  for (const completion of ["interrupted drain", "rejection", "connection failure"] as const) {
+    it.effect(`releases traversal ownership on ${completion}`, () =>
+      Effect.gen(function*() {
+        const draining = yield* Deferred.make<void>()
+        let drains = 0
+        const root = {
+          send: () =>
+            completion === "interrupted drain" ? Effect.succeed({}) : Effect.fail(
+              new Protocol.ProtocolError({
+                reason: completion === "rejection"
+                  ? new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    code: "no such history entry",
+                    reason: "Unrecognized",
+                    description: "end"
+                  })
+                  : new Protocol.SessionEnded({ why: "connectionLost" })
+              })
+            ),
+          drainObserved: Effect.gen(function*() {
+            drains++
+            yield* Deferred.succeed(draining, undefined)
+            return yield* Effect.never
+          })
+        } as unknown as ProtocolClient.Session
+        const { page, state } = yield* withPage({}, {}, root)
+        if (completion === "interrupted drain") {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(draining)
+          yield* Fiber.interrupt(fiber)
+          assert.strictEqual(drains, 1)
+        } else {
+          assert(Option.isNone(yield* Navigation.traverse(state, page.id, -1)))
+          assert.strictEqual(drains, 0)
+        }
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.traversalCommands)
+        assert.isUndefined(page.restoring)
+      }))
+  }
+
   for (const arrival of ["before", "after"] as const) {
     it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
       Effect.gen(function*() {
