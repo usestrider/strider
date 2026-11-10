@@ -260,6 +260,53 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        for (const ending of ["cancel", "departure"] as const) {
+          it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, "<div>Missing target</div>", controlledCooperativeClock)
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                const first = await command({ command: "start", budget: 2000, request: {
+                  op: "expect", steps: [{ _tag: "Css", selector: "#absent" }],
+                  expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+                } })
+                const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+                ${
+                  ending === "cancel"
+                    ? "await command({ command: \"cancel\" })"
+                    : "dispatchEvent(new Event(\"pagehide\"))"
+                }
+                const remaining = Object.values(globalThis.engineTestResources).map((set) => set.size)
+                globalThis.engineTestAdvance(100)
+                await pending
+                return JSON.stringify(remaining)
+              `
+              )
+              assert.deepStrictEqual(result, [0, 0, 0, 0])
+            }), timeout)
+        }
+        it.effect("cooperative viewport expiry retains observations from its final round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div>Missing target</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 50, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#absent" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 50
+              } })
+              const pending = command({ command: "resume", token: first.token, left: 50, decision: "continue" })
+              globalThis.engineTestAdvance(50)
+              const resumed = await pending
+              const terminal = await command({ command: "finish" })
+              return JSON.stringify({ resumed, terminal })
+            `
+            )
+            assert.strictEqual(result.terminal._tag, "Done")
+            assert.deepStrictEqual(result.terminal.response.observed, { matches: 0 })
+            assert.strictEqual(result.resumed._tag, "Done")
+          }), timeout)
         it.effect("cooperative expectation yields before checking an overlay arriving during a round", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
