@@ -2465,7 +2465,7 @@ describe("CdpAdapter evaluation argument transport", () => {
 
   it.effect("sends ordinary arguments directly without compiling a decoder", () =>
     Effect.gen(function*() {
-      const data = Object.fromEntries([["__proto__", "data"]])
+      const data = { text: "data" }
       // This arbitrary callback text must not determine which argument transport is used.
       const fn = "(...values) => values"
       for (const values of [[], ["engine request"], [{ data, items: [null, true, 3, "text"] }], [undefined]]) {
@@ -2475,8 +2475,8 @@ describe("CdpAdapter evaluation argument transport", () => {
         const wire = JSON.parse(JSON.stringify(sent.arguments)) as Array<{ value?: unknown }>
         const result = runInNewContext(`(${sent.functionDeclaration})`)(...wire.map((arg) => arg.value))
         if (values.length === 1 && typeof values[0] === "object") {
-          assert.strictEqual(Object.prototype.hasOwnProperty.call(result[0].data, "__proto__"), true)
-          assert.strictEqual(result[0].data["__proto__"], "data")
+          assert.strictEqual(Object.prototype.hasOwnProperty.call(result[0].data, "text"), true)
+          assert.strictEqual(result[0].data.text, "data")
         } else assert.deepStrictEqual(Array.from(result), values)
       }
       const sent = yield* capture(["request"], fn, true)
@@ -2486,6 +2486,15 @@ describe("CdpAdapter evaluation argument transport", () => {
         { objectId: "handle" as CdpRuntime.RemoteObjectId },
         { objectId: "node" as CdpRuntime.RemoteObjectId }
       ])
+    }).pipe(Effect.scoped))
+
+  it.effect("reconstructs own __proto__ keys through objects and arrays", () =>
+    Effect.gen(function*() {
+      const data = Object.fromEntries([["__proto__", { polluted: true }]])
+      for (const value of [data, { nested: data }, [{ nested: data }]]) {
+        const sent = yield* capture([value], "value => value")
+        assert.notStrictEqual(sent.functionDeclaration, "value => value")
+      }
     }).pipe(Effect.scoped))
 
   it.effect("reconstructs nested special values and undefined while preserving bindings and callback scope", () =>

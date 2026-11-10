@@ -27,7 +27,7 @@ import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 import { useXvfb } from "../stockWebKit.ts"
-import { makeRecorder, site } from "./harness.ts"
+import { json, makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
 const timeout = 60_000
@@ -35,6 +35,47 @@ const timeout = 60_000
 describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
+      it.effect(
+        "evaluates: a by-value argument keeps an own __proto__ key as data at every depth",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const facts = makeRecorder()
+            const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+            const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
+            const page = yield* adapter.createPage(adapter.defaultContext)
+            const navigation = yield* adapter.navigate(page, `${served.origin}/form`, { referrer: Option.none() })
+            const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            assert(ended.outcome._tag === "Committed")
+            const realm = yield* adapter.realm(ended.outcome.document, { _tag: "Main" })
+            const data: Adapter.RemoteValue = {
+              type: "object",
+              value: [["__proto__", { type: "object", value: [["polluted", { type: "boolean", value: true }]] }]]
+            }
+            // CDP parses value arguments as literals: this JSON key requires reconstruction even without tagged values.
+            for (
+              const [value, select] of [
+                [data, "value"],
+                [{ type: "object", value: [["nested", data]] }, "value.nested"],
+                [{ type: "array", value: [{ type: "object", value: [["nested", data]] }] }, "value[0].nested"]
+              ] as const
+            ) {
+              const result = yield* adapter.evaluate(realm, {
+                functionDeclaration:
+                  `(value) => { const data = ${select}; return [Object.prototype.hasOwnProperty.call(data, '__proto__'), Object.getPrototypeOf(data) === Object.prototype, 'polluted' in data] }`,
+                arguments: [{ _tag: "Value", value }],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              })
+              assert(result._tag === "Value", `evaluation threw: ${result._tag === "Exception" ? result.text : ""}`)
+              assert.deepStrictEqual(json(result.value), [true, true, false])
+            }
+          }),
+        timeout
+      )
+
       it.effect(
         "connects Chromium with no startup page",
         () =>
