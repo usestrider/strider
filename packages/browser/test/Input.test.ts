@@ -153,3 +153,34 @@ describe("uncertain modifier releases", () => {
     assert.deepStrictEqual(Option.getOrThrow(state.broken).release, expected)
   })
 })
+
+describe("Input handover settlement", () => {
+  for (const before of [true, false]) {
+    it(`keeps older pending releases when cleanup settles ${before ? "before" : "after"} accounting`, () => {
+      const state = broken()
+      const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+      Input.handOver(events)
+      if (before) Input.settled(events)
+      Input.uncertain(state, "new click", events)
+      if (!before) Input.settled(events)
+      assert.deepStrictEqual(Option.getOrThrow(state.broken), {
+        description: "mouse.up: the page didn't answer",
+        release
+      })
+    })
+  }
+
+  it("does not clear a later gesture's release of the same button", () => {
+    const state = Input.make()
+    const first = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(first)
+    Input.uncertain(state, "first click", first)
+    const second = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.uncertain(state, "second click", second)
+    const later = Option.getOrThrow(state.broken).release[1]
+    Input.settled(first)
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
+    Input.settled(first)
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
+  })
+})

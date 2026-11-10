@@ -587,6 +587,74 @@ describe("Chromium adapter, CDP only", () => {
         )
       }
 
+      it.effect(
+        "returns the click deadline while a cleanup reply is outstanding without a duplicate release",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const cleanupSent = yield* Deferred.make<void>()
+            let pressId: number | undefined
+            let cleanupId: number | undefined
+            const sent: Array<string> = []
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    sent.push(wire.params.type)
+                    if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                    if (wire.params.type === "mouseReleased" && cleanupId === undefined) cleanupId = wire.id
+                  }
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(
+                  Stream.tap((message) => {
+                    const wire = JSON.parse(message)
+                    return wire.id === cleanupId && cleanupId !== undefined
+                      ? Deferred.succeed(cleanupSent, undefined)
+                      : Effect.void
+                  }),
+                  Stream.filter((message) => {
+                    const wire = JSON.parse(message)
+                    return (pressId === undefined || wire.id !== pressId) &&
+                      (cleanupId === undefined || wire.id !== cleanupId)
+                  })
+                )
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button id=\"go\">Go</button>")}`)
+              const target = page.locator("#go")
+              const click = yield* target.click().pipe(
+                Deadline.within("1 second"),
+                Protocol.withCommandTimeout("3 seconds"),
+                Effect.forkChild
+              )
+              yield* Deferred.await(cleanupSent).pipe(Effect.timeout("5 seconds"))
+              const finished = yield* Fiber.await(click).pipe(Effect.timeoutOption("500 millis"))
+              assert.isTrue(
+                Option.isSome(finished),
+                "the operation deadline must not wait for the cleanup reply timeout"
+              )
+              const error = yield* Fiber.join(click).pipe(Effect.flip)
+              assert.isTrue(Deadline.isTimeout(error))
+              yield* target.click()
+              assert.deepStrictEqual(sent, [
+                "mouseMoved",
+                "mousePressed",
+                "mouseReleased",
+                "mouseMoved",
+                "mousePressed",
+                "mouseReleased"
+              ])
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
       for (const failure of ["cleanup", "normal"] as const) {
         it.effect(`records a rejected ${failure} release before the next click`, () =>
           Effect.gen(function*() {
