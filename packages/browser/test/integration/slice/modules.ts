@@ -676,6 +676,19 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect("collects the body of a terminal redirect status", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* fixture(() => "")
+          const page = yield* Browser.newPage()
+          const response = yield* NetworkResponse.next(page, {
+            url: `${origin}/redirect-unfollowed`,
+            status: 302,
+            body: (message) => message.text
+          })
+          yield* page.goto(`${origin}/redirect-unfollowed`)
+          assert.strictEqual((yield* response).body, "<title>unfollowed</title>")
+        })), timeout)
+
       it.effect(
         "ends manual redirects using the browser completion evidence",
         () =>
