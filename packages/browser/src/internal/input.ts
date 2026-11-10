@@ -88,7 +88,13 @@ export const uncertain = (state: State, description: string, events: ReadonlyArr
     } else if (event._tag === "Key" && event.type === "down") {
       if (state.keys.some((held) => held.code === event.code) || keysSeen.has(event.code)) continue
       keysSeen.add(event.code)
-      release.push({ ...event, type: "up", text: Option.none() })
+      const modifier = Keys.modifierOf(event.key)
+      release.push({
+        ...event,
+        type: "up",
+        text: Option.none(),
+        modifiers: modifier === undefined ? event.modifiers : { ...event.modifiers, [modifier.toLowerCase()]: false }
+      })
     }
   }
   if (release.length === 0) return

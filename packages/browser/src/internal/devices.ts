@@ -73,6 +73,12 @@ const sending = <E>(
             }
           })
         ),
+        // Cut short, by a deadline or a dialog, it may still have pressed something
+        Effect.onInterrupt(() =>
+          Effect.sync(() =>
+            Input.uncertain(state, `${operation}: interrupted`, events as ReadonlyArray<Adapter.InputEvent>)
+          )
+        ),
         Effect.catch((error) => {
           const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
           return Effect.fail(mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason, id))
