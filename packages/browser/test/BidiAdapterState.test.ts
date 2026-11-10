@@ -3241,7 +3241,7 @@ describe("BiDi response body completion", () => {
           if (result._tag === "Failure") {
             assert.strictEqual(result.failure.reason._tag, "Unsupported")
             if (result.failure.reason._tag === "Unsupported") {
-              assert.strictEqual(result.failure.reason.feature, "body.redirect")
+              assert.strictEqual(result.failure.reason.capability, "body.redirect")
             }
           }
         }
