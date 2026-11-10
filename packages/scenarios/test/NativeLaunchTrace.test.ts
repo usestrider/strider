@@ -103,3 +103,20 @@ it("bounds handler entry even when the handler ends after reply delivery", async
     fs.writeFileSync(file, JSON.stringify(value))
     expect((await retainNativeTrace(file, events, 1)).status).toBe("complete")
   }))
+it("rejects traces whose buffers report corrupted or rejected chunks", async () =>
+  fixture(async (file) => {
+    // Perfetto's traced_buf reports dropped data under names the loss pattern misses: chunks
+    // from a misbehaving producer (abi_violations) and chunk patches that could not be applied.
+    for (const counter of ["abi_violations", "patches_failed"]) {
+      const corrupted = {
+        ...native,
+        metadata: {
+          ...native.metadata,
+          trace_processor_stats: { traced_buf: [{ bytes_overwritten: 0, [counter]: 1 }] }
+        }
+      }
+      fs.writeFileSync(file, JSON.stringify(corrupted))
+      const result = await retainNativeTrace(file, events, 50)
+      expect(result.status, counter).toBe("error")
+    }
+  }))
