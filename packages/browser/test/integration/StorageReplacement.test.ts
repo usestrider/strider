@@ -8,6 +8,9 @@ import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { createHash } from "node:crypto"
+import * as http from "node:http"
+import type * as net from "node:net"
 import { site, tlsSite } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
@@ -31,6 +34,71 @@ const backends = [
 for (const [name, backend] of backends) {
   describe(name, () => {
     layer(backend, { excludeTestServices: true, timeout: 60000 })((it) => {
+      if (name === "WebKit") {
+        it.effect(
+          "clears cookies accepted from a WebSocket-only host",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const handshakes: Array<{ path: string; cookie: string }> = []
+              const sockets = new Set<net.Socket>()
+              const server = yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  const server = http.createServer((_request, response) =>
+                    response.end("<title>socket cookie probe</title>")
+                  )
+                  server.on("upgrade", (request, socket) => {
+                    const connection = socket as net.Socket
+                    sockets.add(connection)
+                    connection.on("close", () => sockets.delete(connection))
+                    const path = request.url ?? "/"
+                    handshakes.push({ path, cookie: request.headers.cookie ?? "" })
+                    const accept = createHash("sha1").update(
+                      `${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
+                    ).digest("base64")
+                    connection.write(
+                      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${
+                        path === "/seed" ? "Set-Cookie: socketOnly=accepted; Path=/; HttpOnly; SameSite=Lax\r\n" : ""
+                      }\r\n`
+                    )
+                    connection.on("data", () => connection.end(Buffer.from([0x88, 0x00])))
+                  })
+                  return server
+                }),
+                (server) =>
+                  Effect.sync(() => {
+                    for (const socket of sockets) socket.destroy()
+                    server.closeAllConnections()
+                    server.close()
+                  })
+              )
+              yield* Effect.promise(() => new Promise<void>((resolve) => server.listen(0, "::", resolve)))
+              const port = (server.address() as net.AddressInfo).port
+              const context = yield* Browser.newContext({ storageStateTracking: true })
+              const page = yield* context.newPage
+              yield* page.goto(`http://a.socket.127.0.0.1.nip.io:${port}`)
+              const connect = (path: string) =>
+                page.evaluateInMainWorld(async ({ port, path }) => {
+                  await new Promise<void>((resolve, reject) => {
+                    const socket = new WebSocket(`ws://b.socket.127.0.0.1.nip.io:${port}${path}`)
+                    socket.onopen = () => socket.close()
+                    socket.onclose = () => resolve()
+                    socket.onerror = () => reject(new Error("WebSocket handshake failed"))
+                  })
+                }, { port, path })
+              // Reading the Cookie header of another handshake never visits the socket host as a document,
+              // nor writes it through CookieJar. All sockets close before replacement begins.
+              yield* connect("/seed")
+              yield* connect("/before")
+              console.log("WebSocket cookie evidence before replacement", handshakes)
+              assert.include(handshakes.find((entry) => entry.path === "/before")!.cookie, "socketOnly=accepted")
+              yield* context.setStorageState(new StorageState.StorageState({ cookies: [], origins: [] }))
+              yield* connect("/after")
+              console.log("WebSocket cookie evidence after replacement", handshakes)
+              assert.notInclude(handshakes.find((entry) => entry.path === "/after")!.cookie, "socketOnly=accepted")
+            })),
+          60000
+        )
+      }
       it.effect(
         "clears available origin-private files and identifies locked storage handles",
         () =>
