@@ -186,6 +186,8 @@ export const upload = async (
     readonly store: Store
   }
 ): Promise<Manifest> => {
+  const missing = names.map(options.file).filter((path) => !fs.existsSync(path))
+  if (missing.length > 0) throw new Error(`No recording to upload at ${missing.join(", ")}`)
   const entries = new Map(options.manifest.recordings.map((entry) => [entry.name, entry]))
   for (const name of names) {
     const bytes = fs.readFileSync(options.file(name))

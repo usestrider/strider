@@ -170,7 +170,7 @@ the login pages used by other scenarios.
 `pnpm scenarios --record` visits the live sites, overwrites the ignored working recordings in `.data/scenarios/`,
 uploads each to the bucket under its hash, and rewrites `recordings.json`: commit that file with the refresh. Uploading
 needs the same four variables with a write token; without them the recording is kept locally and the command fails
-saying it wasn't uploaded. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
+saying it wasn't uploaded. `pnpm scenarios --upload` does the upload and the manifest alone, for the recordings already in `.data/scenarios/`, without visiting any site: use it to pin the recordings an earlier run was measured on. It needs the write token and fails naming any recording file that is missing. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
 from the repository root (choose an absolute `evidence` path that does not already exist):
 
 ```sh

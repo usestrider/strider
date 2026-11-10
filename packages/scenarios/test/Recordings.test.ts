@@ -208,3 +208,10 @@ it("matches AWS SDK SigV4 signatures for a hash-key GET and a nonempty PUT", asy
     vi.useRealTimers()
   }
 })
+
+it("uploads existing recordings for pinning, failing naming a missing file before any put", async () => {
+  fs.writeFileSync(file("a"), "one")
+  const { store, puts } = fakeStore()
+  await expect(Recordings.upload(["a", "b"], { manifest: { recordings: [] }, file, store })).rejects.toThrow(file("b"))
+  expect(puts).toEqual([])
+})

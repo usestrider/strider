@@ -5,6 +5,7 @@
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
  *   pnpm scenarios --only login    one scenario, and no measurements, printed: RESULTS.md keeps the full run
+ *   pnpm scenarios --upload        upload the existing recordings and pin them, visiting no site
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
@@ -151,6 +152,29 @@ const onAttempt = (scenario: string, sample: Measurements["scenarios"][number]["
 }
 
 // ── Recording the demo sites ──────────────────────────────────────────────────
+
+// Pins the recordings already in .data/scenarios/, as measured, without visiting any site
+if (argv.includes("--upload")) {
+  const store = Recordings.storeFromEnvironment()
+  if (store === undefined) {
+    process.stderr.write(`--upload needs ${Recordings.credentialNames.join(", ")} (write access).\n`)
+    process.exit(1)
+  }
+  try {
+    Recordings.writeManifest(
+      await Recordings.upload(Object.keys(recordings), {
+        manifest: Recordings.readManifest(),
+        file: files.recording,
+        store
+      })
+    )
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+  log("uploaded the existing recordings and updated packages/scenarios/recordings.json")
+  process.exit(0)
+}
 
 if (argv.includes("--record")) {
   const runtime = ManagedRuntime.make(layer)
