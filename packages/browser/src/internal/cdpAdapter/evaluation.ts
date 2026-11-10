@@ -419,16 +419,33 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
                 const reason = error.reason
                 if (
                   reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
-                  reason.code !== -32000 || reason.description !== "Inspected target navigated or closed"
+                  reason.code !== -32000 ||
+                  (reason.description !== "Inspected target navigated or closed" &&
+                    reason.description !== "Execution context was destroyed.")
                 ) return Effect.fail(error)
                 // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
                 // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
                 // Keep the command's original deadline while those lifecycle events catch up.
-                return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                if (reason.description === "Inspected target navigated or closed") {
+                  return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                    BrowserClock.until(at),
+                    Effect.flatMap((ended) =>
+                      Effect.fail(
+                        Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                          reason: new Protocol.NoReply({ method: reason.method, timeout })
+                        })
+                      )
+                    )
+                  )
+                }
+                // "Execution context was destroyed." arrives after the destroy event on the wire, and is no
+                // evidence by itself: fold the events received before the reply, then fail at once. `failed`
+                // reports Gone only if the realm ended, and the rejection otherwise.
+                return state.buffer.run(() => {}).pipe(
                   BrowserClock.until(at),
-                  Effect.flatMap((ended) =>
+                  Effect.flatMap((folded) =>
                     Effect.fail(
-                      Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                      Option.isSome(folded) ? error : new Protocol.ProtocolError({
                         reason: new Protocol.NoReply({ method: reason.method, timeout })
                       })
                     )
