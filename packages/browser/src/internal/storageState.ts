@@ -799,7 +799,8 @@ const remember = (history: History, chain: ReadonlyArray<string>) => {
 }
 
 const rememberCookie = (history: History, domain: string) => {
-  let host = domain.replace(/^\./, "")
+  const raw = domain.replace(/^\./, "")
+  let host = URL.parse(`https://${raw}`)?.hostname ?? raw.toLowerCase()
   while (host !== "") {
     history.cookieOrigins.add(`https://${host}`)
     // Domain cookies can be set on parent domains. IP addresses have no parent domain.
