@@ -62,7 +62,7 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
           "Invalid native timestamp"
         )
         lower = Math.max(lower, sent.at - native.ts! / 1000)
-        upper = Math.min(upper, received.at - (native.ts! + native.dur!) / 1000)
+        upper = Math.min(upper, received.at - native.ts! / 1000)
         matched++
         if (sent === first) firstNative = native
       }
@@ -80,7 +80,7 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
         uncertaintyMs: upper - lower,
         matched,
         alignment:
-          "Host ms = native us / 1000 + offset. Causal send/handler/reply intersection; assumes common monotonic rate over this launch. Bounds include host scheduling and transport delay; no exact point alignment claimed.",
+          "Host ms = native us / 1000 + offset. Causal send/handler-entry/reply intersection; assumes common monotonic rate over this launch. Bounds include host scheduling and transport delay; no exact point alignment claimed.",
         firstCommand: {
           method: message.method,
           id: message.id,

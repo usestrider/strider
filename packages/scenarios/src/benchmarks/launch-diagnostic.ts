@@ -75,8 +75,8 @@ export const launchDiagnostic = (options: {
       `--outputFile=${path.join(directory, "regression-results.json")}`
     ])
     const regressions = JSON.parse(fs.readFileSync(path.join(directory, "regression-results.json"), "utf8"))
-    assert.equal(regressions.numTotalTests, 20)
-    assert.equal(regressions.numPassedTests, 20)
+    assert.equal(regressions.numTotalTests, 21)
+    assert.equal(regressions.numPassedTests, 21)
     assert.equal(regressions.numPendingTests, 0)
     assert.equal(regressions.numFailedTests, 0)
     // Phase-only controls bound native tracing perturbation; these sequential blocks are not a speedup comparison.

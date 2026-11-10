@@ -33,11 +33,13 @@ const native = {
   }
 }
 const fixture = async (body: (file: string) => Promise<void>) => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "native-launch-"))
+  const retained = process.env["STRIDER_LAUNCH_TEST_OUTPUT"]
+  if (retained !== undefined) fs.mkdirSync(retained, { recursive: true })
+  const scratch = fs.mkdtempSync(path.join(retained ?? os.tmpdir(), "native-launch-"))
   try {
     await body(path.join(scratch, "trace.json"))
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true })
+    if (retained === undefined) fs.rmSync(scratch, { recursive: true, force: true })
   }
 }
 it("retains complete traces and intersects causal clock bounds", async () =>
@@ -45,7 +47,7 @@ it("retains complete traces and intersects causal clock bounds", async () =>
     fs.writeFileSync(file, JSON.stringify(native))
     const result = await retainNativeTrace(file, events, 50)
     expect(result.status).toBe("complete")
-    expect(result.offsetMs).toEqual([-1001, -999.5])
+    expect(result.offsetMs).toEqual([-1001, -999])
     expect(result.firstCommand).toEqual({
       method: "Browser.getVersion",
       id: 1,
@@ -74,8 +76,10 @@ it.each([0, 1])("rejects missing first-command evidence %s", async (index) =>
   }))
 it("rejects inconsistent clock bounds and preserves the trace", async () =>
   fixture(async (file) => {
-    fs.writeFileSync(file, JSON.stringify(native))
-    const result = await retainNativeTrace(file, events.map((e, i) => i === 3 ? { ...e, at: 31.1 } : e), 1)
+    const value = structuredClone(native)
+    value.traceEvents[1]!.ts = 1000000
+    fs.writeFileSync(file, JSON.stringify(value))
+    const result = await retainNativeTrace(file, events, 1)
     expect(result.status).toBe("error")
     expect(result.error).toMatch(/clock/)
     expect(fs.existsSync(file)).toBe(true)
