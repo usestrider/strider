@@ -972,6 +972,7 @@ it.effect("does not leave input blocked when navigation destroys the realm durin
               })
             )
           }
+          assert(request.op === "act" && request.action._tag === "Fill")
           return {
             _tag: "Value",
             value: {
