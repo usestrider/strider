@@ -31,6 +31,7 @@ import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
+import { selectScenarios } from "./selection.ts"
 import { start } from "./site.ts"
 
 const argv = process.argv.slice(2)
@@ -163,12 +164,12 @@ const unsupported = engine === "firefox"
     "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
   ]
   : []
-const chosen = scenarios.filter((scenario) =>
-  (only === undefined || scenario.name === only) &&
-  (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
-)
+const paired = process.env["STRIDER_PAIRED"] === "1"
+const chosen = selectScenarios(scenarios, only, paired).filter((
+  scenario
+) => (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined)))
 if (chosen.length === 0) throw new Error("No supported scenarios selected")
-if (process.env["STRIDER_PAIRED"] === "1" && chosen.some((scenario) => scenario.playwright === undefined)) {
+if (paired && chosen.some((scenario) => scenario.playwright === undefined)) {
   throw new Error("Paired scenario comparisons require a Playwright twin for every selected case")
 }
 const problems = recordingProblems(chosen, files.recording)
@@ -305,7 +306,7 @@ const results = await runScenarios(
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
 
-const measured = only === undefined && engine === "chromium"
+const measured = only === undefined && !paired && engine === "chromium"
 const waitMs = 3000
 // The renderers' CPU time per second of wall time, while `run` runs
 const cpuWhile = async (run: () => Promise<unknown>) => {

@@ -29,7 +29,6 @@ if (!["bench", "scenarios"].includes(values.workload)) {
 if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
-if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
 const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
