@@ -118,6 +118,21 @@ it("does not preserve bucket credentials in scenario output artifacts", () => {
   expect(metadata.includes("test-access-key")).toBe(false)
 })
 
+it("skips an unpinned local recording even when bucket credentials are configured", async () => {
+  fs.writeFileSync(file("the-internet"), "existing recording before the first upload")
+  const { store, gets, puts } = fakeStore()
+  const result = await Recordings.ensure(["the-internet"], {
+    manifest: { recordings: [] },
+    file,
+    store
+  })
+  expect([...result.unavailable.keys()]).toEqual(["the-internet"])
+  expect(result.unavailable.get("the-internet")).toContain("recordings.json")
+  expect(gets).toEqual([])
+  expect(puts).toEqual([])
+  expect(fs.readFileSync(file("the-internet"), "utf8")).toBe("existing recording before the first upload")
+})
+
 it("uploads each recording under its hash and records name, hash and size", async () => {
   fs.writeFileSync(file("a"), "one")
   const { store, puts, objects } = fakeStore()
