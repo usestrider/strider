@@ -13,7 +13,7 @@ import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Deadline from "../Deadline.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -318,11 +318,10 @@ export const stream = (
             where,
             delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, Option.some(budget))
           )
-          // Body reads run in the consumer's fiber, which closing the subscription's scope doesn't reach.
-          const grant = found.behind.grant
-          if (Option.isNone(grant)) return events
+          // Body reads run in the consumer's fiber, which closing the subscription's scope doesn't reach. That scope
+          // closes with the caller's or when the grant is released.
           const released = yield* Deferred.make<void>()
-          yield* grant.value.onRelease(Deferred.succeed(released, undefined))
+          yield* Scope.addFinalizer(yield* Effect.scope, Deferred.succeed(released, undefined))
           return events.pipe(Stream.interruptWhen(Deferred.await(released)))
         })
       )
