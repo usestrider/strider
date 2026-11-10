@@ -100,6 +100,10 @@ export const install = (name: string, token: string, pattern: string, transport:
     chain: Promise.resolve()
   })
   class Mock extends global.EventTarget {
+    // Native sockets of unrouted URLs and routed sockets are both instances of the page-visible constructor.
+    static [Symbol.hasInstance](value: any) {
+      return Native.prototype.isPrototypeOf(value) || Mock.prototype.isPrototypeOf(value)
+    }
     static CONNECTING = 0
     static OPEN = 1
     static CLOSING = 2
@@ -397,7 +401,7 @@ export const install = (name: string, token: string, pattern: string, transport:
           if (command.reason) socket.native?.close(1000, command.reason)
           else socket.native?.close()
         } else socket.native?.close(command.code, command.reason)
-      } else socket.closed(command.code ?? 1000, command.reason ?? "", true)
+      } else socket.closed(command.code ?? 1005, command.reason ?? "", true)
     } else if (command.type === "fail") socket.fail(command.reason)
     else if (command.type === "drain") {
       socket.endTerminals()
@@ -409,6 +413,7 @@ export const install = (name: string, token: string, pattern: string, transport:
     }
   }
   global[key] = { add, dispatch }
+  Object.defineProperty(Mock, "name", { value: "WebSocket", configurable: true })
   global.WebSocket = Mock
   add(name, token, pattern, transport)
 }
