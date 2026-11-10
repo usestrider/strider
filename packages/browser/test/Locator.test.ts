@@ -1132,3 +1132,71 @@ for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as 
       })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }).pipe(Effect.scoped))
 }
+
+// A frame can commit while Runtime.element resolves: the node it returns then belongs to the new document,
+// while `routed.document` still names the previous one.
+const withMismatchedLookup = <A, E, R>(
+  body: (input: {
+    readonly page: Browser.Page
+    readonly current: Target.DocumentId
+    readonly realms: Array<Target.DocumentId>
+    readonly calls: Array<ReadonlyArray<unknown>>
+  }) => Effect.Effect<A, E, R>
+) => {
+  const stale = "previous-frame-document" as Target.DocumentId
+  const realms: Array<Target.DocumentId> = []
+  const calls: Array<ReadonlyArray<unknown>> = []
+  const layer = BrowserImpl.layer((sink) =>
+    Fake.connect([], {
+      info: new Browser.Info(Fake.info),
+      capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+    })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+      ...adapter,
+      realm: (document) =>
+        Effect.sync(() => {
+          realms.push(document)
+          return "realm" as Target.RealmId
+        }),
+      evaluate: (request) =>
+        Effect.sync(() => {
+          calls.push(request.arguments ?? [])
+          return { _tag: "Value", value: { type: "undefined" } } as const
+        })
+    })))
+  )
+  return Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const { entry, runtime } = Handles.page(page)
+    const current = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+    const element = vi.spyOn(Runtime, "element").mockReturnValue(Effect.succeed({
+      _tag: "Found",
+      node: { document: current, binding: "target" },
+      routed: { document: stale, hops: [] }
+    }))
+    yield* Effect.addFinalizer(() => Effect.sync(() => element.mockRestore()))
+    return yield* body({ page, current, realms, calls })
+  })).pipe(Effect.provide(layer))
+}
+
+it.effect("evaluate runs in the realm of the bound node's document when a frame commits during resolution", () =>
+  withMismatchedLookup(({ current, page, realms }) =>
+    Effect.gen(function*() {
+      yield* page.locator("#target").evaluate((element) => element.id).pipe(Effect.ignore)
+      assert.deepStrictEqual(realms, [current], "the realm comes from node.document, not the stale routed.document")
+    })
+  ))
+
+it.effect("a synthetic dragTo runs in the realm of the bound nodes' document when a frame commits during resolution", () =>
+  withMismatchedLookup(({ page, realms }) =>
+    Effect.gen(function*() {
+      const from = page.locator("#a") as LocatorImpl
+      const to = page.locator("#b") as LocatorImpl
+      // Both nodes are in the one current document, so the drag is not a cross-document one
+      const error = yield* Operation.named("Locator.dragTo")(
+        Effect.flatMap(Operation.record, (record) => (from as any).syntheticDrag(to, undefined, record))
+      ).pipe(Effect.flip, Effect.option)
+      const reason = Option.isSome(error) ? (error.value as any).reason?._tag : undefined
+      assert.notStrictEqual(reason, "InvalidInput", "same-document nodes refused as a cross-document drag")
+      assert.deepStrictEqual(realms.filter((d) => d === ("previous-frame-document" as Target.DocumentId)), [])
+    })
+  ))
