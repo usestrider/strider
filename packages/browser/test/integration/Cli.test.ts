@@ -1101,6 +1101,23 @@ describe("strider", () => {
         const warnedJson = yield* shop("--json", "goto", `${cafe}&typo=%pasword%`)
         assert.strictEqual(warnedJson.code, 0, warnedJson.err)
         assert.include(JSON.parse(warnedJson.out).sinceLast.join("\n"), "%pasword% names no secret")
+        // A failed command reports the events since the last one, and the next command doesn't repeat them
+        const noisy = `<button onclick="setTimeout(() => console.error('late boom'), 200)">Go</button>`
+        assert.strictEqual((yield* shop("goto", `${served.origin}/fixture?html=${encodeURIComponent(noisy)}`)).code, 0)
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missed = yield* shop("expect", "css=#absent", "visible")
+        assert.strictEqual(missed.code, 14, missed.err)
+        assert.include(missed.err, "ExpectationFailed")
+        assert.include(missed.err, "since last: console error on shop: late boom")
+        const after = yield* shop("find", "Go", "--role", "button")
+        assert.strictEqual(after.code, 0, after.err)
+        assert.notInclude(after.out, "late boom")
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missedJson = yield* shop("--json", "expect", "css=#absent", "visible")
+        assert.strictEqual(missedJson.code, 14, missedJson.err)
+        const failed = JSON.parse(missedJson.out)
+        assert.strictEqual(failed.outcome._tag, "Failed")
+        assert.include(failed.outcome.sinceLast.join("\n"), "console error on shop: late boom")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
         // State for a program, and a test of what ran, into directories that don't exist yet
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
