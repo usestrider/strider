@@ -4,14 +4,21 @@
  * base64 the browser sent that doesn't decode fails rather than giving empty bytes.
  */
 import { assert, describe, it } from "@effect/vitest"
+import { Browser, WebSocketRoute } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Headers from "effect/http/Headers"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import * as Deadline from "../src/Deadline.ts"
@@ -36,6 +43,7 @@ import type * as PageNavigation from "../src/PageNavigation.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
+import { harness as webSocketHarness } from "./utils/WebSocketHostHarness.ts"
 
 const control: ProtocolClient.FoldControl = {
   sync: () => {},
@@ -3439,6 +3447,284 @@ describe("BiDi request collector limits", () => {
       }
     }))
 })
+
+const preload = (source: string): Adapter.Declaration => ({
+  _tag: "InitScript",
+  source,
+  world: { _tag: "Main" },
+  phase: "user",
+  workers: false,
+  timing: "beforeAuthorScript",
+  after: []
+})
+
+it.effect("serializes overlapping preload addition and removal against the latest registry", () =>
+  Effect.gen(function*() {
+    const entered = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const native = new Map<string, string>()
+    let serial = 0
+    let hold = false
+    const root = {
+      send: Effect.fnUntraced(function*(command: Protocol.Command<string, unknown, unknown>) {
+        if (command.method === "script.addPreloadScript") {
+          const script = `P${++serial}`
+          native.set(script, (command.params as { functionDeclaration: string }).functionDeclaration)
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+          }
+          return { script }
+        }
+        if (command.method === "script.removePreloadScript") {
+          native.delete((command.params as { script: string }).script)
+        }
+        return {}
+      })
+    } as unknown as ProtocolClient.Session
+    const { state } = yield* withPage({}, {}, root)
+    const firstScope = yield* Scope.fork(yield* Effect.scope)
+    const nextScope = yield* Scope.fork(yield* Effect.scope)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("first")).pipe(Scope.provide(firstScope))
+    hold = true
+    const adding = yield* Declare.declare(state, { _tag: "Browser" }, preload("next")).pipe(
+      Scope.provide(nextScope),
+      Effect.forkChild
+    )
+    yield* Deferred.await(entered)
+    const removing = yield* Scope.close(firstScope, Exit.void).pipe(Effect.forkChild)
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(adding)
+    yield* Fiber.join(removing)
+    assert.strictEqual(native.size, 1)
+    assert([...native.values()].every((body) => body.includes("next") && !body.includes("first")))
+    yield* Scope.close(nextScope, Exit.void)
+    assert.strictEqual(native.size, 0)
+  }))
+
+it.effect("rolls back every staged preload after a partial replacement fails", () =>
+  Effect.gen(function*() {
+    const native = new Map<string, string>()
+    let serial = 0
+    let failNext = false
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          if (command.method === "script.addPreloadScript") {
+            if (
+              failNext && (command.params as { functionDeclaration: string }).functionDeclaration.includes("second")
+            ) {
+              return Effect.fail(
+                new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: command.method }) })
+              )
+            }
+            const script = `P${++serial}`
+            native.set(script, (command.params as { functionDeclaration: string }).functionDeclaration)
+            return Effect.succeed({ script })
+          }
+          if (command.method === "script.removePreloadScript") {
+            native.delete((command.params as { script: string }).script)
+          }
+          return Effect.succeed({})
+        })
+    } as unknown as ProtocolClient.Session
+    const { state } = yield* withPage({}, {}, root)
+    const firstScope = yield* Scope.fork(yield* Effect.scope)
+    const secondScope = yield* Scope.fork(yield* Effect.scope)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("first")).pipe(Scope.provide(firstScope))
+    const previous = [...native.keys()]
+    failNext = true
+    const result = yield* Declare.declare(state, { _tag: "Browser" }, preload("second")).pipe(
+      Scope.provide(secondScope),
+      Effect.exit
+    )
+    assert(Exit.isFailure(result))
+    assert.deepStrictEqual([...native.keys()], previous)
+    failNext = false
+    yield* Scope.close(secondScope, Exit.void)
+    yield* Scope.close(firstScope, Exit.void)
+    assert.strictEqual(native.size, 0)
+  }))
+
+it.effect("retires a Firefox missing realm without a handler error and reclaims every route lease", () =>
+  Effect.gen(function*() {
+    const errors: Array<unknown> = []
+    const ready = yield* Deferred.make<void>()
+    const trigger = yield* Deferred.make<void>()
+    const replaced = yield* Deferred.make<void>()
+    const tail = yield* Deferred.make<void>()
+    let rejected = 0
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          const params = command.params as { functionDeclaration: string; target: { realm: string } }
+          if (params.target.realm === "R1" && params.functionDeclaration.includes("\"type\":\"send\"")) {
+            return Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: command.method,
+                  reason: "NoSuchFrame",
+                  code: "no such frame",
+                  description: "Realm with id R1 not found"
+                })
+              })
+            )
+          }
+          if (params.functionDeclaration.includes("\"reason\":\"constructor admission\"")) rejected++
+          return Effect.succeed({ type: "success", realm: params.target.realm, result: { type: "undefined" } })
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, realm, facts } = yield* withPage({}, {}, root)
+    const replacement: State.RealmEntry = { ...realm, id: state.ids.realm(), bidi: "R2" as Script.Realm, held: [] }
+    state.realms.set(replacement.bidi, replacement)
+    state.realmsById.set(replacement.id, replacement)
+    yield* webSocketHarness((getBridge) =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const old: Array<WebSocketRoute.Connection> = []
+        const next: Array<WebSocketRoute.Connection> = []
+        const registration = yield* context.routeWebSocket(
+          "**",
+          Effect.fnUntraced(function*(socket) {
+            yield* socket.open({})
+            if (socket.realm === realm.id) {
+              old.push(socket)
+              if (old.length === 14) yield* Deferred.succeed(ready, undefined)
+              if (socket.id.endsWith(":1")) {
+                yield* Deferred.await(trigger)
+                yield* socket.page.send({ _tag: "Text", data: "after realm destruction" })
+              }
+            } else {
+              next.push(socket)
+              if (next.length === 14) yield* Deferred.succeed(replaced, undefined)
+            }
+          }),
+          { implementation: "script" }
+        )
+        const bridge = getBridge()
+        const create = (target: State.RealmEntry, id: number) =>
+          bridge.receive(
+            target.id,
+            Effect.succeed(
+              JSON.stringify({
+                token: bridge.token,
+                type: "create",
+                id: String(id),
+                url: "ws://example.com/",
+                protocols: []
+              })
+            ),
+            { _tag: "Worker", realm: target.id },
+            { isAlive: () => !target.ended }
+          )
+        for (let id = 1; id <= 14; id++) assert.isTrue(create(realm, id))
+        yield* Deferred.await(ready)
+        yield* Deferred.succeed(trigger, undefined)
+        yield* old[0]!.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
+        assert.deepStrictEqual(errors, [], "ordinary realm loss is not a failed user handler")
+        assert.isTrue(realm.ended)
+        assert.isFalse(state.realmsById.has(realm.id))
+        assert.strictEqual(facts.filter((fact) => fact._tag === "RealmRemoved" && fact.realm === realm.id).length, 1)
+        for (const socket of old) {
+          yield* socket.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
+        }
+        bridge.ended(realm.id)
+        bridge.ended(realm.id)
+        for (let id = 1; id <= 15; id++) {
+          assert.isTrue(create(replacement, id))
+        }
+        assert.isTrue(
+          bridge.receive(
+            replacement.id,
+            Effect.yieldNow.pipe(
+              Effect.andThen(Deferred.succeed(tail, undefined)),
+              Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
+            ),
+            { _tag: "Worker", realm: replacement.id },
+            { isAlive: () => !replacement.ended }
+          )
+        )
+        yield* Deferred.await(replaced)
+        yield* Deferred.await(tail)
+        assert.strictEqual(next.length, 14, "all fourteen reservations must be usable again")
+        assert.strictEqual(rejected, 1, "duplicate death must not grant a fifteenth reservation")
+        assert.isFalse(replacement.ended)
+        yield* registration.remove
+      }), (id, call) => Evaluation.evaluate(state, id, call)).pipe(
+        Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([Logger.make((entry) => {
+            if (entry.logLevel === "Error") errors.push(entry.message)
+          })])
+        )
+      )
+  }))
+
+it.effect("removes an obsolete preload even when reinstalling its survivor fails", () =>
+  Effect.gen(function*() {
+    const native = new Map<string, string>()
+    let serial = 0
+    let failing = false
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          if (command.method === "script.addPreloadScript") {
+            if (failing) {
+              return Effect.fail(
+                new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: command.method }) })
+              )
+            }
+            const script = `P${++serial}`
+            native.set(script, (command.params as { functionDeclaration: string }).functionDeclaration)
+            return Effect.succeed({ script })
+          }
+          if (command.method === "script.removePreloadScript") {
+            native.delete((command.params as { script: string }).script)
+          }
+          return Effect.succeed({})
+        })
+    } as unknown as ProtocolClient.Session
+    const { state } = yield* withPage({}, {}, root)
+    const first = yield* Scope.fork(yield* Effect.scope)
+    const survivor = yield* Scope.fork(yield* Effect.scope)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("removed")).pipe(Scope.provide(first))
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("survivor")).pipe(Scope.provide(survivor))
+    failing = true
+    yield* Scope.close(first, Exit.void)
+    assert.strictEqual(native.size, 1)
+    assert([...native.values()].every((body) => body.includes("survivor") && !body.includes("removed")))
+    failing = false
+    yield* Scope.close(survivor, Exit.void)
+    assert.strictEqual(native.size, 0)
+  }))
+
+it.effect("bounds the whole preload-removal loop once, not once per preload", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    let stalled = false
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          if (command.method === "script.addPreloadScript") return Effect.succeed({ script: `P${Math.random()}` })
+          if (command.method === "script.removePreloadScript" && stalled) return Effect.never
+          return Effect.succeed({})
+        })
+    } as unknown as ProtocolClient.Session
+    yield* Effect.gen(function*() {
+      const { state } = yield* withPage({}, {}, root)
+      const scopes = yield* Effect.forEach(["a", "b", "c"], () => Scope.fork(Scope.makeUnsafe()))
+      for (const [index, scope] of scopes.entries()) {
+        yield* Declare.declare(state, { _tag: "Browser" }, preload(`s${index}`)).pipe(Scope.provide(scope))
+      }
+      stalled = true
+      const closing = yield* Scope.close(scopes[0]!, Exit.void).pipe(Effect.forkChild)
+      yield* TestClock.adjust(Duration.millis(5001))
+      for (let index = 0; index < 20; index++) yield* Effect.yieldNow
+      assert.isDefined(closing.pollUnsafe(), "three stalled removals must share one five-second budget")
+    }).pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+  }))
 
 describe("BiDi response body completion", () => {
   for (const successor of ["none", "waiting", "reading"] as const) {

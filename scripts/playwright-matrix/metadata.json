@@ -146,7 +146,9 @@
     "packages/browser/src/Operation.ts",
     "node_modules/effect/src/Effect.ts",
     "node_modules/effect/src/Fiber.ts",
-    "node_modules/effect/package.json"
+    "node_modules/effect/package.json",
+    "packages/browser/src/WebSocketRoute.ts",
+    "packages/browser/src/internal/webSocketRoutes.ts"
   ],
   "scopeDecisions": [
     {

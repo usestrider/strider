@@ -763,6 +763,19 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("leaves no script running after concurrent removals", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const first = yield* page.addInitScript({ source: "(window.ran ??= []).push('first')" })
+            const second = yield* page.addInitScript({ source: "(window.ran ??= []).push('second')" })
+            assert.deepStrictEqual(yield* run(page, origin, "return window.ran"), ["first", "second"])
+            yield* Effect.all([first.remove, second.remove], { concurrency: "unbounded", discard: true })
+            assert.strictEqual(yield* run(page, origin, "return window.ran ?? null"), null)
+          }))
+        }), timeout)
+
       it.effect("runs a script in the isolated world, apart from the page's, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

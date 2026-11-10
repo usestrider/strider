@@ -1,0 +1,223 @@
+---
+title: Mocking WebSockets
+description: Scoped WebSocket mocks and browser-native proxies, with explicit script consent and bounded admission.
+order: 9
+---
+
+A live socket server can make a test depend on timing or unavailable services. A scoped WebSocket route answers
+messages in the test or changes selected messages while the browser connects to the real server.
+
+## Create a mock
+
+Register before navigating. The required `implementation: "script"` option permits a main-world constructor shim;
+this does not intercept native network frames. Removing the registration, or closing its scope, closes its sockets.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mockChat = Effect.fn("mockChat")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.open({
+        fromPage: (message, reply) => reply.send(message)
+      }),
+    { implementation: "script" }
+  )
+  yield* page.goto("https://chat.example.com")
+})
+```
+
+The handler opens explicitly so its message handler is ready before application code sends. Text stays text;
+binary is exact bytes, including a typed-array view's offset and length. Accepted mutable buffers are copied
+synchronously; asynchronous Blob conversion preserves send order. An absent mock handler discards page messages.
+
+## Connect to the real server
+
+A proxy uses the saved native constructor in the originating browser realm, preserving browser cookies, origin,
+TLS and proxy configuration. Absent directional handlers forward unchanged. A provided handler takes ownership of
+its direction: send explicitly to forward or replace, or return without sending to drop.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const redactChat = Effect.fn("redactChat")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.connectToServer({
+        fromPage: (message, endpoints) =>
+          message._tag === "Text"
+            ? endpoints.server.send({
+              _tag: "Text",
+              data: message.data.replaceAll("secret", "redacted")
+            })
+            : endpoints.server.send(message)
+      }).pipe(Effect.asVoid),
+    { implementation: "script" }
+  )
+})
+```
+
+The handlers are fixed before opening. The connection's passive event stream reports messages and closes without
+changing forwarding. A failing handler closes the socket and reports the failure; it never falls back to a live
+server. Stream overflow fails that observer; transport overflow closes the affected connection. Native proxy error
+and close events wait until the host has forwarded or deliberately dropped every preceding server message,
+including completion of a delayed `fromServer` handler. Removal cancels that wait and closes the owned sockets.
+
+## What a handler decides
+
+The handler decides what the socket does: call `open` for a mock, or `connectToServer` for a proxy. Until it does,
+the page's socket is connecting. If the handler returns without deciding, the page sees what an unreachable server
+gives, an `error` event and then a close with code 1006, and its slot is freed. There is no implicit auto-open.
+
+The handler has the default operation budget (`Deadline.DefaultBudget`, 30 seconds unless set) to decide. If it
+takes longer, the connection closes the same way. Once it has decided, the work it leaves running has no deadline
+and lasts until the connection closes.
+
+## Push, observe and close
+
+A mock can send to the page at any time after it opens. `events` watches messages, closes and errors in both
+directions without changing what is forwarded, and `status` says whether the connection is connecting, open or
+closed. A close takes an optional code, 1000 or 3000–4999, and a reason of at most 123 UTF-8 bytes; without a code
+the page sees 1005, as for a native close without one.
+
+```ts
+import { Page, WebSocketRoute } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
+
+const announce = Effect.fn("announce")(
+  function*(connection: WebSocketRoute.Connection) {
+    const events = yield* connection.events
+    yield* events.pipe(
+      Stream.runForEach((event) => Effect.log(`${connection.id}: ${event._tag}`)),
+      Effect.forkScoped
+    )
+    yield* connection.open({})
+    yield* connection.page.send({ _tag: "Text", data: "welcome" })
+    yield* connection.page.close({ code: 4001, reason: "session expired" })
+  }
+)
+
+const mockSession = Effect.fn("mockSession")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket("wss://chat.example.com/socket", announce, {
+    implementation: "script"
+  })
+})
+```
+
+A proxy's `fromServer` handler sees each message the server sends before the page does, with the same choice as
+`fromPage`: send to forward or replace, or return without sending to drop.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const hideAdmin = Effect.fn("hideAdmin")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.connectToServer({
+        fromServer: (message, endpoints) =>
+          message._tag === "Text" && message.data.startsWith("admin:")
+            ? Effect.void
+            : endpoints.page.send(message)
+      }).pipe(Effect.asVoid),
+    { implementation: "script" }
+  )
+})
+```
+
+## Removing a route early
+
+A route lasts as long as the scope it was registered in. `remove` ends it sooner: it closes the sockets that route
+owns with code 1000 and leaves other routes in force. Navigation, a closed page and the end of a frame or worker
+close the sockets they own as well.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mockOnce = Effect.fn("mockOnce")(function*(page: Page.Page) {
+  const route = yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) => connection.open({}),
+    { implementation: "script" }
+  )
+  yield* page.goto("https://chat.example.com")
+  yield* route.remove
+})
+```
+
+## Limits and overflow
+
+- A message is at most 1 MiB.
+- A route serves at most 14 mocked connections, or 7 proxied ones, at a time; a mix of mocks and proxies counts a
+  proxy as two. A constructor past that limit fails as a socket that cannot connect.
+- Replies a handler sends share one pool of 2 MiB and 256 pending sends across the route.
+
+These are ceilings on what the route admits, not guaranteed queue sizes, and they do not bound the browser's own
+memory. Going over one never drops a message quietly: the connection closes with an `error` event and an abnormal
+close, and the operation that went over fails with `Overflow`, whose `limit` says which ceiling it was.
+
+```ts
+import { WebSocketRoute } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const sendBig = (page: WebSocketRoute.Writable, data: string) =>
+  page.send({ _tag: "Text", data }).pipe(
+    Effect.catchTag("WebSocketRouteError", (error) =>
+      error.reason._tag === "Overflow"
+        ? Effect.log(`over the ${error.reason.limit} limit`)
+        : Effect.fail(error))
+  )
+```
+
+When the real server closes a proxied socket, the page sees the close only after every message the server sent
+before it has been forwarded or dropped. Failures the library causes close with code 4000.
+
+## What still differs from a native socket
+
+A mocked socket's events are synthetic and untrusted, and native buffering, compression and wire fragments are not
+reproduced. `instanceof WebSocket`, `WebSocket.name` and `constructor` match for routed and unrouted sockets, but a
+page that patches `WebSocket.prototype` reaches only the sockets the shim creates, not native ones for URLs no
+route matches. Sockets opened before the route, constructors a page saved earlier, `WebSocketStream` and shared
+or service workers are not covered.
+
+## Page scripts can interfere
+
+The shim runs in the page's own world, so scripts on the page can see it and interfere with it. After it
+installs, a page cannot replace or delete the entry the library talks to, nor read the socket internals or the
+binding that carries messages. It can still read that entry and call it, and on a document that was already
+loaded when the route was registered, or under `timing: "bestEffort"`, a page could have claimed the entry
+first. Do not route sockets of pages you do not trust with anything a hostile script must not influence.
+
+## Browser coverage
+
+Launched Chromium and Firefox reach existing documents and future pages/frames, including cross-origin frames.
+Only constructions after installation are captured. Chromium and stock WebKit can also cover dedicated workers
+started later when `workers: true` is explicit; Firefox refuses that option. Shared/service workers, saved
+constructors, existing sockets, WebSocketStream and custom socket clients remain outside this shim.
+
+Stock WebKit and attached Chromium cannot guarantee first-script popup installation. They reject the default
+required timing before installing anything; choose `timing: "bestEffort"` explicitly to accept that limit:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const bestEffortMock = Effect.fn("bestEffortMock")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) => connection.open({}),
+    { implementation: "script", timing: "bestEffort", workers: true }
+  )
+})
+```
+
+The constructor and events are synthetic. Native event trust, constructor identity, buffering, wire fragments,
+compression and security-policy fidelity of a fully mocked socket are not emulated. Native passthrough still
+obeys browser connection policy. Native [connection observations](/docs/events/network) remain distinct from
+mock traffic. Contexts without a route receive no shim, binding/channel or message state for this feature.

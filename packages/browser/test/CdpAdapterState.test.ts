@@ -61,6 +61,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const state = State.make({
+    handlers: Kit.handlers<State.Event>(),
     cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
@@ -69,16 +70,12 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     root: () => protocolSession,
     release: Responses.release
   })
-  const context: State.ContextEntry = {
-    ...(requestTiming ? { requestTiming: new Map() } : {}),
-    ...(requestSizes ? { requestSizes: new Map() } : {}),
-    id: state.defaultContext,
-    browserContextId: undefined,
-    isDefault: true,
-    removing: false
-  }
+  const context = new State.ContextEntry(state.defaultContext, undefined, true)
+  if (requestTiming) context.requestTiming = new Map()
+  if (requestSizes) context.requestSizes = new Map()
   state.contexts.set(context.id, context)
   const target: State.TargetEntry = {
+    event: undefined as unknown as State.DispatchContext,
     kind: "page",
     targetId: "T1",
     session: protocolSession,
@@ -90,6 +87,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     scripts: new Map(),
     ended: false
   }
+  target.event = State.dispatchContext(state, target)
   const page: State.PageEntry = {
     id: state.ids.navigable(),
     targetId: "T1",
@@ -1157,12 +1155,7 @@ describe("CDP restoration cleanup", () => {
           })
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(mock)
-      const closing = {
-        id: state.ids.userContext(),
-        browserContextId: "disposing",
-        isDefault: false,
-        removing: false
-      }
+      const closing = new State.ContextEntry(state.ids.userContext(), "disposing", false)
       state.contexts.set(closing.id, closing)
       state.contextsByCdp.set("disposing", closing)
       state.pages.set(page.id, { ...page, context: closing })

@@ -528,7 +528,7 @@ later context cleanup; interceptor and request state do not.
 
 ## 7. Declarations
 
-Declarations are init scripts, routes, overrides, emulation, download and prompt policies, data collectors and page clocks. All are identified registrations with scoped lifetimes.
+Declarations are init scripts, HTTP and WebSocket routes, overrides, emulation, download and prompt policies, data collectors and page clocks. All are identified registrations with scoped lifetimes.
 
 - **Installation.**
   - Installation is acknowledged, or acquisition fails.
@@ -537,6 +537,19 @@ Declarations are init scripts, routes, overrides, emulation, download and prompt
   - Attaching to a running page cannot precede scripts that already ran.
   - A target is published as ready only after its required setup succeeds. Optional setup failures appear as unavailable capabilities.
 - **Precedence** for settings and handlers: scope specificity first (Page, then Context, then Browser; the API declares nothing on a frame, so Frame joins when a declaration needs it), then explicit priority, then recency. Releasing any registration recomputes the effective state, including when fibers finish out of order. On CDP, releasing the last viewport override clears the emulation and waits for the original renderer dimensions, under a fresh cleanup deadline on the browser clock. Releasing an override while another remains applies the current effective override. On BiDi, viewport defaults are set per user context for future pages; broader writes then restore existing page overrides from the declaration registry. New user contexts receive the browser default without rewriting existing contexts. BiDi viewport release skips closing pages and removing contexts, and gives each remaining context/page its own five-second cleanup budget on the browser clock, detached from the expired operation. Failed or interrupted removal/close resets its lifecycle flag and reconciles surviving resources from the current registry, with the same per-target budgets and diagnostics; an ended transport skips recovery writes. Release and recovery work belong to the connection: an active operation's deadline bounds its wait, and stopping that wait marks cleanup unconfirmed while native cleanup continues. Outside an operation, or when confirmation is explicitly required, release waits for cleanup. A rejected or timed-out cleanup warns and marks restoration unconfirmed without stopping other targets; an ended session is quiet. Failed or interrupted viewport initialization attempts context removal under a separate five-second cleanup budget while preserving the original failure. Confirmed removal ends its pages and context in the model; unconfirmed removal retains the known context and warns rather than claiming it ended. Restoration holds unless cleanup logs a warning: an unknown original size, a deadline or unexpected protocol failure warns without failing the scope; an ended session is quiet. Each target is cleaned up independently.
+- **WebSocket routes** replace the main-world constructor only with explicit script consent. A registration
+  selects future constructions once, newest matching registration first, across existing documents and future
+  pages/frames. Existing sockets and saved constructors remain native. A mock opens explicitly; a proxy opens the
+  saved native constructor in the originating realm. Directional handlers are fixed before open: absent proxy
+  handlers forward, installed handlers send explicitly or drop. Passive event streams never change forwarding.
+  Every connection has a registration-owned child scope; handler failure closes rather than contacting a server.
+  Admission includes unused issued credit, queued payload and pending Blob conversions, across realms. The
+  registration keeps a counted 2 MiB host-send pool, leaving 14 MiB for 1 MiB page credits and an additional
+  1 MiB server credit only for proxies. Thus mocks + 2 * proxies <= 14; host completion/cancellation returns its
+  credit exactly once. The realm spends preauthorized credit synchronously before snapshotting mutable
+  data. A drained surrender or confirmed realm destruction reclaims them exactly once. See `WebSocketRoute` for
+  all ceilings and the guide for the conservative allocation policy. Removing a registration closes its sockets,
+  drains conversion work, removes future scripts and restores only the constructor still owned by its shim.
 - **Init scripts** form an ordered bundle per world and revision. Built as below, with what the probes found on every backend: a script runs before `document.documentElement` exists, in every frame, and a throw is reported as the page's uncaught exception.
   - **Phases.** A reserved *environment phase* (library shims such as the page clock) runs before user scripts.
   - **Order.** Within a phase, array order applies, then explicit `after` dependencies, then registration sequence.

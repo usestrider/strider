@@ -42,6 +42,7 @@ const setup = Effect.fnUntraced(function*() {
     fold: (control) => {
       buffer.connect(control)
       state = State.make({
+        handlers,
         cleanupScope,
         connect: { sink: () => Effect.void, ownership: "launched" },
         ids: Kit.makeIds(),
