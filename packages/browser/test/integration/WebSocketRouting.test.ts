@@ -105,6 +105,32 @@ for (const [name, backend] of backends) {
           }),
         60_000
       )
+      it.effect("answers small messages with eight sockets already open", () =>
+        Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.context.routeWebSocket("**/socket", (connection) =>
+            connection.open({
+              fromPage: (message, endpoint) =>
+                endpoint.send({ _tag: "Text", data: "reply:" + (message._tag === "Text" ? message.data : "binary") })
+            }), { implementation: "script", timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript" })
+          const replies = yield* page.evaluateInMainWorld(async () => {
+            const sockets = Array.from({ length: 8 }, () => new WebSocket("ws://example.invalid/socket"))
+            await Promise.all(sockets.map((socket) =>
+              new Promise<void>((resolve, reject) => {
+                socket.onopen = () => resolve()
+                socket.onerror = () => reject(new Error("opening failed"))
+              })
+            ))
+            return Promise.all(sockets.map((socket) =>
+              new Promise<string>((resolve) => {
+                socket.onmessage = (event) => resolve(String(event.data))
+                socket.onclose = () => resolve("closed before reply")
+                socket.send("hello")
+              })
+            ))
+          })
+          assert.deepStrictEqual(replies, Array.from({ length: 8 }, () => "reply:hello"))
+        }), 60_000)
       it.effect(
         "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
         () =>
