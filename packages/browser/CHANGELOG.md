@@ -1,5 +1,52 @@
 # @usestrider/browser
 
+## 0.8.2
+
+### Added
+
+- **`context.routeWebSocket`** (#258): mock WebSocket connections, or proxy them to the real server, and watch or change their messages. It works by replacing the page's `WebSocket` constructor with a script, so it requires `implementation: "script"`, and page scripts can see and interfere with that replacement. A handler that returns without calling `open` or `connectToServer` fails the connection as an unreachable server does, and its deadline covers only that decision. Unrouted sockets in a routed context stay `instanceof WebSocket`. On WebKit it requires explicit best-effort timing, and Firefox refuses worker routing.
+- **`context.setStorageState(state)`** (#243): replace a live context's cookies and origin storage, keeping its pages, for contexts created with `storageStateTracking: true`. It refuses before changing anything when it can't, and reports a partial failure as `StorageState.PartiallyApplied`.
+- **`NetworkRequest.sizes`** (#244): the browser's own byte counts for a request's transfer and its encoded and decoded body, for contexts created with `requestSizes: true`. A count the browser doesn't give is `None`, never estimated.
+
+### Fixed
+
+**Pages, frames and navigation**
+
+- Chromium popups opened with `rel="noopener"` no longer stay at `about:blank` (#250).
+- Firefox `page.back()` and `page.forward()` through a `history.pushState` entry no longer time out (#254).
+- On Chromium, a call into a nested frame that moved to its own process mid-call runs again on the frame's new context instead of failing with "Execution context was destroyed." (#264).
+
+**Input**
+
+- A click, drag or key press that fails or is cut short after it may have pressed a button or key now has that input released before the next gesture. A release whose outcome is unknown is sent again, which can deliver one extra `mouseup` or `keyup` (#262).
+- A fill that runs out of time before its text is typed reports that nothing was sent, instead of that the input was sent and confirmed (#241).
+
+**Evaluation**
+
+- `Map`, `Set`, `Date` and `RegExp` arguments, and special numbers inside arrays and objects, keep their types on Chromium instead of arriving as plain objects (#242, #249).
+
+**Network**
+
+- On Firefox, reading the body of a 301, 302, 303, 307 or 308 response without a `Location` header fails at once with `Unsupported` (capability `network.responseBody.terminalRedirect`) instead of hanging until the deadline, because Firefox doesn't answer for it. A pending body read no longer returns a later redirect hop's bytes (#248).
+
+**Screenshots**
+
+- Chromium element and clip screenshots that fit the viewport keep its scrollbar layout, so wrapped text is no longer cut off (#252).
+
+**CLI and toolkit**
+
+- A failed command reports what happened since the last one along with its error, instead of leaving those events for the next command (#255).
+- A command's own navigation, from `page new`, `goto` or `back`, is no longer reported again as "since last" on the next command (#246, #256).
+
+**Firefox init scripts**
+
+- Init scripts added and removed at the same time no longer interfere, and removing them shares one five-second budget instead of five seconds per script (#258).
+
+### Performance
+
+- Creating a page on Chromium is 13–15% faster (#250).
+- Reading a page's title on Chromium and Firefox no longer installs Strider's in-page query engine first; `goto` followed by a title read is about 21% faster on Chromium (#253).
+
 ## 0.8.1
 
 ### Added

@@ -12,8 +12,10 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
@@ -27,9 +29,20 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget, type Setup } from "./declare.ts"
+import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
-import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import {
+  ContextEntry,
+  dispatchContext,
+  type Event,
+  type FrameEntry,
+  type PageEntry,
+  placement,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
 
@@ -41,23 +54,29 @@ const initialProgress = (method: string) =>
   method === Fetch.requestPaused.method || method === Fetch.authRequired.method
 
 const newTarget = (
+  state: State,
   kind: TargetEntry["kind"],
   info: Target.TargetInfo,
   session: ProtocolClient.Session,
   page: PageEntry | undefined,
   frame: FrameEntry | undefined
-): TargetEntry => ({
-  kind,
-  targetId: info.targetId,
-  session,
-  page,
-  frame,
-  url: info.url,
-  realm: undefined,
-  intercepts: "",
-  scripts: new Map(),
-  ended: false
-})
+): TargetEntry => {
+  const target: TargetEntry = {
+    event: undefined as unknown as import("./state.ts").DispatchContext,
+    kind,
+    targetId: info.targetId,
+    session,
+    page,
+    frame,
+    url: info.url,
+    realm: undefined,
+    intercepts: "",
+    scripts: new Map(),
+    ended: false
+  }
+  target.event = dispatchContext(state, target)
+  return target
+}
 
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
@@ -69,7 +88,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "page": {
       const context = contextFor(state, info.browserContextId)
       const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
-      const target = newTarget(kind, info, session, undefined, undefined)
+      const target = newTarget(state, kind, info, session, undefined, undefined)
       const page: PageEntry = {
         id: state.ids.navigable(),
         targetId: info.targetId,
@@ -80,6 +99,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         ended: false
       }
       const entry = { ...target, page }
+      entry.event.target = entry
       state.targets.set(session, entry)
       state.targetsById.set(info.targetId, entry)
       state.pages.set(page.id, page)
@@ -102,14 +122,14 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
       })
       state.control.sync(
         session,
-        gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect),
+        context.gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect),
         params.waitingForDebugger ? initialProgress : undefined
       )
       return
     }
     case "iframe": {
       const frame = state.frames.get(info.targetId)
-      const target = newTarget(kind, info, session, frame?.page ?? parentPage, frame)
+      const target = newTarget(state, kind, info, session, frame?.page ?? parentPage, frame)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
       if (frame !== undefined) frame.owner = target
@@ -119,18 +139,20 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "worker":
     case "service_worker":
     case "shared_worker": {
-      const target = newTarget(kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
+      const target = newTarget(state, kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
-      const context = info.browserContextId === undefined
+      const context = target.page?.context ?? (info.browserContextId === undefined
         ? undefined
-        : state.contextsByCdp.get(info.browserContextId)
-      if (context !== undefined) state.workerContexts.set(target, context)
-      state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
+        : state.contextsByCdp.get(info.browserContextId))
+      if (context !== undefined) {
+        state.workerContexts.set(target, context)
+        state.control.sync(session, context.workerGate(state, target, params.waitingForDebugger))
+      } else state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
       return
     }
     case "other": {
-      state.targets.set(session, newTarget(kind, info, session, undefined, undefined))
+      state.targets.set(session, newTarget(state, kind, info, session, undefined, undefined))
       state.control.sync(
         session,
         resume(session, params.waitingForDebugger).pipe(
@@ -378,6 +400,117 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   }).pipe(Effect.ignore)
   return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
 })
+
+// Ordinary contexts share the original gates. Only an opted-in context gets own gate properties.
+ContextEntry.prototype.gate = gate
+ContextEntry.prototype.workerGate = workerGate
+
+export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced(
+  function*(state, target, page, waiting, adopted) {
+    if (target.kind !== "page" || target.url !== "" || page === undefined) {
+      return yield* gate(state, target, page, waiting, adopted)
+    }
+    const bundles = state.registry.bundles(placement(page))
+    const bridges = bundles.get("")?.webSockets
+    if (bridges === undefined) return yield* gate(state, target, page, waiting, adopted)
+    const scope = yield* Scope.fork(state.cleanupScope)
+    const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
+    const main = yield* Deferred.make<void>()
+    const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
+    yield* events.pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          contexts.push(event)
+          if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
+            Deferred.doneUnsafe(main, Effect.void)
+          }
+        })
+      ),
+      Effect.forkIn(scope)
+    )
+    return yield* Effect.gen(function*() {
+      const on = Protocol.on(target.session)
+      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Runtime.enable().pipe(on),
+        ...bindings.map((binding) => binding.pipe(on)),
+        ...[...bundles].map(([key, bundle]) =>
+          Page.addScriptToEvaluateOnNewDocument({
+            source: bundle.source,
+            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
+          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
+        ),
+        Runtime.runIfWaitingForDebugger().pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      yield* Deferred.await(main)
+      const synced = yield* gate(state, target, page, waiting, adopted)
+      const live: Array<Runtime.ExecutionContextCreatedParams> = []
+      for (const event of contexts) {
+        if (
+          Exit.isSuccess(
+            yield* Runtime.evaluate({ expression: "0", uniqueContextId: event.context.uniqueId }).pipe(on, Effect.exit)
+          )
+        ) live.push(event)
+      }
+      return {
+        through: synced.through,
+        apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
+          for (const event of live) {
+            if (event.context.uniqueId === undefined || !state.realmsByUnique.has(event.context.uniqueId)) {
+              Evaluation.contextCreated(event, { state, target })
+            }
+          }
+          WebSocketBridge.flush(state, target)
+          return state.buffer.flush
+        })))
+      }
+    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+  }
+)
+
+export const webSocketWorkerGate: import("./state.ts").WorkerGate = Effect.fnUntraced(
+  function*(state, target, waiting) {
+    const bindings = yield* WebSocketBridge.prepare(state, target, undefined, false)
+    const results = yield* Effect.all([
+      Effect.forEach(bindings, (binding) => binding.pipe(Protocol.on(target.session)), { discard: true }),
+      workerGate(state, target, waiting)
+    ], { concurrency: "unbounded" })
+    return results[1]
+  }
+)
+
+let gateUsers: WeakMap<ContextEntry, { total: number; workers: number }> | undefined
+export const installWebSocketGates = Effect.fnUntraced(
+  function*(context: ContextEntry, scope: Scope.Scope, workers: boolean) {
+    gateUsers ??= new WeakMap()
+    let users = gateUsers.get(context)
+    if (users === undefined) {
+      users = { total: 0, workers: 0 }
+      gateUsers.set(context, users)
+    }
+    users.total++
+    context.gate = webSocketGate
+    if (workers) {
+      users.workers++
+      context.workerGate = webSocketWorkerGate
+    }
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => {
+        users.total--
+        if (workers) users.workers--
+        if (users.workers === 0 && Object.hasOwn(context, "workerGate")) {
+          delete (context as Partial<ContextEntry>).workerGate
+        }
+        if (users.total === 0) {
+          delete (context as Partial<ContextEntry>).gate
+          gateUsers!.delete(context)
+        }
+      })
+    )
+  }
+)
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import type * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { errorPage, errorText, intended, originOf } from "./mapping.ts"
 import {
@@ -32,7 +33,8 @@ const sameDocument = (
   context: string,
   bidi: string | null,
   url: string,
-  via: "fragment" | "historyApi"
+  via: "fragment" | "historyApi",
+  received?: number
 ) => {
   const navigable = navigableOf(state, context)
   const document = navigable?.document
@@ -43,7 +45,19 @@ const sameDocument = (
   // startNavigation consumes an exact reply binding itself. Only claim by URL when neither
   // live nor reply identity owns this event, so one observation cannot take two reservations.
   if (known === undefined && bound === undefined) {
-    const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    let index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    // Traversal reservations have no destination URL. Only the surviving, unambiguous
+    // traversal owner can claim them while its command is in flight; never take an older command.
+    if (
+      index < 0 && !navigable.restorationAmbiguous && navigable.restoring !== undefined &&
+      navigable.traversalCommands.has(navigable.restoring.navigation) &&
+      (received === undefined || navigable.restoring.sameDocumentThrough === undefined ||
+        received < navigable.restoring.sameDocumentThrough)
+    ) {
+      index = navigable.expected.list.findIndex((expected) =>
+        expected.id === navigable.restoring!.navigation && expected.initiatedAs === "traversal"
+      )
+    }
     if (index >= 0) expected = navigable.expected.list.splice(index, 1)[0]!
   }
   const navigation = known ??
@@ -242,11 +256,13 @@ export const register = (handlers: Kit.Handlers<Event>) => {
     .on(BrowsingContext.navigationAborted, (params, { state }) => terminal(state, params, "abort"))
     .on(
       BrowsingContext.fragmentNavigated,
-      (params, { state }) => sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment")
+      (params, { state, received }) =>
+        sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment", received)
     )
     .on(
       BrowsingContext.historyUpdated,
-      (params, { state }) => sameDocument(state, params.context, null, params.url ?? "", "historyApi")
+      (params, { state, received }) =>
+        sameDocument(state, params.context, null, params.url ?? "", "historyApi", received)
     )
     .on(
       BrowsingContext.domContentLoaded,
@@ -399,6 +415,7 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
   const pendingRealm = () => navigable.pendingRealms.find((pending) => !pending.ended && pending.world._tag === "Main")
   const restoration = {
     navigation,
+    sameDocumentThrough: undefined as number | undefined,
     arrived: (realm: RealmEntry) => {
       if (replied) state.buffer.later(complete(realm))
     }
@@ -455,12 +472,19 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
       } else cancelRestoration(navigable)
     })
   return yield* Effect.gen(function*() {
-    const exit = yield* Effect.exit(state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })))
-      .pipe(
+    const exit = yield* Effect.exit(
+      state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })).pipe(
+        // Replies bypass the fold worker. Keep ownership until earlier observations are folded,
+        // but fence it at receipt so events received later cannot claim it while the drain waits.
+        Effect.provideService(ProtocolClient.ReplyReceived, (received) => {
+          restoration.sameDocumentThrough = received
+        }),
+        Effect.tap(() => state.root().drainObserved),
         Effect.ensuring(Effect.sync(() => {
           navigable.traversalCommands.delete(navigation)
         }))
       )
+    )
     if (exit._tag === "Failure") {
       const noHistory = Option.exists(
         Cause.findErrorOption(exit.cause),

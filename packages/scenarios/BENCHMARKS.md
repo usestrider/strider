@@ -31,29 +31,30 @@ default page; explicitly passing `--strider-arg=--no-startup-window` requires ze
 isolated context and page, with the same viewport and DPR. The combined case does not wait for Strider's
 unrelated startup-page gate or add its cost to the first-page phase.
 
-| Case                  | Timed work                                                                                                      |
-| --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `launch-first-page`   | Fresh launch and first isolated configured page, retaining both phases and their combined time from one browser |
-| `launch`              | Start a fresh browser and establish its automation connection; shutdown excluded                                |
-| `first-page`          | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded                    |
-| `shutdown`            | Release each library’s freshly launched browser after availability; launch excluded                             |
-| `repeated-lifecycle`  | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded        |
-| `page-lifecycle`      | Create and close an isolated context and page, including viewport configuration                                 |
-| `navigate`            | Navigate to a local document through `load`, then read its title                                                |
-| `resources`           | Load a local document with 100 uncached images through `load`, then count loaded images                         |
-| `evaluate`            | 20 sequential main-world evaluations returning small objects; time per batch                                    |
-| `locator-read`        | 20 sequential role locator text reads; time per batch                                                           |
-| `locator-values`      | 20 sequential input value reads across distinct elements; time per batch                                        |
-| `read-snapshot-100`   | One synchronous main-world query returning 100 inputs × four properties                                         |
-| `read-snapshot-1000`  | The same query returning 1,000 inputs × four properties                                                         |
-| `click`               | Click with default actionability, then read the updated counter                                                 |
-| `fill`                | Fill a labeled input with default actionability, then read its value                                            |
-| `visible`             | Wait for an already visible heading                                                                             |
-| `screenshot`          | Capture the viewport as PNG                                                                                     |
-| `screenshot-repeated` | Five sequential viewport PNG captures on one page; time per batch                                               |
-| `screenshot-dense`    | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                                             |
-| `screenshot-large`    | Capture a 1280 × 2880 full page; fixture setup excluded                                                         |
-| `screenshot-element`  | Capture a visible 320 × 180 element; fixture setup excluded                                                     |
+| Case                     | Timed work                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `launch-first-page`      | Fresh launch and first isolated configured page, retaining both phases and their combined time from one browser |
+| `launch`                 | Start a fresh browser and establish its automation connection; shutdown excluded                                |
+| `first-page`             | Acquire the first isolated context/page after each fresh launch; launch and cleanup excluded                    |
+| `shutdown`               | Release each library’s freshly launched browser after availability; launch excluded                             |
+| `repeated-lifecycle`     | Five sequential isolated context/page acquisitions and releases on a persistent browser; checks excluded        |
+| `page-lifecycle`         | Create and close an isolated context and page, including viewport configuration                                 |
+| `navigate`               | Navigate to a local document through `load`, then read its title                                                |
+| `navigate-title-locator` | Navigate through load, read the title, then resolve and read a heading; both results are verified               |
+| `resources`              | Load a local document with 100 uncached images through `load`, then count loaded images                         |
+| `evaluate`               | 20 sequential main-world evaluations returning small objects; time per batch                                    |
+| `locator-read`           | 20 sequential role locator text reads; time per batch                                                           |
+| `locator-values`         | 20 sequential input value reads across distinct elements; time per batch                                        |
+| `read-snapshot-100`      | One synchronous main-world query returning 100 inputs × four properties                                         |
+| `read-snapshot-1000`     | The same query returning 1,000 inputs × four properties                                                         |
+| `click`                  | Click with default actionability, then read the updated counter                                                 |
+| `fill`                   | Fill a labeled input with default actionability, then read its value                                            |
+| `visible`                | Wait for an already visible heading                                                                             |
+| `screenshot`             | Capture the viewport as PNG                                                                                     |
+| `screenshot-repeated`    | Five sequential viewport PNG captures on one page; time per batch                                               |
+| `screenshot-dense`       | Capture a seeded dense 1280 × 2880 canvas full page; setup excluded                                             |
+| `screenshot-large`       | Capture a 1280 × 2880 full page; fixture setup excluded                                                         |
+| `screenshot-element`     | Capture a visible 320 × 180 element; fixture setup excluded                                                     |
 
 For operation cases, each sample gets a fresh context and page loaded with the same fixture. Page creation,
 initial navigation and cleanup are outside timing. Results are checked after the timer stops, including
@@ -789,11 +790,25 @@ Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=l
 `browser=chromium`, `runs=20`, and base/head pinned to the same commit. This entry profiles head only;
 base is retained for provenance, not measured as a comparison role. The driver overlays its profiler,
 hooks and regression tests onto head, retaining the exact tooling and original source/dependency provenance.
-It first runs the ordinary/persistent missing-instrumentation and complete-report regressions, then collects
-20 alternating Strider/Playwright diagnostic pairs after three warmup pairs. No workflow edit is needed.
+It first runs ordinary/persistent missing-instrumentation, complete-report, calibration and native-trace
+regressions. It then collects one native baseline block with the requested alternating Strider/Playwright
+pairs after three warmup pairs. No argument control is run. This private probe changes no supported defaults
+or workflow. The initial window, sandbox and core-limit wrapper remain intact.
 
-The retained `launch-diagnostic/` directory contains the main report, raw phases, wire messages, spawn arguments,
-resource counts, regression child output, rejected regression reports and logs, including on failure.
+The retained `launch-diagnostic/` directory contains each block's report, raw phases, wire messages, spawn
+arguments, resource counts, regression child output, rejected reports and logs, including on failure.
+Native blocks also retain full Chromium JSON startup traces outside temporary browser profiles. Before
+browser disposal, the profiler waits for parseable trace output, verifies the Linux monotonic clock domain,
+checks buffer-loss counters, and requires a native first-command handler plus host send/reply evidence.
+After availability and Strider's initial gate, three root `Browser.getVersion` probes run before retention,
+outside launch timing. Each command has a two-second wait bound; rejection or timeout stops further probes.
+The probes use each library's existing root command client, preserving normal reply matching and cleanup.
+Reports explicitly require all three calibration sends, replies and native handler entries inside the trace;
+an expired trace window fails rather than silently falling back to wider bounds. Causal send/handler-entry/reply
+intervals bound clock offset. Reports retain both the intersection excluding calibration and the tightened
+intersection from the same sample, with their uncertainty and the original first-command evidence. Original trace bytes survive failed validation.
+Strider's initial page must still evaluate to `about:blank` after trace retention.
+
 `launch-summary.md` labels the output diagnostic only. Launch availability remains the boundary; initial-page
 gate observation and cleanup are outside timing. Different default initial resources and sandbox settings remain.
 Do not sum overlapping spans or treat instrumented timings as speedup or parity evidence. A failed or partial
@@ -821,3 +836,35 @@ scoped callback resolves; it includes return/finalizer/promise overhead, not jus
 Timestamp calls, record allocation, generator resumption and added promise bookkeeping perturb timings; paired
 head/base totals bound the observed instrumentation effect, not an independent universal correction. Supported
 navigation defaults still differ. These measurements attribute this workload, and establish no optimization.
+
+gate observation, liveness checks, trace flushing and cleanup are outside timing. Different default initial
+resources and sandbox settings remain. Native tracing and phase/protocol instrumentation perturb startup; this baseline calibration run does not
+measure their overhead or a production speedup. Do not sum overlapping spans or treat these timings as parity evidence. A failed or partial report
+establishes no valid timing result. Uninstrumented paired lifecycle and same-source controls remain necessary
+before proposing an optimization.
+
+### Hosted navigation phase diagnostic
+
+Dispatch `benchmarks.yml` from the diagnostic tooling branch with `workload=bench`,
+`only=navigation-diagnostic`, `browser=chromium`, `runs=40`, and identical pinned base/head library commits.
+Head alone is profiled; base is retained for provenance. Run the unchanged `only=navigate` control separately
+with the same pins. This diagnostic does not replace its parity result.
+
+Each fresh isolated page loads the ordinary benchmark fixture outside timing, then records goto through load,
+first title read and second title read on the same destination. Both titles must be `Shop`. Viewport/DPR,
+30-second deadlines and scoped/context cleanup retain the ordinary benchmark's boundaries. Three warmup pairs
+precede balanced alternating measured pairs. Four additional pairs capture protocol sends/replies and Strider
+realm-acquisition/engine-installation marks; their timings are excluded from phase distributions.
+
+`navigation-diagnostic/` retains phase samples, bounded protocol traces, tooling hashes and failures. Long wire
+strings retain length, SHA-256 and prefix instead of full engine source. Source hooks assert pinned replacement
+counts and alter only instrumentation; they still add overhead even with capture disabled. Trace validation
+requires realm creation, engine installation and title execution, matching successful replies and ordered phase
+marks. Missing instrumentation fails the run. Setup and cleanup are outside phase timing; separate browser
+processes remain resident. These observations isolate dependencies, not browser CPU versus IPC versus host
+scheduling. A faster repeated read alone does not attribute the first-read excess to engine installation.
+
+The `navigate-title-locator` case retains the original `navigate` load/title work, then reads the local
+`Shop` heading through each library's role locator. It verifies both results as `Shop`. This combined timer
+checks whether a cheaper title read merely defers initialization to the next locator. Setup, verification and
+cleanup remain outside timing, as for `navigate`.

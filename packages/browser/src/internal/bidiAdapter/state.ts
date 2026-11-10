@@ -55,10 +55,12 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   restoring: {
     readonly navigation: PageNavigation.Id
     readonly arrived: (realm: RealmEntry) => void
+    /** Only events received before this reply may claim the same-document traversal. */
+    readonly sameDocumentThrough?: number | undefined
   } | undefined
   /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
   restorationAmbiguous: boolean
-  /** Traversal commands still awaiting replies, including ones whose restoration ownership was invalidated. */
+  /** Traversal commands awaiting replies or their observation drain, including invalidated owners. */
   readonly traversalCommands: Set<PageNavigation.Id>
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
@@ -221,7 +223,7 @@ export interface State {
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
   /** The preload scripts registered, in order. */
-  preloads: ReadonlyArray<Script.PreloadScript>
+  preloads: ReadonlyArray<{ readonly script: Script.PreloadScript; readonly declaration: Adapter.RegistrationId }>
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
 }
@@ -288,6 +290,7 @@ export const make = (options: {
 
 /** What a fold handler gets beside the event's params: every event is the one session's. */
 export interface Event {
+  readonly received?: number | undefined
   readonly state: State
 }
 

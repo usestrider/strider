@@ -20,7 +20,7 @@ import * as Urls from "../urls.ts"
 import { applyDownloads } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
   contextLock,
   contextOf,
   downloadDirectory,
@@ -110,15 +110,10 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
-  const entry: ContextEntry = {
-    ...(options.requestTiming ? { requestTiming: new Map() } : {}),
-    ...(options.requestSizes ? { requestSizes: new Map() } : {}),
-    id: state.ids.userContext(),
-    browserContextId,
-    isDefault: false,
-    removing: false,
-    proxy: Option.getOrUndefined(options.proxy)
-  }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.requestSizes) entry.requestSizes = new Map()
+  if (options.requestTiming) entry.requestTiming = new Map()
+  entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
   yield* state.buffer.run(() =>

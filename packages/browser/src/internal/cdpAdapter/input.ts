@@ -14,6 +14,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
 import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
 
@@ -61,7 +62,32 @@ export const dispatchInput = Effect.fnUntraced(
       yield* Effect.gen(function*() {
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
-      }).pipe(Effect.onError(() => releaseWritten ? Effect.void : release.pipe(Operation.detached, Effect.ignore)))
+      }).pipe(
+        // The release is owed until the browser is known to have accepted one: the caller's accounting records it
+        // as uncertain unless `settled` says so, and the next gesture sends it again first. A release already
+        // written whose reply was lost or abandoned is uncertain too, and isn't sent again here.
+        Effect.onError(() =>
+          Effect.suspend(() => {
+            Gestures.handOver(events)
+            if (releaseWritten) {
+              Gestures.finished(events)
+              return Effect.void
+            }
+            // The release runs apart from the failed click, which keeps its error and its input permit: the next
+            // gesture waits for it under its own deadline. It waits for its reply on the protocol's timeout, not
+            // the passed deadline.
+            return release.pipe(
+              Effect.tap(() => Effect.sync(() => Gestures.settled(events))),
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+              Operation.detached,
+              Effect.ignore,
+              Effect.ensuring(Effect.sync(() => Gestures.finished(events))),
+              Effect.forkDetach,
+              Effect.asVoid
+            )
+          })
+        )
+      )
       return
     }
     for (const event of events) {

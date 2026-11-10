@@ -35,6 +35,7 @@ import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as InternalOperation from "../../../src/internal/operation.ts"
+import * as Reason from "../../../src/Reason.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -5331,5 +5332,179 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* first.getByText("clicked", { exact: true }).pipe(Expect.toBeVisible)
           }))
         }), timeout)
+
+      it.effect(
+        "a key press whose dispatch fails records the key's release, and the next gesture sends it first",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field">`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#field")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.dispatchInput
+            const sent: Array<ReadonlyArray<string>> = []
+            let failed = false
+            const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+              sent.push(args[1].map((event) => event._tag === "Key" ? event.type : event._tag))
+              yield* original(...args)
+              if (!failed && args[1].some((event) => event._tag === "Key")) {
+                failed = true
+                return yield* Effect.fail(
+                  new Adapter.AdapterError({
+                    reason: new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: "test rejection" })
+                  })
+                )
+              }
+            })
+            yield* Effect.acquireUseRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+              () =>
+                page.keyboard.press("a").pipe(Effect.exit, Effect.map((exit) => assert.isTrue(Exit.isFailure(exit)))),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            const state = target.owner.page.inputState
+            assert.strictEqual(state.keys.length, 0)
+            assert.isTrue(Option.isSome(state.broken))
+            const before = sent.length
+            yield* Effect.acquireUseRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+              () => page.keyboard.press("b"),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            assert.deepStrictEqual(sent.slice(before)[0], ["up"])
+            assert.deepStrictEqual(sent.slice(before)[1], ["down", "up"])
+            assert.isTrue(Option.isNone(state.broken))
+          })),
+        timeout
+      )
+
+      for (const gesture of ["locator click", "coordinate click"] as const) {
+        it.effect(
+          `an interrupted ${gesture} records the press before allowing another gesture`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<button id="go" style="margin:40px">Go</button>`)
+              const page = yield* newPage
+              yield* page.goto(url)
+              const target = page.locator("#go")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              const pressed = yield* Deferred.make<void>()
+              const sent: Array<ReadonlyArray<string>> = []
+              let first = true
+              const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+                sent.push(args[1].map((event) => event._tag === "Mouse" ? event.type : event._tag))
+                if (!first) return yield* original(...args)
+                first = false
+                const down = args[1].findIndex((event) => event._tag === "Mouse" && event.type === "down")
+                yield* original(args[0], args[1].slice(0, down + 1), args[2])
+                yield* Deferred.succeed(pressed, undefined)
+                return yield* Effect.never
+              })
+              const box = Option.getOrThrow(yield* target.boundingBox)
+              const click = gesture === "locator click"
+                ? target.click()
+                : page.mouse.click({ x: box.x + 5, y: box.y + 5 })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                () =>
+                  Effect.gen(function*() {
+                    const fiber = yield* click.pipe(Effect.forkScoped)
+                    yield* Deferred.await(pressed).pipe(Deadline.within("5 seconds"))
+                    yield* Fiber.interrupt(fiber)
+                    const state = target.owner.page.inputState
+                    assert.isTrue(
+                      Option.isSome(state.broken),
+                      "an interrupted dispatch must retain its uncertain release"
+                    )
+                    yield* page.mouse.click({ x: 5, y: 5 })
+                    assert.deepStrictEqual(sent[1], ["up"])
+                    assert.deepStrictEqual(sent[2], ["move", "down", "up"])
+                  }),
+                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+              )
+            })),
+          timeout
+        )
+      }
+
+      for (const gesture of ["locator click", "coordinate click"] as const) {
+        it.effect(
+          `a ${gesture} whose release fails records the release as uncertain, and the next gesture sends it first`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<button id="go" style="margin:40px">Go</button>${out}${recordsClick}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* newPage
+                yield* page.goto(url)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const adapter = target.owner.runtime.model.adapter
+                const original = adapter.dispatchInput
+                const sent: Array<ReadonlyArray<string>> = []
+                let failed = false
+                let recoveryOperation: InternalOperation.Record | undefined
+                const dispatchInput: typeof original = Effect.fnUntraced(
+                  function*(...args: Parameters<typeof original>) {
+                    const events = args[1]
+                    if (events.length === 1 && events[0]?._tag === "Mouse" && events[0].type === "up") {
+                      recoveryOperation = yield* InternalOperation.record
+                    }
+                    sent.push(events.map((event) => event._tag === "Mouse" ? event.type : event._tag))
+                    yield* original(...args)
+                    // The release reaches the browser, but its reply is rejected: Strider can't know it landed
+                    if (!failed && events.some((event) => event._tag === "Mouse" && event.type === "up")) {
+                      failed = true
+                      return yield* Effect.fail(
+                        new Adapter.AdapterError({
+                          reason: new Reason.BackendFailure({
+                            kind: "Rejected",
+                            method: "input",
+                            hint: "test rejection of the release's reply"
+                          })
+                        })
+                      )
+                    }
+                  }
+                )
+                const click = gesture === "locator click"
+                  ? target.click()
+                  : Effect.flatMap(
+                    target.boundingBox,
+                    (box) => page.mouse.click({ x: Option.getOrThrow(box).x + 5, y: Option.getOrThrow(box).y + 5 })
+                  )
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => click.pipe(Effect.exit, Effect.map((exit) => assert.isTrue(Exit.isFailure(exit)))),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                assert.isTrue(failed)
+                const state = target.owner.page.inputState
+                // The release is uncertain, which is not a button observed held
+                assert.strictEqual(state.buttons.size, 0)
+                assert.isTrue(Option.isSome(state.broken), "the failed release is recorded in inputState.broken")
+                const before = sent.length
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => page.mouse.click({ x: 5, y: 5 }),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                const next = sent.slice(before)
+                assert.deepStrictEqual(next[0], ["up"], "the recovery release is sent before the next gesture")
+                assert.deepStrictEqual(next[1], ["move", "down", "up"])
+                assert.isDefined(recoveryOperation)
+                assert.strictEqual(recoveryOperation!.name, "Mouse.click")
+                assert.strictEqual(recoveryOperation!.diagnostics().cleanup._tag, "Completed")
+                assert.isTrue(Option.isNone(state.broken))
+              }))
+            }),
+          timeout
+        )
+      }
     })
   })

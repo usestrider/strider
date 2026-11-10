@@ -313,38 +313,47 @@ export const fromAdapter = (
   return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
 }
 
+/** The title response uses the same decoder and exception handling as engine reads. */
+const titleRead = "function() { return JSON.stringify({ _tag: \"Title\", title: document.title }); }"
+
 /**
- * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
+ * A document's prepared realm and a call to it; `None` when the document or its realm went, or the realm
  * lost its engine, so the caller goes again.
  */
-const callEngine = Effect.fnUntraced(function*(
+const callInDocument = Effect.fnUntraced(function*(
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
-  request: string | Effect.Effect<string>,
+  request: string | Effect.Effect<string> | undefined,
   id: Diagnostics.OperationId,
   releaseResult?: boolean,
-  replay = true
+  replay = true,
+  prepareRealm: Effect.Effect<Target.RealmId, Adapter.AdapterError | Deadline.Timeout> = engineRealm(runtime, document),
+  // Called when the realm or document was gone, so `None` is not the engine's own `missing`
+  onGone?: () => void
 ) {
   let sent = false
-  return yield* engineRealm(runtime, document).pipe(
+  return yield* prepareRealm.pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
-        typeof request === "string" ? Effect.succeed(request) : request,
-        Effect.fnUntraced(function*(encoded: string) {
+        request === undefined || typeof request === "string" ? Effect.succeed(request) : request,
+        Effect.fnUntraced(function*(encoded: string | undefined) {
           // Realm lookup and installation cannot apply this round. Its own evaluation may do so once started.
           if (!replay) {
             const record = yield* Operation.current
             if (Option.isSome(record)) record.value.markSent()
           }
           sent = true
-          return yield* call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+          return yield* encoded === undefined
+            ? call(runtime, realm, functionDeclaration, [], releaseResult)
+            : call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
         })
       )
     ),
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
+        onGone?.()
         return Cache.invalidate(runtime.engineRealms, document).pipe(
           Effect.andThen(
             replay || !sent
@@ -403,7 +412,7 @@ export const elementIn = (
   frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
-  callEngine(
+  callInDocument(
     runtime,
     document,
     Engine.element,
@@ -601,31 +610,45 @@ export const sendRouted = (
         const token = request.op === "expect" && request.expectation._tag === "Viewport"
           ? crypto.randomUUID()
           : undefined
-        const pending = callEngine(
-          runtime,
-          routed.document,
-          Engine.run,
-          Effect.gen(function*() {
-            // Recompute after every route and install, including a stale realm's replacement.
-            const current = request.op === "expect"
-              ? {
-                ...request,
-                ...(token === undefined ? {} : { token }),
-                cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
-              }
-              : request
-            return JSON.stringify(
-              retarget(
-                current.op === "act" && clip !== undefined ? { ...current, clip } : current,
-                last,
-                route._tag === "Missing"
+        // Plain title reads need the same isolated world and replay rules, but none of the query engine.
+        // Backends without isolated worlds retain the existing shared-world engine path.
+        const directTitle = request.op === "title" && !(yield* makesNoWorlds(runtime))
+        const pending = directTitle
+          ? callInDocument(
+            runtime,
+            routed.document,
+            titleRead,
+            undefined,
+            id,
+            undefined,
+            true,
+            runtime.model.adapter.realm(routed.document, utilityWorld)
+          )
+          : callInDocument(
+            runtime,
+            routed.document,
+            Engine.run,
+            Effect.gen(function*() {
+              // Recompute after every route and install, including a stale realm's replacement.
+              const current = request.op === "expect"
+                ? {
+                  ...request,
+                  ...(token === undefined ? {} : { token }),
+                  cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
+                }
+                : request
+              return JSON.stringify(
+                retarget(
+                  current.op === "act" && clip !== undefined ? { ...current, clip } : current,
+                  last,
+                  route._tag === "Missing"
+                )
               )
-            )
-          }),
-          id,
-          undefined,
-          request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
-        )
+            }),
+            id,
+            undefined,
+            request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
+          )
         const owned = token === undefined ? pending : pending.pipe(
           Effect.onExit((exit) =>
             Exit.isSuccess(exit) ?
@@ -675,7 +698,7 @@ export const sendToDocument = (
   Effect.raceFirst(
     Effect.suspend(() =>
       Option.isSome(runtime.model.document(document))
-        ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"
               ? Effect.asSome(decode(value.value.value))
@@ -690,7 +713,8 @@ export const sendToDocument = (
 /**
  * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
  * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
- * caller's uninterruptible finalizer. A gone document needs no release.
+ * caller's uninterruptible finalizer. A gone document needs no release, and a document whose realm is destroyed
+ * counts as released once the model ends it, within the cleanup's deadline.
  */
 export const releaseInDocument = (
   runtime: Runtime,
@@ -698,24 +722,44 @@ export const releaseInDocument = (
   request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
-  Effect.suspend(() =>
-    Option.isSome(runtime.model.document(document))
-      ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
-        Effect.flatMap((value) =>
-          Effect.gen(function*() {
-            if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
-            if (
-              Option.isSome(value) && value.value.type === "string" &&
-              (yield* decode(value.value.value))._tag === "FillGuard"
-            ) {
-              return
-            }
-            return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
-          })
-        )
+  Effect.suspend(() => {
+    const entry = runtime.model.document(document)
+    if (Option.isNone(entry)) return Effect.void
+    let gone = false
+    return callInDocument(
+      runtime,
+      document,
+      Engine.run,
+      JSON.stringify(request),
+      id,
+      undefined,
+      true,
+      engineRealm(runtime, document),
+      () => {
+        gone = true
+      }
+    ).pipe(
+      Effect.flatMap((value) =>
+        Effect.gen(function*() {
+          if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
+          if (
+            Option.isSome(value) && value.value.type === "string" &&
+            (yield* decode(value.value.value))._tag === "FillGuard"
+          ) {
+            return
+          }
+          // A destroyed realm took the guard's listeners with it once the document ends. Wait for the model to say
+          // so, until the cleanup's deadline; a document that is still live then has not confirmed anything.
+          if (gone) {
+            const { at } = yield* Operation.budget
+            const ended = yield* Deferred.await(entry.value.ended).pipe(BrowserClock.until(at))
+            if (Option.isSome(ended)) return
+          }
+          return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
+        })
       )
-      : Effect.void
-  )
+    )
+  })
 
 /** The one match, by its node binding and where it is, or the engine's answer for why there is none. */
 export type Found =
@@ -789,7 +833,7 @@ export const elements = (
           }
           const stale = replaced(routed.document, last)
           if (Option.isSome(stale)) return Option.some({ _tag: "Response" as const, response: stale.value, routed })
-          const result = yield* callEngine(
+          const result = yield* callInDocument(
             runtime,
             routed.document,
             Engine.element,

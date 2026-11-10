@@ -97,6 +97,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("input.native", "unsupported", ["WebDriver actions, not native input"]),
       entry("input.webdriver", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
@@ -250,9 +251,9 @@ const snapshot = (state: State.State) =>
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
-  apply: (_session, method, params) =>
+  apply: (_session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, { state })
+      handlers.apply(method, params, { state, received })
       return state.buffer.flush
     }),
   lost: (session) =>

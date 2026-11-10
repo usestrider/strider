@@ -18,7 +18,13 @@ export const instrument = (source: string, id: string) => {
     source = source.replaceAll(from, to)
   }
   const helper = path.join(import.meta.dirname, "failureTrace.ts")
-  source = `import { connection as __failureConnection } from ${JSON.stringify(helper)};${source}`
+  source = `import { connection as __failureConnection } from ${JSON.stringify(helper)};${
+    transport
+      ? `import { pointerTap as __pointerTap } from ${
+        JSON.stringify(path.join(import.meta.dirname, "pointerRecipients.ts"))
+      };`
+      : ""
+  }${source}`
   if (engine) {
     replace(
       "const request = JSON.parse(text) as Request",
@@ -104,24 +110,40 @@ export const instrument = (source: string, id: string) => {
   if (transport || inspector) {
     replace(
       "const link = yield* Link.make",
-      `const __trace = __failureConnection(${
-        JSON.stringify(inspector ? "webkit-inspector" : "pipe-or-websocket")
-      }); const link = yield* Link.make`,
+      `const __trace = __failureConnection(${JSON.stringify(inspector ? "webkit-inspector" : "pipe-or-websocket")});${
+        transport ? " const __pointer = __pointerTap(__trace);" : ""
+      } const link = yield* Link.make`,
       transport ? 2 : 1
     )
     replace(
       "const link = yield* Link.make" + (inspector ? "<Incoming>()" : "()"),
       "const link = yield* Link.make" + (inspector ? "<Incoming>()" : "()") +
-        `; const __receive = link.receive; link.receive = (message) => { __trace("receive", message); __receive(message) }; const __lose = link.lose; link.lose = (reason) => { __trace("closed", reason); __lose(reason) }`,
+        `; const __receive = link.receive; link.receive = (message) => { ${
+          transport ? "if (__pointer.receive(message)) return; " : ""
+        }__trace("receive", message); __receive(message) }; const __lose = link.lose; link.lose = (reason) => { __trace("closed", reason); __lose(reason) }`,
       transport ? 2 : 1
     )
     if (transport) {
       replace(
         "Queue.offerUnsafe(outbox, encoder.encode(message + \"\\0\"))",
-        "(__trace(\"send\", message), Queue.offerUnsafe(outbox, encoder.encode(message + \"\\0\")))",
+        "(__trace(\"send\", message), __pointer.send(message), Queue.offerUnsafe(outbox, encoder.encode(message + \"\\0\")))",
         1
       )
-      replace("writer.write(message)", "(__trace(\"send\", message), writer.write(message))", 1)
+      replace(
+        "const outbox = yield* Queue.unbounded<Uint8Array, Cause.Done>()",
+        "const outbox = yield* Queue.unbounded<Uint8Array, Cause.Done>(); __pointer.inject = (m: string) => { Queue.offerUnsafe(outbox, encoder.encode(m + \"\\0\")) }",
+        1
+      )
+      replace(
+        "const sendFailed = (error: Socket.SocketError) =>",
+        "__pointer.inject = (m: string) => { if (opened.readyState === 1) Effect.runFork(Effect.ignore(writer.write(m))) }; const sendFailed = (error: Socket.SocketError) =>",
+        1
+      )
+      replace(
+        "writer.write(message)",
+        "(__trace(\"send\", message), __pointer.send(message), writer.write(message))",
+        1
+      )
     } else replace("writer.write(frame(message))", "(__trace(\"send\", message), writer.write(frame(message)))", 1)
   }
   return { code: source, map: null }

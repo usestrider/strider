@@ -1,17 +1,28 @@
 ---
 // The cover, which fills the first screen with the band at its foot: the engraving, and the band with what Strider is,
 // smaller on a phone so the band's heading clears the browser's toolbar;
-// then the contents, and a first example
+// then the contents, an annotated test, an annotated script and a session of the CLI
 import { Image } from "astro:assets"
 import { getCollection } from "astro:content"
 import { Code } from "astro-expressive-code/components"
 import SiteHeader from "../components/SiteHeader.astro"
-import { guideRoute, navigation } from "../features/docs/navigation.ts"
+import { guideRoute, navigation, placeOf } from "../features/docs/navigation.ts"
 import { versionLabel } from "../features/site.ts"
 import BaseLayout from "../layouts/BaseLayout.astro"
 
 const version = await versionLabel()
-const chapters = navigation(await getCollection("docs"))
+const guides = await getCollection("docs")
+const chapters = navigation(guides)
+// The guide an example points to, headed by its chapter and section as its own page is
+const guideLink = (id: string) => {
+  const guide = guides.find((entry) => entry.id === id)
+  const place = guide === undefined ? undefined : placeOf(guides, guide)
+  if (guide === undefined || place === undefined) throw new Error(`The homepage links to ${id}, which no chapter holds`)
+  return { href: guideRoute(guide), title: guide.data.title, place: `Chapter ${place.chapter} · § ${place.section}` }
+}
+const testingGuide = guideLink("tools/testing")
+const expectationsGuide = guideLink("pages/expectations")
+const cliGuide = guideLink("agents/cli")
 const counts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
 const chapterCount = `${counts[chapters.length - 1] ?? chapters.length} ${chapters.length === 1 ? "chapter" : "chapters"}`
 // The homepage's engraving, kept in src/assets
@@ -20,26 +31,150 @@ const engravings = import.meta.glob<{ default: ImageMetadata }>("../assets/heron
 })
 const engraving = Object.values(engravings)[0]?.default
 const install = "pnpm add @usestrider/browser effect @effect/platform-node"
-const example = `import { NodeServices } from "@effect/platform-node"
-import { Browser, Expect } from "@usestrider/browser"
+
+// Coming from Playwright: each row a habit that changes, taken from the Playwright guide (docs/playwright.mdx)
+const habits = [
+  [
+    "<code>npx playwright install</code>",
+    "Nothing to install: Strider runs the browsers you have, and <code>strider&nbsp;browsers</code> lists them."
+  ],
+  [
+    "<code>page.close()</code> in a <code>finally</code>",
+    "The end of the scope that opened the page."
+  ],
+  [
+    "<code>page.goto(url)</code>, which waits for the load",
+    "<code>page.goto(url)</code> returns when the navigation commits; <code>{&nbsp;waitUntil:&nbsp;\"load\"&nbsp;}</code> waits for the load."
+  ],
+  [
+    "<code>locator.textContent()</code>, which waits for a match",
+    "<code>locator.readText</code> reads the page as it is. Wait with an expectation, then read."
+  ],
+  [
+    "<code>page.waitForEvent(\"popup\")</code>",
+    "<code>Popup.next(page)</code>, run before the click that opens the popup."
+  ],
+  [
+    "<code>context.tracing.start()</code>",
+    "<code>Trace.record(context)</code>, whose trace Playwright's trace viewer opens."
+  ]
+] as const
+const orderTest = `import { NodeServices } from "@effect/platform-node"
+import { assert, layer } from "@effect/vitest"
+import { Browser, Download, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
+import { VitestBrowser } from "@usestrider/vitest"
 import { Effect, Layer } from "effect"
 
-const BrowserLive = Chromium.layer({
+const ChromiumLive = Chromium.layer({
   executablePath: "/usr/bin/chromium"
 }).pipe(Layer.provide(NodeServices.layer))
 
-const program = Effect.scoped(Effect.gen(function*() {
-  const page = yield* Browser.newPage()
-  yield* page.goto("https://shop.example.com")
-  yield* page.getByRole("button", { name: "Add to cart" }).click()
-  yield* page.getByText("1 item").pipe(Expect.toBeVisible)
-})).pipe(Effect.provide(BrowserLive))`
+layer(VitestBrowser.layer(ChromiumLive))("Swag Labs", (it) => {
+  it.effect("orders a backpack and downloads the receipt", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage() // ①
+      yield* page.goto("https://www.saucedemo.com")
+      yield* page.getByLabel("Username").fill("standard_user")
+      yield* page.getByLabel("Password").fill("secret_sauce")
+      yield* page.getByRole("button", { name: "Login" }).click() // ②
+
+      yield* page.locator(".inventory_item") // ③
+        .filter({ hasText: "Sauce Labs Backpack" })
+        .getByRole("button", { name: "Add to cart" })
+        .click()
+      yield* page.getByRole("button", { name: "Cart, 1 items" }).click()
+      yield* page.getByRole("button", { name: "Checkout" }).click()
+      yield* page.getByLabel("First Name").fill("Ada")
+      yield* page.getByLabel("Last Name").fill("Lovelace")
+      yield* page.getByLabel("Zip/Postal Code").fill("10001")
+      yield* page.getByRole("button", { name: "Continue" }).click()
+      yield* page.getByText(/^Total:/).pipe(
+        Expect.toHaveText("Total: $32.39") // ④
+      )
+      yield* page.getByRole("button", { name: "Finish" }).click()
+
+      const receipt = yield* Download.next(page) // ⑤
+      yield* page.getByText("Generate PDF order").click()
+      const pdf = yield* receipt
+      assert.match(pdf.suggestedFilename, /^swag-labs-order-.+\\.pdf$/)
+    }))
+})`
+const bookScript = `import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Browser, Locator } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Array, Console, Effect, Layer, Option } from "effect"
+
+const catalogue = "https://books.toscrape.com/catalogue"
+
+const program = Effect.gen(function*() {
+  const books = yield* Effect.forEach(Array.range(1, 50), (n) =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage() // ①
+      yield* page.goto(\`\${catalogue}/page-\${n}.html\`, {
+        waitUntil: "domContentLoaded" // ②
+      })
+      const fiveStar = yield* page.locator("article").filter({ // ③
+        has: Locator.relative.locator(".star-rating.Five")
+      }).all
+      return yield* Effect.forEach(fiveStar, (book) =>
+        Effect.gen(function*() {
+          const alt = yield* book.getByRole("img").readAttribute("alt")
+          const price = yield* book.locator(".price_color").readText
+          return {
+            title: Option.getOrElse(alt, () => "?"),
+            price: Number(price.slice(1))
+          }
+        }))
+    }).pipe(Effect.scoped), { concurrency: 5 }) // ④
+  const cheapest = books.flat().toSorted((a, b) => a.price - b.price)
+  yield* Console.table(cheapest.slice(0, 5))
+})
+
+const ChromiumLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium"
+}).pipe(Layer.provide(NodeServices.layer))
+
+program.pipe(Effect.provide(ChromiumLive), NodeRuntime.runMain) // ⑤`
+const session = `strider -s demo page new --name alerts \\
+  https://the-internet.herokuapp.com/javascript_alerts
+# alerts at https://the-internet.herokuapp.com/javascript_alerts
+
+strider -s demo -p alerts find "JS Confirm"
+# e8  button "Click for JS Confirm"  (main > list > listitem)
+#   on alerts · 13 ms
+# since last: GET https://298279967.log.optimizely.com/event?…
+#   failed: net::ERR_NAME_NOT_RESOLVED
+#   · GET https://the-internet.herokuapp.com/favicon.ico answered 404
+
+strider -s demo -p alerts click e8
+# clicked e8 on alerts · 34 ms
+# since last: dialog confirm "I am a JS Confirm" on alerts
+#   · dialog confirm on alerts dismissed by policy
+
+strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
+# ExpectationFailed: Expected page.getByText("You clicked: Ok",
+#   { exact: true }) to be visible
+# since last: GET https://298279967.log.optimizely.com/event?…
+#   failed: net::ERR_NAME_NOT_RESOLVED
+
+echo $?
+# 14
+
+strider -s demo -p alerts dialog handle accept
+# r1: dialogs accepted; strider remove r1 ends it on alerts · 1 ms
+
+strider -s demo -p alerts click e8
+# clicked e8 on alerts · 13 ms
+# since last: dialog confirm "I am a JS Confirm" on alerts
+
+strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
+# text="You clicked: Ok" is visible on alerts · 3 ms`
 ---
 
 <BaseLayout
   title="Strider"
-  description="Effect-native browser automation over the Chrome DevTools Protocol, WebDriver BiDi and the WebKit inspector protocol"
+  description="Browser automation, typed end to end: drive Chromium, Firefox and WebKit from Effect."
 >
   <div class="flex min-h-svh flex-col">
     <SiteHeader />
@@ -80,8 +215,7 @@ const program = Effect.scoped(Effect.gen(function*() {
       <div class="mx-auto max-w-6xl px-6 pt-8 pb-8 sm:pt-16 md:px-14">
         <h1 class="max-w-xl font-display text-[2.4rem] leading-[1.08] font-normal sm:text-[3.8rem]">Browser automation, typed end to end.</h1>
         <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
-          Drive Chromium, Firefox and WebKit from TypeScript, with typed errors that say what happened, lifetimes tied to
-          scopes, and events you subscribe to before you act.
+          Drive Chromium, Firefox and WebKit from Effect.
         </p>
         <p class="mt-8 flex flex-wrap gap-4">
           <a class="btn border-white bg-white text-band" href="/docs">Read the guide</a>
@@ -90,7 +224,7 @@ const program = Effect.scoped(Effect.gen(function*() {
           </button>
         </p>
         <div class="mt-12 flex justify-between border-t border-white/60 pt-4">
-          <span class="label !text-white">Documentation · {version}</span>
+          <span class="label !text-white">Pre-release · {version}</span>
           <span class="label !text-white">MIT license</span>
         </div>
       </div>
@@ -117,20 +251,128 @@ const program = Effect.scoped(Effect.gen(function*() {
       }
     </div>
 
-    <div class="mt-20 grid items-start gap-10 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+    <div class="mt-20 grid items-start gap-10 md:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]">
       <div>
         <p class="label">Example 1-1</p>
-        <h2 class="mt-2 font-display text-[2rem] leading-tight font-normal">Open a page and click</h2>
+        <h2 class="mt-2 font-display text-[2rem] leading-tight font-normal">Testing a checkout</h2>
         <p class="mt-4 text-[1.05rem]">
-          Every operation is an <code>Effect</code>: it describes what to do, names what can go wrong in its type, and
-          runs only when you ask.
+          This test orders a backpack from saucedemo.com, the shop Sauce Labs runs for testing tools to practise on, and downloads the receipt.
+        </p>
+        <ol class="mt-6 space-y-3 text-[1rem]">
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">①</span>
+            <span>The page opens in a fresh context, with its own cookies and storage, closed when the test ends. The file's tests share one browser.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">②</span>
+            <span>An action waits until its target is ready: visible, enabled and not moving. Nothing sleeps while the products load.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">③</span>
+            <span>A locator can be narrowed by text: the item that mentions the backpack, then its Add to cart button.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">④</span>
+            <span>An expectation waits for the total, and if it's wrong, fails with the total it saw.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">⑤</span>
+            <span><code>Download.next</code> starts listening before the click, so a quick download isn't missed. <code>yield*&nbsp;receipt</code> waits for it.</span>
+          </li>
+        </ol>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{testingGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={testingGuide.href}>{testingGuide.title} →</a>
+        </div>
+      </div>
+      <Code code={orderTest} lang="ts" title="checkout.test.ts" mark={["①", "②", "③", "④", "⑤"]} />
+    </div>
+
+    <div class="mt-20 grid items-start gap-10 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div class="md:order-2">
+        <p class="label">Example 1-2</p>
+        <h2 class="mt-2 font-display text-[2rem] leading-tight font-normal">Comparing prices</h2>
+        <p class="mt-4 text-[1.05rem]">
+          This script reads all 50 pages of books.toscrape.com, a shop built for practising scraping, and prints the five cheapest five-star books.
+        </p>
+        <ol class="mt-6 space-y-3 text-[1rem]">
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">①</span>
+            <span>Each page opens in a context of its own, which <code>Effect.scoped</code> closes once the page is read.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">②</span>
+            <span><code>goto</code> returns as soon as the page commits, and reads don't wait. Waiting for <code>domContentLoaded</code> means all 20 books are there to read.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">③</span>
+            <span><code>filter</code> keeps the books whose card has a five-star rating.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">④</span>
+            <span><code>Effect.forEach</code> reads five pages at a time. If one fails, the rest are interrupted and the program fails with its error.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="font-mono text-band" aria-hidden="true">⑤</span>
+            <span><code>NodeRuntime.runMain</code> runs the program. Ctrl-C interrupts it, and the pages and the browser close.</span>
+          </li>
+        </ol>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{expectationsGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={expectationsGuide.href}>{expectationsGuide.title} →</a>
+        </div>
+      </div>
+      <Code code={bookScript} lang="ts" title="cheapest.ts" mark={["①", "②", "③", "④", "⑤"]} />
+    </div>
+
+    <div class="mt-20 grid items-start gap-10 md:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]">
+      <div>
+        <p class="label">Example 1-3</p>
+        <h2 class="mt-2 font-display text-[2rem] leading-tight font-normal">Driving a browser from a shell</h2>
+        <p class="mt-4 text-[1.05rem]">
+          The browser stays open between commands, and each command answers with its outcome and what happened since
+          the last one. Here an agent clicks a button on the-internet.herokuapp.com, a site for practising automation.
+          The confirm it opens is dismissed, since nothing handles it, so the check after it fails,
+          and <code>since&nbsp;last</code> says why.
         </p>
         <p class="mt-3 text-[1.05rem]">
-          The page is a scoped resource: opened at the top, and closed when the scope closes, whether the program
-          succeeds or fails.
+          A failed check exits with a nonzero status, so a script can act on it too.
+          Once <code>dialog&nbsp;handle&nbsp;accept</code> accepts the page's dialogs, the second try passes. The site's
+          analytics requests fail as well, and are reported with the rest.
         </p>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{cliGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={cliGuide.href}>{cliGuide.title} →</a>
+        </div>
       </div>
-      <Code code={example} lang="ts" title="example.ts" />
+      <Code code={session} lang="sh" title="Terminal" />
+    </div>
+  </section>
+  <section class="bg-band text-white">
+    <div class="mx-auto max-w-6xl px-6 py-16 sm:py-20 md:px-14">
+      <div class="flex flex-wrap items-end justify-between gap-6">
+        <div class="max-w-xl">
+          <h2 class="font-display text-[2.2rem] leading-tight font-normal sm:text-[2.8rem]">Coming from Playwright</h2>
+          <p class="mt-4 text-[1.1rem] leading-relaxed">
+            A Playwright program translates almost line by line. These are the habits that change.
+          </p>
+        </div>
+        <a class="btn border-white bg-white text-band" href="/docs/playwright">Strider for Playwright users</a>
+      </div>
+      <div class="mt-10 border-b border-white/60">
+        <div class="hidden grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-10 border-t border-white/60 pt-3 pb-2 md:grid">
+          <span class="label !text-white">Playwright</span>
+          <span class="label !text-white">Strider</span>
+        </div>
+        {
+          habits.map(([playwright, strider]) => (
+            <div class="grid gap-x-10 gap-y-1 border-t border-white/60 py-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <p class="text-[1.02rem] leading-relaxed text-white/75" set:html={playwright} />
+              <p class="text-[1.02rem] leading-relaxed" set:html={strider} />
+            </div>
+          ))
+        }
+      </div>
     </div>
   </section>
 </BaseLayout>

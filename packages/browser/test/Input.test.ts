@@ -4,6 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Input from "../src/internal/input.ts"
@@ -103,3 +104,136 @@ describe("Input.singleClick", () => {
     ) assert.isUndefined(Input.singleClick(gesture))
   })
 })
+
+describe("Input.uncertain", () => {
+  const releases = (state: Input.State) =>
+    Option.isSome(state.broken)
+      ? state.broken.value.release.map((event) =>
+        event._tag === "Mouse" || event._tag === "Key" ? event.type : event._tag
+      )
+      : []
+
+  it("releases the button a double click pressed, once, and leaves the observed state alone", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.click", Input.click(state, { x: 1, y: 2 }, "left", 2))
+    assert.deepStrictEqual(releases(state), ["up"])
+    assert.strictEqual(state.buttons.size, 0)
+  })
+
+  it("releases a drag's button and the modifiers it pressed, the button first", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.drag", Input.drag(state, { x: 1, y: 2 }, { x: 5, y: 6 }, 3, ["Shift"]))
+    assert.deepStrictEqual(releases(state), ["up", "up"])
+    const [first, second] = Option.getOrThrow(state.broken).release
+    assert.strictEqual(first?._tag, "Mouse")
+    assert.strictEqual(second?._tag, "Key")
+  })
+
+  it("releases a pressed key, and not a button or key that was already held", () => {
+    const state = Input.make()
+    state.buttons.add("left")
+    Input.uncertain(state, "Mouse.click", Input.click(state, { x: 1, y: 2 }, "left", 1))
+    assert.isTrue(Option.isNone(state.broken))
+    Input.uncertain(state, "Keyboard.press", Input.type(state, "a", "us")!)
+    assert.deepStrictEqual(releases(state), ["up"])
+  })
+
+  it("records nothing for a gesture that presses nothing", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.move", Input.move(state, { x: 3, y: 4 }, 2))
+    assert.isTrue(Option.isNone(state.broken))
+  })
+})
+
+describe("uncertain modifier releases", () => {
+  it("clears the released modifier's flag", () => {
+    const state = Input.make()
+    const events = Input.type(state, "A", "us")!
+    Input.uncertain(state, "Keyboard.press", events)
+    const expected = events.filter((event) => event._tag === "Key" && event.type === "up")
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, expected)
+  })
+})
+
+describe("Input handover settlement", () => {
+  for (const before of [true, false]) {
+    it(`keeps older pending releases when cleanup settles ${before ? "before" : "after"} accounting`, () => {
+      const state = broken()
+      const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+      Input.handOver(events)
+      if (before) {
+        Input.settled(events)
+        Input.finished(events)
+      }
+      Input.uncertain(state, "new click", events)
+      if (!before) {
+        Input.settled(events)
+        Input.finished(events)
+      }
+      assert.deepStrictEqual(Option.getOrThrow(state.broken), {
+        description: "mouse.up: the page didn't answer",
+        release
+      })
+    })
+  }
+
+  it("does not clear a later gesture's release of the same button", () => {
+    const state = Input.make()
+    const first = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(first)
+    Input.uncertain(state, "first click", first)
+    const second = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.uncertain(state, "second click", second)
+    const later = Option.getOrThrow(state.broken).release[0]!
+    Input.settled(first)
+    Input.finished(first)
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
+    Input.settled(first)
+    Input.finished(first)
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
+  })
+})
+
+it.effect("keeps an in-flight cleanup when a recovery waiter is interrupted", () =>
+  Effect.gen(function*() {
+    const state = Input.make()
+    const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(events)
+    Input.uncertain(state, "click", events)
+    const first = yield* Input.recover(state, () => Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+    assert.isUndefined(first.pollUnsafe())
+    yield* Fiber.interrupt(first)
+    const next = yield* Input.recover(state, () => Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+    assert.isUndefined(next.pollUnsafe(), "the next gesture must still wait for the unfinished cleanup")
+    Input.settled(events)
+    Input.finished(events)
+    yield* Fiber.join(next)
+  }))
+
+it.effect("records unfinished cleanup before waking recovery and reports the resend on its operation", () =>
+  Effect.gen(function*() {
+    const state = Input.make()
+    const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(events)
+    Input.uncertain(state, "failed click", events)
+    const sent: Array<Adapter.InputEvent> = []
+    yield* Effect.gen(function*() {
+      const operation = yield* Operation.record
+      const waiting = yield* Input.recover(state, (release) =>
+        Effect.sync(() => {
+          sent.push(...release)
+        })).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+      assert.isUndefined(waiting.pollUnsafe())
+      Input.finished(events)
+      yield* Fiber.join(waiting)
+      assert.strictEqual(sent.length, 1)
+      const press = events[1]
+      assert(press?._tag === "Mouse")
+      assert.deepStrictEqual(sent[0], { ...press, type: "up", buttons: 0 })
+      assert.strictEqual(operation.diagnostics().cleanup._tag, "Completed")
+      assert.isTrue(Option.isNone(state.broken))
+      assert.strictEqual(state.cleanups.length, 0)
+    }).pipe(Operation.named("Mouse.click"))
+  }))

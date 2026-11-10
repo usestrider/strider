@@ -336,7 +336,15 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
   })).pipe(
-    Effect.mapError(Kit.realmFailure(id, () => realm.ended)),
+    Effect.catch((error) => {
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
+      return (missing
+        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        : Effect.void).pipe(
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(id, () => realm.ended)(error))))
+        )
+    }),
     Effect.raceFirst(
       state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
         Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))

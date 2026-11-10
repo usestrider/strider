@@ -166,61 +166,64 @@ const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean =>
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Folds a native context; opted-in popup replay uses the same handler after installing its frame tree. */
+export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { state, target }: Event): void => {
+  if (target === undefined) return
+  const context = params.context
+  const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
+  const base = {
+    uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
+    contextId: context.id as number,
+    target,
+    origin: context.origin
+  }
+  if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
+    const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
+    target.realm = realm
+    state.buffer.emit({
+      _tag: "RealmAdded",
+      realm: realm.id,
+      origin: context.origin,
+      kind: {
+        _tag: "Worker",
+        worker: target.kind === "worker"
+          ? { _tag: "Dedicated", owner: Option.none() }
+          : target.kind === "shared_worker"
+          ? { _tag: "Shared" }
+          : { _tag: "Service", scope: Option.none() },
+        url: Urls.reported(target.url),
+        page: Option.fromUndefinedOr(target.page?.id),
+        context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
+      }
+    })
+    return
+  }
+  const frame = frameOf(state, auxData.frameId)
+  const document = frame?.document
+  if (frame === undefined || document === undefined) return
+  const realm = addRealm(state, {
+    ...base,
+    frame,
+    world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
+  })
+  // During a traversal, Chromium creates a restored document's realm before its commit
+  if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
+    realm.pending = true
+    frame.pendingRealms.push(realm)
+    return
+  }
+  document.realms.add(realm)
+  state.buffer.emit({
+    _tag: "RealmAdded",
+    realm: realm.id,
+    origin: context.origin,
+    kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
+  })
+}
+
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
-    .on(Runtime.executionContextCreated, (params, { state, target }) => {
-      if (target === undefined) return
-      const context = params.context
-      const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
-      const base = {
-        uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
-        contextId: context.id as number,
-        target,
-        origin: context.origin
-      }
-      if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
-        const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
-        target.realm = realm
-        state.buffer.emit({
-          _tag: "RealmAdded",
-          realm: realm.id,
-          origin: context.origin,
-          kind: {
-            _tag: "Worker",
-            worker: target.kind === "worker"
-              ? { _tag: "Dedicated", owner: Option.none() }
-              : target.kind === "shared_worker"
-              ? { _tag: "Shared" }
-              : { _tag: "Service", scope: Option.none() },
-            url: Urls.reported(target.url),
-            page: Option.fromUndefinedOr(target.page?.id),
-            context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
-          }
-        })
-        return
-      }
-      const frame = frameOf(state, auxData.frameId)
-      const document = frame?.document
-      if (frame === undefined || document === undefined) return
-      const realm = addRealm(state, {
-        ...base,
-        frame,
-        world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
-      })
-      // During a traversal, Chromium creates a restored document's realm before its commit
-      if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
-        realm.pending = true
-        frame.pendingRealms.push(realm)
-        return
-      }
-      document.realms.add(realm)
-      state.buffer.emit({
-        _tag: "RealmAdded",
-        realm: realm.id,
-        origin: context.origin,
-        kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
-      })
-    })
+    .on(Runtime.executionContextCreated, contextCreated)
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)
@@ -416,16 +419,33 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
                 const reason = error.reason
                 if (
                   reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
-                  reason.code !== -32000 || reason.description !== "Inspected target navigated or closed"
+                  reason.code !== -32000 ||
+                  (reason.description !== "Inspected target navigated or closed" &&
+                    reason.description !== "Execution context was destroyed.")
                 ) return Effect.fail(error)
                 // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
                 // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
                 // Keep the command's original deadline while those lifecycle events catch up.
-                return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                if (reason.description === "Inspected target navigated or closed") {
+                  return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                    BrowserClock.until(at),
+                    Effect.flatMap((ended) =>
+                      Effect.fail(
+                        Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                          reason: new Protocol.NoReply({ method: reason.method, timeout })
+                        })
+                      )
+                    )
+                  )
+                }
+                // "Execution context was destroyed." arrives after the destroy event on the wire, and is no
+                // evidence by itself: fold the events received before the reply, then fail at once. `failed`
+                // reports Gone only if the realm ended, and the rejection otherwise.
+                return state.buffer.run(() => {}).pipe(
                   BrowserClock.until(at),
-                  Effect.flatMap((ended) =>
+                  Effect.flatMap((folded) =>
                     Effect.fail(
-                      Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                      Option.isSome(folded) ? error : new Protocol.ProtocolError({
                         reason: new Protocol.NoReply({ method: reason.method, timeout })
                       })
                     )
