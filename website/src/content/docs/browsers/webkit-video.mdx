@@ -1,11 +1,11 @@
 ---
 title: WebKit video
-description: Enable PNG polling explicitly, choose its interval and output directory, and write a WebM file.
+description: Recording a WebKit page to a video file.
 order: 5
 ---
 
-Stock WebKit has no native screencast stream. Explicit PNG polling records a WebM file, at the cost of page work
-and missed states between captures.
+WebKit has no screencast stream, so Strider makes its video by polling: it takes a screenshot at an interval you
+set and writes each into a WebM file. Polling adds work to the page, and misses what happens between screenshots.
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"

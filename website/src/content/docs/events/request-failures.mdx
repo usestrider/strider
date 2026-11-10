@@ -1,11 +1,11 @@
 ---
 title: Request failures
-description: Read a request's reported failure, distinguish HTTP errors and cancellation, and handle unavailable observations.
+description: Finding out why a request didn't complete.
 order: 4
 ---
 
-An HTTP error response and a failed network transfer need different checks. `NetworkRequest.failure` reads the
-browser's failure report for one request hop without waiting for it to finish.
+`NetworkRequest.failure` reads whether a request's transfer has failed so far, with the browser's reason, without
+waiting for the request to end. An HTTP error, such as a 404, isn't a failure but a response.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"

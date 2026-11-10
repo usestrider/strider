@@ -1,16 +1,17 @@
 ---
 title: Strider CLI
-description: A usage guide for agent context and skills, commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions and their state, managing them, attaching, TypeScript segments, and an MCP server.
+description: Browser automation from the command line.
 order: 3
 ---
+
+The `strider` CLI keeps a browser open in a named session between commands, so a shell, a script, or an agent can
+drive it one step at a time. Install it globally; it runs on Node, or on Bun where there is no Node:
 
 ```sh
 pnpm add -g @usestrider/cli
 ```
 
-A program's browser closes when the program ends. `strider`, the command-line tool, keeps one open in a named session
-between commands, so a shell, a script, or an agent can drive it one step at a time. It runs on Node, or on Bun where
-there is no Node. `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
+`strider --help` lists the commands, and `strider <command> --help` each one's arguments.
 
 ## Agent usage
 
@@ -36,8 +37,9 @@ use their tools' schemas for argument names.
 
 ## Commands
 
-A session holds one browser between commands. A target is a ref from the page's latest snapshot, such as `e3`, or
-a locator, such as `label=Email`, as the [toolkit's](/docs/agents/toolkit#tools) are:
+`start` opens a session, and `page new` opens a named page in it, which `snapshot` shows with a ref on each element.
+A target is a ref from the page's latest snapshot, such as `e3`, or a locator, such as `label=Email`, as the
+[toolkit's](/docs/agents/toolkit#tools) are:
 
 ```sh
 strider start --name shop --chromium /usr/bin/chromium
@@ -137,9 +139,9 @@ The code is the error's, not its reason's: a locator's `InvalidInput` exits with
 
 ## Exporting a test
 
-A session's refs mean nothing outside it, so rewriting a session as a test by hand means finding each element again.
-`export test` writes each command the session ran, expectations included, as a step of a
-[Vitest test](/docs/tools/testing), with refs turned into the locators they stood for. It leaves out reads, such as
+`export test` writes each command the session ran, expectations included, as a statement of a
+[Vitest test](/docs/tools/testing), with refs turned into the locators they stood for, since a ref means nothing
+outside its session. It leaves out reads, such as
 `snapshot` and `find`, and commands that failed; `run`, `control`, and `release` become `TODO` comments, which the
 command lists. For the session in [Commands](#commands) and [Waits across commands](#waits-across-commands):
 
@@ -186,8 +188,8 @@ can't tell which of them opened it.
 
 ## Sessions and state
 
-Starting a session from saved [storage state](/docs/pages/contexts#logging-in-once) skips the login form. `--state`
-starts from a saved file; `--fork` from a running session's state, with no file written. A secret given with
+A session can start from saved [storage state](/docs/pages/contexts#logging-in-once), already signed in: `--state`
+from a saved file, and `--fork` from a running session's state, with no file written. A secret given with
 `--secret` is read from the environment and used as `%name%`, never echoed or recorded:
 
 ```sh
@@ -479,8 +481,8 @@ from result and export metadata.
 
 ## MCP
 
-An MCP client, such as an editor's agent, calls tools, not a shell. `strider mcp` serves a session's commands as
-tools over the Model Context Protocol. The [agent usage guide](#agent-usage) explains the shared session and
+`strider mcp` serves a session's commands as tools over the Model Context Protocol, for an MCP client such as an
+editor's agent, which calls tools rather than a shell. The [agent usage guide](#agent-usage) explains the shared session and
 event behavior; the MCP tool schemas describe their arguments. Add the server to your MCP client:
 
 ```json

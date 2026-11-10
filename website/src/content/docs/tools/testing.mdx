@@ -1,12 +1,11 @@
 ---
 title: Tests with Vitest
-description: Tests as Effect programs on one browser per file, pages that run at once, files attached to a test, and a fake browser for events.
+description: Testing a web app in a real browser.
 order: 1
 ---
 
-Launching a browser for each test is slow, and tests whose pages share cookies and storage leak state into each
-other. Under Vitest, each test is an Effect program on one browser per file, with a fresh context for each page, so
-the steps you wrote for scripts run in tests unchanged.
+Under Vitest, a test is an Effect program that shares one browser with the file's other tests and gets a fresh
+context for each page, so the steps you wrote for scripts run in tests unchanged.
 
 ## Writing a test
 
@@ -81,9 +80,10 @@ export default defineConfig({
 
 ## Concurrent pages
 
-A browser throttles the timers and rendering of pages in the background and gives focus to one page only, so
-with several pages at once, a background page's actions can time out and `toBeFocused` fails on all but one. Use
-these when a file's tests run concurrently, or a test drives several pages:
+`LaunchProfile.concurrent` and `focus: "emulated"` let several pages run at once as if each were in front. A
+browser otherwise throttles background pages' timers and rendering, so their actions can time out, and focuses one
+page only, so `toBeFocused` fails on the rest. Use them when a file's tests run concurrently, or a test drives
+several pages:
 
 ```ts title="dashboards.test.ts"
 import { NodeServices } from "@effect/platform-node"
@@ -129,14 +129,13 @@ For automatic recording and attachment on failure, see [Traces for failed tests]
 
 ## Attaching files
 
-A trace written to disk isn't tied to the test that made it, so finding a failed test's trace means matching file
-names by hand. `TestRun`, which `VitestBrowser.layer` provides, attaches a file to the running test as a Vitest
-artifact, kept with its result: `run.attach` takes the file's kind (`"Trace"`, `"Har"`, or `"Screenshot"`) and its
-path, such as a [trace](/docs/tools/recordings#traces)'s. Bind the callback with
-`VitestBrowser.withTest(context)` to capture its identity, retry attempt, and attachment owner, even with a shared
-browser layer, or with a per-effect browser layer in either composition order. Call it again for each retry.
-Complete attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without this binding the adapter uses Vitest's global current-test
-lookup, which supports sequential tests only and can select another callback during concurrent tests:
+`TestRun`, which `VitestBrowser.layer` provides, attaches a file to the running test as a Vitest artifact, kept
+with its result. `run.attach` takes `{ trace }`, `{ har }`, or `{ screenshot }`, each a path, such as a
+[trace](/docs/tools/recordings#traces)'s. Bind each test's effect with `VitestBrowser.withTest(context)`, on every
+retry, so its name, retry attempt, and attachments stay with that callback, whether the block shares the browser
+layer or the test provides its own. Without it, `TestRun` asks Vitest which test is running, which is right only
+when tests run one at a time. Attach before the callback ends: Vitest doesn't promise that later artifacts reach
+its reporters:
 
 ```ts title="cart.test.ts"
 import { NodeServices } from "@effect/platform-node"
@@ -207,10 +206,9 @@ the repeat in the filename digest and trace metadata.
 
 ## A fake browser for events
 
-A real browser decides when a response, a dialog, or a crash arrives, so a test can't make one come first, or at
-all. `Browser.layerTest` is a fake browser for code about events: waiting for a response, handling a dialog, giving up
-when a page crashes. Its first page plays a timeline on Effect's clock, so under `TestClock` it moves only when the
-test moves it:
+`Browser.layerTest` is a fake browser for code about events: waiting for a response, handling a dialog, giving up
+when a page crashes. Its first page plays a timeline of events you write, on Effect's clock, so under `TestClock`
+each event comes only when the test moves the clock to it:
 
 ```ts
 import { assert, it } from "@effect/vitest"

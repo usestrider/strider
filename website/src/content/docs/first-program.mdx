@@ -1,11 +1,11 @@
 ---
 title: First program
-description: A whole program, the page it opens, its locators and actions, expectations, reads, the layer that launches the browser, and steps as functions that run concurrently.
+description: Strider's basics, through one short example.
 order: 2
 ---
 
 This program has the parts every later page builds on: a page that closes with its scope, a locator, an action, an
-expectation, and the layer that launches the browser.
+expectation, a read, and the layer that launches the browser.
 
 ## The whole program
 
@@ -59,9 +59,8 @@ again. Two or more matches fail at once, with [`StrictViolation`](/docs/errors#s
 
 ## Expectations
 
-The cart can change after `click` returns, so a check that reads once can run too early. `Expect.toBeVisible`
-checks now and on each change to the page, until it passes or [the deadline](/docs/deadlines) does. It's the
-program's only waiting: no sleeps.
+`Expect.toBeVisible` checks now and on each change to the page, until it passes or [the deadline](/docs/deadlines)
+does, since the cart can change after `click` returns. It's the program's only waiting: no sleeps.
 
 `locator.pipe(Expect.toBeVisible)` and `Expect.toBeVisible(locator)` are the same. Matchers with arguments are dual:
 `locator.pipe(Expect.toHaveText("1 item"))` or `Expect.toHaveText(locator, "1 item")`.

@@ -1,11 +1,10 @@
 ---
 title: Actions
-description: The actions, the checks each makes first and turning them off, typing, keys and keyboard layouts, files, dragging, and the keyboard and the mouse.
+description: Clicking, typing, and dragging, as a person would.
 order: 2
 ---
 
-Input sent to an element that's hidden, moving, or covered misses it or lands on something else, and a sleep before
-each step only makes that less likely. An action waits until its element can take the input, then sends it once.
+An action waits until the element a locator finds can take input, then sends it once.
 
 ## The actions
 
@@ -363,8 +362,8 @@ gesture at a time, so two fibers acting on one page never interleave their press
 
 ## DOM events
 
-A component may listen for an application event that keyboard or pointer input cannot produce. Dispatch an
-untrusted DOM event on one attached element with `dispatchEvent`:
+`dispatchEvent` dispatches an untrusted DOM event on one attached element, for an application event that keyboard
+or pointer input can't produce:
 
 ```ts
 import { Page } from "@usestrider/browser"

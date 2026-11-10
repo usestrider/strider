@@ -1,13 +1,13 @@
 ---
 title: Request sizes
-description: Read native HTTP byte counts with explicit unavailable values and separate encoded and decoded bodies.
+description: How big a request and its response were.
 order: 5
 ---
 
-A compressed response has different encoded, decoded, and transferred byte counts. Native request sizes let you
-inspect those counts without downloading response bodies or estimating headers.
+Request sizes are the browser's own byte counts for a request and its response, with a compressed body's encoded,
+decoded, and transferred sizes counted separately. A count the browser didn't report is missing, never estimated.
 
-Enable collection when creating the context, then read the original request with `NetworkRequest.sizes`:
+Create a context with `requestSizes: true`, then read a request with `NetworkRequest.sizes`:
 
 ```ts
 import { Browser, NetworkRequest } from "@usestrider/browser"

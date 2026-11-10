@@ -1,11 +1,11 @@
 ---
 title: Locators
-description: Locators and the elements they find, the queries, matching text, narrowing to the matches you mean, labels for errors and traces, frames, and counting matches.
+description: Picking out the elements on a page.
 order: 1
 ---
 
-An element found once goes stale when the page re-renders it, and a selector of classes breaks when the markup
-changes; a locator, by what a user sees, survives both.
+A locator finds an element for an action, read, or expectation, usually by what a person sees: a button's role and
+name, a field's label, or text.
 
 ## Locators and elements
 
@@ -110,9 +110,8 @@ return `ExpectationFailed`. See
 
 ## Narrowing
 
-A query over the whole page can match the same link in the header and the footer, and acting on it fails with
-`StrictViolation`. Narrowing searches one region, or keeps only the matches you mean. Each query in a chain
-searches inside the previous one's matches:
+Narrowing searches one region, or keeps only the matches you mean, such as the header's link when the footer has
+the same one. Each query in a chain searches inside the previous one's matches:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -185,8 +184,8 @@ Pick by position last: it breaks when the order changes.
 
 ## Labels
 
-A failure names a locator by its queries, and `header .cart > span` doesn't say which element was meant.
-`describe` names it as you would, in errors and [traces](/docs/tools/recordings#traces):
+`describe` gives a locator a label, which errors and [traces](/docs/tools/recordings#traces) show in place of its
+queries, so a failure names the cart badge rather than `header .cart > span`:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -209,9 +208,8 @@ named by its queries again, so call `describe` last.
 
 ## Frames
 
-A query searches one document, and an iframe holds a document of its own, so `page.getByLabel` finds nothing
-inside an embedded payment form. `page.frame` takes a locator for an iframe and gives a frame locator, with the
-same queries:
+A query searches one document, and an iframe, such as an embedded payment form, holds its own. `page.frame` takes a
+locator for an iframe and gives a frame locator, which has the same queries and searches inside it:
 
 ```ts
 import { Page } from "@usestrider/browser"

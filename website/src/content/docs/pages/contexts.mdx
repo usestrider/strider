@@ -1,17 +1,16 @@
 ---
 title: Contexts
-description: Pages in one context, settings for a context's life and for a while, logging in once with storage state, and cookies and storage.
+description: Separate cookies, storage, and settings for each task.
 order: 4
 ---
 
-Pages that share cookies and storage leak state from one task or test into the next. A context has its own, so
-pages in different contexts share nothing, and its settings hold for every page in it.
+A context is a fresh browser profile: its own cookies, storage, cache, and permissions. Give each task or test its
+own, and nothing one leaves behind reaches the next.
 
 ## Pages in one context
 
-A context is like a fresh profile: its own cookies, storage, cache, and permissions. `Browser.newPage()` makes a
-context with one page in it. For pages that share them, such as two tabs of one signed-in user, make the context
-and open pages in it:
+`Browser.newPage()` makes a context with one page in it. For pages that share cookies and storage, such as two
+tabs of one signed-in user, make the context and open pages in it:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -34,9 +33,8 @@ A context and its pages close with the scope that made them, popups included.
 
 ## Settings for a context's life
 
-A page reads its viewport, locale, and time zone as it loads, so settings applied after it opens can miss what it
-rendered first. Options to `newContext` or `newPage` hold for the context's life, and apply before its first page
-loads:
+Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what
+it renders first already uses them:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -109,9 +107,8 @@ stock WebKit cannot create contexts. `Browser.newPage` accepts the same option. 
 
 ## Settings for a while
 
-Some states come and go while a context is open, such as the network dropping or a permission granted after a
-prompt. Set as an option, they'd hold for every step; set for a scope, only the steps that test them see them.
-`emulate` and `grant` apply settings until their scope closes, then restore what was there. `emulate` works on a
+`emulate` and `grant` apply settings for a state only some steps should see, such as the network dropping or a
+permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
 context, for every page in it, popups included, or on a page, for that page alone; `grant` works only on a context,
 and not on WebKit:
 
@@ -139,9 +136,9 @@ const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
 
 ## Logging in once
 
-Signing in through the form before every task is slow, and fails every task when only the login page is broken.
 Storage state is a context's cookies, and the `localStorage` and IndexedDB of each origin it has open.
-`exportStorageState` reads it; the `storageState` option starts a context from it, already signed in:
+`exportStorageState` reads it after signing in, and the `storageState` option starts a later context from it,
+already signed in:
 
 ```ts
 import { Browser, Expect, StorageState } from "@usestrider/browser"
@@ -203,9 +200,9 @@ const profileInbox = Effect.fn("profileInbox")(
 
 ## Cookies and storage
 
-Reaching a state through the UI, such as a feature flag or a dismissed banner, adds steps the task isn't about;
-setting the cookie or storage entry does it in one. `context.cookies` reads and changes a context's cookies; `page.localStorage` and `page.sessionStorage`, the current
-origin's storage:
+`context.cookies` reads and changes a context's cookies, and `page.localStorage` and `page.sessionStorage` the
+current origin's storage. Setting an entry puts a page in a state, such as a feature flag on or a banner dismissed,
+without the steps the UI takes:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -244,8 +241,9 @@ const lastVisit = Effect.fn("lastVisit")(function*(page: Page.Page) {
 
 ## Replacing storage in a live context
 
-A sign-in change can require clearing a context's previous login while keeping its pages. Create the context with
-`storageStateTracking: true` so replacement can also clear origins and partitions whose pages have closed.
+`context.setStorageState` replaces a live context's cookies and storage with a saved state, such as another user's
+login, and keeps its pages open. It works only on a context created with `storageStateTracking: true`, which
+records the origins and partitions the context visits so replacement can clear them after their pages close:
 
 ```ts
 import { Browser, StorageState } from "@usestrider/browser"

@@ -1,11 +1,11 @@
 ---
 title: Mocking WebSockets
-description: Scoped WebSocket mocks and browser-native proxies, with explicit script consent and bounded admission.
+description: Faking or rewriting a page's socket traffic.
 order: 9
 ---
 
-A live socket server can make a test depend on timing or unavailable services. A scoped WebSocket route answers
-messages in the test or changes selected messages while the browser connects to the real server.
+A WebSocket route answers a page's sockets itself, or connects them to the real server and changes the messages
+you choose, until its scope closes.
 
 ## Create a mock
 

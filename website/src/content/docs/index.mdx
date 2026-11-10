@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: Browser automation for Effect with composable workflows, typed failures, streams, schemas, tracing, and tools for agents.
+description: What Strider is and what it can do.
 order: 0
 ---
 
@@ -117,8 +117,7 @@ const logErrors = Effect.fn("logErrors")(function*(page: Page.Page) {
 
 ### Responses decoded with schemas
 
-A successful HTTP status does not tell you whether the server returned the data your program needs.
-Decode the response with an Effect Schema so the next step gets validated, typed data:
+Decode a response body with an Effect Schema, and the next step gets the server's data validated and typed:
 
 ```ts
 import { NetworkResponse, Page } from "@usestrider/browser"
@@ -148,8 +147,8 @@ const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
 
 ### Browser operations in your traces
 
-A slow application workflow can spend its time in browser actions as well as your own code.
-Every browser operation creates a span beneath your `Effect.fn` step, so your configured Effect tracer shows them together:
+Every browser operation creates a span beneath your `Effect.fn` step, so your configured Effect tracer shows time
+in the browser beside time in your own code:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -181,9 +180,9 @@ The command runs without a browser or session. It can also [generate a skill](/d
 
 ### Inspecting a tab before taking control
 
-A tool attached to your browser may need to read a tab you are using without changing it.
-[Inspection access](/docs/pages/attaching#access-levels) gives it a page type with reads, snapshots, and screenshots;
-clicking or navigating requires explicitly taking control:
+[Inspection access](/docs/pages/attaching#access-levels) gives a tool attached to your browser a page type with
+reads, snapshots, and screenshots, so it can read a tab you're using without changing it. Clicking or navigating
+requires taking control explicitly:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -200,8 +199,9 @@ const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
 
 ### The CLI
 
-A shell-based agent can inspect a page, act on it, and check the result in separate commands while the browser stays open.
-The [`strider` CLI](/docs/agents/cli) gives each session and page a name, so every command says which browser and tab it uses:
+The [`strider` CLI](/docs/agents/cli) keeps a browser open between commands, so a shell-based agent can inspect a
+page, act on it, and check the result one command at a time. It names each session and page, so every command says
+which browser and tab it uses:
 
 ```sh
 pnpm add -g @usestrider/cli
