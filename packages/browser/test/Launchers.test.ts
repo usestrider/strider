@@ -778,7 +778,8 @@ describe("WebKit launcher", () => {
           | "foreign"
           | "collision"
           | "unreadable-after"
-          | "unreadable-collision",
+          | "unreadable-collision"
+          | "descriptors-denied-once",
         around: (
           start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
           progress: OwnershipProgress
@@ -800,6 +801,7 @@ describe("WebKit launcher", () => {
         let connected = 0
         let closed = 0
         let writes = 0
+        let deniedDescriptors = 0
         let inspected = yield* Deferred.make<void>()
         const spawner = ChildProcessSpawner.make((command) =>
           Effect.gen(function*() {
@@ -864,8 +866,21 @@ describe("WebKit launcher", () => {
                 )
               })
               : fs.readFileString(path, options),
-          readDirectory: (path, options) =>
-            path === "/proc/9000001/fd" ? Effect.succeed(["7"]) : fs.readDirectory(path, options),
+          readDirectory: (path, options) => {
+            if (path !== "/proc/9000001/fd") return fs.readDirectory(path, options)
+            // While the exec wrapper is still replacing itself with the browser, the kernel denies the first read.
+            if (mode === "descriptors-denied-once" && deniedDescriptors++ === 0) {
+              return Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "readDirectory",
+                  pathOrDescriptor: path
+                })
+              )
+            }
+            return Effect.succeed(["7"])
+          },
           readLink: (path) =>
             path === "/proc/9000001/fd/7"
               ? Effect.succeed(`socket:[${mode === "foreign" || mode === "collision" ? "99999" : inode}]`)
@@ -951,6 +966,14 @@ describe("WebKit launcher", () => {
         assert.strictEqual(result.writes, 1)
         assert.strictEqual(result.connected, 1)
         assert.strictEqual(result.closed, 1)
+        assert.strictEqual(result.stopped, 1)
+      }))
+
+    it.effect("launches when the first read of the spawned process's descriptors is denied and later reads succeed", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("descriptors-denied-once")
+        assert.strictEqual(result.writes, 1)
+        assert.strictEqual(result.connected, 1)
         assert.strictEqual(result.stopped, 1)
       }))
 
