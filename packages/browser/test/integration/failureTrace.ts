@@ -64,14 +64,17 @@
  * `pointer-dispatch`. Firefox and WebKit have no capture.
  *
  * The shared-context suites (`slice/sharedContext.ts`) read the context's storage from each page as it closes, with a
- * 5 second deadline. Only when that read isn't answered in time, `stalled-read-probe` entries record, on the
- * `shared-context` connection, two further questions, each with its own 2 second deadline: whether the same page
- * still answers `1 + 1`, and whether a new page in the same context, on the stalled page's origin, answers
- * `indexedDB.databases()` (then how long closing that page took). Each entry holds `probe`, `outcome` (`answered`,
- * `timed out`, `failed: ...`, or `skipped: no origin`) and `millis`, measured on the host clock. The probes run
- * before the case's failure is reported and never change it or its message; a read that answers, or a page that is
- * gone, runs none. They exist to tell a page that no longer runs scripts from a context whose IndexedDB doesn't
- * answer, and they are in the trace of the failing case only.
+ * 5 second deadline. Only when that read isn't answered in time, on any backend, `stalled-read-probe` entries record,
+ * on the `shared-context` connection, up to three further steps. Each has a budget of 2 seconds of its own, whatever
+ * deadline encloses the read, and is also raced against that long on the browser's clock: (1) whether the same page
+ * still answers `1 + 1`; (2) whether a new page in the same context, on the stalled page's origin, opens, navigates
+ * there and answers `indexedDB.databases()`; (3) how long closing that new page took. The new page's close is
+ * waited for only 2 seconds, and finishes in the background if it takes longer. Each entry holds `probe`, `outcome`
+ * (`answered`, `timed out`, `failed: ...`, or `skipped: no origin`) and, except when skipped, `millis`, measured on
+ * the host clock. Step 2 is one outcome: a timeout or failure there can't tell opening or navigating the page from
+ * `indexedDB.databases()` itself, so it shows the context's IndexedDB stalling only together with step 1 and a page
+ * that opened. The probes run before the case's failure is reported and never change it or its message; a read
+ * that answers, or a page that is gone, runs none. The entries are in the trace of the failing case only.
  *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
  * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while

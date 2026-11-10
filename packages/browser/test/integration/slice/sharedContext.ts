@@ -12,15 +12,19 @@ import { assert, type Vitest } from "@effect/vitest"
 import { Browser, Deadline, type Page, type StorageState, type UserContext } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import type { TestContext } from "vitest"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as Handles from "../../../src/internal/handles.ts"
+import * as Operation from "../../../src/internal/operation.ts"
 import { connection, type Record as TraceRecord } from "../failureTrace.ts"
 
 /** A declaration in force, on a context or the whole browser. */
@@ -152,18 +156,25 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
 
 /** How long each probe after a stalled storage read, and the closing of its page, may take. */
 const probeDeadline = "2 seconds"
+const probeDeadlineDuration = Duration.seconds(2)
 
 /** Whether a failed storage read is the page not answering before its deadline, rather than any other failure. */
 export const isStalledRead = (error: unknown): boolean =>
   Deadline.isTimeout(error) ||
   (error instanceof Error && error.message.includes("The page didn't answer before the deadline"))
 
-/** Runs one probe within its own deadline and records how it ended and how long it took; never fails. */
+/**
+ * Runs one probe and records how it ended and how long it took; never fails. The probe is an operation under its own
+ * `probeDeadline`, and also raced against that long on the browser's clock, so a step no deadline reaches, such as
+ * a page's release, can't outlast it.
+ */
 const probed = Effect.fnUntraced(function*<A, E>(record: TraceRecord, probe: string, effect: Effect.Effect<A, E>) {
   const started = Date.now()
-  const exit = yield* Effect.exit(effect.pipe(Deadline.within(probeDeadline)))
+  const exit = yield* Effect.exit(
+    effect.pipe(Deadline.within(probeDeadline), BrowserClock.timeoutOption(Duration.toMillis(probeDeadlineDuration)))
+  )
   const outcome = Exit.isSuccess(exit)
-    ? "answered"
+    ? Option.isSome(exit.value) ? "answered" : "timed out"
     : isStalledRead(Cause.squash(exit.cause))
     ? "timed out"
     : `failed: ${Cause.pretty(exit.cause).split("\n")[0]}`
@@ -171,10 +182,11 @@ const probed = Effect.fnUntraced(function*<A, E>(record: TraceRecord, probe: str
 })
 
 /**
- * After a page's storage read didn't answer in time, asks Firefox two more things and records the answers, with how
- * long each took, in the failure trace: whether the same page still answers a trivial script, and whether a new page
- * in the same context, on the stalled page's origin, answers `indexedDB.databases()`. Each is bounded, and none changes
- * the outcome.
+ * After a page's storage read didn't answer in time, asks the browser two more things and records the answers, with
+ * how long each took, in the failure trace (every backend runs it): whether the same page still answers a trivial
+ * script, and whether a new page in the same context, on the stalled page's origin, answers `indexedDB.databases()`.
+ * Each gets a budget of its own, whatever deadline encloses the read, and none changes the outcome. The new page's
+ * close is waited for only that long; it finishes in the background.
  */
 export const probeStalledRead = Effect.fnUntraced(
   function*(context: UserContext.UserContext, page: Page.Page, record: TraceRecord) {
@@ -200,9 +212,11 @@ export const probeStalledRead = Effect.fnUntraced(
         return yield* fresh.evaluate(async () => (await indexedDB.databases()).length)
       })
     )
-    yield* probed(record, "closing that page", Scope.close(scope, Exit.void))
+    // Releasing a page isn't an operation under any deadline, so it runs on its own fiber that outlives this wait
+    const closing = yield* Effect.forkDetach(Scope.close(scope, Exit.void).pipe(Operation.detached))
+    yield* probed(record, "closing that page", Fiber.await(closing))
   },
-  (effect) => Effect.ignore(effect)
+  (effect) => Effect.ignore(effect).pipe(Operation.detached)
 )
 
 /**

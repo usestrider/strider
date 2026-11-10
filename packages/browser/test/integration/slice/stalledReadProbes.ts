@@ -50,7 +50,11 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
               assert.isNumber(payload.millis)
             }
             assert.strictEqual(notes.length, 1)
-            assert.match(notes[0]!, /^storage that couldn't be read: /)
+            const failure = yield* (stalled.exportStorageState as Effect.Effect<unknown, Error>).pipe(
+              Deadline.within("200 millis"),
+              Effect.flip
+            )
+            assert.strictEqual(notes[0], `storage that couldn't be read: ${failure.message}`)
           })),
         60_000
       )
