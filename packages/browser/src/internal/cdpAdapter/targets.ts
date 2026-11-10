@@ -33,6 +33,7 @@ import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   ContextEntry,
+  dispatchContext,
   type Event,
   type FrameEntry,
   type PageEntry,
@@ -46,23 +47,29 @@ import * as WebSocketBridge from "./webSocketBridge.ts"
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
 
 const newTarget = (
+  state: State,
   kind: TargetEntry["kind"],
   info: Target.TargetInfo,
   session: ProtocolClient.Session,
   page: PageEntry | undefined,
   frame: FrameEntry | undefined
-): TargetEntry => ({
-  kind,
-  targetId: info.targetId,
-  session,
-  page,
-  frame,
-  url: info.url,
-  realm: undefined,
-  intercepts: "",
-  scripts: new Map(),
-  ended: false
-})
+): TargetEntry => {
+  const target: TargetEntry = {
+    event: undefined as unknown as import("./state.ts").DispatchContext,
+    kind,
+    targetId: info.targetId,
+    session,
+    page,
+    frame,
+    url: info.url,
+    realm: undefined,
+    intercepts: "",
+    scripts: new Map(),
+    ended: false
+  }
+  target.event = dispatchContext(state, target)
+  return target
+}
 
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
@@ -74,7 +81,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "page": {
       const context = contextFor(state, info.browserContextId)
       const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
-      const target = newTarget(kind, info, session, undefined, undefined)
+      const target = newTarget(state, kind, info, session, undefined, undefined)
       const page: PageEntry = {
         id: state.ids.navigable(),
         targetId: info.targetId,
@@ -85,6 +92,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         ended: false
       }
       const entry = { ...target, page }
+      entry.event.target = entry
       state.targets.set(session, entry)
       state.targetsById.set(info.targetId, entry)
       state.pages.set(page.id, page)
@@ -110,7 +118,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     }
     case "iframe": {
       const frame = state.frames.get(info.targetId)
-      const target = newTarget(kind, info, session, frame?.page ?? parentPage, frame)
+      const target = newTarget(state, kind, info, session, frame?.page ?? parentPage, frame)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
       if (frame !== undefined) frame.owner = target
@@ -120,7 +128,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "worker":
     case "service_worker":
     case "shared_worker": {
-      const target = newTarget(kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
+      const target = newTarget(state, kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
       const context = target.page?.context ?? (info.browserContextId === undefined
@@ -133,7 +141,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
       return
     }
     case "other": {
-      state.targets.set(session, newTarget(kind, info, session, undefined, undefined))
+      state.targets.set(session, newTarget(state, kind, info, session, undefined, undefined))
       state.control.sync(
         session,
         resume(session, params.waitingForDebugger).pipe(
@@ -366,7 +374,11 @@ export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced
       return {
         through: synced.through,
         apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
-          for (const event of live) Evaluation.contextCreated(state, target, event)
+          for (const event of live) {
+            if (event.context.uniqueId === undefined || !state.realmsByUnique.has(event.context.uniqueId)) {
+              Evaluation.contextCreated(event, { state, target })
+            }
+          }
           WebSocketBridge.flush(state, target)
           return state.buffer.flush
         })))

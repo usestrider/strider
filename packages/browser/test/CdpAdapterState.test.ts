@@ -58,6 +58,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const state = State.make({
+    handlers: Kit.handlers<State.Event>(),
     cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
@@ -70,6 +71,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   if (requestTiming) context.requestTiming = new Map()
   state.contexts.set(context.id, context)
   const target: State.TargetEntry = {
+    event: undefined as unknown as State.DispatchContext,
     kind: "page",
     targetId: "T1",
     session: protocolSession,
@@ -81,6 +83,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     scripts: new Map(),
     ended: false
   }
+  target.event = State.dispatchContext(state, target)
   const page: State.PageEntry = {
     id: state.ids.navigable(),
     targetId: "T1",

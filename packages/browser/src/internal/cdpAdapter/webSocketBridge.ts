@@ -10,30 +10,40 @@ import * as Runtime from "../../cdp/Runtime.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
+import type * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { contextKey, placement, type RealmEntry, type State, type TargetEntry } from "./state.ts"
+import { contextKey, type Event, placement, type RealmEntry, type State, type TargetEntry } from "./state.ts"
 
 const origin = (realm: RealmEntry): import("../../WebSocketRoute.ts").Origin =>
   realm.frame === undefined
     ? { _tag: "Worker", realm: realm.id }
     : { _tag: "Frame", page: realm.frame.page.id, frame: realm.frame.id }
-const installed = new WeakMap<TargetEntry, Set<string>>()
-const pending = new WeakMap<
-  TargetEntry,
-  Map<
-    string,
-    {
-      readonly bridge: Adapter.WebSocketBridge
-      readonly events: Array<Runtime.BindingCalledParams>
-      readonly known: Map<string, import("../../Target.ts").RealmId>
-      overflow: boolean
-    }
+let installed:
+  | WeakMap<
+    TargetEntry,
+    { names: Set<string>; base: Kit.Handlers<Event>; table: Kit.Handlers<Event> }
   >
->()
+  | undefined
+let pending:
+  | WeakMap<
+    TargetEntry,
+    Map<
+      string,
+      {
+        readonly bridge: Adapter.WebSocketBridge
+        readonly events: Array<Runtime.BindingCalledParams>
+        readonly known: Map<string, import("../../Target.ts").RealmId>
+        overflow: boolean
+      }
+    >
+  >
+  | undefined
 export const flush = (state: State, target: TargetEntry): void => {
-  for (const holder of pending.get(target)?.values() ?? []) {
+  const holders = pending?.get(target)
+  if (holders === undefined) return
+  for (const holder of holders.values()) {
     if (holder.overflow) {
       for (const realm of state.realms.values()) {
         if (realm.target === target && realm.world._tag === "Main" && !realm.ended) holder.bridge.failed(realm.id)
@@ -63,17 +73,32 @@ export const prepare = Effect.fnUntraced(
         []
     )
     for (const bridge of bridges) {
-      let names = installed.get(target)
-      if (names === undefined) {
-        names = new Set()
-        installed.set(target, names)
+      const installs = installed ??= new WeakMap()
+      const awaiting = pending ??= new WeakMap()
+      let installation = installs.get(target)
+      if (installation === undefined) {
+        const base = target.event.handlers
+        const table: Kit.Handlers<Event> = {
+          ...base,
+          apply: (method, params, event) => {
+            if (method === Runtime.executionContextCreated.method) {
+              const context = (params as Runtime.ExecutionContextCreatedParams).context
+              if (context.uniqueId !== undefined && state.realmsByUnique.has(context.uniqueId)) return
+            }
+            base.apply(method, params, event)
+          }
+        }
+        installation = { names: new Set(), base, table }
+        installs.set(target, installation)
+        target.event.handlers = table
       }
+      const names = installation.names
       if (names.has(bridge.name)) continue
       names.add(bridge.name)
-      let deferred = pending.get(target)
+      let deferred = awaiting.get(target)
       if (deferred === undefined) {
         deferred = new Map()
-        pending.set(target, deferred)
+        awaiting.set(target, deferred)
       }
       const known = new Map<string, import("../../Target.ts").RealmId>()
       const holder = { bridge, events: [] as Array<Runtime.BindingCalledParams>, known, overflow: false }
@@ -166,6 +191,10 @@ export const prepare = Effect.fnUntraced(
           Effect.andThen(Effect.sync(() => {
             names.delete(bridge.name)
             deferred.delete(bridge.name)
+            if (names.size === 0) {
+              if (target.event.handlers === installation.table) target.event.handlers = installation.base
+              installs.delete(target)
+            }
           }))
         )
       )

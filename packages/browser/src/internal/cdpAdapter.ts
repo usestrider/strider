@@ -217,10 +217,9 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, {
-        state,
-        target: session.key === undefined ? undefined : state.targets.get(session)
-      })
+      const target = session.key === undefined ? undefined : state.targets.get(session)
+      const event = target === undefined ? State.dispatchContext(state, undefined) : target.event
+      event.handlers.apply(method, params, event)
       for (const guard of state.captures) {
         const document = state.navigables.get(guard.page)?.document
         if (document !== undefined && document.id !== guard.document) guard.replaced(document.id, received)
@@ -257,6 +256,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          handlers,
           cleanupScope,
           connect: options,
           ids: Kit.makeIds(),

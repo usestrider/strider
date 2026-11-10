@@ -359,6 +359,8 @@ Adapter responsibilities:
 - **Script WebSocket routing** adds private transport metadata to an environment init script only in the
   requesting context. CDP installs Runtime bindings and realm-event subscriptions only on covered targets.
   Contexts share ordinary gate methods by prototype; opting in replaces only that context’s gate methods.
+  Native targets reuse a cached dispatch context with a shared ordinary table. Popup-replay deduplication is
+  installed only on opted-in target tables; ordinary context events perform no replay lookup.
   Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
   before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
   binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.

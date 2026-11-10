@@ -24,7 +24,7 @@ import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { contextKey, documentOf, type Event, frameOf, realmOf, type State, type TargetEntry } from "./state.ts"
+import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -162,14 +162,10 @@ const callValue = (value: Adapter.RemoteValue): Runtime.CallArgument => {
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Replays an early paused popup's context after its frame-tree snapshot is installed. */
-export const contextCreated = (
-  state: State,
-  target: TargetEntry,
-  params: Runtime.ExecutionContextCreatedParams
-): void => {
+/** Folds a native context; opted-in popup replay uses the same handler after installing its frame tree. */
+export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { state, target }: Event): void => {
+  if (target === undefined) return
   const context = params.context
-  if (context.uniqueId !== undefined && state.realmsByUnique.has(context.uniqueId)) return
   const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
   const base = {
     uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
@@ -223,9 +219,7 @@ export const contextCreated = (
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
-    .on(Runtime.executionContextCreated, (params, { state, target }) => {
-      if (target !== undefined) contextCreated(state, target, params)
-    })
+    .on(Runtime.executionContextCreated, contextCreated)
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)

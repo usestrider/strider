@@ -65,6 +65,7 @@ export const contextLock = (context: ContextEntry) => context.lifecycleLock ??= 
 export type TargetKind = "page" | "iframe" | "worker" | "service_worker" | "shared_worker" | "other"
 
 export interface TargetEntry {
+  event: DispatchContext
   proxyAuth?: Map<string, { readonly networkId: string | undefined; attempted: boolean }> | undefined
   readonly kind: TargetKind
   readonly targetId: string
@@ -264,6 +265,7 @@ export interface CaptureGuard {
 }
 
 export interface State {
+  readonly handlers: Kit.Handlers<Event>
   readonly cleanupScope: Scope.Scope
   readonly captures: Set<CaptureGuard>
   readonly options: Adapter.ConnectOptions
@@ -321,6 +323,7 @@ export interface State {
 export const make = (options: {
   readonly cleanupScope: Scope.Scope
   readonly connect: Adapter.ConnectOptions
+  readonly handlers: Kit.Handlers<Event>
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
   readonly control: ProtocolClient.FoldControl
@@ -330,6 +333,7 @@ export const make = (options: {
   const requests = new Map<string, RequestEntry>()
   const hops = new Map<NetworkRequest.HopId, RequestEntry>()
   const state: State = {
+    handlers: options.handlers,
     cleanupScope: options.cleanupScope,
     captures: new Set(),
     options: options.connect,
@@ -387,6 +391,17 @@ export interface Event {
   readonly state: State
   readonly target: TargetEntry | undefined
 }
+
+/** The native target's cached dispatch. Ordinary targets share the connection's default table. */
+export interface DispatchContext extends Event {
+  target: TargetEntry | undefined
+  handlers: Kit.Handlers<Event>
+}
+export const dispatchContext = (state: State, target: TargetEntry | undefined): DispatchContext => ({
+  state,
+  target,
+  handlers: state.handlers
+})
 
 // ── Keys ──────────────────────────────────────────────────────────────────────────────────────────────────
 
