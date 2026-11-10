@@ -341,6 +341,9 @@ export const install = (name: string, token: string, pattern: string, transport:
       }
       if (routes.length === 0) {
         if (global.WebSocket === Mock) global.WebSocket = Native
+        if (nativeConstructor !== undefined) {
+          global.Object.defineProperty(Native.prototype, "constructor", nativeConstructor)
+        }
         active = false
       }
       return
@@ -427,6 +430,11 @@ export const install = (name: string, token: string, pattern: string, transport:
         if (!active) {
           active = true
           global.WebSocket = Mock
+          global.Object.defineProperty(Native.prototype, "constructor", {
+            value: Mock,
+            configurable: true,
+            writable: true
+          })
         }
         add(...args)
       },
@@ -437,6 +445,9 @@ export const install = (name: string, token: string, pattern: string, transport:
     enumerable: false
   })
   Object.defineProperty(Mock, "name", { value: "WebSocket", configurable: true })
+  // Native sockets of unrouted URLs report the page-visible constructor too. Removal puts it back.
+  const nativeConstructor = global.Object.getOwnPropertyDescriptor(Native.prototype, "constructor")
+  global.Object.defineProperty(Native.prototype, "constructor", { value: Mock, configurable: true, writable: true })
   global.WebSocket = Mock
   add(name, token, pattern, transport)
 }
