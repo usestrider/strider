@@ -27,7 +27,7 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
       assert.ok(Array.isArray(buffers) && buffers.length > 0, "Missing native buffer-loss accounting")
       for (const buffer of buffers) {
         for (const [key, value] of Object.entries(buffer)) {
-          if (/loss|discard|overwrit|dropped/.test(key)) assert.equal(value, 0, `Native trace data loss: ${key}`)
+          if (/loss|discard|overwrit|dropped|^abi_violations$|^patches_failed$/.test(key)) assert.equal(value, 0, `Native trace data loss: ${key}`)
         }
       }
       const sends = events.filter((e) => e.kind === "wire" && e.name === "send")
