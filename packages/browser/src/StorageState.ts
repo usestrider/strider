@@ -160,11 +160,12 @@ export class Incompatible extends Schema.Error<Incompatible>("@usestrider/browse
 }
 
 /**
- * Reason for a storage replacement that failed after its mutation phase began.
+ * Reason for a failed storage replacement whose changes may already have begun.
  *
  * **Details**
  *
- * Cookies and origin storage may already have changed. No rollback is attempted; pending IndexedDB deletions
+ * Cookies and origin storage may already have changed; this reason does not confirm that any change occurred.
+ * No rollback is attempted; pending IndexedDB deletions
  * may complete later when open connections close. Stop writers and release storage handles before retrying.
  * Deadlines remain `Deadline.Timeout`, and interruption remains interruption; both can also leave partial changes.
  *

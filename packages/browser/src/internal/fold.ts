@@ -837,6 +837,15 @@ export const make = Effect.fnUntraced(function*(options: {
           if (Option.isNone(page)) return
           const owner = ownerOfPage(page)
           const context = page.value.contextEntry
+          const listener = context.storageSources
+          if (listener !== undefined) {
+            const url = URL.parse(fact.url)
+            if (url !== null) {
+              if (url.protocol === "ws:") url.protocol = "http:"
+              else if (url.protocol === "wss:") url.protocol = "https:"
+              if (url.protocol === "http:" || url.protocol === "https:") listener.observe([url.origin], true)
+            }
+          }
           const connection: Model.ConnectionEntry = {
             id: fact.connection,
             kind: fact.kind,

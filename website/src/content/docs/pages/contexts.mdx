@@ -269,9 +269,11 @@ needs to read the new state. Existing-page sessionStorage, HTTP cache and servic
 
 Stop page and worker writes, including storage-writing init scripts, and release IndexedDB connections and file handles first. A blocked database deletion,
 locked file, backend error or deadline can leave partial changes. Interruption has the same risk. There is no
-rollback. Runtime failures use `UserContextError` with reason `StorageState.PartiallyApplied`; deadlines remain
+rollback. Runtime failures use `UserContextError` with reason `StorageState.PartiallyApplied`, meaning changes
+may have occurred, even if the failure happened before the first deletion; deadlines remain
 `Deadline.Timeout`, and interruption remains interruption. An issued IndexedDB deletion may complete later when its connection closes. Temporary pages and
-routes are released even on failure or interruption. A successful call confirms completed storage operations,
+routes are released even on failure or interruption. Temporary pages appear in `context.pages` while replacement
+runs, and the context's routes and init scripts apply to them. A successful call confirms completed storage operations,
 not an atomic snapshot against concurrent writers.
 
 Untracked contexts and contexts with acquired virtual authenticators refuse before mutation. Close the
