@@ -68,6 +68,38 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
       cleanup(scratch)
     }
   }, 90_000)
+  it("retains a complete report for a launch with no initial page", () => {
+    const scratch = scratchDirectory("launch-profile-no-window-")
+    try {
+      const hooks = fs.readFileSync(path.join(directory, "launch-profile-hooks.mjs"), "utf8")
+      const rule = "  [\"/internal/chromiumLauncher.ts\", ["
+      expect(hooks).toContain(rule)
+      // Launch as `--no-startup-window` does: the launcher's last argument is the flag, not `about:blank`.
+      const swap = JSON.stringify(["  \"about:blank\"\n]", "  \"--no-startup-window\"\n]"])
+      fs.writeFileSync(path.join(scratch, "hooks.mjs"), hooks.replace(rule, `${rule}\n    ${swap},`))
+      const output = path.join(scratch, "report.json")
+      const result = spawnSync(
+        process.execPath,
+        ["--import", path.join(scratch, "hooks.mjs"), path.join(directory, "launch-profile.ts"), output, "1"],
+        { cwd: root, env: { ...process.env, STRIDER_LAUNCH_NATIVE: "0" }, encoding: "utf8", timeout: 60_000 }
+      )
+      retainOutput(scratch, result)
+      expect(result.status, result.stderr).toBe(0)
+      const report = JSON.parse(fs.readFileSync(output, "utf8"))
+      expect(report.status).toBe("completed")
+      const strider = report.samples.filter((sample: { library: string }) => sample.library === "strider")
+      expect(strider.length).toBeGreaterThan(0)
+      for (const sample of strider) {
+        const spawned = sample.events.find((event: { name: string }) => event.name === "spawn.args")
+        expect(spawned.data.args).toContain("--no-startup-window")
+        expect(spawned.data.args).not.toContain("about:blank")
+        expect(sample.resources.visiblePages).toBe(0)
+        expect(sample.events.some((event: { name: string }) => event.name === "target.gate.end")).toBe(false)
+      }
+    } finally {
+      cleanup(scratch)
+    }
+  }, 90_000)
   it.each(
     ["/internal/chromiumLauncher.ts", "/chromium/Chromium.ts", "/internal/cdpAdapter.ts"].flatMap((suffix) =>
       ["default", "persistent"].map((mode) => [suffix, mode] as const)
