@@ -40,6 +40,8 @@ concurrency:
 jobs:
   benchmarks:
     runs-on: ubuntu-24.04
+    # Holds SOPS_AGE_KEY, the benchmarks' own age key, which decrypts only the recordings bucket's keys (.sops.yaml)
+    environment: benchmarks
     timeout-minutes: 120
     defaults:
       run:
@@ -67,6 +69,21 @@ jobs:
             (cd ".paired/$role" && nix develop --command pnpm install --frozen-lockfile && nix develop --command pnpm build) 2>&1 | tee ".data/paired/$role-build.log"
           done
           nix develop --command pnpm install --frozen-lockfile
+      - name: Recordings bucket keys
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          set -euo pipefail
+          # A driver without the encrypted keys runs the real-site scenarios only if their recordings are on the runner
+          if [ ! -f packages/scenarios/recordings.sops.env ]; then exit 0; fi
+          keys="$RUNNER_TEMP/recordings.env"
+          nix develop --command sops -d --output-type dotenv packages/scenarios/recordings.sops.env > "$keys"
+          while IFS='=' read -r name value; do
+            [ -n "$name" ] || continue
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done < "$keys"
+          rm -f "$keys"
       - name: Paired comparison
         env:
           WORKLOAD: ${{ inputs.workload }}
@@ -77,7 +94,7 @@ jobs:
           set -euo pipefail
           args=(--base "$PWD/.paired/base" --head "$PWD/.paired/head" --output "$PWD/.data/paired" --workload "$WORKLOAD" --browser "$BROWSER" --runs "$RUNS")
           if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
-          nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/benchmarks/compare-bin.ts "${args[@]}" 2>&1 | tee .data/paired/driver.log
+          nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORDINGS_ACCOUNT_ID --keep STRIDER_RECORDINGS_BUCKET --keep STRIDER_RECORDINGS_ACCESS_KEY_ID --keep STRIDER_RECORDINGS_SECRET_ACCESS_KEY --command node packages/scenarios/src/benchmarks/compare-bin.ts "${args[@]}" 2>&1 | tee .data/paired/driver.log
       - name: Job summary
         if: always()
         run: |

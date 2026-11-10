@@ -1,7 +1,7 @@
 /**
  * File choosers: the file picker a page opens when a file input is clicked.
  *
- * A chooser doesn't pause the page, but something must answer it, by choosing files or canceling. `next`, `stream`
+ * A chooser doesn't pause the page, but something must answer it, by choosing files or canceling. `next`, `stream`,
  * and `history` report a chooser as data; `handle` registers a scoped handler that answers it, given as `Pending`
  * with the decisions. In a context Strider creates no chooser is shown: one no handler answers is canceled and
  * reported as an `AutoResolution`. `locator.setInputFiles` sets an input's files without a chooser.
@@ -11,7 +11,7 @@
  * - On Firefox the input gets a `cancel` event as the chooser opens, before any decision; the files a handler
  *   chooses still arrive after it, with `input` and `change` (`fileChooser`).
  * - On a backend without the `fileChooser` capability, such as WebKit, no chooser is reported: `next`, `stream`,
- *   `history` and `handle` fail with `Unsupported`, and the browser cancels the chooser itself.
+ *   `history`, and `handle` fail with `Unsupported`, and the browser cancels the chooser itself.
  *
  * @stability unstable
  * @since 0.1.0
@@ -233,7 +233,7 @@ export const history = (
  *
  * **Gotchas**
  *
- * - A handler that fails, is interrupted or runs out of time leaves the chooser canceled, reported as an
+ * - A handler that fails, is interrupted, or runs out of time leaves the chooser canceled, reported as an
  *   `AutoResolution`, and its failure is logged at Effect's `References.UnhandledLogLevel`.
  * - On a backend without the `fileChooser` capability, such as WebKit, it fails at once with `DeclarationError`,
  *   reason `Unsupported`: no chooser would reach the handler.

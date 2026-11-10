@@ -1,11 +1,12 @@
 ---
 title: Redirect chains
-description: Read request neighbors and handle explicit uncertainty using bounded browser evidence.
+description: Following a request through its redirects.
 order: 4
 ---
 
-A redirect can visit the same URL more than once, so matching URLs cannot reconstruct its path.
-Scoped redirect access reads neighboring hops by identity and distinguishes a proven end from an unknown successor.
+`NetworkRequest.redirects` gives a handle that reads the request before or after another in its chain. It follows
+the requests themselves, not their URLs, since a chain can visit one URL twice, and says when it can't tell whether
+a request was the last, rather than calling it the end.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -24,7 +25,7 @@ const successorSeen = Effect.fn("successorSeen")(function*(page: Page.Page) {
 ```
 
 This one-step recovery handles only `RedirectUnknown`. Its `None` means no successor was seen; it does not prove
-that the chain ended. Eviction, foreign ownership, copied snapshots, release and target closure remain errors.
+that the chain ended. Eviction, foreign ownership, copied snapshots, release, and target closure remain errors.
 Omit the recovery when the difference between a proven boundary and uncertainty matters.
 
 The handle's `from(request)` and `to(request)` read immediately and never wait. Pass the original snapshot from
@@ -45,7 +46,7 @@ The browser protocols have different limits:
 A lookup fails with `RequestError`, whose reason is one of:
 
 - `RedirectUnknown`: `inFlight` before the hop ends, or `completedRedirect` after a redirect response when neither
-  a successor nor terminal navigation proof is retained. Completion, status and Location alone cannot prove an end.
+  a successor nor terminal navigation proof is retained. Completion, status, and Location alone cannot prove an end.
 - `RedirectUnavailable`: `evicted` for a request or neighbor outside retention, `foreignTarget` for a retained hop
   owned by another page or context, `unavailable` for a copied snapshot, missing response evidence, or an absent navigation outcome in disabled or
   incomplete history, `released`
@@ -56,4 +57,4 @@ then unfinished hops if necessary; another context can evict evidence too. Navig
 bounded [event history](/docs/events/events#next-stream-and-history); an absent navigation outcome
 cannot establish a boundary. If its history is disabled or has dropped entries, the lookup reports unavailable
 evidence; the one-step unknown recovery preserves this error. The handle can inspect retained requests from before it opened. It adds no request
-cache, event listener or protocol command, and closing its scope revokes further lookups.
+cache, event listener, or protocol command, and closing its scope revokes further lookups.

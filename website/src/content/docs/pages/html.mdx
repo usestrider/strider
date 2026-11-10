@@ -1,11 +1,12 @@
 ---
 title: HTML fixtures
-description: Replacing a page's HTML, resource readiness, and deadlines.
+description: A page from a string of markup, for tests and previews.
 order: 8
 ---
 
-Assigning HTML to an element skips the document parser's script execution and does not tell you when resources have loaded.
-[`Page.setContent`](/docs/api/browser/Page#Page.setContent) replaces a page's HTML through the parser and waits for the readiness you choose.
+[`Page.setContent`](/docs/api/browser/Page#Page.setContent) replaces a page's HTML through the document parser, so
+the scripts in it run, and waits for the readiness you choose. Assigning HTML to an element doesn't run its `<script>`
+elements, and doesn't say when resources have loaded.
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -17,7 +18,7 @@ const renderReceipt = Effect.fn("renderReceipt")(function*(page: Page.Page) {
 })
 ```
 
-The call opens, writes and closes the current document. It preserves the URL, history entry, document identity
+The call opens, writes, and closes the current document. It preserves the URL, history entry, document identity,
 and main-world globals while replacing the DOM and its event listeners. Scripts execute and resources load with
 the current document's origin and security policy. Relative resource URLs use its base URL; include an HTML
 `base` element when the fixture needs another one.

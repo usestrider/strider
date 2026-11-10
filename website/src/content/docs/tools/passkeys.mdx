@@ -1,16 +1,16 @@
 ---
 title: Passkeys
-description: Native Chromium passkey tests, credential management, and explicit credential copies for a second page or popup.
+description: Testing passkey sign-in on Chromium.
 order: 4
 ---
 
-A passkey sign-in needs an authenticator as well as the page's cookies. A scoped virtual authenticator lets
-Chromium run native registration and sign-in ceremonies without a physical device.
+A virtual authenticator stands in for the authenticator built into a device, such as Touch ID or Windows Hello, so
+a page can register and use a passkey with no physical device. It lasts until its scope closes.
 
 ## Registration and sign-in
 
 Acquire [`Capability.VirtualAuthenticator`](/docs/api/browser/Capability#VirtualAuthenticator) on a page you
-control, before starting a ceremony. Firefox and WebKit return `CapabilityError` with reason `Unsupported`:
+control before the page starts a ceremony, WebAuthn's name for a registration or a sign-in. Firefox and WebKit return `CapabilityError` with reason `Unsupported`:
 Firefox exposes virtual authenticators through classic WebDriver, outside Strider's BiDi transport, and stock
 WebKit's Automation implementation refuses credential management.
 

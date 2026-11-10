@@ -295,7 +295,7 @@ describe("Locator.check refusal deadlines", () => {
                         _tag: "Final",
                         final: {
                           _tag: "WrongElement",
-                          expected: "a checkbox, a radio or an ARIA checkable",
+                          expected: "a checkbox, a radio, or an ARIA checkable",
                           element: "<option>"
                         }
                       })
@@ -478,8 +478,8 @@ describe("Locator.boundingBox", () => {
               )
             }
             if (mode === "document handoff") {
-              assert.sameMembers(released, ["temporary-box", "handoff-box"])
-              assert.strictEqual(queries, 2)
+              assert.sameMembers(released, ["handoff-box"])
+              assert.strictEqual(queries, 1, "the bound node's document is used without looking again")
             } else assert.deepStrictEqual(released, mode === "installation deadline" ? [] : ["temporary-box"])
             assert.strictEqual(inputs, 0)
           }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
@@ -731,7 +731,9 @@ describe("Locator.evaluateAll", () => {
   it.effect("preserves a typed backend refusal", () =>
     Effect.gen(function*() {
       const page = yield* Browser.newPage()
-      const error = yield* page.locator("p").evaluateAll((elements) => elements.length).pipe(Effect.flip)
+      const error = yield* page.locator("p").evaluateAll((elements: ReadonlyArray<unknown>) => elements.length).pipe(
+        Effect.flip
+      )
       assert(Locator.isLocatorError(error))
       assert.strictEqual(error.reason._tag, "Unsupported")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
@@ -754,7 +756,7 @@ it.effect("evaluateAll rejects a released ownership grant before reaching the ba
       original.steps,
       Option.none()
     )
-    const error = yield* locator.evaluateAll((elements) => elements.length).pipe(Effect.flip)
+    const error = yield* locator.evaluateAll((elements: ReadonlyArray<unknown>) => elements.length).pipe(Effect.flip)
     assert(Target.isTargetGone(error))
     assert.strictEqual(error.reason._tag, "AccessReleased")
   }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
@@ -787,7 +789,7 @@ it.effect("evaluateAll preserves deadlines before and after dispatch without rep
       const page = yield* Browser.newPage()
       const { entry, runtime } = Handles.page(page)
       const document = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
-      const expired = yield* page.locator("p").evaluateAll((elements) => elements.length).pipe(
+      const expired = yield* page.locator("p").evaluateAll((elements: ReadonlyArray<unknown>) => elements.length).pipe(
         Deadline.within("0 millis"),
         Effect.flip
       )
@@ -1132,3 +1134,214 @@ for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as 
       })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
     }).pipe(Effect.scoped))
 }
+
+// A frame can commit while an element lookup resolves: the engine then answers from the new document, so the
+// node it returns belongs to `committed` while the lookup was routed to the page's earlier `current` document.
+// `lookups` gives what each successive engine call returns, as node documents; later calls return undefined.
+const withCommittedLookup = <A, E, R>(
+  lookups: (documents: { readonly current: Target.DocumentId; readonly committed: Target.DocumentId }) => ReadonlyArray<
+    ReadonlyArray<Target.DocumentId>
+  >,
+  body: (input: {
+    readonly page: Effect.Success<ReturnType<typeof Browser.newPage>>
+    readonly current: Target.DocumentId
+    readonly committed: Target.DocumentId
+    readonly realms: Array<Target.DocumentId>
+  }) => Effect.Effect<A, E, R>
+) => {
+  const committed = "committed-frame-document" as Target.DocumentId
+  const realms: Array<Target.DocumentId> = []
+  const queue: Array<ReadonlyArray<Target.DocumentId>> = []
+  const layer = BrowserImpl.layer((sink) =>
+    Fake.connect([], {
+      info: new Browser.Info(Fake.info),
+      capabilities: new Browser.CapabilitySet({
+        entries: Fake.capabilities.map((entry) =>
+          entry.name === "isolatedWorlds" ? { ...entry, status: "supported", limitations: [] } : entry
+        )
+      })
+    })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+      ...adapter,
+      realm: (document) =>
+        Effect.sync(() => {
+          realms.push(document)
+          return "realm" as Target.RealmId
+        }),
+      evaluate: (_realm, call) =>
+        Effect.sync(() => {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          const next = queue.shift()
+          if (next === undefined) return { _tag: "Value", value: { type: "undefined" } } as const
+          const nodes = next.map((document, index) => ({
+            type: "node" as const,
+            node: { document, binding: `node-${index}` }
+          }))
+          return {
+            _tag: "Value",
+            value: nodes.length === 1 ? nodes[0]! : { type: "array" as const, value: nodes }
+          } as const
+        })
+    })))
+  )
+  return Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const { entry, runtime } = Handles.page(page)
+    const current = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+    queue.push(...lookups({ current, committed }))
+    return yield* body({ page, current, committed, realms })
+  })).pipe(Effect.provide(layer))
+}
+
+it.effect("evaluate runs in the realm of the bound node's document when a frame commits during resolution", () =>
+  withCommittedLookup(({ committed }) => [[committed]], ({ committed, page, realms }) =>
+    Effect.gen(function*() {
+      yield* page.locator("#target").evaluate((element: { id: string }) => element.id).pipe(Effect.ignore)
+      assert.strictEqual(realms.at(-1), committed, "the realm comes from node.document, not the routed document")
+    })))
+
+it.effect("evaluateAll runs in the realm of the bound nodes' document when a frame commits during resolution", () =>
+  withCommittedLookup(
+    ({ committed }) => [[committed, committed]],
+    ({ committed, page, realms }) =>
+      Effect.gen(function*() {
+        yield* page.locator("li").evaluateAll((elements: ReadonlyArray<unknown>) => elements.length).pipe(Effect.ignore)
+        assert.strictEqual(realms.at(-1), committed, "the realm comes from the nodes' document")
+      })
+  ))
+
+const syntheticDrag = (from: Locator.Locator, to: Locator.Locator) =>
+  Operation.named("Locator.dragTo")(
+    Effect.flatMap(Operation.record, (record) =>
+      ((from as any).syntheticDrag(to, undefined, record)) as Effect.Effect<unknown, unknown>)
+  ).pipe(Effect.flip, Effect.option)
+
+it.effect("a synthetic dragTo runs in the realm of the bound nodes' document when a frame commits during resolution", () =>
+  withCommittedLookup(
+    ({ committed }) => [[committed], [committed]],
+    ({ committed, page, realms }) =>
+      Effect.gen(function*() {
+        const error = yield* syntheticDrag(page.locator("#a"), page.locator("#b"))
+        const reason = Option.isSome(error) ? (error.value as any).reason?._tag : undefined
+        assert.notStrictEqual(reason, "InvalidInput", "same-document nodes refused as a cross-document drag")
+        assert.strictEqual(realms.at(-1), committed)
+      })
+  ))
+
+it.effect("a synthetic dragTo refuses nodes of different documents when only one lookup straddled the commit", () =>
+  withCommittedLookup(({ committed, current }) => [[committed], [current]], ({ page }) =>
+    Effect.gen(function*() {
+      const error = yield* syntheticDrag(page.locator("#a"), page.locator("#b"))
+      assert.strictEqual(Option.isSome(error) ? (error.value as any).reason?._tag : undefined, "InvalidInput")
+    })))
+
+it.effect("evaluateAll uses the committed document for an empty match set after realm acquisition crosses a commit", () =>
+  Effect.gen(function*() {
+    let acquire = Effect.void
+    let acquired = false
+    const requested: Array<Target.DocumentId> = []
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" ? { ...entry, status: "supported", limitations: [] } : entry
+          )
+        })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        // A realm acquired for a document is that document's, or the document has ended: the commit during
+        // the first acquisition ends the requested document, so its realm fails and the lookup routes again.
+        realm: Effect.fnUntraced(function*(document) {
+          requested.push(document)
+          if (!acquired) {
+            acquired = true
+            yield* acquire
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Document", id: document },
+                  reason: new Target.DocumentReplaced({})
+                }
+              })
+            )
+          }
+          return "committed-realm" as Target.RealmId
+        }),
+        evaluate: (_realm, call) =>
+          Effect.succeed({
+            _tag: "Value",
+            value: call.functionDeclaration === Engine.install
+              ? { type: "string", value: "installed" }
+              : call.functionDeclaration === Engine.element
+              ? { type: "array", value: [] }
+              : { type: "number", value: 0 }
+          })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const previous = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      acquire = runtime.model.adapter.navigate(entry.id, "https://example.test/committed", { referrer: Option.none() })
+        .pipe(Effect.asVoid, Effect.orDie)
+      assert.strictEqual(yield* page.locator(".absent").evaluateAll((elements) => elements.length), 0)
+      const committed = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      assert.notStrictEqual(committed, previous)
+      assert.deepStrictEqual(requested.slice(0, 2), [previous, committed], "the lookup routes again to the replacement")
+      assert.strictEqual(requested.at(-1), committed, "the empty snapshot's callback runs in the replacement document")
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }))
+
+it.effect("evaluateAll does not move an empty snapshot to a document committed after the query ran", () =>
+  Effect.gen(function*() {
+    let beforeReply = Effect.void
+    const requested: Array<Target.DocumentId> = []
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" ? { ...entry, status: "supported", limitations: [] } : entry
+          )
+        })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: (document) =>
+          Effect.sync(() => {
+            requested.push(document)
+            return "searched-realm" as Target.RealmId
+          }),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          if (call.functionDeclaration === Engine.element) {
+            // The query already produced its empty snapshot; a navigation is folded before its reply is consumed.
+            const result = { _tag: "Value", value: { type: "array", value: [] } } as const
+            yield* beforeReply
+            return result
+          }
+          return { _tag: "Value", value: { type: "number", value: 0 } } as const
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const searched = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      beforeReply = runtime.model.adapter.navigate(entry.id, "https://example.test/replacement", {
+        referrer: Option.none()
+      }).pipe(Effect.asVoid, Effect.orDie)
+      yield* page.locator(".absent").evaluateAll((elements) => elements.length)
+      const current = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      assert.notStrictEqual(current, searched)
+      assert.strictEqual(
+        requested.at(-1),
+        searched,
+        "an empty snapshot must not dispatch its callback in an unsearched document"
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }))

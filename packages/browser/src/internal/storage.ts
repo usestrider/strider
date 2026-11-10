@@ -100,7 +100,7 @@ const fromInput = (input: CookieJar.Input): Adapter.Cookie | Reason.InvalidInput
   const invalid = (field: string, expected: string, hint: string) =>
     new Reason.InvalidInput({ input: field, expected, hint })
   if (input.name === "" || /[\s;=,]/.test(input.name)) {
-    return invalid("name", "a cookie name, without whitespace, ;, = or ,", `${JSON.stringify(input.name)} isn't one`)
+    return invalid("name", "a cookie name, without whitespace, ;, =, or ,", `${JSON.stringify(input.name)} isn't one`)
   }
   const value = Redacted.isRedacted(input.value) ? input.value : Redacted.make(input.value)
   if (/[;\r\n]/.test(Redacted.value(value))) {

@@ -1,11 +1,11 @@
 ---
 title: Request failures
-description: Read a request's reported failure, distinguish HTTP errors and cancellation, and handle unavailable observations.
+description: Finding out why a request didn't complete.
 order: 4
 ---
 
-An HTTP error response and a failed network transfer need different checks. `NetworkRequest.failure` reads the
-browser's failure report for one request hop without waiting for it to finish.
+`NetworkRequest.failure` reads whether a request's transfer has failed so far, with the browser's reason, without
+waiting for the request to end. An HTTP error, such as a 404, isn't a failure but a response.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -33,9 +33,9 @@ reports this limitation under `network.failure`.
 Pass the original request object and the page or context that observed it. The connection's existing index keeps
 at most 1000 request hops, dropping completed hops first; this read adds no retention or browser instrumentation.
 
-An observation that is missing, evicted, copied or decoded fails with `RequestError`, whose reason is
+An observation that is missing, evicted, copied, or decoded fails with `RequestError`, whose reason is
 `RequestUnavailable` with `why: "notRetained"`. Another page or context gives `"foreignTarget"`. Loss of the
-request's page, context, frame, worker or browser connection gives `"ownerLost"`, even if it previously failed.
+request's page, context, frame, worker, or browser connection gives `"ownerLost"`, even if it previously failed.
 Save a returned failure value before that owner closes if it must outlive the owner. Unavailable observations
 are not evidence of network failure:
 

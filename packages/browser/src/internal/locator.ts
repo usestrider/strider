@@ -1,5 +1,5 @@
 /**
- * Locators (API.md, Locators, actions and actionability). A locator is data: the engine's
+ * Locators (API.md, Locators, actions, and actionability). A locator is data: the engine's
  * steps, resolved again on every attempt. Built: the queries and chainers, frames, every read, every action,
  * `evaluate` and `snapshot`.
  *
@@ -67,7 +67,7 @@ interface Ready {
   readonly origin: { readonly x: number; readonly y: number }
 }
 
-/** The checks each action documents (API.md, Locators, actions and actionability). */
+/** The checks each action documents (API.md, Locators, actions, and actionability). */
 const pointerChecks: CheckSet = {
   rendered: true,
   visible: true,
@@ -353,10 +353,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           ),
           (found) => found._tag === "Found" ? release(found.node) : Effect.void
         )
-      let found = yield* resolve()
-      // Creating a utility realm can straddle a child document commit. Resolve again only when the
-      // returned binding belongs to a different document; missing/strict results remain immediate.
-      while (found._tag === "Found" && found.node.document !== found.routed.document) found = yield* resolve()
+      const found = yield* resolve()
       if (found._tag === "Response") {
         if (found.response._tag === "NoMatch") return yield* noMatch()
         return yield* this.unmatched(operation, found.response, record.id)
@@ -1140,7 +1137,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           operation,
           new Locator.NotEditable({
             element: final.element,
-            hint: "Only inputs, textareas and contenteditable elements take text"
+            hint: "Only inputs, textareas, and contenteditable elements take text"
           }),
           id
         )

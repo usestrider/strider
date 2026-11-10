@@ -1,13 +1,13 @@
 ---
 title: Request timings
-description: Opt into native request phase timings and read immutable snapshots with explicit missing phases.
+description: Where a request spent its time.
 order: 4
 ---
 
-A response can arrive long before its body finishes. Native request timings show which phases the browser measured
-and whether a successful transfer end has been observed.
+Request timings are the browser's own measurements of when each phase of a request happened, such as its DNS
+lookup, connection, and response. A phase it didn't measure is missing rather than zero.
 
-Create a context with `requestTiming: true` before opening its pages. Read a request with `NetworkRequest.timing`:
+Create a context with `requestTiming: true`, then read a request with `NetworkRequest.timing`:
 
 ```ts
 import { Browser, NetworkRequest } from "@usestrider/browser"
@@ -45,14 +45,14 @@ Chromium uses its native request-time baseline and header start when reported. F
 own request time and native response start. Stock WebKit uses fetch start and native response-header start; its
 ambiguous zero phases and redirect origins remain unavailable. Redirect completion can be an observation bound
 from the next request event. Stock WebKit's finish timestamp can fall back to when the inspector reports completion.
-Cache responses, reused connections and worker requests without a page-attributed collector may lack phases.
+Cache responses, reused connections, and worker requests without a page-attributed collector may lack phases.
 Available cache timings describe browser-reported cache access, not a second transfer to the server. Cache reuse
 can also omit a second observable request entirely, as with memory-cached scripts; do not wait for a request event
 to prove cache reuse. Response source labels alone do not establish whether the server was contacted.
 Unknown origins leave dependent timings unavailable. These native timings do not change [HAR recordings](/docs/tools/recordings).
 
 Pass the original request instance and its page or context. The connection retains at most 1000 hops, dropping
-finished hops first. Copied or decoded requests, eviction, foreign targets and loss of the owning page, context,
-frame, worker or connection refuse with `NetworkRequest.RequestError` / `RequestUnavailable`. A context that did
+finished hops first. Copied or decoded requests, eviction, foreign targets, and loss of the owning page, context,
+frame, worker, or connection refuse with `NetworkRequest.RequestError` / `RequestUnavailable`. A context that did
 not opt in refuses with `timingNotEnabled`. Request history does not pin timing data. Save the returned `Timing`
 value if it must outlive the owner.

@@ -31,7 +31,7 @@ import type * as Target from "./Target.ts"
 import type * as UserContext from "./UserContext.ts"
 
 /**
- * What a trace records beyond spans, logs, errors and console messages.
+ * What a trace records beyond spans, logs, errors, and console messages.
  *
  * **Details**
  *
@@ -54,7 +54,7 @@ export type Options = CaptureOptions & (NetworkOptions | SnapshotOptions)
  */
 export interface CaptureOptions {
   /**
-   * A screenshot after each action, navigation and page-associated expectation, whether it succeeds or fails.
+   * A screenshot after each action, navigation, and page-associated expectation, whether it succeeds or fails.
    * Each capture has a fixed one-second budget on the browser's clock, independent of the operation's deadline.
    * The caller waits for capture; a failed or timed-out capture is omitted without changing the operation's result.
    *
@@ -144,20 +144,20 @@ export interface Recording extends Declaration.Registration {
  *
  * **Details**
  *
- * - Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration
+ * - Each Strider operation on the target is a step, with its name, its span's attributes as params, its duration,
  *   and its error. A span of yours that encloses steps, such as an `Effect.fn`'s, is a step too, so the trace
  *   nests as the program did.
- * - Available caller file, line and column locations link steps to the viewer's Source tab, even when operation
+ * - Available caller file, line, and column locations link steps to the viewer's Source tab, even when operation
  *   spans are disabled. Enclosing caller spans retain their available locations too.
  * - Export includes the local files referenced by those locations, read at export time. Source contents and file
  *   paths are included unchanged under every diagnostics preset; review the archive before sharing it.
  * - Console messages and uncaught exceptions are always recorded.
- * - `screenshots: "perAction"` adds a screenshot after each action, navigation and page-associated expectation,
+ * - `screenshots: "perAction"` adds a screenshot after each action, navigation, and page-associated expectation,
  *   whether it succeeds or fails. Value expectations without a page do not capture screenshots. The caller waits
  *   for capture, with a fixed one-second budget on the browser's clock independent of the operation's deadline.
  *   A failed or timed-out capture is omitted without changing the operation's result.
  * - `screencast` adds frames: the page's video where `Capability.Video` is supported, native frames otherwise
- *   (`Capability.Screencast`) or polled screenshots.
+ *   (`Capability.Screencast`), or polled screenshots.
  * - `network` adds the requests a `Har` would record, with their bodies.
  * - `domSnapshots` adds a snapshot of each frame of the page before and after each action and navigation, which
  *   the viewer renders with the recorded network and the action's target highlighted.
@@ -172,7 +172,7 @@ export interface Recording extends Declaration.Registration {
  *   getter can retain that call site; one constructed later uses the nearest available enclosing caller frame.
  *   Disabled or unavailable stack capture leaves no location. Unreadable source files are omitted; locations remain.
  *   Sources are not fetched from remote URLs, and changes to a source file before export appear in the archive.
- * - `domSnapshots` needs `network: true`, since a snapshot's images, fonts and cross-origin styles come from the
+ * - `domSnapshots` needs `network: true`, since a snapshot's images, fonts, and cross-origin styles come from the
  *   network recording. The types refuse one without the other; options that get past them, such as a cast, fail
  *   with `InvalidInput`.
  * - Snapshots are taken in an isolated world of Strider's, which the page can't see, and each one reads every
@@ -180,24 +180,24 @@ export interface Recording extends Declaration.Registration {
  * - The viewer draws a snapshot's canvas from the action's screenshot, so canvases need
  *   `screenshots: "perAction"`.
  * - Failed expectations keep their original message plus the last observation, observation history, check
- *   count and triggers, elapsed time, nearest match and suggestions where available in the viewer's error message.
- *   Each export applies its diagnostics preset: URL expectations redact query values, credentials and fragments
+ *   count and triggers, elapsed time, nearest match, and suggestions where available in the viewer's error message.
+ *   Each export applies its diagnostics preset: URL expectations redact query values, credentials, and fragments
  *   under `"strict"`, and keep whole URLs under `"local"`. Expected URL regexps and titles are hidden under
  *   `"strict"`; form values are hidden under both presets. Direct `Expect.that` inputs from `page.url` and
  *   `page.title` classify observations too; generic condition descriptions are exported as written. User
  *   transformations and reconstructed failures do not inherit that source classification. Redaction follows the
  *   originating expectation through enclosing operations and rethrows. The original failure returned to the caller is unchanged.
  * - The page's video ends at the first `exportTrace`, which reads its file. If native video cannot be acquired,
- *   stopped or read, export still succeeds. The trace viewer's Console tab shows an error with the page ID,
- *   stage (`acquisition`, `stop` or `file-read`) and underlying cause. Later exports retain that diagnostic;
+ *   stopped, or read, export still succeeds. The trace viewer's Console tab shows an error with the page ID,
+ *   stage (`acquisition`, `stop`, or `file-read`), and underlying cause. Later exports retain that diagnostic;
  *   they do not retry the failed recording. Error URLs follow the diagnostics preset chosen for each export.
  * - Export does not wait for native video acquisition. If acquisition is still pending when export begins,
  *   the Console tab explains the missing video as pending, without a browser error. Later exports show the
  *   actual outcome: the video once acquired, or its failure reason. They do not retain a stale pending message.
  *
- * When `TestRun` is available and names a running test, recording captures its identity, retry attempt and
+ * When `TestRun` is available and names a running test, recording captures its identity, retry attempt, and
  * repeat at the start. A missing repeat defaults to zero.
- * The context header's `title` is its test ID; `striderTest` preserves `project`, `file`, `id` and `attempt`
+ * The context header's `title` is its test ID; `striderTest` preserves `project`, `file`, `id`, and `attempt`
  * (zero for the first run). Later exports retain that identity, even after the running test changes. Without
  * a named test, neither field is added. Test names and file paths are exported as written.
  *
@@ -241,7 +241,7 @@ export const record = (
         new Reason.InvalidInput({
           input: "domSnapshots",
           expected: "network: true beside it",
-          hint: "A snapshot's images, fonts and cross-origin styles come from the network recording"
+          hint: "A snapshot's images, fonts, and cross-origin styles come from the network recording"
         })
       ))
     }

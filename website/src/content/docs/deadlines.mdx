@@ -1,15 +1,16 @@
 ---
 title: Deadlines
-description: One budget for everything an operation does, what a Timeout says about how far it got, and operations of your own.
+description: Limiting how long a program waits.
 order: 4
 ---
 
-A wait for something that never happens would hang a program, and a limit on each step would add up to more than
-you meant. So each operation has one deadline, and a `Timeout` that says how far it got.
+A deadline is the time by which an operation, such as a click or a navigation, must finish. Past it, the operation
+fails with a `Timeout` that says how far it got, or, for an expectation, an
+[`ExpectationFailed`](/docs/errors#failed-expectations) that says what it saw.
 
 ## Setting a deadline
 
-An operation is one call of Strider's, such as a click, a navigation or an expectation; one that runs inside
+An operation is one call of Strider's, such as a click, a navigation, or an expectation; one that runs inside
 another is a step of it. An operation has one deadline for everything it does, from waiting its turn at the page's
 input to confirming the result. Without one around it, it gets the default budget, 30 seconds.
 
@@ -98,9 +99,9 @@ saw it, such as a click that would have hit a toast.
 
 ## Operations of your own
 
-With `Effect.fn`, a timeout inside your helper is the step's own, such as the click's, and says nothing of the
-steps before it. `Operation.fn` gives the caller one `Timeout`, named for the helper, whose `diagnostics.progress`
-lists each step:
+`Operation.fn` makes a helper of yours one operation, as a click is: if it runs out of time, its caller gets one
+`Timeout`, named for the helper, whose `diagnostics.progress` lists each step. From a helper made with `Effect.fn`,
+the caller gets the step's own `Timeout`, such as the click's, which says nothing of the steps before it:
 
 ```ts
 import { Deadline, Operation, Page } from "@usestrider/browser"

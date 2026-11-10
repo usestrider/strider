@@ -1128,6 +1128,87 @@ describe("CDP restoration cleanup", () => {
       })))
   }
 
+  for (const retiring of [undefined, () => false, () => true]) {
+    const skipped = retiring?.() === true
+    it.effect(
+      `${skipped ? "skips" : "sends"} the download restore when its release ${
+        skipped ? "precedes the context's removal" : "leaves the context in place"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const restored: Array<string> = []
+          const mock = {
+            ...session,
+            ended: Effect.void,
+            send: (command: {
+              readonly method: string
+              readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+            }) =>
+              Effect.sync(() => {
+                if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                  restored.push(command.params.browserContextId ?? "none")
+                }
+                return {}
+              })
+          } as unknown as ProtocolClient.Session
+          const { state, page } = yield* withPage(mock)
+          const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+          state.contexts.set(context.id, context)
+          state.contextsByCdp.set("scoped", context)
+          state.pages.set(page.id, { ...page, context })
+          const lifetime = yield* Scope.make()
+          yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Deny" },
+            ...(retiring === undefined ? {} : { retiring })
+          }).pipe(Scope.provide(lifetime))
+          restored.length = 0
+          yield* Scope.close(lifetime, Exit.void)
+          assert.deepStrictEqual(restored, skipped ? [] : ["scoped"])
+        }))
+    )
+  }
+
+  it.effect("restores the download behavior and leaves the context usable when its disposal is refused", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const restored: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+        }) =>
+          command.method === "Target.disposeBrowserContext"
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Target.disposeBrowserContext",
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "refused"
+                })
+              })
+            )
+            : Effect.sync(() => {
+              if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                restored.push(command.params.browserContextId ?? "none")
+              }
+              return {}
+            })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "kept", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("kept", context)
+      state.pages.set(page.id, { ...page, context })
+      const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.isFalse(context.removing)
+      assert.notOk(context.disposed)
+      assert.deepStrictEqual(restored, ["kept"])
+    })))
+
   it.effect("holds disposal until a download restore already sent to the context has replied", () =>
     Effect.scoped(Effect.gen(function*() {
       const restoreSent = yield* Deferred.make<void>()
@@ -3010,3 +3091,66 @@ for (const outcome of ["success", "failure"] as const) {
       assert.strictEqual(accepts(mock), outcome !== "success")
     }).pipe(Effect.scoped))
 }
+
+it.effect("rejects an isolated realm created in a replacement document while acquisition is pending", () =>
+  Effect.gen(function*() {
+    let create: Effect.Effect<unknown> = Effect.void
+    const native = {
+      ...session,
+      drainObserved: Effect.void,
+      send: (command: { readonly method: string }) => {
+        assert.strictEqual(command.method, "Page.createIsolatedWorld")
+        return create
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(native)
+    const frame = state.frames.get("T1")!
+    const document = Tree.commit(
+      state,
+      frame,
+      {
+        loaderId: "initial",
+        url: "about:blank",
+        origin: "://"
+      },
+      () => ({ _tag: "InitialBlank" }),
+      undefined,
+      "test"
+    )
+    create = Effect.sync(() => {
+      Tree.commit(
+        state,
+        frame,
+        {
+          loaderId: "replacement",
+          url: "https://example.test/",
+          origin: "https://example.test"
+        },
+        () => ({ _tag: "Adopted" }),
+        undefined,
+        "test"
+      )
+      Evaluation.contextCreated({
+        context: {
+          id: 7 as CdpRuntime.ExecutionContextId,
+          uniqueId: "replacement-utility",
+          origin: "https://example.test",
+          name: "utility",
+          auxData: { frameId: "T1", isDefault: false, type: "isolated" }
+        }
+      }, target.event)
+      return { executionContextId: 7 }
+    })
+    const result = yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "utility" }).pipe(Effect.exit)
+    assert(
+      Exit.isFailure(result),
+      "realm acquisition must refuse the ended document instead of returning its replacement's realm"
+    )
+    if (Exit.isFailure(result)) {
+      const error = yield* Effect.failCause(result.cause).pipe(Effect.flip)
+      assert.strictEqual(error.reason._tag, "Gone")
+      if (error.reason._tag === "Gone") {
+        assert.deepStrictEqual(error.reason.target, { _tag: "Document", id: document.id })
+      }
+    }
+  }).pipe(Effect.scoped))

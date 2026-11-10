@@ -1,18 +1,18 @@
 # Conventions
 
-This file records the conventions Strider follows so that it reads as if Effect's core team wrote it: Effect's own conventions, the evidence for each in Effect's sources, and how Strider applies them. API.md's Conventions section applies them to the public API, `.agents/AGENTS.md` summarizes them for agents, and the README's principles give the reasons they serve. The evidence was gathered against Effect's `origin/main` at `93abf0208` (2026-10-19), cloned read-only at `.repos/effect`; file paths, line numbers and counts below refer to that commit. The sources are the team's written guidance (`.agents/AGENTS.md`, `.agents/skills/{effect-development,jsdocs,test-development,performance-analysis,package-development}`, `LLMS.md`, `ai-docs/src`) and the shipped modules most like Strider's (`http/HttpClient`, `http/HttpClientError`, `PlatformError`, `FileSystem`, `process/ChildProcessSpawner`, `socket/Socket`, `Queue`, `Schema`, `index.ts`, `typetest/`). Where this file is silent, Effect's skills in `.repos/effect/.agents/skills` are the reference.
+This file records the conventions Strider follows so that it reads as if Effect's core team wrote it: Effect's own conventions, the evidence for each in Effect's sources, and how Strider applies them. API.md's Conventions section applies them to the public API, `.agents/AGENTS.md` summarizes them for agents, and the README's principles give the reasons they serve. The evidence was gathered against Effect's `origin/main` at `93abf0208` (2026-10-19), cloned read-only at `.repos/effect`; file paths, line numbers, and counts below refer to that commit. The sources are the team's written guidance (`.agents/AGENTS.md`, `.agents/skills/{effect-development,jsdocs,test-development,performance-analysis,package-development}`, `LLMS.md`, `ai-docs/src`) and the shipped modules most like Strider's (`http/HttpClient`, `http/HttpClientError`, `PlatformError`, `FileSystem`, `process/ChildProcessSpawner`, `socket/Socket`, `Queue`, `Schema`, `index.ts`, `typetest/`). Where this file is silent, Effect's skills in `.repos/effect/.agents/skills` are the reference.
 
 ## Effect's modules first
 
-A user's Effect knowledge carries over: the types they already know, and the services they already provide. Where Effect has the type, module or service, Strider uses it rather than a copy:
+A user's Effect knowledge carries over: the types they already know, and the services they already provide. Where Effect has the type, module, or service, Strider uses it rather than a copy:
 
 - **HTTP.** A route's response is an `HttpServerResponse` (`Route.fulfill(HttpServerResponse.json(…))`, `.text`, `.uint8Array`, `.stream`, `.file`), and a request change is an `HttpClientRequest` transform (`Route.continueWith(HttpClientRequest.setHeader("x-test", "1"))`). A captured response is an `HttpIncomingMessage`, decoded with Effect's decoders (`HttpIncomingMessage.schemaBodyJson(schema)`). `NetworkRequest.toHttpClientRequest` turns a captured request into one `HttpClient` can send. `Headers` and `HttpMethod` come from `effect/http`.
 - **Dates and durations.** Dates are `DateTime`, as `LLMS.md` asks ("use the `DateTime` module instead of `Date`"), and inputs are `DateTime.DateTime.Input` and `Duration.Input`. `JSHandle.Serialized<A>` keeps `Date` only because that is what a page returns.
 - **Configuration and secrets.** Secrets come from `Config.Redacted("PASSWORD")`, which works with any `ConfigProvider` (environment, files, secret stores, tests) and is never a plain string. Settings that differ per machine, such as an executable path, are configuration too: each backend has `layerConfig` beside `layer` (Layers, below). Layers that depend on configuration fit `Layer.unwrap` (`ai-docs/src/01_effect/…/20_layer-unwrap.ts`).
-- **Redaction.** Values whose rendering depends on the diagnostics preset implement Effect's `Redactable`, reading the preset from `Diagnostics.CurrentPreset`, so Effect's logger, tracer and inspection apply it, in user code too. Sensitive header names join `Headers.CurrentRedactedNames`. A serializer of Strider's own would protect only Strider's output: a user logging a `NetworkRequest` with `Effect.log` would bypass it.
+- **Redaction.** Values whose rendering depends on the diagnostics preset implement Effect's `Redactable`, reading the preset from `Diagnostics.CurrentPreset`, so Effect's logger, tracer, and inspection apply it, in user code too. Sensitive header names join `Headers.CurrentRedactedNames`. A serializer of Strider's own would protect only Strider's output: a user logging a `NetworkRequest` with `Effect.log` would bypass it.
 - **Observability.** Spans export through `effect/observability`'s OTLP exporters and show live in `effect/devtools`. Counts are `Metric`s, exported through `effect/observability` to OTLP or Prometheus. Each is a `Layer`, not a feature of Strider's.
 - **Archives and encodings.** Trace zips and HAR attachments are written with `effect/encoding`'s `Zip`, which streams entries and supports ZIP64. Streaming `--json` output is NDJSON (`effect/encoding`).
-- **Agents and the CLI.** Tools are `effect/ai` `Tool`s with `failureMode: "return"`, so a `LocatorError`, `Timeout` or stale ref reaches the model as data instead of ending the conversation. The CLI's commands are `effect/cli` `Command`s, and its daemon serves them over `effect/socket`.
+- **Agents and the CLI.** Tools are `effect/ai` `Tool`s with `failureMode: "return"`, so a `LocatorError`, `Timeout`, or stale ref reaches the model as data instead of ending the conversation. The CLI's commands are `effect/cli` `Command`s, and its daemon serves them over `effect/socket`.
 - **Internal mechanisms name their primitive** (CONCEPTS.md §9), so the implementation uses it rather than rebuilding it: `RcMap` for domains enabled on demand, `Semaphore` for input per page, `Latch` for the initialization gate, `Request`/`RequestResolver` for batched checks, `Cache` for capability evidence, `Graph` for init-script dependencies, `FiberSet`/`FiberMap` for handlers, `KeyValueStore` for the ownership ledger, `ByteSize` for limits, `Deferred` for single-winner decisions, a `Queue` per subscription, and `Reactivity` for re-checks.
 - **Names that clash with an Effect module are renamed, or replaced by Effect's.** `EventLog` would clash with `effect/eventlog`, `HttpStatus` with `effect/http`'s `HttpStatus` module, and Strider's `HttpMethod` and `DateInput` with Effect's `HttpMethod` and `DateTime.Input`. Names inside modules (below) avoid most of these: a status is `NetworkResponse.StatusCode`, a branded integer from 100 to 599 that goes wherever Effect HTTP expects a status.
 
@@ -35,9 +35,9 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 **Effect.** The package entry exports every module as a namespace, `export * as FileSystem from "./FileSystem.ts"`, 142 times in `packages/effect/src/index.ts`. Inside a module, names are short, because the namespace supplies the context: `Queue.Dequeue`, `Cookies.Cookie`, `HttpClient.With`, `Effect.Effect`, `Deferred.Deferred`.
 
 **Strider.**
-- `import { Browser, Download, Page } from "@usestrider/browser"`. Types read `Page.Page`, `Locator.Locator` and `Download.Download`.
+- `import { Browser, Download, Page } from "@usestrider/browser"`. Types read `Page.Page`, `Locator.Locator`, and `Download.Download`.
 - Supporting types are short inside their module: `UserContext.Options`, `CookieJar.Input`, `PageNavigation.Filter`, `Locator.ClickOptions`, `Download.Id`.
-- An event module is a real module (`Download.ts` exports `interface Download` plus `next`, `stream` and `history`), not a merged type and constant.
+- An event module is a real module (`Download.ts` exports `interface Download` plus `next`, `stream`, and `history`), not a merged type and constant.
 - **Access levels keep their full names:** `Page.ObservedPage`, `Page.ReadonlyPage`, `Page.Page`, `Locator.ReadonlyLocator`, `OriginStorage.ReadonlyOriginStorage`. A bare `Page.Readonly` would shadow TypeScript's `Readonly<T>` inside the module, and Effect itself writes `Record.ReadonlyRecord` and `Array.ReadonlyArray`.
 - **Imports.** Inside the package, Effect's and Strider's modules are imported as namespaces (`import * as Schema from "effect/Schema"`), which the language service's `namespaceImportPackages: ["effect", "@usestrider/*"]` asks for. Tests import a module by its own path (`@usestrider/browser/Locator`); JSDoc examples import from `"@usestrider/browser"`.
 
@@ -46,7 +46,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 **Effect.** `package.json` maps `"."` to `src/index.ts` and `"./*"` to `src/*.ts`, and a subpath such as `"./http"` to its own barrel. `effect-utils codegen` writes each barrel as `export * as X` lines under the marker `// @barrel: Auto-generated exports. Do not edit manually.` Each line carries only `@stability` and `@since`. The module's description stays in the module, where the reference reads it.
 
 **Strider.**
-- `packages/browser/package.json` maps `"."` to `src/index.ts`, `"./*"` to `src/*.ts`, and each subpath to its own barrel: `./chromium`, `./firefox`, `./webkit`, `./bidi`, `./ai`, `./test`, `./cli`, `./protocol`, `./cdp`, `./bidi-protocol`, `./webkit-stock-protocol` and `./webkit-automation-protocol`. `./internal/*` and `./bin/*` map to `null`.
+- `packages/browser/package.json` maps `"."` to `src/index.ts`, `"./*"` to `src/*.ts`, and each subpath to its own barrel: `./chromium`, `./firefox`, `./webkit`, `./bidi`, `./ai`, `./test`, `./cli`, `./protocol`, `./cdp`, `./bidi-protocol`, `./webkit-stock-protocol`, and `./webkit-automation-protocol`. `./internal/*` and `./bin/*` map to `null`.
 - `pnpm codegen` writes the barrels in Effect's format (`packages/tools/utils`). They are never edited by hand.
 - Backends and surfaces are subpaths, so only the protocol code a program imports is loaded. The Vitest adapter is a package of its own, `@usestrider/vitest`, so `@usestrider/browser` depends on nothing but Effect.
 
@@ -56,7 +56,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 
 **Strider.**
 - Each id lives in its owner: `Download.Id`, `UserContext.Id`, `Snapshot.RefId`, `InitScript.Id`, `Target.NavigableId`, `Target.DocumentId`. Brand keys are `"~@usestrider/browser/<Module>/<Name>"`, as in `Schema.String.pipe(Schema.brand("~@usestrider/browser/Download/Id"))`.
-- Values with no single owner have small modules: `Url` (`Url.Url`, `Url.Pattern`, `Url.Origin`, `Url.Site`), `FilePath` (`Local`, `Remote`), `Pixels` (`Css`, `Device`), `AriaRole` (shaped like `effect/http`'s `HttpMethod`) and `MonotonicInstant`.
+- Values with no single owner have small modules: `Url` (`Url.Url`, `Url.Pattern`, `Url.Origin`, `Url.Site`), `FilePath` (`Local`, `Remote`), `Pixels` (`Css`, `Device`), `AriaRole` (shaped like `effect/http`'s `HttpMethod`), and `MonotonicInstant`.
 - `effect/http` also exports a `Url` module, so a file that needs both aliases one (`import { Url as HttpUrl } from "effect/http"`). The shared name has precedent: Effect's AI provider packages each export a module named `Generated`.
 
 ### Services and references
@@ -66,7 +66,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 - Configuration with a default is a `Context.Reference` (`ai-docs/src/01_effect/03_services/10_reference.ts`). A reference is named descriptively in its module, as `Headers.CurrentRedactedNames` is.
 
 **Strider.**
-- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun`, `CurrentSession`, `Protocol.ProtocolSession` and `SocketConnector`. This is the form of Effect's `FileSystem`, `HttpServerRequest` and `LanguageModel`, whose documented interface is the service; the class form, `class X extends Context.Service<X, Shape>()(key)`, is Effect's default where the service's name isn't its shape's, as `Cause.StackTrace` and `Model.ProviderName` are, and it is `Operation.Current`'s, whose value is an `Operation`. A service is never both: the form follows whether its type parameter and its value are the same type.
+- **Services** are an interface and a constant of the same name: `export const Browser: Context.Service<Browser, Browser> = Context.Service<Browser>("@usestrider/browser/Browser")`. Likewise `@usestrider/browser/test/TestRun`, `CurrentSession`, `Protocol.ProtocolSession`, and `SocketConnector`. This is the form of Effect's `FileSystem`, `HttpServerRequest`, and `LanguageModel`, whose documented interface is the service; the class form, `class X extends Context.Service<X, Shape>()(key)`, is Effect's default where the service's name isn't its shape's, as `Cause.StackTrace` and `Model.ProviderName` are, and it is `Operation.Current`'s, whose value is an `Operation`. A service is never both: the form follows whether its type parameter and its value are the same type.
 - **References** are keyed `"@usestrider/browser/<Module>/<Name>"`.
   - A reference to the value in force is `Current…`: `Deadline.CurrentDeadline`, `Diagnostics.CurrentPreset`, `Ledger.CurrentLedger`, `Protocol.CurrentValidation`.
   - A setting is named for what it sets: `Deadline.DefaultBudget`, `Expect.CheckInterval`, `Subscription.Capacity`, `NetworkResponse.BodyLimit`, `Page.UserGesture`, `Protocol.CommandTimeout`, `Browser.TraceProtocolCommands`.
@@ -102,7 +102,7 @@ A read-only `Watchable` and an inherited `Deadline` are candidates for Effect it
 **Effect.** `Effect.withSpan` and `Logger.withMinimumLogLevel` set something for any effect, data-first or in `pipe`.
 
 **Strider.**
-- The combinators are `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset`, `Expect.withCheckInterval` and `Page.withUserGesture`. Each is backed by a `Context.Reference` and built with `dual` from `effect/Function`: `button.click().pipe(Deadline.within("5 seconds"))`.
+- The combinators are `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset`, `Expect.withCheckInterval`, and `Page.withUserGesture`. Each is backed by a `Context.Reference` and built with `dual` from `effect/Function`: `button.click().pipe(Deadline.within("5 seconds"))`.
 - Option bags hold only what is specific to one operation.
 
 ### Services offer module-level accessors
@@ -129,7 +129,7 @@ Effect's, and a second step at every call site (`yield* Deferred.await(popups)`)
 
 ### Fluent methods on central values are allowed
 
-**Effect.** `Schema` keeps `annotate`, `check` and `mapFields` as methods (`Schema.ts:202–205`, `3531`), while most of its transformations are module functions.
+**Effect.** `Schema` keeps `annotate`, `check`, and `mapFields` as methods (`Schema.ts:202–205`, `3531`), while most of its transformations are module functions.
 
 **Strider.** Locator chaining (`filter`, `nth`, `first`, `and`, `or`) is the same kind of refinement, so it stays as methods.
 
@@ -147,9 +147,9 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 
 **Strider.**
 - Backends:
-  - `Chromium.layer(options)`, `Chromium.layerConfig(options: Config.Wrap<Browser.LaunchOptions>)` and `Chromium.layerConnect(endpoint, options?)`;
-  - `Firefox.layer`, `layerConfig` and `layerConnect`;
-  - `WebKit.layer`, `layerConfig` and `layerAttach`;
+  - `Chromium.layer(options)`, `Chromium.layerConfig(options: Config.Wrap<Browser.LaunchOptions>)`, and `Chromium.layerConnect(endpoint, options?)`;
+  - `Firefox.layer`, `layerConfig`, and `layerConnect`;
+  - `WebKit.layer`, `layerConfig`, and `layerAttach`;
   - `Bidi.layerConnect`.
 - Elsewhere: `Browser.layerTest(timeline)`, the fake browser (`@stability experimental`); `VitestBrowser.layer`, in `@usestrider/vitest`; `Ledger.layer`; `SocketConnector.layer`.
 - Platform services (`ChildProcessSpawner`, `FileSystem`, `Socket.WebSocketConstructor`) appear only in these layers. An ordinary call site requires only `Scope`, and `Browser` for the accessors.
@@ -164,11 +164,11 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 - These are Schemas:
   - data events: `NetworkRequest`, `NetworkResponse`, `ConsoleMessage`, `UncaughtException`, `PageNavigation`, `AutoResolution`, `NetworkConnection.Frame`;
   - states: `Page.Status`, `Page.FrameTree`, `Download.Status`;
-  - cookies (`BrowserCookie`'s value is `Schema.Redacted`), snapshot trees, storage state, the diagnostics envelope, `LaunchProfile` and every error.
+  - cookies (`BrowserCookie`'s value is `Schema.Redacted`), snapshot trees, storage state, the diagnostics envelope, `LaunchProfile`, and every error.
 - Live handles stay interfaces: pages, locators, downloads.
 - A `Snapshot` is split. Its tree is a Schema (`Snapshot.Data`); its page-bound `ref(id)` is not serializable.
 - Storage state crosses through `StorageState.Json`, a codec built with `Schema.toCodecJson`. Effect's default JSON encoding writes a `Redacted` as `"<redacted>"`. `exportStorageState` encodes with the same Schema, and decodes with it; there is no `StorageState.import`.
-- What the CLI daemon sends, MCP tool results, `--json` output, history exports and trace attachments all encode these values without hand-written serializers.
+- What the CLI daemon sends, MCP tool results, `--json` output, history exports, and trace attachments all encode these values without hand-written serializers.
 
 ### Optional fields admit `undefined`
 
@@ -179,7 +179,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 - `pnpm pack-check` also type-checks the published declarations without that flag (Q240).
 - What is truly optional in an output is `Option`, never `?:` (principle 15).
 
-### Every public type is identified, guarded, pipeable and inspectable
+### Every public type is identified, guarded, pipeable, and inspectable
 
 **Effect.**
 - Type IDs are strings with a `~` prefix: `TypeId = "~effect/socket/Socket"`.
@@ -224,7 +224,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
   }
   export const isLocatorError = (u: unknown): u is LocatorError => Predicate.hasProperty(u, LocatorErrorTypeId)
   ```
-- **Reasons** are `Schema.Error` classes with `_tag: Schema.tag("…")`, their own fields and a `hint`. Their `message` includes the hint.
+- **Reasons** are `Schema.Error` classes with `_tag: Schema.tag("…")`, their own fields, and a `hint`. Their `message` includes the hint.
   - A reason that belongs to one module is declared there: `Locator.StrictViolation`, `PageNavigation.NavigationFailed`.
   - Reasons several modules share live in `Reason`: `InvalidInput`, `NotPermitted`, `Unsupported`, `BackendFailure`, `EvaluationThrown`, `NotSerializable`, `PromptBlocking`.
   - A reason that wraps a failure carries its own `cause` (`BackendFailure`, `Locator.FileUnreadable`, the recordings' `WriteFailed`).
@@ -238,11 +238,11 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 **Effect.**
 - Library internals use `Effect.fnUntraced`: 462 uses in `packages/effect/src` against 42 named `Effect.fn`s, most of those in documentation examples. `LLMS.md` prefers `fnUntraced` "particularly in library implementations and hot paths".
 - A span marks a meaningful boundary. `HttpClient` opens one per request with `Effect.useSpan(…, { kind: "client" })` and OpenTelemetry's semantic-convention attributes (`http.request.method`, `http.response.status_code`, `error.type`).
-- Its knobs are references: `SpanNameGenerator`, `TracerDisabledWhen`, `TracerHeaderFilter` and `Headers.CurrentRedactedNames` (`http/HttpClient.ts:705–760`).
+- Its knobs are references: `SpanNameGenerator`, `TracerDisabledWhen`, `TracerHeaderFilter`, and `Headers.CurrentRedactedNames` (`http/HttpClient.ts:705–760`).
 
 **Strider.**
-- **One span per user-visible operation,** named like `Locator.click`. The operation runs through `src/internal/operation.ts`, with `Operation.named(name, { attributes })` or `Operation.fn(name)`, which gives it a record and opens its span through `src/internal/spans.ts`; never `Effect.withSpan` or `Effect.fn` directly. That way `SpanNameGenerator`, `TracerDisabledWhen` and the diagnostics preset apply, and recordings learn of each operation. Launching and connecting open theirs with `Spans.operation`, since they start the connection's long-lived fibers. The public `Operation` module gives users the same, over the same record.
-- **Attributes are in OpenTelemetry's style.** `browser.operation`, and the operation's target as `browser.page.id`, `browser.context.id` or `browser.realm.id`. `url.full` and `browser.endpoint` are redacted by the preset: under `"strict"`, a URL keeps its origin and path, each query value `REDACTED`, with no credentials or fragment.
+- **One span per user-visible operation,** named like `Locator.click`. The operation runs through `src/internal/operation.ts`, with `Operation.named(name, { attributes })` or `Operation.fn(name)`, which gives it a record and opens its span through `src/internal/spans.ts`; never `Effect.withSpan` or `Effect.fn` directly. That way `SpanNameGenerator`, `TracerDisabledWhen`, and the diagnostics preset apply, and recordings learn of each operation. Launching and connecting open theirs with `Spans.operation`, since they start the connection's long-lived fibers. The public `Operation` module gives users the same, over the same record.
+- **Attributes are in OpenTelemetry's style.** `browser.operation`, and the operation's target as `browser.page.id`, `browser.context.id`, or `browser.realm.id`. `url.full` and `browser.endpoint` are redacted by the preset: under `"strict"`, a URL keeps its origin and path, each query value `REDACTED`, with no credentials or fragment.
 - **Everything beneath an operation is `Effect.fnUntraced`.** Protocol commands get child spans only when `Browser.TraceProtocolCommands` is on, because they are a hot path.
 - **The knobs are references,** as on `HttpClient`: `Browser.SpanNameGenerator` and `Browser.TracerDisabledWhen` rename or suppress spans.
 
@@ -262,15 +262,15 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 ### The JSDoc contract
 
 **Effect.** The contract comes from `.agents/skills/jsdocs/*`:
-- **Shape.** Every public declaration has a one-paragraph description, then optional **When to use**, **Details** and **Gotchas**, then `**Example** (Title)` sections. Each example is fenced ```` ```ts import.meta.vitest ```` and run by doctest.
+- **Shape.** Every public declaration has a one-paragraph description, then optional **When to use**, **Details**, and **Gotchas**, then `**Example** (Title)` sections. Each example is fenced ```` ```ts import.meta.vitest ```` and run by doctest.
 - **Tags,** in this order: `@see`, `@stability`, `@category`, `@since`.
 - **Categories** come from a fixed vocabulary: constructors, models, guards, getters, combinators, services, layers, errors, error handling, resource management, references, and so on.
 - **Stability.** Since Effect #8770 (2026-10-07), every module and every importable export states `@stability` explicitly, not only where a dependency's types show.
 
 **Strider.**
-- **Shape.** The description starts with what the declaration does. **When to use** starts "Use to", "Use when", "Use as" or "Use with". Examples import from `"@usestrider/browser"`.
-- **Categories.** The categories in use are Effect's (`models`, `schemas`, `guards`, `constructors`, `constants`, `combinators`, `getters`, `accessors`, `converting`, `references`, `configuration`, `services`, `tags`, `layers`, `errors`, `utility types`), plus four of Strider's: `reasons`, `subscriptions`, `matchers` and `handlers`.
-- **Stability.** Until 1.0, `@stability` is `unstable`: compatible fixes and additions ship in patch releases, and breaking changes in minor releases. `experimental` marks what rests on an upstream proposal or an in-flight module, such as `Trace` and `Har` (built on `effect/encoding`'s `Zip`), `Browser.layerTest` and `SocketConnector`; even breaking changes to these APIs ship in patch releases. `stable` waits for 1.0. The [release policy](../.changeset/README.md#release-policy) defines changeset bumps, mixed-stability changes and the CLI's `unstable` classification.
+- **Shape.** The description starts with what the declaration does. **When to use** starts "Use to", "Use when", "Use as", or "Use with". Examples import from `"@usestrider/browser"`.
+- **Categories.** The categories in use are Effect's (`models`, `schemas`, `guards`, `constructors`, `constants`, `combinators`, `getters`, `accessors`, `converting`, `references`, `configuration`, `services`, `tags`, `layers`, `errors`, `utility types`), plus four of Strider's: `reasons`, `subscriptions`, `matchers`, and `handlers`.
+- **Stability.** Until 1.0, `@stability` is `unstable`: compatible fixes and additions ship in patch releases, and breaking changes in minor releases. `experimental` marks what rests on an upstream proposal or an in-flight module, such as `Trace` and `Har` (built on `effect/encoding`'s `Zip`), `Browser.layerTest`, and `SocketConnector`; even breaking changes to these APIs ship in patch releases. `stable` waits for 1.0. The [release policy](../.changeset/README.md#release-policy) defines changeset bumps, mixed-stability changes, and the CLI's `unstable` classification.
 - **`@since`** is `0.1.0`.
 - **APIs that expose `effect/http` types** (`Route`, `NetworkRequest.toHttpClientRequest`, `CapturedResponse`) can change when Effect's HTTP modules do, which Effect marks unstable.
 
@@ -279,7 +279,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 **Effect.** Effect's reference on effect.website is generated from the sources on every release, and nothing in it is written by hand. Five pieces make that work:
 1. **One module per file, listed in the export map.**
 2. **A generated barrel.** Its lines carry only tags.
-3. **A checked JSDoc contract.** `effect-jsdocs --check` runs in CI. It enforces the description sections, the tag order, `@category`, `@since` and `@stability`, and that inline `{@link}` targets resolve. It writes a model of the whole API to `.data/jsdocs.json`: every declaration with its parsed sections, examples, tags, resolved `@see` links and import guidance.
+3. **A checked JSDoc contract.** `effect-jsdocs --check` runs in CI. It enforces the description sections, the tag order, `@category`, `@since`, `@stability`, and that inline `{@link}` targets resolve. It writes a model of the whole API to `.data/jsdocs.json`: every declaration with its parsed sections, examples, tags, resolved `@see` links, and import guidance.
 4. **Examples that run.** `@effect/doctest`, a Vitest plugin, runs every ```` ```ts import.meta.vitest ```` fence in JSDoc, Markdown and MDX, and checks `// =>` assertions with `Equal`.
 5. **The website.** When a release is promoted:
    - `npm-promote` sends a `repository_dispatch` event (`publish-api-reference`, with the revision), and Effect-TS/website checks out that revision.
@@ -301,7 +301,7 @@ Effect puts operations on handles as members (`client.get`, `handle.kill`), and 
 **Strider's pieces:**
 - `pnpm jsdocs` runs the vendored checker and writes `.data/jsdocs.json`.
 - `pnpm examples` type-checks every example from that model against the package's source.
-- `pnpm index` writes ignored `packages/browser/INDEX.md` and `packages/vitest/INDEX.md` from the sources, by entry point, module and `@category`.
+- `pnpm index` writes ignored `packages/browser/INDEX.md` and `packages/vitest/INDEX.md` from the sources, by entry point, module, and `@category`.
 - `pnpm api-reference` writes `.data/api-reference/`: a manifest (package, version, git revision, TypeDoc version, barrels, and per module its name, export path, source, JSON file with SHA-256, and barrel), one TypeDoc JSON per module, and `jsdocs.json`. Any site, Strider's included, can render it as effect.website renders Effect's.
 - `pnpm all` runs them all, and CI runs `pnpm all` on every pull request and every push to `main`.
 

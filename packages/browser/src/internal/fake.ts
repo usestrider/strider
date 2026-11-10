@@ -57,7 +57,7 @@ export const parse = (timeline: string): ReadonlyArray<Step> => {
     if (match === null) {
       throw new Error(
         `Browser.layerTest: ${JSON.stringify(timeline.slice(at, at + 12))} at ${at} isn't a step; ` +
-          "the steps are -, commit, load, resp(name), dialog(kind), popup, crash and |"
+          "the steps are -, commit, load, resp(name), dialog(kind), popup, crash, and |"
       )
     }
     at = token.lastIndex
@@ -74,7 +74,7 @@ export const parse = (timeline: string): ReadonlyArray<Step> => {
       steps.push({ _tag: "Dialog", kind: kind as "alert" | "confirm" | "prompt" | "beforeunload" })
     } else {
       throw new Error(
-        `Browser.layerTest: dialog(${kind}) at ${at - text.length} isn't alert, confirm, prompt or beforeunload`
+        `Browser.layerTest: dialog(${kind}) at ${at - text.length} isn't alert, confirm, prompt, or beforeunload`
       )
     }
   }

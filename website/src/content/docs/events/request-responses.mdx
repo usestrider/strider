@@ -1,11 +1,11 @@
 ---
 title: A request's response
-description: Associate an observed request hop with its response, within an explicit scope.
+description: Pairing a request with its response.
 order: 3.5
 ---
 
-Matching responses by URL can confuse concurrent requests to the same endpoint. Retaining an observed request's
-hop lets you wait for exactly its response, including an individual redirect's response.
+`NetworkRequest.response` gives a wait for the response to one request you've seen, not to any request for its URL,
+so concurrent requests to the same endpoint don't get mixed up. Each redirect hop has its own.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -29,7 +29,7 @@ Acquire while the request is still among the model's last 1000 retained hops, us
 observed it. Acquisition does not recover an evicted hop. The wait fails with
 [RequestError](/docs/api/browser/NetworkRequest#RequestError), whose
 [ResponseUnavailable](/docs/api/browser/NetworkRequest#ResponseUnavailable) reason distinguishes an evicted hop,
-a foreign target, a released scope and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
+a foreign target, a released scope, and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
 
 This retains response metadata only. To read a body, set up a [response-body subscription](/docs/events/network#decoding-bodies)
 before the request starts. Continue a routed request before awaiting its response, so the browser can send it.

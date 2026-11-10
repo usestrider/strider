@@ -1062,7 +1062,7 @@ const stateHosts = (state: StorageState.StorageState) => {
   const covering = [...hosts].filter((host) => ![...hosts].some((other) => host.endsWith(`.${other}`))).sort()
   return covering.length <= 5
     ? covering.join(", ")
-    : `${covering.slice(0, 5).join(", ")} and ${covering.length - 5} more`
+    : `${covering.slice(0, 5).join(", ")}, and ${covering.length - 5} more`
 }
 
 /**
@@ -1521,7 +1521,7 @@ const browserOf = (flags: {
       new CommandFailed({
         error: "InvalidInput",
         message:
-          "A session names its browser: exactly one of --chromium, --firefox or --webkit with an absolute path, or --attach with an endpoint; strider browsers lists the paths"
+          "A session names its browser: exactly one of --chromium, --firefox, or --webkit with an absolute path, or --attach with an endpoint; strider browsers lists the paths"
       })
     )
 }
@@ -1581,7 +1581,7 @@ const captures = ["local", "strict"] as const
 
 /** Launch and lifetime flags shared with MCP help. */
 export const startFlags = {
-  name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits and dashes")),
+  name: Flag.String("name").pipe(Flag.withDescription("The session's name: lowercase letters, digits, and dashes")),
   chromium: Flag.String("chromium").pipe(
     Flag.withDescription("Launch Chromium from this executable path; choose exactly one browser or --attach"),
     Flag.optional
@@ -1627,7 +1627,7 @@ export const startFlags = {
   ),
   capture: Flag.Literals("capture", captures).pipe(
     Flag.withDescription(
-      "What snapshots, screenshots and digests may hold: local allows everything, for pages you trust; strict denies screenshots, masks fields' text and leaves console text out (default: local)"
+      "What snapshots, screenshots, and digests may hold: local allows everything, for pages you trust; strict denies screenshots, masks fields' text, and leaves console text out (default: local)"
     ),
     Flag.withDefault("local")
   )
@@ -1797,7 +1797,7 @@ const serve = Effect.fnUntraced(
         new CommandFailed({
           error: "InvalidInput",
           message:
-            "An attached WebKit inspector uses its existing default context; --state, --fork and --viewport require a browser that can create contexts"
+            "An attached WebKit inspector uses its existing default context; --state, --fork, and --viewport require a browser that can create contexts"
         })
       )
     }

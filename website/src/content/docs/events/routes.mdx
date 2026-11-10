@@ -1,11 +1,11 @@
 ---
 title: Routes
-description: Declarations and their scope, route handlers and the decisions they return, the response phase, HTTP authentication, and replaying a recording.
+description: Mocking, changing, or blocking a page's requests.
 order: 4
 ---
 
-A page that talks to a real backend shows whatever data and failures the backend has that run. A route decides
-each matching request before it leaves the browser, so the page gets the answer you chose.
+A route intercepts the requests that match it, and its handler decides what happens to each: let it through,
+change it, answer it, or fail it.
 
 ## Declarations
 
@@ -52,7 +52,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 | [`Route.abort(reason?)`](/docs/api/browser/Route#abort) | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 
-- A pattern is a glob, a URL or a `URLPattern`.
+- A pattern is a glob, a URL, or a `URLPattern`.
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - On Chromium, a request already underway without response interception may miss a later response route, even
   before its headers arrive. Existing response pauses select the current routes by precedence.
@@ -63,7 +63,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
 - A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
-- A handler that fails, is interrupted or times out lets the request continue. So does a decision the browser
+- A handler that fails, is interrupted, or times out lets the request continue. So does a decision the browser
   can't apply, which fails with `Unsupported`: a `continueWith` to a new URL on Firefox, which would abort the
   request, or an `abort` reason other than `"failed"` anywhere but Chromium. The failure is logged and reported as
   an [`AutoResolution`](/docs/events/events#event-modules) event.
@@ -71,7 +71,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 Each decision is an Effect, so a handler returns it directly. After other work in a generator, use
 `return yield*` to return its decision, as in the response handler below.
 
-A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
+A handler gets the paused request, so it can decide by method, headers, or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
 
 ```ts
@@ -124,7 +124,7 @@ const freshApi = Effect.fn("freshApi")(function*(page: Page.Page) {
 - Reading `intercepted.responseBody` and fulfilling with a patched copy: Chromium only.
 - WebKit does neither.
 
-To switch on a feature flag the real server sends off, decode its body, patch it and fulfill with the copy:
+To switch on a feature flag the real server sends off, decode its body, patch it, and fulfill with the copy:
 
 ```ts
 import { Expect, Page, Route } from "@usestrider/browser"
@@ -175,7 +175,7 @@ const openStaging = Effect.fn("openStaging")(function*() {
 }, Effect.scoped)
 ```
 
-The password is `Redacted`. The optional origin matches scheme, hostname and effective port; omit it to allow
+The password is `Redacted`. The optional origin matches scheme, hostname, and effective port; omit it to allow
 any website origin. Credentials answer challenges rather than adding an authorization header to every request.
 The pair is submitted once across the whole request and redirect chain. A later challenge in the chain is
 canceled, even at another origin. Proxy challenges never receive this
@@ -209,7 +209,7 @@ A challenge the route lets continue, with `Route.continue` or a handler that fai
 too; the browser's prompt never opens. On WebKit an `auth` route fails with `Unsupported`, since WebKit answers
 challenges only from credentials set in advance.
 
-- On Chromium, a challenge to a `fetch`, an image or a script with no route still waits on Chromium's own prompt,
+- On Chromium, a challenge to a `fetch`, an image, or a script with no route still waits on Chromium's own prompt,
   until it times out: only a document's is answered without one, since pausing every request would slow them all.
   An `auth` route on its URL or context HTTP credentials answers it.
 - A page in a context Strider didn't create, such as a tab of a browser it [attached](/docs/pages/attaching) to,
@@ -217,9 +217,9 @@ challenges only from credentials set in advance.
 
 ## Replaying a recording
 
-A recorded backend answers the same way every run, with no server running. `Route.fromHar` reads a HAR file, from
-[`Har.record`](/docs/tools/recordings) or another tool, and makes a handler that answers each request from the
-entry matching its method, URL and body. Reading the file needs Effect's `FileSystem`, so build the backend's layer
+`Route.fromHar` makes a handler that answers requests from a HAR file, recorded by
+[`Har.record`](/docs/tools/recordings) or another tool, so the page gets the same answers every run, with no server
+running. Each request is answered from the entry matching its method, URL, and body. Reading the file needs Effect's `FileSystem`, so build the backend's layer
 with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and the program gets it too:
 
 ```ts

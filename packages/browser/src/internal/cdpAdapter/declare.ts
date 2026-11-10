@@ -212,7 +212,8 @@ const applyOverride = (
       case "Touch":
         return Emulation.setTouchEmulationEnabled({ enabled: false }).pipe(on)
       case "FocusEmulation":
-        return Emulation.setFocusEmulationEnabled({ enabled: false }).pipe(on)
+        // A tab in a context that emulates focus for its life renders only with it
+        return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
         return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
     }
@@ -254,7 +255,9 @@ const applyOverride = (
         maxTouchPoints: override.maxTouchPoints
       }).pipe(on)
     case "FocusEmulation":
-      return Emulation.setFocusEmulationEnabled({ enabled: override.enabled }).pipe(on)
+      return Emulation.setFocusEmulationEnabled({
+        enabled: override.enabled || target.page?.context.focusEmulated === true
+      }).pipe(on)
     case "CacheDisabled":
       return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
   }
@@ -350,6 +353,16 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
   return lock.withPermits(1)(effect)
 }
 
+/**
+ * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
+ * holds it for its life, even when no declaration of it remains.
+ */
+const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+  const kinds = [...overrides.keys()]
+  if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  return kinds
+}
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -360,8 +373,8 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              overrides,
-              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              kindsFor(page, overrides),
+              (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
               }
@@ -381,8 +394,8 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            overrides,
-            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            kindsFor(page, overrides),
+            (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
             }
@@ -528,7 +541,10 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = declaration._tag === "Downloads"
+      const release = declaration._tag === "Downloads" && declaration.retiring?.() === true
+        // The context is removed right after: restoring its download behavior would only add a round trip
+        ? Effect.void
+        : declaration._tag === "Downloads"
         ? Effect.forEach(
           scope._tag === "UserContext"
             ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)

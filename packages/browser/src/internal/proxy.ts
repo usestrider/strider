@@ -14,7 +14,7 @@ export const normalize = (
       new Reason.InvalidInput({
         input: "proxy",
         expected:
-          "an HTTP proxy endpoint without credentials, path, query or fragment, and bypass hostnames or IP addresses",
+          "an HTTP proxy endpoint without credentials, path, query, or fragment, and bypass hostnames or IP addresses",
         hint: "Supply proxy credentials separately with a Redacted password"
       })
     )

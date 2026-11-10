@@ -2085,7 +2085,7 @@ export function engine(render: (root: SnapNode) => string) {
             _tag: "Final",
             final: {
               _tag: "WrongElement",
-              expected: "a checkbox, a radio or an ARIA checkable",
+              expected: "a checkbox, a radio, or an ARIA checkable",
               element: describe(element)
             }
           }
@@ -2341,7 +2341,7 @@ export function engine(render: (root: SnapNode) => string) {
         return { _tag: "Read", value: textOf(element) }
       case "Value": {
         const value = valueOf(element)
-        return value === null ? wrong("an input, a textarea or a select") : { _tag: "Read", value }
+        return value === null ? wrong("an input, a textarea, or a select") : { _tag: "Read", value }
       }
       case "Html":
         return { _tag: "Read", value: element.outerHTML }
@@ -2367,7 +2367,7 @@ export function engine(render: (root: SnapNode) => string) {
             }
           }
         }
-        return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
+        return checked === null ? wrong("a checkbox, a radio, or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
   }

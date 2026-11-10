@@ -21,7 +21,7 @@ import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 
 /**
- * Schema for a key value, such as `"Enter"`, `"a"` or `"ArrowDown"`.
+ * Schema for a key value, such as `"Enter"`, `"a"`, or `"ArrowDown"`.
  *
  * @stability unstable
  * @category schemas
@@ -30,7 +30,7 @@ import type * as Target from "./Target.ts"
 export const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboard/Key"))
 
 /**
- * A key value from the UI Events `key` list, such as `"Enter"`, `"a"` or `"ArrowDown"`.
+ * A key value from the UI Events `key` list, such as `"Enter"`, `"a"`, or `"ArrowDown"`.
  *
  * @stability unstable
  * @category models
@@ -52,7 +52,7 @@ export type Modifier = "Alt" | "Control" | "Meta" | "Shift"
  *
  * **Details**
  *
- * `us` is the default (`UserContext.Options.keyboardLayout`); `uk`, `de`, `fr`, `es` and `it` are the common
+ * `us` is the default (`UserContext.Options.keyboardLayout`); `uk`, `de`, `fr`, `es`, and `it` are the common
  * European ones. A character the layout types with Shift or AltGr is typed with them held. One that only a dead
  * key reaches is typed as the dead key, then the key it combines with. One the layout has no key for is typed as
  * a key of its own, with an empty `code`. The page sees the layout's `key` and `code` (on Firefox, only the

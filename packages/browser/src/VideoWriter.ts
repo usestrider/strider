@@ -53,7 +53,7 @@ export type Frame = typeof Frame.Type
 
 /**
  * The destination and fixed output size. Writers must output every frame at exactly these dimensions,
- * scaling to fit, centring and padding with black. Writers must preserve frame timestamps: the last
+ * scaling to fit, centring, and padding with black. Writers must preserve frame timestamps: the last
  * picture lasts until the final frame's timestamp, which marks the recording end.
  *
  * @stability unstable
@@ -73,7 +73,7 @@ export const Destination = Schema.Struct({ path: Schema.String, width: Schema.Nu
 export type Destination = typeof Destination.Type
 
 /**
- * A writer could not start, accept frames or finish its file.
+ * A writer could not start, accept frames, or finish its file.
  *
  * @stability unstable
  * @category errors

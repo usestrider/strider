@@ -1,0 +1,196 @@
+---
+title: Performance tuning
+description: Faster settings and their trade-offs.
+order: 6
+---
+
+Strider's defaults favor behaving like a real browser over speed. Where that costs time, there's a faster setting,
+and each section below says what it gives up.
+
+## Chromium's startup window
+
+Chromium opens a window as it starts, and Strider keeps it. Chromium's own trace puts about 129 ms of its startup in
+building that window; `--no-startup-window` skips it, which, measured from launch to the first page, saves about 40
+to 60 ms, once per launch:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Layer } from "effect"
+
+const ChromiumLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  args: ["--no-startup-window"]
+}).pipe(Layer.provide(NodeServices.layer))
+```
+
+- Without the window, a page you open in the [default context](/docs/pages/contexts#logging-in-once) is its last, so
+  closing it drops the context's session cookies. Contexts made with `Browser.newContext` or `Browser.newPage()` keep
+  theirs.
+- Until you open a page, the agent toolkit's [`tabs`](/docs/agents/toolkit#browser-access) lists nothing.
+
+## Focus
+
+On Chromium only the page in front has focus, and a page behind a popup stops rendering, so actions on it time out.
+`focus: "emulated"` makes every page of a context behave as if focused, so several can run at once:
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const searchBoth = Effect.fn("searchBoth")(function*() {
+  const context = yield* Browser.newContext({ focus: "emulated" })
+  const sales = yield* context.newPage
+  const stock = yield* context.newPage
+  yield* Effect.all([
+    sales.goto("https://app.example.com/sales"),
+    stock.goto("https://app.example.com/stock")
+  ], { concurrency: 2 })
+  yield* sales.getByRole("searchbox").pipe(Expect.toBeFocused)
+  yield* stock.getByRole("searchbox").pipe(Expect.toBeFocused)
+}, Effect.scoped)
+```
+
+Every page reports itself focused, even one behind another, so a page that reacts to losing focus never does. It's
+Chromium's alone: Firefox and WebKit refuse it with [`Unsupported`](/docs/browsers/choosing#checking-capabilities),
+and keep rendering a page behind a popup without it.
+
+On Chromium, `focus: "emulated"` also opens each page you create as a tab instead of a window of its own. Creating twenty
+pages in one context, using them and closing the context took 44% less time that way.
+
+## Launch profiles
+
+A browser slows the timers and rendering of pages it treats as in the background, which holds back a run with many
+pages at once. [`LaunchProfile.automation`](/docs/api/browser/LaunchProfile#automation), the default, leaves that as
+it is and turns off what a browser does for a person that an automation doesn't need; `LaunchProfile.concurrent`
+also turns the throttling off:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { LaunchProfile } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Layer } from "effect"
+
+const ChromiumLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  profile: LaunchProfile.concurrent
+}).pipe(Layer.provide(NodeServices.layer))
+```
+
+| Profile      | Chromium                                                                                                           | Firefox                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `automation` | no first-run, sync, update, or crash-report prompts, no background traffic, and no component extensions as targets | no update, first-run, or data-reporting prompts; the JSON viewer off; popups open as windows |
+| `concurrent` | `automation`, and background timers, covered windows, and background renderers aren't throttled                    | `automation`, and timers aren't throttled to a budget                                          |
+
+A page can tell `concurrent` apart, such as by its timers' cadence, so it's for runs with many pages at once, as in
+[Concurrent pages](/docs/tools/testing#concurrent-pages). It doesn't keep a popup's opener rendering on Chromium;
+[`focus: "emulated"`](#focus) does. WebKit takes no launch profile.
+
+## The rendered check
+
+A pointer action, such as a click, is routed by what the browser last drew. Its stability check already waits for
+drawn frames, so the rendered check's wait for a drawn frame adds time only where stability is off: a drag's drop point, or
+an action you've turned `stable` off for, as [Checks](/docs/pages/actions#checks) describes. There,
+`rendered: false` skips the wait:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const claimOffer = Effect.fn("claimOffer")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Claim offer" }).click({
+    checks: { stable: false, rendered: false }
+  })
+})
+```
+
+The click is then routed against the last frame the browser drew, and it can succeed even when the page isn't
+drawing. Turn the wait off only where your application can tolerate that.
+
+## Shared contexts
+
+A fresh context for each task or test keeps what one leaves behind from reaching the next. Tasks that leave
+nothing behind can share one and save making a context each, which on launched WebKit is a browser process of its
+own, about 0.6 s to start and up to 0.8 GB of memory:
+
+```ts
+import { Browser, Expect } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const helpPages = [
+  { url: "https://shop.example.com/help", heading: "Help" },
+  { url: "https://shop.example.com/returns", heading: "Returns" }
+]
+
+const checkHelpPages = Effect.fn("checkHelpPages")(function*() {
+  const context = yield* Browser.newContext()
+  for (const { heading, url } of helpPages) {
+    const page = yield* context.newPage
+    yield* page.goto(url)
+    yield* page.getByRole("heading", { name: heading }).pipe(Expect.toBeVisible)
+    yield* page.close()
+  }
+}, Effect.scoped)
+```
+
+Whatever a task leaves in the [context](/docs/pages/contexts), such as a cookie, stored data, or a granted
+permission, reaches every task after it.
+
+## Spans
+
+Every operation opens a [span](/docs/tools/recordings#spans), so your tracer shows each click and wait. A step that repeats a read, such as a loop
+that polls `isVisible`, opens a span every round, each built with its attributes and handed to your tracer.
+`Browser.TracerDisabledWhen` leaves out the spans of the operations it matches:
+
+```ts
+import { Browser, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const dismissBanners = Effect.fn("dismissBanners")(
+  function*(page: Page.Page) {
+    const dismiss = page.getByRole("button", { name: "Dismiss" })
+    while (yield* dismiss.isVisible) {
+      yield* dismiss.click()
+    }
+  },
+  Effect.provideService(
+    Browser.TracerDisabledWhen,
+    (operation) => operation.name === "Locator.isVisible"
+  )
+)
+```
+
+A matched operation has no span, so a slow or failed one is missing from your tracer. Its failure still carries its
+[`diagnostics`](/docs/errors#diagnostics), and a [trace](/docs/tools/recordings#traces) still includes it as a step.
+
+## Opt-in features
+
+Request timings, request sizes, storage tracking, response bodies, and WebSocket routes collect nothing until you ask
+for them, so leaving them off costs nothing, and each costs only in the context or subscription that turns it on:
+
+```ts
+import { Browser, NetworkRequest } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkoutRequest = Effect.fn("checkoutRequest")(function*() {
+  const context = yield* Browser.newContext({ requestTiming: true, requestSizes: true })
+  const page = yield* context.newPage
+  const sent = yield* NetworkRequest.next(page, {
+    url: "https://shop.example.com/checkout"
+  })
+  yield* page.goto("https://shop.example.com/checkout")
+  const request = yield* sent
+  const timing = yield* NetworkRequest.timing(page, request)
+  const sizes = yield* NetworkRequest.sizes(page, request)
+  return { timing, sizes }
+}, Effect.scoped)
+```
+
+- `requestTiming` and `requestSizes` keep a record for each of the context's requests, read as
+  [request timings](/docs/events/request-timings) and [byte counts](/docs/events/request-sizes). On Chromium,
+  `requestSizes` also counts every chunk of each response as it arrives.
+- `storageStateTracking` keeps every origin and partition the context visits, for the context's life, so
+  [replacing its storage](/docs/pages/contexts#replacing-storage-in-a-live-context) can clear them.
+- A [`body` decoder](/docs/events/network#decoding-bodies) copies each matching response's body out of the browser,
+  up to 10 MiB. On WebKit, while one is open, a navigation waits for its main document to finish loading.
+- [`routeWebSocket`](/docs/events/websockets) puts its script in pages only once a route is registered.

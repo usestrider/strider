@@ -1,7 +1,7 @@
 /**
  * User contexts: isolated browser sessions, at two access levels.
  *
- * A context, which Playwright calls a browser context, keeps its storage, cookies, permissions and emulation apart
+ * A context, which Playwright calls a browser context, keeps its storage, cookies, permissions, and emulation apart
  * from every other context. An `ObservedUserContext` is one you don't control, such as an attached browser's
  * default context; a `UserContext` is one you do. There are only two levels, because reads happen on pages.
  *
@@ -233,9 +233,9 @@ export interface UserContext extends ObservedUserContext {
    *
    * Requires `storageStateTracking: true` at context creation. Untracked contexts and contexts with acquired
    * virtual authenticators refuse before mutation: their credentials are outside StorageState, and replacement does
-   * not invalidate their live scoped handles. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB and available origin-private
+   * not invalidate their live scoped handles. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB, and available origin-private
    * files for incoming and previously visited origins and partitions, then writes the supplied state.
-   * Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
+   * Existing-page sessionStorage, HTTP cache, and service-worker registrations are unchanged.
    *
    * **Gotchas**
    *
@@ -504,7 +504,7 @@ export interface Options {
    * Answers website authentication challenges with these credentials. User auth routes run first;
    * falling through uses these credentials. The pair is submitted once per request, including its whole
    * redirect chain. A later challenge in that chain is canceled, even at another origin.
-   * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname and effective port.
+   * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname, and effective port.
    * An omitted origin permits any website. Proxy challenges never receive these credentials.
    * Chromium and Firefox support this option; stock WebKit refuses it with `Unsupported`.
    * Chromium enables request interception for this context, which can affect request timing.
@@ -533,13 +533,13 @@ export interface Options {
 
   /**
    * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
-   * `host:port`, without credentials, path, query or fragment. An omitted port is 80.
+   * `host:port`, without credentials, path, query, or fragment. An omitted port is 80.
    *
    * **Details**
    *
-   * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards or CIDR.
+   * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards, or CIDR.
    * Host matching follows the browser's native proxy rules, which may also exclude subdomains. Loopback
-   * destinations (`localhost`, `127.0.0.1` and `::1`) remain direct on every backend.
+   * destinations (`localhost`, `127.0.0.1`, and `::1`) remain direct on every backend.
    * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
    * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
    * Firefox credentials require a freshly launched browser. Firefox shares its proxy authentication cache:
@@ -603,14 +603,17 @@ export interface Options {
    */
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined
   /**
-   * `"emulated"` makes every page report focus, so many pages can run at once. `Unsupported` on Firefox and
-   * WebKit (`emulation.focus`).
+   * `"emulated"` makes every page report focus, so many pages can run at once. On Chromium it also opens each
+   * page you create as a tab, not as a window of its own, and keeps focus emulated for the context's life, which
+   * makes creating a page and closing a context faster: use it for suites that don't depend on real focus.
+   * `"system"` keeps each page you create in a window of its own, so focus and visibility are the browser's.
+   * `Unsupported` on Firefox and WebKit (`emulation.focus`).
    *
    * @default "system"
    */
   readonly focus?: "system" | "emulated" | undefined
   /**
-   * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially` and
+   * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially`, and
    * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that
    * key on a US keyboard, and there are no AltGr or dead keys. WebKit types characters and named keys, not a
    * layout's physical keys (`input.keyboardLayout`).

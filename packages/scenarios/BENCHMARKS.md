@@ -816,6 +816,29 @@ measure their overhead or a production speedup. Do not sum overlapping spans or 
 establishes no valid timing result. Uninstrumented paired lifecycle and same-source controls remain necessary
 before proposing an optimization.
 
+### Hosted twenty-page phase diagnostic
+
+Dispatch `benchmarks.yml` from the tooling branch with `workload=scenarios`,
+`only=many-pages-diagnostic`, `browser=chromium`, `runs=32`, and identical pinned base/head commits.
+Base runs the unchanged callback; head timestamps context acquisition, each indexed creation/navigation/click,
+each final counter read, and scoped context release. The four-cell Williams schedule balances both libraries
+and instrumentation roles. Launch remains a separate, uninstrumented case.
+
+The driver transforms only the two callback regions and the head measurement runner; original library source,
+operation order, defaults, deadlines, output checks and cleanup remain unchanged. Source-boundary assertions reject
+a changed callback. Exact overlaid sources are retained under `driver/base` and `driver/head`.
+`head/phases.ndjson` contains the initial Strider/Playwright checks followed by head callbacks in scheduler order.
+Failed callbacks retain partial phases and are excluded from reconciliation. Missing/reordered/overlapping phases
+reject a successful diagnostic. File output occurs after the runner timer stops, before the sample acknowledgment.
+
+Each successful callback reports disjoint phase sum, callback elapsed and residual. Subtract callback elapsed
+from the corresponding runner sample to expose normalization, verification and diagnostic bookkeeping overhead.
+Release starts when the original callback body returns (or Playwright enters context.close) and ends after the
+scoped callback resolves; it includes return/finalizer/promise overhead, not just wire acknowledgment latency.
+Timestamp calls, record allocation, generator resumption and added promise bookkeeping perturb timings; paired
+head/base totals bound the observed instrumentation effect, not an independent universal correction. Supported
+navigation defaults still differ. These measurements attribute this workload, and establish no optimization.
+
 ### Hosted navigation phase diagnostic
 
 Dispatch `benchmarks.yml` from the diagnostic tooling branch with `workload=bench`,
@@ -841,3 +864,26 @@ The `navigate-title-locator` case retains the original `navigate` load/title wor
 `Shop` heading through each library's role locator. It verifies both results as `Shop`. This combined timer
 checks whether a cheaper title read merely defers initialization to the next locator. Setup, verification and
 cleanup remain outside timing, as for `navigate`.
+
+### Hosted twenty-page protocol trace
+
+`only=many-pages-trace` (`workload=scenarios`, `browser=chromium`, `runs=8`, identical pinned base/head commits)
+runs the unchanged scenarios in both roles with the session-profile loader, which writes every protocol message of
+each attempt, with its host `performance.now()` time at send and at receive, to `<role>/protocol-trace.jsonl`.
+Page creation and context release can then be read off as sequences of commands and replies, per library. The
+timestamps are host-side, not the browser's, and the loader's per-message work perturbs timings, so a trace
+attributes where time goes and is never a baseline or speedup figure. The first attempts of each role include
+startup, and the repetitions are same-source replicates, not a distribution estimate.
+
+### Emulated-focus variant
+
+`many-pages-emulated` is the twenty-page scenario with Strider's context created with `focus: "emulated"`, which on
+Chromium opens pages as tabs; the Playwright twin is the same callback as `many-pages`. It is Chromium-only: Firefox
+rejects focus emulation, so a Firefox run leaves it out and lists it as excluded in the report. `--only` takes
+several comma-separated names, so one paired dispatch (`only=many-pages,many-pages-emulated`) measures both.
+
+Evidence for the placement change (hosted Chromium 155.0.8059.79): a trace of the default path showed
+`Target.createTarget` with `newWindow: true` answering in about 46–50 ms against 13–17 ms for a tab, and closing
+twenty windows taking about 22 ms each, serially inside the browser, so that closing them concurrently saved nothing
+(release 430.5 ms against 427.3 ms). The default path measured 1.578× Playwright [1.560, 1.597] and the emulated
+variant 0.907× [0.898, 0.916], head against base main (32 rounds, one job).

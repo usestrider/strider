@@ -579,6 +579,11 @@ export type Declaration =
   | {
     readonly _tag: "Downloads"
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
+    /**
+     * Whether the context is about to be removed when this declaration is released, which makes restoring the
+     * download behavior pointless: the context's removal follows. Absent, or false, the release restores it.
+     */
+    readonly retiring?: (() => boolean) | undefined
   }
   | { readonly _tag: "FileChooser" }
   /**
@@ -765,6 +770,11 @@ export interface UserContextOptions {
   readonly requestTiming?: boolean | undefined
   readonly requestSizes?: boolean | undefined
   readonly reclaimable?: boolean | undefined
+  /**
+   * Focus is emulated for the context's whole life, so the backend may place its pages where only emulated focus
+   * keeps them rendering.
+   */
+  readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
 }

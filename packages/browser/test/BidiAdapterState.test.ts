@@ -3905,7 +3905,7 @@ describe("BiDi terminal redirect body refusal", () => {
               _tag: "Unsupported",
               capability: "network.responseBody.terminalRedirect",
               hint:
-                "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+                "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
             })
           }
           assert.deepStrictEqual(sent, [])
@@ -3969,3 +3969,35 @@ it.effect("refuses a terminal BiDi response learned while a body read waits", ()
     }
     assert.deepStrictEqual(sent, [])
   }))
+
+it.effect("rejects a sandbox realm created in a replacement document while acquisition is pending", () =>
+  Effect.gen(function*() {
+    let create: Effect.Effect<unknown> = Effect.void
+    const { document, page, state } = yield* withPage({
+      "script.evaluate": Effect.suspend(() => create)
+    })
+    const handlers = Evaluation.register(Kit.handlers<State.Event>())
+    create = Effect.sync(() => {
+      Tree.commit(state, page, "https://example.test/", "https://example.test", { _tag: "Adopted" }, undefined, "test")
+      handlers.apply("script.realmCreated", {
+        realm: "replacement-utility",
+        type: "window",
+        context: "C1",
+        origin: "https://example.test",
+        sandbox: "utility"
+      }, { state })
+      return { type: "success", realm: "replacement-utility", result: { type: "number", value: 0 } }
+    })
+    const result = yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "utility" }).pipe(Effect.exit)
+    assert(
+      Exit.isFailure(result),
+      "realm acquisition must refuse the ended document instead of returning its replacement's realm"
+    )
+    if (Exit.isFailure(result)) {
+      const error = yield* Effect.failCause(result.cause).pipe(Effect.flip)
+      assert.strictEqual(error.reason._tag, "Gone")
+      if (error.reason._tag === "Gone") {
+        assert.deepStrictEqual(error.reason.target, { _tag: "Document", id: document.id })
+      }
+    }
+  }).pipe(Effect.scoped))

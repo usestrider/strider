@@ -48,6 +48,8 @@ export class ContextEntry {
   /** CDP's id; the default context's too, once a page in it reports it. */
   declare browserContextId: string | undefined
   declare readonly isDefault: boolean
+  /** Focus is emulated for the context's whole life: its pages are tabs, which render only with it. */
+  declare focusEmulated?: boolean | undefined
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined

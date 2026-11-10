@@ -5,10 +5,13 @@
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
  *   pnpm scenarios --only login    one scenario, and no measurements, printed: RESULTS.md keeps the full run
+ *   pnpm scenarios --upload        upload the existing recordings and pin them, visiting no site
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
- * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
- * in `.data/scenarios/`, and a run without them fails, saying to record them. A Strider program visits its site as
+ * What leaves this machine: `--record` visits the public demo sites and uploads the recordings to the private bucket;
+ * `--upload` only uploads the existing ones; an ordinary run fetches the pinned recordings from the bucket when
+ * credentials are set. Nothing else does: the demo sites are replayed from their recordings, in `.data/scenarios/`,
+ * and a run without them skips their scenarios, saying why. A Strider program visits its site as
  * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
  * its own.
  */
@@ -27,10 +30,12 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { chromium, firefox as playwrightFirefox } from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
+import * as Recordings from "./recordings.ts"
 import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
+import { selectScenarios, supportedOn } from "./selection.ts"
 import { start } from "./site.ts"
 
 const argv = process.argv.slice(2)
@@ -102,7 +107,12 @@ if (output !== undefined) {
         memory: os.totalmem(),
         load: os.loadavg(),
         environment: Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => /^(STRIDER_|FONTCONFIG_|ALSA_|LANG$|LC_|TZ$)/.test(key))
+          // By name, and never a credential: the output directory is retained, and the bucket's keys are STRIDER_ variables
+          Object.entries(process.env).filter(([key]) =>
+            /^(STRIDER_|FONTCONFIG_|ALSA_|LANG$|LC_|TZ$)/.test(key) &&
+            !key.startsWith("STRIDER_RECORDINGS_") &&
+            !/SECRET|TOKEN|PASSWORD|CREDENTIAL|KEY|AUTH/i.test(key)
+          )
         )
       },
       null,
@@ -146,6 +156,29 @@ const onAttempt = (scenario: string, sample: Measurements["scenarios"][number]["
 
 // ── Recording the demo sites ──────────────────────────────────────────────────
 
+// Pins the recordings already in .data/scenarios/, as measured, without visiting any site
+if (argv.includes("--upload")) {
+  const store = Recordings.storeFromEnvironment()
+  if (store === undefined) {
+    process.stderr.write(`--upload needs ${Recordings.credentialNames.join(", ")} (write access).\n`)
+    process.exit(1)
+  }
+  try {
+    Recordings.writeManifest(
+      await Recordings.upload(Object.keys(recordings), {
+        manifest: Recordings.readManifest(),
+        file: files.recording,
+        store
+      })
+    )
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+  log("uploaded the existing recordings and updated packages/scenarios/recordings.json")
+  process.exit(0)
+}
+
 if (argv.includes("--record")) {
   const runtime = ManagedRuntime.make(layer)
   for (const [name, record] of Object.entries(recordings)) {
@@ -153,22 +186,60 @@ if (argv.includes("--record")) {
     await runtime.runPromise(Effect.scoped(record(files.recording(name))))
   }
   await runtime.dispose()
+  const store = Recordings.storeFromEnvironment()
+  if (store === undefined) {
+    process.stderr.write(
+      `Recorded, but not uploaded: set ${
+        Recordings.credentialNames.join(", ")
+      } (write access) to upload and update recordings.json.\n`
+    )
+    process.exit(1)
+  }
+  Recordings.writeManifest(
+    await Recordings.upload(Object.keys(recordings), {
+      manifest: Recordings.readManifest(),
+      file: files.recording,
+      store
+    })
+  )
+  log("uploaded the recordings and updated packages/scenarios/recordings.json")
   log(`recorded into ${path.relative(root, recordingsDirectory)}`)
   process.exit(0)
 }
 
-const unsupported = engine === "firefox"
+const unsupported: Array<string> = engine === "firefox"
   ? [
     "video and video-firefox: no equivalent Playwright video twin; Chromium screencast and Firefox native capture perform different work",
-    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
+    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics",
+    ...scenarios.flatMap((scenario) =>
+      scenario.chromiumOnly === undefined ? [] : [`${scenario.name}: excluded from Firefox, ${scenario.chromiumOnly}`]
+    )
   ]
   : []
-const chosen = scenarios.filter((scenario) =>
-  (only === undefined || scenario.name === only) &&
-  (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
+const paired = process.env["STRIDER_PAIRED"] === "1"
+const selected = supportedOn(selectScenarios(scenarios, only, paired), engine)
+if (selected.length === 0) throw new Error("No supported scenarios selected")
+// Fetch what the manifest pins and the recordings directory lacks; the real-site scenarios whose recording can't be
+// had are skipped, and say why
+const ensured = await Recordings.ensure(
+  [...new Set(selected.flatMap((scenario) => scenario.recording === undefined ? [] : [scenario.recording]))],
+  { manifest: Recordings.readManifest(), file: files.recording, store: Recordings.storeFromEnvironment() }
+).catch((error: unknown) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  process.exit(1)
+})
+const chosen = selected.filter((scenario) =>
+  scenario.recording === undefined || !ensured.unavailable.has(scenario.recording)
 )
-if (chosen.length === 0) throw new Error("No supported scenarios selected")
-if (process.env["STRIDER_PAIRED"] === "1" && chosen.some((scenario) => scenario.playwright === undefined)) {
+for (const scenario of selected) {
+  const reason = scenario.recording === undefined ? undefined : ensured.unavailable.get(scenario.recording)
+  if (reason !== undefined) {
+    unsupported.push(`${scenario.name} skipped: ${reason}`)
+    log(`skipped ${scenario.name}: ${reason}`)
+  }
+}
+if (chosen.length === 0) throw new Error("Every selected scenario was skipped; see above")
+if (paired && chosen.some((scenario) => scenario.playwright === undefined)) {
   throw new Error("Paired scenario comparisons require a Playwright twin for every selected case")
 }
 const problems = recordingProblems(chosen, files.recording)
@@ -305,7 +376,7 @@ const results = await runScenarios(
 
 // ── Q82: what an expectation waiting costs the page ──────────────────────────
 
-const measured = only === undefined && engine === "chromium"
+const measured = only === undefined && !paired && engine === "chromium"
 const waitMs = 3000
 // The renderers' CPU time per second of wall time, while `run` runs
 const cpuWhile = async (run: () => Promise<unknown>) => {

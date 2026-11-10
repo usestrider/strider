@@ -607,7 +607,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             new Reason.InvalidInput({
               input: "httpCredentials.origin",
               expected: "an HTTP(S) origin (scheme://host:port)",
-              hint: "Supply an origin without credentials, path, query or fragment"
+              hint: "Supply an origin without credentials, path, query, or fragment"
             }),
             id
           ))
@@ -729,6 +729,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
+            focusEmulated: options?.focus === "emulated",
             requestTiming: options?.requestTiming,
             requestSizes: options?.requestSizes
           })).pipe(
@@ -744,6 +745,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      // A context this scope created is removed with it, which closes the pages it released in it
+      if (mode === undefined || !("context" in mode)) {
+        model.removedWith(entry, ownerScope, () => committed() && !(reclaimable && Handoff.leavesOpen(ownerScope)))
+      }
       if (options?.storageStateTracking === true) yield* StorageStates.track(runtime, entry, options.storageState)
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
@@ -791,14 +796,27 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (!adopt && reports("network.challenges")) {
         yield* adapter.declare(scope, { _tag: "Challenges" }).pipe(Effect.catch(failed))
       }
+      // Set by the first finalizer to run, ahead of the declarations released below it: the context is removed
+      // when this scope closes unless it is handed off or not yet committed (the release above)
+      let retiring = false
       if (asked === "deny") {
-        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" }, retiring: () => retiring }).pipe(
+          Effect.catch(failed)
+        )
         yield* Effect.annotateCurrentSpan("browser.context.downloads", "deny")
       } else if (Option.isSome(downloads)) {
-        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Allow", directory: downloads.value } })
-          .pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: downloads.value },
+          retiring: () => retiring
+        }).pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          retiring = committed() && !(reclaimable && Handoff.leavesOpen(ownerScope))
+        })
+      )
       // The options that are declarations, held for the context's life, before its first page
       if (options?.emulation !== undefined || options?.focus === "emulated") {
         const fields = Emulation.fields(options.emulation ?? {})
