@@ -17,7 +17,7 @@ import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
-import { applyDownloads } from "./declare.ts"
+import { applyDownloads, restoreContext } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
   ContextEntry,
@@ -164,9 +164,17 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
     }))
   }))
-  // A removal the browser refused leaves the context in place: its download behavior, which the scope's declaration
-  // left alone because this removal was to follow, is applied again (no declaration in force says "default")
-  yield* removal.pipe(Effect.onError(() => applyDownloads(state, context).pipe(Effect.ignore)))
+  // A removal the browser refused leaves the context in place: what its declarations' releases left alone because
+  // this removal was to follow is applied again: its download behavior (no declaration in force says "default"),
+  // its interception and its file chooser dialog
+  yield* removal.pipe(
+    Effect.onError(() =>
+      // Independent resets: one that fails doesn't skip the others
+      Effect.all([applyDownloads(state, context).pipe(Effect.ignore), restoreContext(state, context)], {
+        discard: true
+      })
+    )
+  )
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {

@@ -1169,6 +1169,125 @@ describe("CDP restoration cleanup", () => {
     )
   }
 
+  const declarationSession = (sent: Array<string>, refuseDisposal = false) =>
+    ({
+      ...session,
+      ended: Effect.void,
+      send: (command: { readonly method: string; readonly params: { readonly enabled?: boolean } }) =>
+        command.method === "Target.disposeBrowserContext" && refuseDisposal
+          ? Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: command.method,
+                reason: "Unrecognized",
+                code: -32000,
+                description: "refused"
+              })
+            })
+          )
+          : Effect.sync(() => {
+            if (command.method === "Fetch.enable" || command.method === "Page.setInterceptFileChooserDialog") {
+              sent.push(command.method)
+            }
+            return {}
+          })
+    }) as unknown as ProtocolClient.Session
+
+  const withContextPage = Effect.fnUntraced(function*(mock: ProtocolClient.Session) {
+    const { state, page, target } = yield* withPage(mock)
+    const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+    state.contexts.set(context.id, context)
+    state.contextsByCdp.set("scoped", context)
+    const scoped = { ...page, context }
+    state.pages.set(page.id, scoped)
+    const scopedTarget = { ...target, page: scoped }
+    state.targets.set(mock, scopedTarget)
+    return { state, context, target: scopedTarget }
+  })
+
+  for (const retiring of [undefined, () => false, () => true]) {
+    const skipped = retiring?.() === true
+    it.effect(
+      `${skipped ? "skips" : "sends"} the file chooser and challenge retractions when its release ${
+        skipped ? "precedes the context's removal" : "leaves the context in place"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const sent: Array<string> = []
+          const { state, context } = yield* withContextPage(declarationSession(sent))
+          const scope = { _tag: "UserContext", context: context.id } as const
+          const lifetime = yield* Scope.make()
+          const flag = retiring === undefined ? {} : { retiring }
+          yield* Declare.declare(state, scope, { _tag: "FileChooser", ...flag }).pipe(Scope.provide(lifetime))
+          yield* Declare.declare(state, scope, { _tag: "Challenges", ...flag }).pipe(Scope.provide(lifetime))
+          sent.length = 0
+          yield* Scope.close(lifetime, Exit.void)
+          assert.deepStrictEqual(
+            sent.sort(),
+            skipped ? [] : ["Fetch.enable", "Page.setInterceptFileChooserDialog"]
+          )
+        }))
+    )
+  }
+
+  it.effect("restores the file chooser and challenge retractions when the context's disposal is refused", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const { state, context, target } = yield* withContextPage(declarationSession(sent, true))
+      const scope = { _tag: "UserContext", context: context.id } as const
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, scope, { _tag: "FileChooser", retiring: () => true }).pipe(Scope.provide(lifetime))
+      yield* Declare.declare(state, scope, { _tag: "Challenges", retiring: () => true }).pipe(Scope.provide(lifetime))
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      const staleKey = target.intercepts
+      const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.notStrictEqual(target.intercepts, staleKey, "interception was applied again")
+      assert.deepStrictEqual(sent.sort(), ["Fetch.enable", "Page.setInterceptFileChooserDialog"])
+    })))
+
+  for (const rejected of ["Browser.setDownloadBehavior", "Fetch.enable"]) {
+    it.effect(`restores independent declarations after refused disposal even when ${rejected} rejects`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent: Array<string> = []
+        const base = declarationSession(sent, true)
+        let restoring = false
+        const mock = {
+          ...base,
+          send: (command: Parameters<ProtocolClient.Session["send"]>[0]) =>
+            restoring && command.method === rejected
+              ? Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: command.method,
+                    reason: "Unrecognized",
+                    code: -32000,
+                    description: "restoration refused"
+                  })
+                })
+              )
+              : base.send(command)
+        } as ProtocolClient.Session
+        const { state, context } = yield* withContextPage(mock)
+        const scope = { _tag: "UserContext", context: context.id } as const
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, scope, { _tag: "FileChooser", retiring: () => true }).pipe(
+          Scope.provide(lifetime)
+        )
+        yield* Declare.declare(state, scope, { _tag: "Challenges", retiring: () => true }).pipe(Scope.provide(lifetime))
+        sent.length = 0
+        yield* Scope.close(lifetime, Exit.void)
+        restoring = true
+        const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+        assert.isTrue(Exit.isFailure(exit))
+        assert.include(sent, "Page.setInterceptFileChooserDialog", "file chooser retraction is independent")
+        if (rejected === "Browser.setDownloadBehavior") {
+          assert.include(sent, "Fetch.enable", "interception retraction is independent of downloads")
+        }
+      })))
+  }
+
   it.effect("restores the download behavior and leaves the context usable when its disposal is refused", () =>
     Effect.scoped(Effect.gen(function*() {
       const restored: Array<string> = []
