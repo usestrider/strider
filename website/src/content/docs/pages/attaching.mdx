@@ -1,15 +1,15 @@
 ---
 title: Attached browsers
-description: Connecting to a browser that's already running, and the access levels of the tabs you didn't open.
+description: Driving a browser your program didn't launch.
 order: 5
 ---
 
-A launch starts a new browser. To drive one that a person or another program already has running, with its
-logins and tabs as they are, attach to it; it keeps running after.
+Attaching connects to a browser that a person or another program already has running, with its logins and tabs as
+they are, and leaves it running after.
 
 ## Connecting
 
-`layerConnect` takes the browser's endpoint. Chrome opens its debugging port when started with one, and a
+`layerConnect` takes the browser's endpoint. Start Chrome with a debugging port, which opens the endpoint, and a
 profile of its own ([Chromium](/docs/browsers/chromium#attaching) says why):
 
 ```sh
@@ -51,9 +51,9 @@ const openTabs = Effect.fn("openTabs")(
 
 ## Access levels
 
-A tab you didn't open may be in use, by a person or another program, and a stray click or route there changes
-what they see. Take `inspect` when the program only reads, so acting on the tab doesn't compile, and `control`
-when it must act. A page has one of three types:
+An access level limits what a program can do to a tab it didn't open, which a person or another program may be
+using. Take `inspect` when the program only reads, so acting on the tab doesn't compile, and `control` when it must
+act. A page has one of three types:
 
 | Type                | Can                                                                            |
 | ------------------- | ------------------------------------------------------------------------------ |

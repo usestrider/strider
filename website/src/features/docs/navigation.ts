@@ -15,36 +15,33 @@ export const groups: ReadonlyArray<Group> = [
   {
     label: "Getting started",
     directory: "",
-    description: "What Strider is, how to install it and a browser, a first program, and what its errors tell you."
+    description: "Installing Strider, writing a first program, and handling its errors and timeouts."
   },
   {
     label: "Pages and locators",
     directory: "pages",
-    description:
-      "Finding elements, acting on them, expecting what should happen, and contexts that keep sessions apart."
+    description: "Finding a page's elements, acting on them, and checking the result."
   },
   {
     label: "Events and the network",
     directory: "events",
-    description:
-      "Subscribing before you act, navigations, popups, dialogs, downloads, watching requests and responses, routes, init scripts, and the page clock."
+    description: "Watching what a page does and deciding what its requests get back."
   },
   {
     label: "Testing and recordings",
     directory: "tools",
-    description: "Tests under Vitest, and traces and HAR recordings of what a page did."
+    description: "Running steps as Vitest tests, and recording what a page did."
   },
   {
     label: "Agents and the command line",
     directory: "agents",
-    description:
-      "Snapshots for reading a page, an agent toolkit for acting on it, and the strider CLI for driving a browser from a shell."
+    description: "Handing a browser to a model, or to a shell, one step at a time."
   },
   {
     label: "Browsers",
     directory: "browsers",
     description:
-      "What's different about Chromium, Firefox, and WebKit: launching each, attaching, what each can do, its quirks, and the settings that trade fidelity for speed."
+      "What each browser can do and does differently, how Strider launches and attaches to it, and how to make it faster."
   }
 ]
 

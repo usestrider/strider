@@ -1,12 +1,12 @@
 ---
 title: Strider for Playwright users
-description: Playwright's calls and Strider's for browsers and pages, reads and waits, subscribing before acting, routes and recordings, timeout options, and tests.
+description: Moving from Playwright to Strider.
 order: 5
 ---
 
-A Playwright program translates to Strider almost line by line, but kept habit for habit, it reads elements
-before they appear, keeps pages open past their step, and returns from `goto` before the load. Each section pairs
-Playwright's calls with Strider's and says which habit changes.
+A Playwright program translates almost line by line, except where a habit changes: reads don't wait for an
+element, a page closes with its scope, and `goto` returns before the load. Each section pairs Playwright's calls
+with Strider's.
 
 ## Browsers and pages
 

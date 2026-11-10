@@ -1,12 +1,12 @@
 ---
 title: Init scripts
-description: Scripts that run before a page's own, the order they run in and what they depend on, and scripts for a whole context, its workers, or an isolated world.
+description: Code that runs first in every document a page loads.
 order: 5
 ---
 
-[`page.evaluate`](/docs/pages/expectations#evaluating-in-the-page) after `goto` runs once the page's own scripts
-have started, too late to set up what they read as they load, such as a global or a stub. An init script runs
-first, so the page's scripts load into what it set up.
+An init script sets up what a page's own scripts read as they load, such as a global or a stub, since it runs
+before them. [`page.evaluate`](/docs/pages/expectations#evaluating-in-the-page) after `goto` comes too late for
+that.
 
 ## Adding a script
 
