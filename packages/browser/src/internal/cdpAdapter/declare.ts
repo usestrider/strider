@@ -506,6 +506,27 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
     }).pipe(Protocol.on(state.root()))
   }))
 
+/**
+ * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
+ * in place a context whose declarations' releases were skipped because it was to go.
+ */
+export const restoreContext = (state: State, context: ContextEntry) =>
+  Effect.forEach(
+    targetsInScope(state, { _tag: "UserContext", context: context.id }),
+    (target) =>
+      applyIntercepts(state, target, target.page!).pipe(
+        Effect.andThen(
+          target.kind === "page"
+            ? Page.setInterceptFileChooserDialog({
+              enabled: state.registry.fileChooser(placement(target.page!))
+            }).pipe(Protocol.on(target.session))
+            : Effect.void
+        ),
+        releaseErrors
+      ),
+    { concurrency: "unbounded", discard: true }
+  )
+
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
     Effect.catchIf(
@@ -541,8 +562,8 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = declaration._tag === "Downloads" && declaration.retiring?.() === true
-        // The context is removed right after: restoring its download behavior would only add a round trip
+      const release = "retiring" in declaration && declaration.retiring?.() === true
+        // The context is removed right after: undoing the declaration would only add a round trip
         ? Effect.void
         : declaration._tag === "Downloads"
         ? Effect.forEach(
