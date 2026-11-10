@@ -6,6 +6,7 @@ import { stripTypeScriptTypes } from "node:module"
 import * as path from "node:path"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
+import { pointerTap, summarize } from "./integration/pointerRecipients.ts"
 import { pipeObserver } from "./integration/tracePipe.ts"
 import { instrument } from "./integration/tracePlugin.ts"
 
@@ -913,4 +914,89 @@ it("retains a child record up to the documented 64 KiB serialized bound", async 
   scope.close()
   expect(records.filter(([kind]) => kind === "node-stderr")).toHaveLength(1)
   expect(records.map(([kind]) => kind)).not.toContain("overflow")
+})
+
+describe("pointer recipient capture", () => {
+  const harness = () => {
+    const records: Array<{ kind: string; payload: any }> = []
+    const tap = pointerTap((kind, payload) => void records.push({ kind, payload }))
+    const injected: Array<any> = []
+    tap.inject = (message) => void injected.push(JSON.parse(message))
+    return { tap, records, injected }
+  }
+  const attached = (sessionId: string, type: string) =>
+    JSON.stringify({
+      method: "Target.attachedToTarget",
+      params: { sessionId, targetInfo: { targetId: `t-${sessionId}`, type, url: "" } }
+    })
+  const called = (sessionId: string, payload: object) =>
+    JSON.stringify({
+      method: "Runtime.bindingCalled",
+      params: { name: "__striderPointerRecipient", payload: JSON.stringify(payload) },
+      sessionId
+    })
+  const entries = (records: Array<{ kind: string; payload: any }>) =>
+    records.map((record, index) => ({
+      kind: record.kind,
+      sequence: index + 1,
+      payload: JSON.stringify(record.payload)
+    }))
+
+  it("installs the capture on page and frame sessions only, and swallows only its own traffic", () => {
+    const { tap, injected, records } = harness()
+    expect(tap.receive(attached("s1", "page"))).toBe(false)
+    expect(tap.receive(attached("s2", "iframe"))).toBe(false)
+    expect(tap.receive(attached("s3", "service_worker"))).toBe(false)
+    expect(injected.map((command) => [command.sessionId, command.method])).toEqual([
+      ["s1", "Runtime.addBinding"],
+      ["s1", "Page.addScriptToEvaluateOnNewDocument"],
+      ["s2", "Runtime.addBinding"],
+      ["s2", "Page.addScriptToEvaluateOnNewDocument"]
+    ])
+    expect(injected[1].params.worldName).toBe(injected[0].params.executionContextName)
+    expect(tap.receive(JSON.stringify({ id: injected[0].id, result: {}, sessionId: "s1" }))).toBe(true)
+    expect(tap.receive(JSON.stringify({ id: 7, result: {}, sessionId: "s1" }))).toBe(false)
+    expect(tap.receive(JSON.stringify({ method: "Runtime.bindingCalled", params: { name: "other", payload: "" } })))
+      .toBe(false)
+    expect(records.map((record) => record.kind)).toEqual(["pointer-capture-installed", "pointer-capture-installed"])
+  })
+
+  it("records a rejected install", () => {
+    const { tap, injected, records } = harness()
+    tap.receive(attached("s1", "page"))
+    expect(tap.receive(JSON.stringify({ id: injected[1].id, error: { code: -32601, message: "no" }, sessionId: "s1" })))
+      .toBe(true)
+    expect(records.at(-1)?.kind).toBe("pointer-capture-error")
+  })
+
+  it("records the document that received a press, and says when none did", () => {
+    const { tap, records } = harness()
+    tap.receive(attached("root", "page"))
+    tap.receive(attached("leaf", "iframe"))
+    const press = (x: number) =>
+      tap.send(
+        JSON.stringify({
+          id: 1,
+          method: "Input.dispatchMouseEvent",
+          params: { type: "mousePressed", x, y: 5 },
+          sessionId: "root"
+        })
+      )
+    press(10)
+    expect(
+      tap.receive(called("root", { type: "mousedown", href: "http://root/", top: true, target: "body", x: 10, y: 5 }))
+    )
+      .toBe(true)
+    press(20)
+    press(30)
+    tap.receive(called("leaf", { type: "mousedown", href: "http://leaf/", top: false, target: "a#go", x: 1, y: 2 }))
+    const summary = summarize(entries(records))
+    expect(summary.map((entry) => entry.outcome)).toEqual([
+      "received",
+      "no document received a mousedown",
+      "received"
+    ])
+    expect(summary[0]!.recipients.map((r) => r.href)).toEqual(["http://root/"])
+    expect(summary[2]!.recipients.map((r) => [r.href, r.target])).toEqual([["http://leaf/", "a#go"]])
+  })
 })
