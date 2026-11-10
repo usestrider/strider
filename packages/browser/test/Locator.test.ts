@@ -7,6 +7,7 @@ import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
@@ -928,6 +929,85 @@ it.effect("does not acknowledge native fill while its insertion guard is still p
       assert.strictEqual(inputs, 0)
       assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
     })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+  }).pipe(Effect.scoped))
+
+it.effect("does not leave input blocked when navigation destroys the realm during guard cleanup", () =>
+  Effect.gen(function*() {
+    const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+    const guarding = yield* Deferred.make<void>()
+    const cleaned = yield* Deferred.make<void>()
+    const warnings: Array<string> = []
+    const logger = Logger.make((options) => {
+      const message = (options.message as ReadonlyArray<string>).join(" ")
+      if (options.logLevel === "Warn") warnings.push(message)
+    })
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("fill-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          const argument = call.arguments[0]
+          assert(argument?._tag === "Value" && argument.value.type === "string")
+          const request = JSON.parse(argument.value.value) as Engine.Request
+          if (request.op === "fillGuard") {
+            yield* Deferred.succeed(guarding, undefined)
+            return yield* Effect.never
+          }
+          if (request.op === "fillDisarm") {
+            yield* Deferred.succeed(cleaned, undefined)
+            // The navigation destroyed the realm; the model hasn't yet dropped the document.
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "fill-realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          }
+          return {
+            _tag: "Value",
+            value: {
+              type: "string",
+              value: JSON.stringify({
+                _tag: "Ready",
+                element: "p#target",
+                scrolled: false,
+                point: null,
+                draggable: false,
+                checked: null,
+                fill: request.apply ? "guarded" : null
+              })
+            }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const pending = yield* page.locator("#target").fill("new").pipe(
+        Deadline.within("1 second"),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* Deferred.await(guarding)
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(pending)
+      yield* Deferred.await(cleaned)
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual(warnings, [])
+    })).pipe(
+      Effect.provide(layer),
+      Effect.provideService(BrowserClock.CurrentClock, clock),
+      Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+    )
   }).pipe(Effect.scoped))
 
 for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as const) {
