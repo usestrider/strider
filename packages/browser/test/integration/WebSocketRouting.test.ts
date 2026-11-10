@@ -6,6 +6,7 @@ import { Browser, Condition, ConsoleMessage, Expect, Popup, WebSocketRoute } fro
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
@@ -270,6 +271,135 @@ for (const [name, backend] of backends) {
             assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), ["hello", "HELLO!"])
             assert.isTrue(observations.some((event) => event._tag === "Message" && event.direction === "page"))
             assert.isTrue(observations.some((event) => event._tag === "Message" && event.direction === "server"))
+          }),
+        60_000
+      )
+
+      it.effect(
+        "preserves a final proxy message before native close and error with truthful metadata",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const target = origin.replace("http:", "ws:")
+            yield* page.context.routeWebSocket(
+              "**/*-proxy",
+              (connection) => connection.connectToServer({}).pipe(Effect.asVoid),
+              {
+                implementation: "script",
+                timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+              }
+            )
+            const html = `<pre id="out">pending</pre><script>
+            const exchange = path => new Promise(resolve => {
+              const seen = []; const socket = new WebSocket(${JSON.stringify(target)} + path);
+              socket.onmessage = event => seen.push('message:' + event.data);
+              socket.onerror = () => seen.push('error');
+              socket.onclose = event => { seen.push('close'); resolve({seen, code:event.code, reason:event.reason, wasClean:event.wasClean}); };
+            });
+            (async () => {
+              const native = await exchange('/ws-final-native'); const proxy = await exchange('/ws-final-proxy');
+              const nativeError = await exchange('/ws-final-error-native'); const proxyError = await exchange('/ws-final-error-proxy');
+              document.querySelector('#out').textContent = JSON.stringify({native, proxy, nativeError, proxyError});
+            })();
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("both terminal paths completed", (value: string) => value !== "pending")
+            )
+            const result = JSON.parse(yield* page.locator("#out").readText)
+            assert.deepStrictEqual(result.native, {
+              seen: ["message:bye", "close"],
+              code: 1000,
+              reason: "done",
+              wasClean: true
+            })
+            assert.deepStrictEqual(result.proxy, result.native)
+            assert.deepStrictEqual(result.nativeError, {
+              seen: ["message:bye", "error", "close"],
+              code: 1006,
+              reason: "",
+              wasClean: false
+            })
+            assert.deepStrictEqual(result.proxyError, result.nativeError)
+          }),
+        60_000
+      )
+
+      it.effect(
+        "waits for delayed server handlers to forward or deliberately drop before closing",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(origin)
+            // Observe the real native peer ending, independently of the shim's delayed page notification.
+            yield* page.evaluateInMainWorld(() => {
+              document.body.innerHTML = "<pre id=\"native\">pending</pre><pre id=\"out\">pending</pre>"
+              const Native = WebSocket
+              globalThis.WebSocket = class extends Native {
+                constructor(url: string | URL, protocols?: string | Array<string>) {
+                  super(url, protocols)
+                  this.addEventListener("close", () => {
+                    document.querySelector("#native")!.textContent = "closed"
+                  })
+                }
+              }
+            })
+            for (const drop of [false, true]) {
+              const started = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              let completed = false
+              const registration = yield* page.context.routeWebSocket("**/ws-final-delayed", (connection) =>
+                connection.connectToServer({
+                  fromServer: Effect.fnUntraced(function*(message, endpoints) {
+                    yield* Deferred.succeed(started, undefined)
+                    yield* Deferred.await(release)
+                    if (!drop) {
+                      yield* endpoints.page.send(message)
+                    }
+                    completed = true
+                  })
+                }).pipe(Effect.asVoid), {
+                implementation: "script",
+                timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+              })
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#native")!.textContent = "pending"
+                document.querySelector("#out")!.textContent = "pending"
+                const seen: Array<string> = []
+                ;(globalThis as any).seen = seen
+                const socket = new WebSocket(location.origin.replace("http:", "ws:") + "/ws-final-delayed")
+                socket.onmessage = (event) =>
+                  seen.push("message:" + event.data)
+                socket.onerror = () =>
+                  seen.push("error")
+                socket.onclose = () => {
+                  seen.push("close")
+                  document.querySelector("#out")!.textContent = JSON.stringify(seen)
+                }
+              })
+              yield* Deferred.await(started)
+              yield* Expect.that(
+                page.locator("#native").readText,
+                Condition.make("native peer ended", (value: string) =>
+                  value === "closed")
+              )
+              assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (globalThis as any).seen), [])
+              assert.isFalse(completed)
+              yield* Deferred.succeed(release, undefined)
+              yield* Expect.that(
+                page.locator("#out").readText,
+                Condition.make("page closed", (value: string) => value !== "pending")
+              )
+              assert.deepStrictEqual(
+                JSON.parse(yield* page.locator("#out").readText),
+                drop ? ["close"] : ["message:bye", "close"]
+              )
+              assert.isTrue(completed)
+              yield* registration.remove
+            }
           }),
         60_000
       )

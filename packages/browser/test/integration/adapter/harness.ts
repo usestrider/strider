@@ -245,6 +245,13 @@ const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
   socket.write(
     `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
   )
+  if (request.url?.startsWith("/ws-final")) {
+    const message = Buffer.from([0x81, 3, 98, 121, 101]) // text: bye
+    const close = Buffer.concat([Buffer.from([0x88, 6, 0x03, 0xe8]), Buffer.from("done")])
+    socket.resume() // Consume the peer's close frame/FIN after sending the terminal fixture.
+    socket.end(request.url.includes("error") ? message : Buffer.concat([message, close]))
+    return
+  }
   socket.on("data", (data: Buffer) => {
     const opcode = data[0]! & 0x0f
     if (opcode === 8) return socket.end()
