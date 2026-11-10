@@ -231,6 +231,39 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  it.effect("claims a same-document event received before the traversal's reply but folded after it", () =>
+    Effect.gen(function*() {
+      // The protocol client resolves a reply in its reader, but folds the events received before it in a
+      // separate worker: the reply can wake the command first. drainObserved completes once those are folded.
+      let queued: (() => void) | undefined
+      const fold = () => {
+        const event = queued
+        queued = undefined
+        event?.()
+      }
+      const root = {
+        send: () => Effect.succeed({}),
+        drainObserved: Effect.sync(fold)
+      } as unknown as ProtocolClient.Session
+      const { facts, page, state } = yield* withPage({}, {}, root)
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      queued = () =>
+        handlers.apply(
+          "browsingContext.historyUpdated",
+          { context: page.bidi, url: "about:blank#earlier", timestamp: 1 },
+          { state }
+        )
+      const traversal = yield* Navigation.traverse(state, page.id, -1)
+      // The worker reaches the event at last, if the command did not wait for it.
+      fold()
+      yield* state.buffer.flush
+      assert(Option.isSome(traversal))
+      const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.lengthOf(ends, 1)
+      assert.strictEqual(ends[0]!.navigation, traversal.value)
+      assert.isEmpty(page.expected.list)
+    }))
+
   for (const arrival of ["before", "after"] as const) {
     it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
       Effect.gen(function*() {
