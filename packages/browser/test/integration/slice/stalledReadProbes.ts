@@ -121,5 +121,19 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
           yield* probeStalledRead(slowCleanup, page, (_kind: string, payload: any) => void records.push({ payload }))
           assert.strictEqual(records[2]!.payload.outcome, "timed out")
         })), 60_000)
+      it.effect("records a failed probe-page cleanup as failed", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { context, page } = yield* setup()
+          const records: Array<{ payload: any }> = []
+          const failedCleanup = Object.create(context, {
+            newPage: {
+              value: context.newPage.pipe(
+                Effect.tap(() => Effect.addFinalizer(() => Effect.die(new Error("probe cleanup failed"))))
+              )
+            }
+          })
+          yield* probeStalledRead(failedCleanup, page, (_kind: string, payload: any) => void records.push({ payload }))
+          assert.match(records[2]!.payload.outcome, /^failed: /)
+        })), 60_000)
     })
   })
