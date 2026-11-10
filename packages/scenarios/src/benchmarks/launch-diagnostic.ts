@@ -65,8 +65,15 @@ export const launchDiagnostic = (options: {
       "--run",
       "--config",
       "vitest.config.ts",
-      "packages/scenarios/test/LaunchProfile.test.ts"
+      "packages/scenarios/test/LaunchProfile.test.ts",
+      "--reporter=json",
+      `--outputFile=${path.join(directory, "regression-results.json")}`
     ])
+    const regressions = JSON.parse(fs.readFileSync(path.join(directory, "regression-results.json"), "utf8"))
+    assert.equal(regressions.numTotalTests, 10)
+    assert.equal(regressions.numPassedTests, 10)
+    assert.equal(regressions.numPendingTests, 0)
+    assert.equal(regressions.numFailedTests, 0)
     run("profile", process.execPath, [
       "--import",
       path.join(roots.head, "packages/scenarios/benchmark/launch-profile-hooks.mjs"),

@@ -285,7 +285,10 @@ export const connect: (
     )
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
-    const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect))
+    const [version, contextIds] = yield* Effect.all([
+      BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect)),
+      Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)
+    ], { concurrency: 2 })
     state.defaultUserAgent = version.userAgent
     const info = new Browser.Info({
       product: version.product,
@@ -293,7 +296,6 @@ export const connect: (
       protocol: "cdp",
       revision: version.protocolVersion
     })
-    const contextIds = yield* Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)
     const defaultEntry: State.ContextEntry = {
       id: state.defaultContext,
       browserContextId: Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,

@@ -48,16 +48,16 @@ const rules = [
     ],
     ["    root = client.root", `    ${mark("client.ready")}\n    root = client.root`],
     [
+      "BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect))",
+      "BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect), Effect.tap(() => Effect.sync(() => globalThis.__launchTrace.mark(\"version.ready\"))))"
+    ],
+    [
+      "Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)",
+      "Effect.suspend(() => { globalThis.__launchTrace.mark(\"contexts.start\"); return Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option, Effect.tap(() => Effect.sync(() => globalThis.__launchTrace.mark(\"contexts.end\")))); })"
+    ],
+    [
       "    state.defaultUserAgent = version.userAgent",
-      `    ${mark("version.ready")}\n    state.defaultUserAgent = version.userAgent`
-    ],
-    [
-      "    const contextIds = yield* Target.getBrowserContexts()",
-      `    ${mark("contexts.start")}\n    const contextIds = yield* Target.getBrowserContexts()`
-    ],
-    [
-      "    const defaultEntry: State.ContextEntry = {",
-      `    ${mark("contexts.end")}\n    const defaultEntry: State.ContextEntry = {`
+      `    ${mark("metadata.joined")}\n    state.defaultUserAgent = version.userAgent`
     ],
     [
       "    yield* Declare.applyDownloads(state, defaultEntry).pipe(Effect.ignore)",

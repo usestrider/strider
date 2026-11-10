@@ -126,6 +126,7 @@ const validateSample = (sample: Sample) => {
       "adapter.start",
       "client.ready",
       "version.ready",
+      "metadata.joined",
       "contexts.start",
       "contexts.end",
       "downloads.start",
@@ -172,19 +173,30 @@ const validateSample = (sample: Sample) => {
     )
     assert.ok(sent !== undefined, `${sample.library}: missing protocol send ${method}`)
     assert.ok(typeof sent.message["id"] === "number", `${sample.library}: missing protocol id ${method}`)
-    assert.ok(
-      wires.some((entry) =>
-        entry.name === "receive" && entry.at >= sent.at && entry.at <= through &&
-        entry.message["id"] === sent.message["id"] && entry.message["sessionId"] === sent.message["sessionId"]
-      ),
-      `${sample.library}: missing protocol reply ${method}`
+    const reply = wires.find((entry) =>
+      entry.name === "receive" && entry.at >= sent.at && entry.at <= through &&
+      entry.message["id"] === sent.message["id"] && entry.message["sessionId"] === sent.message["sessionId"]
     )
+    assert.ok(reply !== undefined, `${sample.library}: missing protocol reply ${method}`)
+    return { sent: sent.at, reply: reply.at }
   }
   for (const method of ["Browser.getVersion", "Target.setAutoAttach"]) roundTrip(method, true, available)
   if (strider) {
     for (const method of ["Target.getBrowserContexts", "Browser.setDownloadBehavior"]) {
       roundTrip(method, true, available)
     }
+    const version = roundTrip("Browser.getVersion", true, available)
+    const census = roundTrip("Target.getBrowserContexts", true, available)
+    assert.ok(
+      Math.max(version.sent, census.sent) <= Math.min(version.reply, census.reply),
+      "Metadata reads did not overlap"
+    )
+    const joined = phase("metadata.joined")
+    assert.ok(version.reply <= phase("version.ready") && phase("version.ready") <= joined)
+    assert.ok(
+      phase("contexts.start") <= census.sent && census.reply <= phase("contexts.end") && phase("contexts.end") <= joined
+    )
+    assert.ok(joined <= phase("downloads.start") && phase("downloads.end") <= phase("autoattach.start"))
     const gate = phase("target.gate.end")
     for (
       const method of [
