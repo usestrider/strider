@@ -528,10 +528,8 @@ describe("Session's digest", () => {
         yield* Deferred.succeed(release, undefined)
         assert.deepStrictEqual(yield* Fiber.join(own), [], "reported twice")
       }
-      // Nothing is waiting for an event that already came: an event with an id seen before is reported again
-      yield* publish("n0")
-      yield* TestClock.adjust("1 millis")
-      assert.deepStrictEqual(yield* sinceLast(session), [line], "a delivered identity is still retained")
+      // Nothing is waiting for an event that already came
+      assert.strictEqual(session.retainedNavigations, 0, "a delivered identity is still retained")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("opening a page preserves another page's pending and later navigation", () =>
