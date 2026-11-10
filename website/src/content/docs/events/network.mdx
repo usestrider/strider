@@ -70,9 +70,10 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
   - `BodyUnavailable`: there's no body to read. Its `why` says which: a redirect, over the limit, released by the
     browser, a failed transfer, or a stream that never ends, such as server-sent events.
   - `MalformedBody`: the body isn't what it was read as.
-  - `Unsupported`: the browser cannot supply this body's bytes. On Firefox, a terminal 3xx response without a
-    `Location` header fails immediately with capability `"network.responseBody.terminalRedirect"`, because Firefox
-    does not answer `network.getData` for it. Chromium and WebKit return its body normally. Followed redirect hops
+  - `Unsupported`: the browser cannot supply this body's bytes. On Firefox, a terminal response with status 301,
+    302, 303, 307 or 308 without a `Location` header fails immediately with capability
+    `"network.responseBody.terminalRedirect"`, because Firefox does not answer `network.getData` for it. Other
+    statuses remain readable, and Chromium and WebKit return these bodies normally. Followed redirect hops
     still fail with `BodyUnavailable`, `why: "redirect"`; their final response's body can be collected.
 - Reading a body needs [read access](/docs/pages/attaching#access-levels) to the page.
 

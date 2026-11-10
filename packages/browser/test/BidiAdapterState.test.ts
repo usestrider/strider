@@ -3355,7 +3355,8 @@ describe("BiDi terminal redirect body refusal", () => {
             assert.deepStrictEqual(result.failure.reason, {
               _tag: "Unsupported",
               capability: "network.responseBody.terminalRedirect",
-              hint: "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+              hint:
+                "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
             })
           }
           assert.deepStrictEqual(sent, [])

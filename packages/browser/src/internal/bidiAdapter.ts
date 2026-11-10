@@ -106,7 +106,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
       entry("network.responseBody.terminalRedirect", "unsupported", [
-        "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+        "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
       ]),
       entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),
       entry("network.requestBody.absence", "partial", ["zero body size conflates empty payload with absence"]),

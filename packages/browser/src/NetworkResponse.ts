@@ -245,9 +245,10 @@ export const withBodyLimit: {
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
- * On Firefox, a terminal 3xx response without a `Location` header fails body collection immediately with
- * `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does not answer the native body
- * command for it. Chromium and WebKit can collect this body.
+ * On Firefox, a terminal response with status 301, 302, 303, 307 or 308 without a `Location` header fails body
+ * collection immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does
+ * not answer the native body command for it. Other statuses remain readable, and Chromium and WebKit can collect
+ * these terminal responses' bodies.
  *
  * On WebKit, response-body collection makes navigation and reload wait for the responded, committed main
  * document to finish loading and for document body reads already started on the page to settle. Unresponded or
@@ -321,9 +322,9 @@ export const next: {
  *
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
- * Firefox terminal 3xx responses without a `Location` header fail body collection immediately with
- * `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not answer the
- * native body command for them.
+ * Firefox terminal responses with status 301, 302, 303, 307 or 308 without a `Location` header fail body collection
+ * immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not
+ * answer the native body command for them. Other statuses remain readable.
  *
  * **Example** (Logging server errors)
  *

@@ -80,7 +80,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (request.navigable?.context.requestTiming) {
         state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, false) })
       }
-      request.terminalRedirect = params.response.status >= 300 && params.response.status < 400 &&
+      request.terminalRedirect = [301, 302, 303, 307, 308].includes(params.response.status) &&
         headersOf(params.response.headers)["location"] === undefined
       if (request.navigation !== undefined) request.navigation.status = params.response.status
       const response = new NetworkResponse.NetworkResponse({
@@ -172,7 +172,7 @@ const notCollected = (error: Parameters<typeof Kit.protocolError>[0]) =>
 const terminalRedirect = () =>
   Kit.unsupported(
     "network.responseBody.terminalRedirect",
-    "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+    "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
   )
 
 export const responseBody = Effect.fnUntraced(function*(state: State, hop: NetworkRequest.HopId) {
