@@ -61,6 +61,19 @@ const setup = (BlobConstructor = Blob) => {
 }
 
 describe("WebSocket shim admission and conversion", () => {
+  it("sends text as the browser's USVString, replacing lone surrogates", async () => {
+    // WebSocket.send(string) takes a USVString: a native socket transmits U+FFFD for a lone surrogate.
+    const { context, dispatch, messages, waitFor } = setup()
+    await dispatch({ type: "grant", direction: "page", bytes: 16 })
+    await dispatch({ type: "open" })
+    vm.runInContext(`ws.send("a\\uD800b")`, context)
+    await waitFor(1)
+    assert.deepStrictEqual(messages.find((message) => message.type === "message")?.message, {
+      _tag: "Text",
+      data: "a\uFFFDb"
+    })
+  })
+
   it("snapshots views synchronously and orders them after a pending Blob", async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
