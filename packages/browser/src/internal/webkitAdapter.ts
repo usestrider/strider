@@ -244,7 +244,7 @@ export const connect: (
       dispatchInput: (page, events) => Input.dispatchInputLaunched(state, page, events),
       cookies: (context) => Storage.cookiesLaunched(state, context),
       setCookies: (context, list) => Storage.setCookiesLaunched(state, context, list),
-      clearCookies: (context) => Storage.clearCookiesLaunched(state, context),
+      clearCookies: (context, options) => Storage.clearCookiesLaunched(state, context, options),
       setInputFiles: (node, files) => Input.setInputFilesLaunched(state, node, files),
       contentFrame: (node) => Input.contentFrameLaunched(state, node)
     } satisfies Adapter.AdapterConnection

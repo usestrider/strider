@@ -1462,6 +1462,15 @@ Rejected: per-module index fragments, which keep redundant output; per-class mat
 concurrent Locator or Page features; and post-merge generation, which delays validation and needs privileged writes
 unavailable to fork PRs.
 
+## Existing-context storage replacement
+
+Replacement requires creation-time tracking and preserves live pages. Native protocols cannot enumerate closed
+origins across backends, so only opted-in contexts retain history, following [Pay for what you use](#pay-for-what-you-use).
+Untracked contexts have only context-local dispatch checks. Replacement refuses live authenticator handles and
+unreproducible histories, and clears origins before cookies. Running writers and open storage handles can cause typed partial failure;
+pending deletions cannot be cancelled. Always-on history, context replacement, silent merging and atomic rollback
+were rejected.
+
 ## Read-only event admission on the protocol reader
 
 Optional event scopes may synchronously inspect adapter ownership state on the protocol reader to reject events
