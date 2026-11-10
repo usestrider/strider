@@ -54,6 +54,26 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
   )
 })
 
+describe("CDP startup metadata", () => {
+  it.effect("sends both read-only metadata requests before either reply", () =>
+    Effect.scoped(withProtocolScheduler((drain) => Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const facts: Array<Adapter.Fact> = []
+      const connecting = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: (fact) => Effect.sync(() => { facts.push(fact) })
+      }).pipe(Effect.forkScoped)
+      yield* drain
+      assert.strictEqual(yield* browser.pending, 2)
+      const commands = [yield* browser.next, yield* browser.next]
+      assert.deepStrictEqual(commands.map((c) => c.method).sort(), ["Browser.getVersion", "Target.getBrowserContexts"])
+      assert.deepStrictEqual(facts, [])
+      assert.isUndefined(connecting.pollUnsafe())
+      yield* Fiber.interrupt(connecting)
+    })))
+  )
+})
+
 describe("CDP combined locale and user-agent declarations", () => {
   for (const order of ["Locale first", "UserAgent first"] as const) {
     for (const timing of ["existing target", "new targets"] as const) {
