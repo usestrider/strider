@@ -209,6 +209,8 @@ export interface Session {
   readonly pages: Effect.Effect<ReadonlyArray<{ readonly name: string; readonly page: Page.Page }>>
   /** The page with a name, as the toolkit knows it now, without listing the context's pages again. */
   readonly named: (name: string) => Option.Option<Page.Page>
+  /** How many navigation identities the session is remembering, to match a result with its event. */
+  readonly retainedNavigations: number
   /** A page's latest snapshot, which its refs are checked against. */
   readonly latest: (name: string) => Option.Option<Snapshot.Snapshot<Locator.Locator>>
   /** Ends a route or dialog handler that `route` or `dialog` declared, by its registration (`r1`). */
@@ -265,12 +267,18 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const digest: Array<
     { readonly line: string; readonly navigation?: PageNavigation.Id; readonly page?: Target.NavigableId }
   > = []
+  // Results that came before their event, which the event is then not reported for
   const reportedNavigations = new Map<Target.NavigableId, Set<PageNavigation.Id>>()
+  // Navigations a call's digest already delivered, kept only while a call is running, since only a running call
+  // can still bring a result for them
+  const deliveredNavigations = new Map<Target.NavigableId, Set<PageNavigation.Id>>()
+  let running = 0
   // A result and its queued event can arrive in either order. Match identities, never URLs.
   const reportNavigation = (page: Page.Page, navigation: PageNavigation.PageNavigation) => {
     if (navigation._tag !== "Committed" && navigation._tag !== "SameDocument") return navigation
     const index = digest.findIndex((entry) => entry.page === page.id && entry.navigation === navigation.id)
     if (index !== -1) digest.splice(index, 1)
+    else if (deliveredNavigations.get(page.id)?.delete(navigation.id)) return navigation
     else {
       let reported = reportedNavigations.get(page.id)
       if (reported === undefined) reportedNavigations.set(page.id, reported = new Set())
@@ -313,6 +321,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       const watcher = watching.get(page.id)
       const grant = controlled.get(page.id)
       reportedNavigations.delete(page.id)
+      deliveredNavigations.delete(page.id)
       watching.delete(page.id)
       controlled.delete(page.id)
       return (watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)).pipe(
@@ -499,17 +508,39 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   yield* refresh.pipe(Effect.orDie)
 
   // ── Results ──
+  const drainDigest = () => {
+    const entries = digest.splice(0)
+    if (running > 1) {
+      for (const entry of entries) {
+        if (entry.page === undefined || entry.navigation === undefined) continue
+        let delivered = deliveredNavigations.get(entry.page)
+        if (delivered === undefined) deliveredNavigations.set(entry.page, delivered = new Set())
+        delivered.add(entry.navigation)
+      }
+    }
+    return entries.map((entry) => entry.line)
+  }
+  // A call that reports a navigation is counted while it runs, so a drain by another call records what it delivers
+  const counted = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      running++
+      return effect
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => {
+        if (--running === 0) deliveredNavigations.clear()
+      }))
+    )
   const run = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
-    effect.pipe(
+    counted(effect.pipe(
       Effect.mapError(toFailure),
-      Effect.map((outcome) => conceal({ outcome, sinceLast: digest.splice(0).map((entry) => entry.line) })),
+      Effect.map((outcome) => conceal({ outcome, sinceLast: drainDigest() })),
       // A failure stays a ToolFailure, so its Schema encodes it, and it reports the digest too, which the next call
       // then doesn't repeat
       Effect.mapError((failure) => {
-        const lines = digest.splice(0).map((entry) => entry.line)
+        const lines = drainDigest()
         return new Tools.ToolFailure(conceal({ ...failure, ...(lines.length === 0 ? {} : { sinceLast: lines }) }))
       })
-    )
+    ))
   const onPage = <A, R>(name: string, f: (page: Page.Page) => Effect.Effect<A, unknown, R>) =>
     run(Effect.flatMap(pageNamed(name), f))
   // An action brings its page to the front first: the tools name pages, and a page behind another may not render
@@ -579,8 +610,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       // A page whose navigation fails isn't the session's: the command failed, and the exported test leaves it
       // out, so the page goes with it
       if (url !== undefined) {
-        yield* page.goto(reveal(url)).pipe(
-          Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation))),
+        yield* counted(
+          page.goto(reveal(url)).pipe(
+            Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation)))
+          )
+        ).pipe(
           Effect.mapError(toFailure),
           Effect.onError(() => closeAgain)
         )
@@ -1020,6 +1054,12 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   ) as typeof handlers
   const handlerContext = yield* Tools.toolkit.toHandlers(diagnosed)
   const session: Session = {
+    get retainedNavigations() {
+      let total = 0
+      for (const set of reportedNavigations.values()) total += set.size
+      for (const set of deliveredNavigations.values()) total += set.size
+      return total
+    },
     toolkit: yield* Effect.provideContext(Tools.toolkit, handlerContext),
     name: (page, given) =>
       Effect.andThen(
