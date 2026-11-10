@@ -244,6 +244,7 @@ export const withBodyLimit: {
  * `url` is required. Without `body`, only the status and headers are delivered. With it, body collection is set
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
+ * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
  *
  * On Firefox, a terminal response with status 301, 302, 303, 307 or 308 without a `Location` header fails body
  * collection immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does
@@ -301,7 +302,7 @@ export const next: {
       CapturedResponse<B>,
       DE | PE | ResponseError | Target.TargetGone | Deadline.Timeout
     >,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(
@@ -322,6 +323,7 @@ export const next: {
  *
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
+ * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
  * Firefox terminal responses with status 301, 302, 303, 307 or 308 without a `Location` header fail body collection
  * immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not
  * answer the native body command for them. Other statuses remain readable.
@@ -356,7 +358,7 @@ export const stream: {
     where?: Subscription.Where<CapturedResponse<B>, PE, PR> | undefined
   ): Effect.Effect<
     Stream.Stream<CapturedResponse<B>, DE | PE | ResponseError | Subscription.EventOverflow | Target.TargetGone>,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(

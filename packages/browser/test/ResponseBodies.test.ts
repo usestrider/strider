@@ -59,13 +59,15 @@ describe("NetworkResponse body subscriptions and borrowed access", () => {
       const accessScope = yield* Scope.make()
       const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
       const world = setup(bytes, Option.some(grant))
-      const wait = yield* NetworkResponse.next(world.page, { body: (message) => message.text })
+      const wait = yield* NetworkResponse.next(world.page, { url: "**/data", body: (message) => message.text })
       yield* world.publish
       const captured = yield* wait
       yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))
       assert.strictEqual(world.released(), 1)
       assert.deepStrictEqual(captured.body, "owned")
-      const error = yield* NetworkResponse.next(world.page, { body: (message) => message.text }).pipe(Effect.flip)
+      const error = yield* NetworkResponse.next(world.page, { url: "**/data", body: (message) => message.text }).pipe(
+        Effect.flip
+      )
       assert.strictEqual(error._tag, "TargetGone")
       assert.strictEqual(world.declarations.length, 1)
     })))
@@ -83,10 +85,26 @@ describe("NetworkResponse body subscriptions and borrowed access", () => {
         ),
         Option.some(grant)
       )
-      yield* NetworkResponse.next(world.page, { body: (message) => message.text }).pipe(Effect.asVoid)
+      yield* NetworkResponse.next(world.page, { url: "**/data", body: (message) => message.text }).pipe(Effect.asVoid)
       yield* world.publish
       yield* Deferred.await(started)
       yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))
       yield* Deferred.await(cancelled).pipe(Effect.timeout("500 millis"))
+    })))
+
+  it.live("keeps collecting for a subscription in the caller's scope after another's borrowed access is released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const accessScope = yield* Scope.make()
+      const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
+      const world = setup(bytes, Option.some(grant))
+      const own = Option.none<Access.Grant>()
+      const ownWorld = setup(bytes, own)
+      yield* NetworkResponse.next(world.page, { url: "**/data", body: (message) => message.text }).pipe(Effect.asVoid)
+      const wait = yield* NetworkResponse.next(ownWorld.page, { url: "**/data", body: (message) => message.text })
+      yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))
+      assert.strictEqual(world.released(), 1)
+      assert.strictEqual(ownWorld.released(), 0)
+      yield* ownWorld.publish
+      assert.deepStrictEqual((yield* wait).body, "owned")
     })))
 })
