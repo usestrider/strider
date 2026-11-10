@@ -1282,3 +1282,54 @@ it.effect("evaluateAll uses the committed document for an empty match set after 
       assert.strictEqual(requested.at(-1), committed, "the empty snapshot's callback must use the document searched")
     }).pipe(Effect.scoped, Effect.provide(layer))
   }))
+
+it.effect("evaluateAll does not move an empty snapshot to a document committed after the query ran", () =>
+  Effect.gen(function*() {
+    let beforeReply = Effect.void
+    const requested: Array<Target.DocumentId> = []
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" ? { ...entry, status: "supported", limitations: [] } : entry
+          )
+        })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: (document) =>
+          Effect.sync(() => {
+            requested.push(document)
+            return "searched-realm" as Target.RealmId
+          }),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          if (call.functionDeclaration === Engine.element) {
+            // The query already produced its empty snapshot; a navigation is folded before its reply is consumed.
+            const result = { _tag: "Value", value: { type: "array", value: [] } } as const
+            yield* beforeReply
+            return result
+          }
+          return { _tag: "Value", value: { type: "number", value: 0 } } as const
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const searched = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      beforeReply = runtime.model.adapter.navigate(entry.id, "https://example.test/replacement", {
+        referrer: Option.none()
+      }).pipe(Effect.asVoid, Effect.orDie)
+      yield* page.locator(".absent").evaluateAll((elements) => elements.length)
+      const current = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      assert.notStrictEqual(current, searched)
+      assert.strictEqual(
+        requested.at(-1),
+        searched,
+        "an empty snapshot must not dispatch its callback in an unsearched document"
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }))
