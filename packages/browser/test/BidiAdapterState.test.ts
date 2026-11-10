@@ -3215,7 +3215,7 @@ describe("BiDi response body completion", () => {
           handlers.apply(method, { ...params, ...extra }, { state: tracked })
         const complete = () =>
           apply("network.responseCompleted", {
-            response: { status: 302, bytesReceived: 8 }
+            response: { status: 200, bytesReceived: 8, headers: [] }
           })
         apply("network.beforeRequestSent")
         page.context.proxyAttempts = new Set(["response-body"])
@@ -3266,7 +3266,7 @@ it.effect("retires terminal BiDi responses without evicting an active redirect s
         redirectCount,
         isBlocked: false,
         request: { request: key, url: "http://site.test/", method: "GET", headers: [], destination: "", bodySize: 0 },
-        response: { status: 302, bytesReceived: 5 }
+        response: { status: redirectCount === 1 ? 200 : 302, bytesReceived: 5, headers: [] }
       }, { state })
     apply("network.beforeRequestSent", "active")
     apply("network.responseCompleted", "active")
@@ -3292,3 +3292,77 @@ it.effect("retires terminal BiDi responses without evicting an active redirect s
     assert.isFalse(state.hops.has(active.hop))
     assert.strictEqual(state.requests.size, 1000)
   }))
+
+describe("BiDi terminal 3xx body refusal", () => {
+  for (
+    const sample of [
+      { status: 299, headers: [], refused: false },
+      { status: 300, headers: [], refused: true },
+      { status: 302, headers: [], refused: true },
+      { status: 399, headers: [], refused: true },
+      { status: 400, headers: [], refused: false },
+      { status: 302, headers: [{ name: "lOcAtIoN", value: { type: "string", value: "/next" } }], refused: false },
+      { status: 302, headers: [{ name: "Location", value: { type: "string", value: "" } }], refused: false }
+    ]
+  ) {
+    it.effect(`bounds refusal to status ${sample.status} with ${sample.headers.length} Location headers (${sample.headers[0]?.value.value ?? "absent"})`, () =>
+      Effect.gen(function*() {
+        const { state, sent } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "body" } } })
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const params = {
+          context: "C1",
+          userContext: "default",
+          navigation: null,
+          timestamp: 1,
+          redirectCount: 0,
+          isBlocked: false,
+          request: {
+            request: "terminal",
+            url: "http://site.test/",
+            method: "GET",
+            headers: [],
+            destination: "",
+            bodySize: 0
+          },
+          response: {
+            url: "http://site.test/",
+            status: sample.status,
+            statusText: "",
+            protocol: "HTTP/1.1",
+            headers: sample.headers,
+            fromCache: false,
+            bytesReceived: 4
+          }
+        }
+        handlers.apply("network.beforeRequestSent", params, { state })
+        handlers.apply("network.responseStarted", params, { state })
+        const entry = state.requests.get("terminal")!
+        if (sample.refused) {
+          // No completion event is needed to identify this unsupported native read.
+          const reading = yield* Network.responseBody(state, entry.hop).pipe(Effect.result, Effect.forkChild)
+          yield* Effect.yieldNow
+          assert.isDefined(reading.pollUnsafe(), "refusal must not wait for response completion")
+          const result = yield* Fiber.join(reading)
+          assert.strictEqual(result._tag, "Failure")
+          if (result._tag === "Failure") {
+            assert.deepStrictEqual(result.failure.reason, {
+              _tag: "Unsupported",
+              capability: "network.responseBody.terminalRedirect",
+              hint: "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+            })
+          }
+          assert.deepStrictEqual(sent, [])
+          // A followed successor must clear the refusal and wait for its own completion.
+          const next = { ...params, redirectCount: 1, response: { ...params.response, status: 200 } }
+          handlers.apply("network.beforeRequestSent", next, { state })
+          handlers.apply("network.responseStarted", next, { state })
+          assert.isFalse(Deferred.isDoneUnsafe(entry.finished))
+          handlers.apply("network.responseCompleted", next, { state })
+          assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, entry.hop)), "body")
+        } else {
+          handlers.apply("network.responseCompleted", params, { state })
+          assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, entry.hop)), "body")
+        }
+      }))
+  }
+})

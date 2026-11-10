@@ -676,18 +676,35 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
-      it.effect("collects the body of a terminal redirect status", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const { origin } = yield* fixture(() => "")
-          const page = yield* Browser.newPage()
-          const response = yield* NetworkResponse.next(page, {
-            url: `${origin}/redirect-unfollowed`,
-            status: 302,
-            body: (message) => message.text
-          })
-          yield* page.goto(`${origin}/redirect-unfollowed`)
-          assert.strictEqual((yield* response).body, "<title>unfollowed</title>")
-        })), timeout)
+      it.effect(
+        "collects a terminal redirect body or refuses it explicitly",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-unfollowed`,
+              status: 302,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            if (yield* supports("network.responseBody.terminalRedirect")) {
+              assert.strictEqual((yield* response).body, "<title>unfollowed</title>")
+            } else {
+              const error = yield* Effect.flip(response)
+              assert.strictEqual(error._tag, "ResponseError")
+              if (error._tag === "ResponseError") {
+                assert.deepStrictEqual(error.reason, {
+                  _tag: "Unsupported",
+                  capability: "network.responseBody.terminalRedirect",
+                  backend: "firefox",
+                  hint: "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+                })
+              }
+            }
+          })),
+        timeout
+      )
 
       it.effect(
         "ends manual redirects using the browser completion evidence",
