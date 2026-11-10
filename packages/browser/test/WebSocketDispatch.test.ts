@@ -105,7 +105,7 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
     })
     assert.strictEqual(ended, 1)
     assert.strictEqual(received, 0)
-    live = []
+    // The declaration registry has an older finalizer and can still contain this closing bridge.
     yield* Scope.close(scope, Exit.void)
     assert.strictEqual(first.target.event.handlers, handlers)
     assert.strictEqual(first.target.event.state, state)
