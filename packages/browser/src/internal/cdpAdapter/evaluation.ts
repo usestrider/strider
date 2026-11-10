@@ -26,7 +26,6 @@ import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State, type TargetEntry } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -220,7 +219,6 @@ export const contextCreated = (
     origin: context.origin,
     kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
   })
-  WebSocketBridge.flush(state, target)
 }
 
 export const register = (handlers: Kit.Handlers<Event>) =>

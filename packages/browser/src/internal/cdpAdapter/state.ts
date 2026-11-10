@@ -27,17 +27,36 @@ import * as Retired from "../retired.ts"
 
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface ContextEntry {
-  webSocketDeclarations?: number | undefined
-  readonly requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
-  proxy?: Adapter.ProxyOptions | undefined
-  readonly id: UserContext.Id
-  /** CDP's id; the default context's too, once a page in it reports it. */
-  browserContextId: string | undefined
-  readonly isDefault: boolean
-  removing: boolean
-  disposed?: boolean | undefined
-  lifecycleLock?: Semaphore.Semaphore | undefined
+export type ContextGate = (
+  state: State,
+  target: TargetEntry,
+  page: PageEntry | undefined,
+  waiting: boolean,
+  adopted: boolean
+) => Effect.Effect<ProtocolClient.Synced, Adapter.AdapterError | import("../../protocol/Protocol.ts").ProtocolError>
+export type WorkerGate = (
+  state: State,
+  target: TargetEntry,
+  waiting: boolean
+) => Effect.Effect<ProtocolClient.Synced, Adapter.AdapterError | import("../../protocol/Protocol.ts").ProtocolError>
+
+export class ContextEntry {
+  declare requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
+  declare proxy?: Adapter.ProxyOptions | undefined
+  declare readonly id: UserContext.Id
+  declare browserContextId: string | undefined
+  declare readonly isDefault: boolean
+  declare removing: boolean
+  declare disposed?: boolean | undefined
+  declare lifecycleLock?: Semaphore.Semaphore | undefined
+  declare gate: ContextGate
+  declare workerGate: WorkerGate
+  constructor(id: UserContext.Id, browserContextId: string | undefined, isDefault: boolean) {
+    this.id = id
+    this.browserContextId = browserContextId
+    this.isDefault = isDefault
+    this.removing = false
+  }
 }
 
 /** Serialize context commands with disposal; removal in progress alone does not prove it succeeded. */

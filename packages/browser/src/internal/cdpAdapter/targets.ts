@@ -31,7 +31,15 @@ import * as Urls from "../urls.ts"
 import { configureTarget } from "./declare.ts"
 import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
-import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import {
+  ContextEntry,
+  type Event,
+  type FrameEntry,
+  type PageEntry,
+  placement,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
 
@@ -97,7 +105,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
           : { _tag: "Opened", opener: openerId },
         url: Urls.reported(info.url)
       })
-      state.control.sync(session, gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect))
+      state.control.sync(session, context.gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect))
       return
     }
     case "iframe": {
@@ -115,11 +123,13 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
       const target = newTarget(kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
-      const context = info.browserContextId === undefined
+      const context = target.page?.context ?? (info.browserContextId === undefined
         ? undefined
-        : state.contextsByCdp.get(info.browserContextId)
-      if (context !== undefined) state.workerContexts.set(target, context)
-      state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
+        : state.contextsByCdp.get(info.browserContextId))
+      if (context !== undefined) {
+        state.workerContexts.set(target, context)
+        state.control.sync(session, context.workerGate(state, target, params.waitingForDebugger))
+      } else state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
       return
     }
     case "other": {
@@ -237,48 +247,6 @@ const snapshot = Effect.fnUntraced(function*(
   configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>
 ) {
   const on = Protocol.on(target.session)
-  // An anchor-created popup has no document yet. Its Page/Runtime enables wait for debugger resume.
-  // Only opted-in contexts batch their bindings and preload ahead of resume. Early binding messages are held
-  // until their live contexts have been installed into the frame-tree snapshot.
-  let early:
-    | { readonly contexts: Array<Runtime.ExecutionContextCreatedParams>; readonly scope: Scope.Closeable }
-    | undefined
-  if (target.kind === "page" && target.url === "" && page?.context.webSocketDeclarations !== undefined) {
-    const bundles = state.registry.bundles(placement(page))
-    const bridges = bundles.get("")?.webSockets
-    if (bridges !== undefined) {
-      const scope = yield* Scope.fork(state.cleanupScope)
-      const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
-      const main = yield* Deferred.make<void>()
-      const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
-      yield* events.pipe(
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            contexts.push(event)
-            if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
-              Deferred.doneUnsafe(main, Effect.void)
-            }
-          })
-        ),
-        Effect.forkIn(scope)
-      )
-      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
-      yield* Effect.all([
-        Page.enable().pipe(on),
-        Runtime.enable().pipe(on),
-        ...bindings.map((binding) => binding.pipe(on)),
-        ...[...bundles].map(([key, bundle]) =>
-          Page.addScriptToEvaluateOnNewDocument({
-            source: bundle.source,
-            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
-        ),
-        Runtime.runIfWaitingForDebugger().pipe(on)
-      ], { concurrency: "unbounded", discard: true })
-      yield* Deferred.await(main)
-      early = { contexts, scope }
-    }
-  }
   yield* Effect.all([
     Page.enable().pipe(on),
     Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
@@ -296,25 +264,10 @@ const snapshot = Effect.fnUntraced(function*(
     filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
   }).pipe(on)
   const failure = yield* configure.pipe(Effect.flip, Effect.option)
-  const liveContexts: Array<Runtime.ExecutionContextCreatedParams> = []
-  if (early !== undefined) {
-    for (const context of early.contexts.slice()) {
-      const live = yield* Runtime.evaluate({ expression: "0", uniqueContextId: context.context.uniqueId }).pipe(
-        on,
-        Effect.exit
-      )
-      if (Exit.isSuccess(live)) liveContexts.push(context)
-    }
-    yield* Scope.close(early.scope, Exit.void)
-  }
   return {
     through: received,
     apply: Effect.suspend(() => {
       installTree(state, target, result.frameTree, adopted)
-      if (early !== undefined) {
-        for (const context of liveContexts) Evaluation.contextCreated(state, target, context)
-        WebSocketBridge.flush(state, target)
-      }
       if (page !== undefined && target.kind === "page") {
         if (failure._tag === "Some") {
           state.buffer.emit({ _tag: "PageInitializationFailed", page: page.id, description: failure.value.message })
@@ -358,6 +311,113 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
 })
 
+// Ordinary contexts share the original gates. Only an opted-in context gets own gate properties.
+ContextEntry.prototype.gate = gate
+ContextEntry.prototype.workerGate = workerGate
+
+export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced(
+  function*(state, target, page, waiting, adopted) {
+    if (target.kind !== "page" || target.url !== "" || page === undefined) {
+      return yield* gate(state, target, page, waiting, adopted)
+    }
+    const bundles = state.registry.bundles(placement(page))
+    const bridges = bundles.get("")?.webSockets
+    if (bridges === undefined) return yield* gate(state, target, page, waiting, adopted)
+    const scope = yield* Scope.fork(state.cleanupScope)
+    const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
+    const main = yield* Deferred.make<void>()
+    const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
+    yield* events.pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          contexts.push(event)
+          if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
+            Deferred.doneUnsafe(main, Effect.void)
+          }
+        })
+      ),
+      Effect.forkIn(scope)
+    )
+    return yield* Effect.gen(function*() {
+      const on = Protocol.on(target.session)
+      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Runtime.enable().pipe(on),
+        ...bindings.map((binding) => binding.pipe(on)),
+        ...[...bundles].map(([key, bundle]) =>
+          Page.addScriptToEvaluateOnNewDocument({
+            source: bundle.source,
+            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
+          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
+        ),
+        Runtime.runIfWaitingForDebugger().pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      yield* Deferred.await(main)
+      const synced = yield* gate(state, target, page, waiting, adopted)
+      const live: Array<Runtime.ExecutionContextCreatedParams> = []
+      for (const event of contexts) {
+        if (
+          Exit.isSuccess(
+            yield* Runtime.evaluate({ expression: "0", uniqueContextId: event.context.uniqueId }).pipe(on, Effect.exit)
+          )
+        ) live.push(event)
+      }
+      return {
+        through: synced.through,
+        apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
+          for (const event of live) Evaluation.contextCreated(state, target, event)
+          WebSocketBridge.flush(state, target)
+          return state.buffer.flush
+        })))
+      }
+    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+  }
+)
+
+export const webSocketWorkerGate: import("./state.ts").WorkerGate = Effect.fnUntraced(
+  function*(state, target, waiting) {
+    const bindings = yield* WebSocketBridge.prepare(state, target, undefined, false)
+    const results = yield* Effect.all([
+      Effect.forEach(bindings, (binding) => binding.pipe(Protocol.on(target.session)), { discard: true }),
+      workerGate(state, target, waiting)
+    ], { concurrency: "unbounded" })
+    return results[1]
+  }
+)
+
+let gateUsers: WeakMap<ContextEntry, { total: number; workers: number }> | undefined
+export const installWebSocketGates = Effect.fnUntraced(
+  function*(context: ContextEntry, scope: Scope.Scope, workers: boolean) {
+    gateUsers ??= new WeakMap()
+    let users = gateUsers.get(context)
+    if (users === undefined) {
+      users = { total: 0, workers: 0 }
+      gateUsers.set(context, users)
+    }
+    users.total++
+    context.gate = webSocketGate
+    if (workers) {
+      users.workers++
+      context.workerGate = webSocketWorkerGate
+    }
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => {
+        users.total--
+        if (workers) users.workers--
+        if (users.workers === 0 && Object.hasOwn(context, "workerGate")) {
+          delete (context as Partial<ContextEntry>).workerGate
+        }
+        if (users.total === 0) {
+          delete (context as Partial<ContextEntry>).gate
+          gateUsers!.delete(context)
+        }
+      })
+    )
+  }
+)
+
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -375,9 +435,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         : state.registry.workerBundle(placement(target.page))
       state.buffer.later(
         Effect.all([
-          Option.isNone(bundle) ? Effect.void : WebSocketBridge.prepare(state, target).pipe(
-            Effect.andThen(Runtime.evaluate({ expression: bundle.value }).pipe(on))
-          ),
+          Option.isNone(bundle) ? Effect.void : Runtime.evaluate({ expression: bundle.value }).pipe(on),
           // Disabling the debugger clears its breakpoint
           Debugger.resume({}).pipe(on),
           Debugger.disable().pipe(on)

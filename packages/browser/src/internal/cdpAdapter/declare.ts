@@ -26,6 +26,7 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import { installWebSocketGates } from "./targets.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** A URL pattern no request matches: a scheme nothing uses. */
@@ -450,16 +451,7 @@ export const declare = Effect.fnUntraced(function*(
 ) {
   if (declaration._tag === "InitScript" && declaration.webSocket !== undefined && scope._tag === "UserContext") {
     const context = state.contexts.get(scope.context)
-    if (context !== undefined) {
-      context.webSocketDeclarations = (context.webSocketDeclarations ?? 0) + 1
-      yield* Scope.addFinalizer(
-        yield* Effect.scope,
-        Effect.sync(() => {
-          if (context.webSocketDeclarations === 1) delete context.webSocketDeclarations
-          else if (context.webSocketDeclarations !== undefined) context.webSocketDeclarations--
-        })
-      )
-    }
+    if (context !== undefined) yield* installWebSocketGates(context, yield* Effect.scope, declaration.workers)
   }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)

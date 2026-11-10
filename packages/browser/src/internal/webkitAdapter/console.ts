@@ -111,10 +111,6 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Console.messageAdded, (params, { state, target, worker }) => {
       const holder = worker ?? target
       if (holder === undefined) return
-      if ((worker?.target ?? target)?.webSocketConsole?.(params.message, worker)) {
-        holder.lastConsole = undefined
-        return
-      }
       holder.lastConsole = params.message
       consoleMessage(state, params.message, worker?.target ?? target!, worker)
     })

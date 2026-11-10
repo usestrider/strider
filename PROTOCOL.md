@@ -357,14 +357,18 @@ Adapter responsibilities:
   - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
   - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
 - **Script WebSocket routing** adds private transport metadata to an environment init script only in the
-  requesting context. CDP installs Runtime bindings on covered targets (at the existing before-script breakpoint
-  in dedicated workers). A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
+  requesting context. CDP installs Runtime bindings and realm-event subscriptions only on covered targets.
+  Contexts share ordinary gate methods by prototype; opting in replaces only that context’s gate methods.
+  Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
   before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
   binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
   Stock WebKit captures console.debug and sends a fresh object per envelope, carrying an exact marker and
   payload. Its target-local classifier consumes those objects before ordinary console publication, derives the
   realm from injectedScriptId, and releases every consumed remote object after extraction. Ordinary string and
-  object console messages are unchanged. No polling supplies the bridge. Required context timing is refused
+  object console messages are unchanged. Native WebKit events reuse a prebound dispatch context: ordinary
+  targets use the shared handler table, and only opted-in targets/page proxies/workers use a private handler/state
+  view. Realm removal reaches that view through the existing fact buffer. No ordinary console/realm event probes
+  WebSocket fields or a bridge WeakMap. Last release restores the shared dispatch. No polling supplies the bridge. Required context timing is refused
   before installation on stock WebKit and attached Chromium. Firefox refuses dedicated-worker preloads; shared
   and service workers are outside this feature. None of these protocols offers native message interception.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:

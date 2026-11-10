@@ -118,17 +118,16 @@ const applyTargetOverride = (
   }
 }
 
-const applyBootstrap = (state: State, target: TargetEntry) =>
-  Effect.suspend(() => {
-    const bundles = state.registry.bundles(placement(target.page))
-    const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
-    if (main?.webSockets !== undefined || target.webSocketConsole !== undefined) {
-      WebSocketBridge.prepare(state, target, main?.webSockets ?? [])
-    }
-    return Page.setBootstrapScript(main === undefined ? {} : { source: main.source }).pipe(
-      Protocol.on(target.session)
-    )
-  })
+const applyBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
+  const bundles = state.registry.bundles(placement(target.page))
+  const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
+  if (main?.webSockets !== undefined) {
+    yield* WebSocketBridge.prepare(state, target, main.webSockets)
+  }
+  return yield* Page.setBootstrapScript(main === undefined ? {} : { source: main.source }).pipe(
+    Protocol.on(target.session)
+  )
+})
 
 const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
   const intercepts = state.registry.intercepts(placement(target.page))

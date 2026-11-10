@@ -113,6 +113,8 @@ const fixture = Effect.fnUntraced(function*(collect: boolean, via: "automation" 
     pausedRequests: new Map(),
     realms: new Map()
   })
+  target.event = State.eventContext(state, session, page, target, undefined)
+  page.event = State.eventContext(state, session, page, undefined, undefined)
   const endTarget = buffer.run(() => Targets.ended(state, session, { why: "targetClosed" } as never))
   const otherPage = buffer.run(() => {
     Object.assign(request, { frame: { ...frame, page: {} as State.PageEntry } })

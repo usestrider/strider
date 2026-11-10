@@ -5,6 +5,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
@@ -42,7 +43,7 @@ export const flush = (state: State, target: TargetEntry): void => {
     }
     for (const event of holder.events.splice(0)) {
       const realm = state.realmsByContext.get(contextKey(target, event.executionContextId))
-      if (realm !== undefined && !realm.ended) {
+      if (realm !== undefined && !realm.ended && !realm.pending) {
         holder.known.set(realm.uniqueId, realm.id)
         holder.bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm))
       } else holder.events.push(event)
@@ -84,7 +85,7 @@ export const prepare = Effect.fnUntraced(
           Effect.sync(() => {
             if (event.name !== bridge.name) return
             const realm = state.realmsByContext.get(contextKey(target, event.executionContextId))
-            if (realm === undefined || realm.ended) {
+            if (realm === undefined || realm.ended || realm.pending) {
               if (holder.events.length < 64) holder.events.push(event)
               else {
                 holder.overflow = true
@@ -117,6 +118,16 @@ export const prepare = Effect.fnUntraced(
             )
         ),
         Effect.ensuring(Scope.close(lifetime, Exit.void)),
+        Effect.forkIn(lifetime)
+      )
+      const created = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(lifetime))
+      yield* created.pipe(
+        Stream.runForEach(() => Effect.sync(() => flush(state, target))),
+        Effect.forkIn(lifetime)
+      )
+      const committed = yield* target.session.subscribe(Page.frameNavigated).pipe(Scope.provide(lifetime))
+      yield* committed.pipe(
+        Stream.runForEach(() => Effect.sync(() => flush(state, target))),
         Effect.forkIn(lifetime)
       )
       const destroyed = yield* target.session.subscribe(Runtime.executionContextDestroyed).pipe(

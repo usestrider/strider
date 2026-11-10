@@ -12,7 +12,7 @@ import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import { releaseDocument } from "./responses.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
   contextKey,
   type DocumentEntry,
   type FrameEntry,
@@ -251,7 +251,7 @@ export const contextFor = (state: State, browserContextId: string | undefined): 
     return fallback
   }
   // A context someone else created
-  const entry: ContextEntry = { id: state.ids.userContext(), browserContextId, isDefault: false, removing: false }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
   state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })

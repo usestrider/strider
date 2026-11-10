@@ -66,13 +66,8 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     root: () => protocolSession,
     release: Responses.release
   })
-  const context: State.ContextEntry = {
-    ...(requestTiming ? { requestTiming: new Map() } : {}),
-    id: state.defaultContext,
-    browserContextId: undefined,
-    isDefault: true,
-    removing: false
-  }
+  const context = new State.ContextEntry(state.defaultContext, undefined, true)
+  if (requestTiming) context.requestTiming = new Map()
   state.contexts.set(context.id, context)
   const target: State.TargetEntry = {
     kind: "page",
@@ -1153,12 +1148,7 @@ describe("CDP restoration cleanup", () => {
           })
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(mock)
-      const closing = {
-        id: state.ids.userContext(),
-        browserContextId: "disposing",
-        isDefault: false,
-        removing: false
-      }
+      const closing = new State.ContextEntry(state.ids.userContext(), "disposing", false)
       state.contexts.set(closing.id, closing)
       state.contextsByCdp.set("disposing", closing)
       state.pages.set(page.id, { ...page, context: closing })

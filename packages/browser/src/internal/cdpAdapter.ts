@@ -286,12 +286,11 @@ export const connect: (
       revision: version.protocolVersion
     })
     const contextIds = yield* Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)
-    const defaultEntry: State.ContextEntry = {
-      id: state.defaultContext,
-      browserContextId: Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
-      isDefault: true,
-      removing: false
-    }
+    const defaultEntry = new State.ContextEntry(
+      state.defaultContext,
+      Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
+      true
+    )
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
