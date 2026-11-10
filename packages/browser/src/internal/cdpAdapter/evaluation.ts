@@ -419,9 +419,11 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
                 const reason = error.reason
                 if (
                   reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
-                  reason.code !== -32000 || reason.description !== "Inspected target navigated or closed"
+                  reason.code !== -32000 ||
+                  (reason.description !== "Inspected target navigated or closed" &&
+                    reason.description !== "Execution context was destroyed.")
                 ) return Effect.fail(error)
-                // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
+                // CDP can reject before contexts-cleared, context-destroyed or target-detached reaches the fold. Wait for that
                 // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
                 // Keep the command's original deadline while those lifecycle events catch up.
                 return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
