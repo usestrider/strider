@@ -250,6 +250,14 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             if (error._tag !== "UserContextError") return yield* Effect.die(error)
             assert.equal(error.reason._tag, "Unsupported")
             assert.equal(clear.mock.calls.length, 0)
+            yield* page.close()
+            if (yield* supports("storageState.closedOpaqueHistory")) {
+              yield* context.setStorageState(empty)
+            } else {
+              const closedError = yield* context.setStorageState(empty).pipe(Effect.flip)
+              assert(closedError._tag === "UserContextError" && closedError.reason._tag === "Unsupported")
+              assert.equal(clear.mock.calls.length, 0)
+            }
           })),
         60000
       )

@@ -134,6 +134,12 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "a context's list is the cookies its pages' documents and resources are sent"
       ]),
       entry("cookies.partitioned", "unsupported", ["WebKit doesn't report partitioned cookies"]),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported", [
         "stock WebKit keys a frame's storage by its top-level origin, port included: a state saved without one is restored at its site's default port"
       ]),

@@ -2,12 +2,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Route, StorageState } from "@usestrider/browser"
+import { Browser, StorageState } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Effect from "effect/Effect"
-import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs"
@@ -156,197 +155,39 @@ for (const [name, backend] of backends) {
         )
       }
       it.effect(
-        "probes opaque and file storage lifetime after page closure",
+        "refuses retained file history before and after its last page closes",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const childOrigin = "http://storage.example.com"
-            const context = yield* Browser.newContext({ storageStateTracking: true })
+            const table = yield* (yield* Browser.Browser).capabilities
+            const policy = table.entries.find((entry) => entry.name === "storageState.closedFileHistory")
+            assert.isDefined(policy)
             const directory = yield* Effect.acquireRelease(
-              Effect.sync(() => fs.mkdtempSync(path.join(os.tmpdir(), "strider-storage-lifetime-"))),
+              Effect.sync(() => fs.mkdtempSync(path.join(os.tmpdir(), "strider-file-history-"))),
               (directory) => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
             )
             const file = path.join(directory, "storage.html")
-            fs.writeFileSync(file, "<!doctype html><title>file storage lifetime</title>")
-            const fileUrl = pathToFileURL(file).href
-            const results: Record<string, unknown> = {}
-            for (const kind of ["opaque", "file"] as const) {
-              const top = kind === "opaque" ? "data:text/html,<title>opaque storage lifetime</title>" : fileUrl
-              const page = yield* context.newPage
-              yield* page.goto(top)
-              if (kind === "file") {
-                results.fileOwnAccepted = yield* page.evaluateInMainWorld(async () => {
-                  const result: Record<string, string | null> = {}
-                  try {
-                    localStorage.setItem("file-lifetime", "kept")
-                    result.local = localStorage.getItem("file-lifetime")
-                  } catch (error) {
-                    result.local = (error as Error).name
-                  }
-                  try {
-                    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-                      const request = indexedDB.open("file-lifetime", 1)
-                      request.onupgradeneeded = () => request.result.createObjectStore("values")
-                      const pending = setTimeout(() =>
-                        reject(
-                          new DOMException("IndexedDB open did not reply within two seconds", "OpenReplyUnobserved")
-                        ), 2000)
-                      request.onsuccess = () => {
-                        clearTimeout(pending)
-                        resolve(request.result)
-                      }
-                      request.onerror = () => {
-                        clearTimeout(pending)
-                        reject(request.error)
-                      }
-                    })
-                    await new Promise<void>((resolve, reject) => {
-                      const tx = db.transaction("values", "readwrite")
-                      tx.objectStore("values").put("kept", "key")
-                      tx.oncomplete = () => resolve()
-                      tx.onerror = () => reject(tx.error)
-                    })
-                    db.close()
-                    result.db = "kept"
-                  } catch (error) {
-                    result.db = (error as Error).name
-                  }
-                  return result
-                })
-              }
-              const child = Effect.fnUntraced(function*(page: import("../../src/Page.ts").Page, seed: boolean) {
-                const script = `(${
-                  async function(seed: boolean) {
-                    const result: Record<string, string | null> = {}
-                    try {
-                      if (seed) localStorage.setItem("partition-lifetime", "kept")
-                      result.local = localStorage.getItem("partition-lifetime")
-                    } catch (error) {
-                      result.local = (error as Error).name
-                    }
-                    try {
-                      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-                        const request = indexedDB.open("partition-lifetime", 1)
-                        request.onupgradeneeded = () => request.result.createObjectStore("values")
-                        const pending = setTimeout(() =>
-                          reject(
-                            new DOMException("IndexedDB open did not reply within two seconds", "OpenReplyUnobserved")
-                          ), 2000)
-                        request.onsuccess = () => {
-                          clearTimeout(pending)
-                          resolve(request.result)
-                        }
-                        request.onerror = () => {
-                          clearTimeout(pending)
-                          reject(request.error)
-                        }
-                      })
-                      result.db = await new Promise<string | null>((resolve, reject) => {
-                        const tx = db.transaction("values", seed ? "readwrite" : "readonly")
-                        const store = tx.objectStore("values")
-                        let value: string | null = null
-                        if (seed) {
-                          store.put("kept", "key")
-                          value = "kept"
-                        } else {
-                          const read = store.get("key")
-                          read.onsuccess = () => {
-                            value = read.result ?? null
-                          }
-                        }
-                        tx.oncomplete = () => resolve(value)
-                        tx.onerror = () => reject(tx.error)
-                      })
-                      db.close()
-                    } catch (error) {
-                      result.db = (error as Error).name
-                    }
-                    parent.postMessage(result, "*")
-                  }.toString()
-                })(${seed})`
-                const childUrl = `${childOrigin}/lifetime/${seed ? "seed" : "read"}`
-                yield* page.route(childUrl, () =>
-                  Route.fulfill(HttpServerResponse.text(`<script>${script}</script>`, { contentType: "text/html" })))
-                return yield* page.evaluateInMainWorld(async (url) => {
-                  return await new Promise<Record<string, string | null>>((resolve) => {
-                    const old = document.querySelector("iframe")
-                    old?.remove()
-                    const iframe = document.createElement("iframe")
-                    window.addEventListener("message", function received(event) {
-                      if (event.source !== iframe.contentWindow) {
-                        return
-                      }
-                      window.removeEventListener("message", received)
-                      resolve(event.data)
-                    })
-                    iframe.src = url
-                    document.body.append(iframe)
-                  })
-                }, childUrl)
-              })
-              results[`${kind}Accepted`] = yield* child(page, true)
-              results[`${kind}SameTopRead`] = yield* child(page, false)
-              const accepted = results[`${kind}Accepted`] as Record<string, string | null>
-              const control = results[`${kind}SameTopRead`] as Record<string, string | null>
-              for (const storage of ["local", "db"]) {
-                if (accepted[storage] === "kept") {
-                  assert.equal(control[storage], "kept", `${kind} ${storage} acceptance control`)
-                }
-              }
-              yield* page.close()
-              const reopened = yield* context.newPage
-              yield* reopened.goto(top)
-              if (kind === "file") {
-                results.fileOwnReopened = yield* reopened.evaluateInMainWorld(async () => {
-                  const result: Record<string, string | null> = {}
-                  try {
-                    result.local = localStorage.getItem("file-lifetime")
-                  } catch (error) {
-                    result.local = (error as Error).name
-                  }
-                  try {
-                    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-                      const request = indexedDB.open("file-lifetime", 1)
-                      request.onupgradeneeded = () =>
-                        request.result.createObjectStore("values")
-                      const pending = setTimeout(() =>
-                        reject(
-                          new DOMException("IndexedDB open did not reply within two seconds", "OpenReplyUnobserved")
-                        ), 2000)
-                      request.onsuccess = () => {
-                        clearTimeout(pending)
-                        resolve(request.result)
-                      }
-                      request.onerror = () => {
-                        clearTimeout(pending)
-                        reject(request.error)
-                      }
-                    })
-                    result.db = await new Promise<string | null>((resolve, reject) => {
-                      const tx = db.transaction("values", "readonly")
-                      const read = tx.objectStore("values").get("key")
-                      read.onsuccess = () => resolve(read.result ?? null)
-                      read.onerror = () => reject(read.error)
-                    })
-                    db.close()
-                  } catch (error) {
-                    result.db = (error as Error).name
-                  }
-                  return result
-                })
-              }
-              results[`${kind}ReopenedTopRead`] = yield* child(reopened, false)
-              yield* reopened.close()
+            fs.writeFileSync(file, "<!doctype html><title>file history</title>")
+            const context = yield* Browser.newContext({ storageStateTracking: true })
+            const page = yield* context.newPage
+            yield* page.goto(pathToFileURL(file).href)
+            yield* page.evaluateInMainWorld(() => localStorage.setItem("file-history", "kept"))
+            const openError = yield* context.setStorageState(
+              new StorageState.StorageState({ cookies: [], origins: [] })
+            ).pipe(Effect.flip)
+            assert(openError._tag === "UserContextError" && openError.reason._tag === "Unsupported")
+            yield* page.close()
+            const reopened = yield* context.newPage
+            yield* reopened.goto(pathToFileURL(file).href)
+            assert.equal(yield* reopened.evaluateInMainWorld(() => localStorage.getItem("file-history")), "kept")
+            yield* reopened.close()
+            if (policy!.status === "unsupported") {
+              const closedError = yield* context.setStorageState(
+                new StorageState.StorageState({ cookies: [], origins: [] })
+              ).pipe(Effect.flip)
+              assert(closedError._tag === "UserContextError" && closedError.reason._tag === "Unsupported")
+            } else {
+              yield* context.setStorageState(new StorageState.StorageState({ cookies: [], origins: [] }))
             }
-            const firstParty = yield* context.newPage
-            yield* firstParty.route(childOrigin + "/", () =>
-              Route.fulfill(HttpServerResponse.text("<!doctype html>", { contentType: "text/html" })))
-            yield* firstParty.goto(childOrigin)
-            results.firstPartyLocal = yield* firstParty.evaluateInMainWorld(() =>
-              localStorage.getItem("partition-lifetime")
-            )
-            console.log(`${name} storage lifetime evidence`, JSON.stringify(results))
-            assert.isObject(results.opaqueAccepted)
-            assert.isObject(results.fileAccepted)
           })),
         60000
       )
