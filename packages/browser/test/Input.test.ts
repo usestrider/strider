@@ -143,3 +143,13 @@ describe("Input.uncertain", () => {
     assert.isTrue(Option.isNone(state.broken))
   })
 })
+
+describe("uncertain modifier releases", () => {
+  it("clears the released modifier's flag", () => {
+    const state = Input.make()
+    const events = Input.type(state, "A", "us")!
+    Input.uncertain(state, "Keyboard.press", events)
+    const expected = events.filter((event) => event._tag === "Key" && event.type === "up")
+    assert.deepStrictEqual(Option.getOrThrow(state.broken).release, expected)
+  })
+})

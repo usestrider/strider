@@ -5382,6 +5382,57 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
 
       for (const gesture of ["locator click", "coordinate click"] as const) {
         it.effect(
+          `an interrupted ${gesture} records the press before allowing another gesture`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<button id="go" style="margin:40px">Go</button>`)
+              const page = yield* newPage
+              yield* page.goto(url)
+              const target = page.locator("#go")
+              assert(target instanceof LocatorImpl)
+              const adapter = target.owner.runtime.model.adapter
+              const original = adapter.dispatchInput
+              const pressed = yield* Deferred.make<void>()
+              const sent: Array<ReadonlyArray<string>> = []
+              let first = true
+              const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+                sent.push(args[1].map((event) => event._tag === "Mouse" ? event.type : event._tag))
+                if (!first) return yield* original(...args)
+                first = false
+                const down = args[1].findIndex((event) => event._tag === "Mouse" && event.type === "down")
+                yield* original(args[0], args[1].slice(0, down + 1), args[2])
+                yield* Deferred.succeed(pressed, undefined)
+                return yield* Effect.never
+              })
+              const box = Option.getOrThrow(yield* target.boundingBox)
+              const click = gesture === "locator click"
+                ? target.click()
+                : page.mouse.click({ x: box.x + 5, y: box.y + 5 })
+              yield* Effect.acquireUseRelease(
+                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                () =>
+                  Effect.gen(function*() {
+                    const fiber = yield* click.pipe(Effect.forkScoped)
+                    yield* Deferred.await(pressed).pipe(Deadline.within("5 seconds"))
+                    yield* Fiber.interrupt(fiber)
+                    const state = target.owner.page.inputState
+                    assert.isTrue(
+                      Option.isSome(state.broken),
+                      "an interrupted dispatch must retain its uncertain release"
+                    )
+                    yield* page.mouse.click({ x: 5, y: 5 })
+                    assert.deepStrictEqual(sent[1], ["up"])
+                    assert.deepStrictEqual(sent[2], ["move", "down", "up"])
+                  }),
+                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+              )
+            })),
+          timeout
+        )
+      }
+
+      for (const gesture of ["locator click", "coordinate click"] as const) {
+        it.effect(
           `a ${gesture} whose release fails records the release as uncertain, and the next gesture sends it first`,
           () =>
             Effect.gen(function*() {
