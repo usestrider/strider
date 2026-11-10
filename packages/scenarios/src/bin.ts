@@ -103,7 +103,12 @@ if (output !== undefined) {
         memory: os.totalmem(),
         load: os.loadavg(),
         environment: Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => /^(STRIDER_|FONTCONFIG_|ALSA_|LANG$|LC_|TZ$)/.test(key))
+          // By name, and never a credential: the output directory is retained, and the bucket's keys are STRIDER_ variables
+          Object.entries(process.env).filter(([key]) =>
+            /^(STRIDER_|FONTCONFIG_|ALSA_|LANG$|LC_|TZ$)/.test(key) &&
+            !key.startsWith("STRIDER_RECORDINGS_") &&
+            !/SECRET|TOKEN|PASSWORD|CREDENTIAL|KEY|AUTH/i.test(key)
+          )
         )
       },
       null,
