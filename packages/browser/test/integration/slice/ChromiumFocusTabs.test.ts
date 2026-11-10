@@ -77,6 +77,43 @@ describe("Chromium page placement", () => {
         }), { timeout: 60_000 })
     }
 
+    it.effect(
+      "keeps new lifetime-emulated tabs rendering after the focus declaration is released",
+      () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const facts = makeRecorder()
+          const { transport } = yield* ChromiumLauncher.launch({ executablePath: chromium.executable })
+          const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+          const context = yield* adapter.createUserContext({
+            proxy: Option.none(),
+            acceptInsecureCerts: false,
+            focusEmulated: true
+          })
+          yield* Effect.scoped(adapter.declare({ _tag: "UserContext", context }, {
+            _tag: "Override",
+            override: { _tag: "FocusEmulation", enabled: true }
+          }))
+          const behind = yield* adapter.createPage(context)
+          const navigation = yield* adapter.navigate(behind, `${served.origin}/hello`, { referrer: Option.none() })
+          const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+          assert(ended.outcome._tag === "Committed")
+          const realm = yield* adapter.realm(ended.outcome.document, { _tag: "Main" })
+          yield* adapter.createPage(context)
+          const result = yield* adapter.evaluate(realm, {
+            functionDeclaration:
+              "() => new Promise(resolve => { requestAnimationFrame(() => resolve(true)); setTimeout(() => resolve(false), 2000) })",
+            arguments: [],
+            awaitPromise: true,
+            result: "value",
+            userActivation: false
+          })
+          assert(result._tag === "Value")
+          assert.strictEqual(json(result.value), true, "the lifetime setting must apply to future tabs too")
+        }),
+      { timeout: 60_000 }
+    )
+
     it.effect("opens a page in a window of its own by default", () =>
       Effect.gen(function*() {
         const created: Array<Record<string, unknown>> = []
