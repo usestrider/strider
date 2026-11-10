@@ -93,7 +93,8 @@ export const dispatchInput = Effect.fnUntraced(
               Effect.ignore,
               Effect.ensuring(Effect.sync(() => Gestures.finished(events))),
               Effect.forkDetach,
-              Effect.asVoid
+              // Let it begin, so its write is ordered before anything the caller sends next
+              Effect.andThen(Effect.yieldNow)
             )
           })
         )
