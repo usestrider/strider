@@ -328,7 +328,9 @@ const callInDocument = Effect.fnUntraced(function*(
   id: Diagnostics.OperationId,
   releaseResult?: boolean,
   replay = true,
-  prepareRealm: Effect.Effect<Target.RealmId, Adapter.AdapterError | Deadline.Timeout> = engineRealm(runtime, document)
+  prepareRealm: Effect.Effect<Target.RealmId, Adapter.AdapterError | Deadline.Timeout> = engineRealm(runtime, document),
+  // Called when the realm or document was gone, so `None` is not the engine's own `missing`
+  onGone?: () => void
 ) {
   let sent = false
   return yield* prepareRealm.pipe(
@@ -351,6 +353,7 @@ const callInDocument = Effect.fnUntraced(function*(
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
+        onGone?.()
         return Cache.invalidate(runtime.engineRealms, document).pipe(
           Effect.andThen(
             replay || !sent
@@ -710,7 +713,8 @@ export const sendToDocument = (
 /**
  * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
  * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
- * caller's uninterruptible finalizer. A gone document needs no release.
+ * caller's uninterruptible finalizer. A gone document needs no release, and a document whose realm is destroyed
+ * counts as released once the model ends it, within the cleanup's deadline.
  */
 export const releaseInDocument = (
   runtime: Runtime,
@@ -718,24 +722,44 @@ export const releaseInDocument = (
   request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
-  Effect.suspend(() =>
-    Option.isSome(runtime.model.document(document))
-      ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
-        Effect.flatMap((value) =>
-          Effect.gen(function*() {
-            if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
-            if (
-              Option.isSome(value) && value.value.type === "string" &&
-              (yield* decode(value.value.value))._tag === "FillGuard"
-            ) {
-              return
-            }
-            return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
-          })
-        )
+  Effect.suspend(() => {
+    const entry = runtime.model.document(document)
+    if (Option.isNone(entry)) return Effect.void
+    let gone = false
+    return callInDocument(
+      runtime,
+      document,
+      Engine.run,
+      JSON.stringify(request),
+      id,
+      undefined,
+      true,
+      engineRealm(runtime, document),
+      () => {
+        gone = true
+      }
+    ).pipe(
+      Effect.flatMap((value) =>
+        Effect.gen(function*() {
+          if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
+          if (
+            Option.isSome(value) && value.value.type === "string" &&
+            (yield* decode(value.value.value))._tag === "FillGuard"
+          ) {
+            return
+          }
+          // A destroyed realm took the guard's listeners with it once the document ends. Wait for the model to say
+          // so, until the cleanup's deadline; a document that is still live then has not confirmed anything.
+          if (gone) {
+            const { at } = yield* Operation.budget
+            const ended = yield* Deferred.await(entry.value.ended).pipe(BrowserClock.until(at))
+            if (Option.isSome(ended)) return
+          }
+          return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
+        })
       )
-      : Effect.void
-  )
+    )
+  })
 
 /** The one match, by its node binding and where it is, or the engine's answer for why there is none. */
 export type Found =
