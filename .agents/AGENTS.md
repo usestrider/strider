@@ -218,8 +218,8 @@ time: "The files a page downloads", not "Downloads a page starts". Words of the 
 fold, latched or navigable, become what they mean, unless they are the API's names.
 
 A guide teaches one concept a page, and a section a reader would look for in the sidebar is a page of its own.
-Before its first code, a concept gets up to two plain sentences: what goes wrong without it and what it gets the
-reader, with no history or scene-setting. Whatever the prose names that a reader would type is shown in a block on
+Before its first code, a concept gets a sentence or two that say what it is and does, as you'd explain it to a
+colleague: a problem only when the concept exists to solve it, and no template, history, or scene-setting. Whatever the prose names that a reader would type is shown in a block on
 the page, or linked to where it's shown. Every page follows the conventions in `website/README.md`, "Style", so
 the guide reads as one. The `review-guides` skill checks all four.
 
