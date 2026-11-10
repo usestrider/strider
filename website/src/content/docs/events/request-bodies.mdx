@@ -1,11 +1,11 @@
 ---
 title: Request bodies
-description: Capture submitted text, bytes, JSON and URL-encoded forms with scoped request subscriptions.
+description: Reading what a page submitted.
 order: 4
 ---
 
-A request event tells you where data went, but leaves out what was submitted. Giving its subscription a body
-decoder collects that data and returns an owned result without waiting for the response.
+A request subscription given a `body` decoder collects what the page sent, such as a form's fields or JSON,
+without waiting for the response.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"
@@ -23,7 +23,7 @@ const submittedForm = Effect.fn("submittedForm")(function*(page: Page.Page) {
 ```
 
 The decoder receives an Effect `HttpIncomingMessage`: use `text` for text, `arrayBuffer` for bytes, `json` for
-JSON or `urlParamsBody` for URL-encoded forms. URL parameters preserve repeated keys. For schema validation, use
+JSON, or `urlParamsBody` for URL-encoded forms. URL parameters preserve repeated keys. For schema validation, use
 Effect's `HttpIncomingMessage.schemaBodyJson`, as with [response bodies](/docs/events/network#decoding-bodies).
 Text honors the declared charset and defaults to UTF-8; unknown charsets fall back to UTF-8, with invalid
 sequences replaced.

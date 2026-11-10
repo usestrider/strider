@@ -3,7 +3,7 @@
  *
  * Every failure carries its operation's record as `diagnostics`, which says, for an action, whether the input was
  * sent. `CurrentPreset` decides how much of a URL is shown: in an operation's span attributes, and wherever Effect's
- * logger, formatter or inspection shows a `NetworkRequest` or `NetworkResponse`, and in exported trace errors. Under `"strict"`, the default, a URL
+ * logger, formatter, or inspection shows a `NetworkRequest` or `NetworkResponse`, and in exported trace errors. Under `"strict"`, the default, a URL
  * keeps its origin and path with each query value redacted; under `"local"` it's shown whole.
  *
  * @stability unstable
@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 
 /**
- * Schema for the id that links an operation's span, its diagnostics and its trace entry.
+ * Schema for the id that links an operation's span, its diagnostics, and its trace entry.
  *
  * @stability unstable
  * @category schemas
@@ -25,7 +25,7 @@ import * as MonotonicInstant from "./MonotonicInstant.ts"
 export const OperationId = Schema.String.pipe(Schema.brand("~@usestrider/browser/Diagnostics/OperationId"))
 
 /**
- * Id that links an operation's span, its diagnostics and its trace entry.
+ * Id that links an operation's span, its diagnostics, and its trace entry.
  *
  * @stability unstable
  * @category models
@@ -174,12 +174,12 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
 }) {}
 
 /**
- * Schema for how much of a URL Strider shows in its spans, logs and exported traces.
+ * Schema for how much of a URL Strider shows in its spans, logs, and exported traces.
  *
  * **Details**
  *
  * - `"strict"`: a URL keeps its origin and path, with each query value `REDACTED` and no credentials or
- *   fragment. For production, exported traces and agents.
+ *   fragment. For production, exported traces, and agents.
  * - `"local"`: a URL is shown whole. For a developer's own machine.
  *
  * Text passed as `Redacted` stays redacted under both, except in an exported trace's DOM snapshots: there,
@@ -192,7 +192,7 @@ export class Diagnostics extends Schema.Class<Diagnostics>("@usestrider/browser/
 export const Preset = Schema.Literals(["local", "strict"])
 
 /**
- * How much of a URL Strider shows in its spans, logs and exported traces.
+ * How much of a URL Strider shows in its spans, logs, and exported traces.
  *
  * @stability unstable
  * @category models

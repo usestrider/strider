@@ -78,7 +78,7 @@ export const claim = (value: Base.UserContext) => Claims.claimUserContext(value)
  * **Gotchas**
  *
  * Session hosts must provide expiry cleanup before enabling persistence. Pipe connections without a browser
- * WebSocket identity, Firefox and stock WebKit fail with Unsupported.
+ * WebSocket identity, Firefox, and stock WebKit fail with Unsupported.
  *
  * **Example** (Using claims)
  *
@@ -113,7 +113,7 @@ export const create = (options: Base.Options & { readonly reclaimable: true }) =
  *
  * With no settings requested and at least one Unknown page, recovery instead adopts the entire context without
  * session setup. All pages, including healthy siblings and future pages, lack automatic dialog decisions, unrouted
- * HTTP challenge forwarding, file chooser interception/cancellation and a managed temporary download directory
+ * HTTP challenge forwarding, file chooser interception/cancellation, and a managed temporary download directory
  * with an allow declaration. Native browser behavior is not replaced with these defaults, and recovery does not
  * restore them automatically later. Supplied settings are all refused before ownership moves if any page is Unknown,
  * even local settings such as `eventLog` or `dialogs`, with a `UserContext.reclaim.settings` backend rejection.

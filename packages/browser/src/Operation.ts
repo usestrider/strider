@@ -39,7 +39,7 @@ export interface Operation {
  *
  * **Details**
  *
- * `markSent`, `observe` and `bound` require it, so they compile only inside an operation, and a helper that uses
+ * `markSent`, `observe`, and `bound` require it, so they compile only inside an operation, and a helper that uses
  * them says so in its requirements. Library operations read it where it's present, so one that runs inside yours is
  * a step of it.
  *
@@ -76,8 +76,8 @@ export interface Options {
  *
  * An operation that runs inside another is a step of it: when it ends, it joins the enclosing operation's steps.
  * Every library operation, such as a click, is one. A `Timeout` that leaves an operation is the operation's own: one
- * a step ran out with keeps the step's `phase`, `history` and `hint`, which say where it stopped, and takes the
- * operation's name, budget and diagnostics. The diagnostics list its steps in `progress`, and their `dispatch` is
+ * a step ran out with keeps the step's `phase`, `history`, and `hint`, which say where it stopped, and takes the
+ * operation's name, budget, and diagnostics. The diagnostics list its steps in `progress`, and their `dispatch` is
  * the latest step that sent when steps run sequentially. Overlapping calls and steps stay uncertain if any write
  * has no acknowledgement, even after its wait ends. A successful step does not confirm a call known to have ended
  * without a reply.

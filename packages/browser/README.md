@@ -2,8 +2,8 @@
 
 # @usestrider/browser
 
-Browser automation for [Effect](https://effect.website): scripts, tests and agents that drive Chromium, Firefox or
-WebKit. Strider speaks each browser's protocol directly (the Chrome DevTools Protocol, WebDriver BiDi and WebKit's
+Browser automation for [Effect](https://effect.website): scripts, tests, and agents that drive Chromium, Firefox, or
+WebKit. Strider speaks each browser's protocol directly (the Chrome DevTools Protocol, WebDriver BiDi, and WebKit's
 inspector protocol), so it drives browsers as they're installed, with no driver or patched build beside them.
 
 **Documentation: [usestrider.dev](https://usestrider.dev)**
@@ -41,8 +41,8 @@ A launch runs the executable you name; Strider never finds or installs a browser
 
 ### Browser workflows that compose
 
-Browser jobs use the same concurrency, services and scopes as the rest of your Effect application.
-Run up to two jobs at once here, with each job closing its page and isolated context on success, failure or interruption:
+Browser jobs use the same concurrency, services, and scopes as the rest of your Effect application.
+Run up to two jobs at once here, with each job closing its page and isolated context on success, failure, or interruption:
 
 ```ts
 import { Browser, Deadline } from "@usestrider/browser"
@@ -68,13 +68,13 @@ const titles = Effect.forEach(
 ```
 
 The [deadline](https://usestrider.dev/docs/deadlines) is one budget for the whole batch, shared by the operations inside it.
-Provide a browser layer as in the opening example; the same jobs can run in a script, a service or a test.
+Provide a browser layer as in the opening example; the same jobs can run in a script, a service, or a test.
 
 ### Typed failures
 
 When a step is optional, recover from the specific failure you expect and let unexpected failures reach the caller.
 This invoice step returns `None` when PDF generation reports `Unsupported`, as it does on WebKit;
-timeouts, closed pages and other failures still propagate:
+timeouts, closed pages, and other failures still propagate:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -172,7 +172,7 @@ You can also [record the page](https://usestrider.dev/docs/tools/recordings#trac
 ## Working with existing browsers and agents
 
 Give a shell-based agent Strider's [usage guide](https://usestrider.dev/docs/agents/cli#agent-usage) as context: it explains sessions, page targets,
-event waits and reusable login state, with command examples for the installed version:
+event waits, and reusable login state, with command examples for the installed version:
 
 ```sh
 pnpx @usestrider/cli agent instructions
@@ -183,7 +183,7 @@ The command runs without a browser or session. It can also [generate a skill](ht
 ### Inspecting a tab before taking control
 
 A tool attached to your browser may need to read a tab you are using without changing it.
-[Inspection access](https://usestrider.dev/docs/pages/attaching#access-levels) gives it a page type with reads, snapshots and screenshots;
+[Inspection access](https://usestrider.dev/docs/pages/attaching#access-levels) gives it a page type with reads, snapshots, and screenshots;
 clicking or navigating requires explicitly taking control:
 
 ```ts
@@ -201,7 +201,7 @@ const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
 
 ### The CLI
 
-A shell-based agent can inspect a page, act on it and check the result in separate commands while the browser stays open.
+A shell-based agent can inspect a page, act on it, and check the result in separate commands while the browser stays open.
 The [`strider` CLI](https://usestrider.dev/docs/agents/cli) gives each session and page a name, so every command says which browser and tab it uses:
 
 ```sh
@@ -234,7 +234,7 @@ strider -s login state save ./auth/shop.state
 strider -s login stop
 ```
 
-Start each task from that file while the saved login is valid. Each session gets its own copy of the cookies, localStorage and IndexedDB,
+Start each task from that file while the saved login is valid. Each session gets its own copy of the cookies, localStorage, and IndexedDB,
 so multiple agents can work concurrently without sharing browser tabs. An agent checking orders starts its own session:
 
 ```sh
@@ -333,7 +333,7 @@ you can inspect and act on the same pages from either interface.
 
 ## Status
 
-Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox and WebKit, and what a browser can't
+Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox, and WebKit, and what a browser can't
 do fails with `Unsupported`, naming the capability. The packages are on npm:
 
 | Package                                   | What it's for                              |

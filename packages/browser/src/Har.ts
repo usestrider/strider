@@ -38,7 +38,7 @@ import type * as WatchableApi from "./Watchable.ts"
 
 /**
  * A class of secret that an export can include on request: a URL's credentials, cookie values, `Authorization`
- * headers, text typed into a trace or the bodies requests sent.
+ * headers, text typed into a trace, or the bodies requests sent.
  *
  * @stability experimental
  * @category models
@@ -55,7 +55,7 @@ export type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "
  */
 export interface Options {
   /**
-   * Where bodies go: embedded in the HAR, attached beside it in a zip or left out. Required: never inferred from a
+   * Where bodies go: embedded in the HAR, attached beside it in a zip, or left out. Required: never inferred from a
    * file extension.
    */
   readonly content: "embed" | "attach" | "omit"
@@ -158,10 +158,10 @@ export interface Recording extends Declaration.Registration {
  * - From now on, each redirect hop of each request the target makes is an entry, with its response and, unless
  *   `content` is `"omit"`, the response body, read as the hop finishes.
  * - Timings come from Strider's clock, so they mean the same on every backend: `send` is 0, `wait` runs from the
- *   request to its response, `receive` from the response to the end, and `blocked`, `dns`, `connect` and `ssl`
+ *   request to its response, `receive` from the response to the end, and `blocked`, `dns`, `connect`, and `ssl`
  *   are -1.
  * - `exportHar` writes HAR 1.2, or with `content: "attach"` one zip holding `har.har` and the bodies it names.
- * - A URL's credentials, cookie values and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
+ * - A URL's credentials, cookie values, and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
  *   unless `include` names their class.
  * - The body each request sent is recorded whatever `content` says, and written as `postData` only when
  *   `include` names `"requestBodies"`. A text body is written as `text`, with a form's `params`; any other is
@@ -350,7 +350,7 @@ export class ReadFailed extends Schema.Error<ReadFailed>("@usestrider/browser/Ha
 }
 
 /**
- * Schema for the reasons recording, exporting or replaying a HAR can fail.
+ * Schema for the reasons recording, exporting, or replaying a HAR can fail.
  *
  * @stability experimental
  * @category schemas
@@ -366,7 +366,7 @@ export const HarErrorReason = Schema.Union([
 ])
 
 /**
- * The reasons recording, exporting or replaying a HAR can fail.
+ * The reasons recording, exporting, or replaying a HAR can fail.
  *
  * @stability experimental
  * @category models
@@ -377,7 +377,7 @@ export type HarErrorReason = typeof HarErrorReason.Type
 const HarErrorTypeId = "~@usestrider/browser/Har/HarError"
 
 /**
- * Error for a HAR that couldn't be recorded, exported or read for replay.
+ * Error for a HAR that couldn't be recorded, exported, or read for replay.
  *
  * **Example** (Logging a HAR that couldn't be written)
  *

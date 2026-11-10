@@ -455,6 +455,7 @@ export interface Model {
    * budget.
    */
   readonly remove: (context: ContextEntry) => Effect.Effect<void>
+  readonly removedWith: (context: ContextEntry, scope: Scope.Scope, removes: () => boolean) => void
   /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */
   readonly transfer: (page: Target.NavigableId, to: Scope.Scope) => Effect.Effect<void>
 }
@@ -510,6 +511,7 @@ export const make = Effect.fnUntraced(function*() {
         release,
         closeApart: ownership.closeApart,
         remove: ownership.remove,
+        removedWith: ownership.removedWith,
         transfer: (page, to) =>
           Effect.suspend(() => {
             const entry = fold.page(page)

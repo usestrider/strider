@@ -6,6 +6,7 @@
  * through the handle are removed with it, whichever scope they were made in.
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import type * as Declaration from "../Declaration.ts"
@@ -108,3 +109,21 @@ export const guard = <A extends object>(handle: A, grant: Grant, members: Member
   }
   return out as A
 }
+
+/**
+ * Runs an acquisition that holds native resources in the caller's scope so that they also end when the grant is
+ * released. Fails with `TargetGone` if it already was, and closes everything once released during acquisition.
+ */
+export const bound = Effect.fnUntraced(
+  function*<A, E, R>(grant: Option.Option<Grant>, self: Effect.Effect<A, E, R>) {
+    yield* check(grant)
+    if (Option.isNone(grant)) return yield* self
+    const lifetime = yield* Scope.fork(yield* Effect.scope)
+    const close = Scope.close(lifetime, Exit.void)
+    const result = yield* self.pipe(Scope.provide(lifetime), Effect.onError(() => close))
+    // Register after acquisition: release during acquisition closes everything once its native resources exist.
+    yield* grant.value.onRelease(close)
+    yield* check(grant)
+    return result
+  }
+)

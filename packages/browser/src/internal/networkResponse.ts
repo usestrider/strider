@@ -13,7 +13,7 @@ import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Redactable from "effect/Redactable"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Deadline from "../Deadline.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -22,8 +22,10 @@ import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import * as Subscription from "../Subscription.ts"
+import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as EventModule from "./eventModule.ts"
@@ -161,12 +163,18 @@ class Captured<B> extends Inspectable.Class
  */
 const delivery = <B, DE, DR>(
   runtime: Runtime.Runtime,
+  grant: Option.Option<Access.Grant>,
   decoder: NetworkResponse.BodyDecoder<B, DE, DR>,
   context: Context.Context<DR>,
   limit: number,
   wait: Option.Option<Duration.Duration>
-): Events.Delivery<Model.ResponseEvent, NetworkResponse.CapturedResponse<B>, DE | NetworkResponse.ResponseError> => ({
+): Events.Delivery<
+  Model.ResponseEvent,
+  NetworkResponse.CapturedResponse<B>,
+  DE | NetworkResponse.ResponseError | Target.TargetGone
+> => ({
   deliver: Effect.fnUntraced(function*({ hop, response }) {
+    yield* Access.check(grant)
     const url = response.url
     if (response.status >= 300 && response.status < 400 && response.headers["location"] !== undefined) {
       return yield* Effect.fail(unavailable(url, "redirect", "A redirect hop has no body; its next hop has one"))
@@ -262,21 +270,24 @@ export const next = (
   return Effect.flatMap(
     subscription(target, filter, "NetworkResponse.next"),
     ({ accepts, channel, found }) =>
-      Effect.gen(function*() {
-        const limit = ByteSize.toNumberUnsafe(yield* NetworkResponse.BodyLimit)
-        yield* collect(found, "NetworkResponse.next", limit)
-        const context = yield* Effect.context<unknown>()
-        return yield* Events.next(
-          kind("NetworkResponse.next") as unknown as Events.Kind<
-            Model.ResponseEvent,
-            NetworkResponse.CapturedResponse<unknown>
-          >,
-          channel,
-          accepts,
-          where,
-          delivery(found.behind.runtime, decoder, context, limit, Option.none())
-        )
-      })
+      Access.bound(
+        found.behind.grant,
+        Effect.gen(function*() {
+          const limit = ByteSize.toNumberUnsafe(yield* NetworkResponse.BodyLimit)
+          yield* collect(found, "NetworkResponse.next", limit)
+          const context = yield* Effect.context<unknown>()
+          return yield* Events.next(
+            kind("NetworkResponse.next") as unknown as Events.Kind<
+              Model.ResponseEvent,
+              NetworkResponse.CapturedResponse<unknown>
+            >,
+            channel,
+            accepts,
+            where,
+            delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, Option.none())
+          )
+        })
+      )
   ).pipe(Operation.named("NetworkResponse.next"))
 }
 
@@ -290,21 +301,29 @@ export const stream = (
   return Effect.flatMap(
     subscription(target, filter, "NetworkResponse.stream"),
     ({ accepts, channel, found }) =>
-      Effect.gen(function*() {
-        const limit = ByteSize.toNumberUnsafe(yield* NetworkResponse.BodyLimit)
-        const budget = yield* Deadline.DefaultBudget
-        yield* collect(found, "NetworkResponse.stream", limit)
-        const context = yield* Effect.context<unknown>()
-        return yield* Events.stream(
-          kind("NetworkResponse.stream") as unknown as Events.Kind<
-            Model.ResponseEvent,
-            NetworkResponse.CapturedResponse<unknown>
-          >,
-          channel,
-          accepts,
-          where,
-          delivery(found.behind.runtime, decoder, context, limit, Option.some(budget))
-        )
-      })
+      Access.bound(
+        found.behind.grant,
+        Effect.gen(function*() {
+          const limit = ByteSize.toNumberUnsafe(yield* NetworkResponse.BodyLimit)
+          const budget = yield* Deadline.DefaultBudget
+          yield* collect(found, "NetworkResponse.stream", limit)
+          const context = yield* Effect.context<unknown>()
+          const events = yield* Events.stream(
+            kind("NetworkResponse.stream") as unknown as Events.Kind<
+              Model.ResponseEvent,
+              NetworkResponse.CapturedResponse<unknown>
+            >,
+            channel,
+            accepts,
+            where,
+            delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, Option.some(budget))
+          )
+          // Body reads run in the consumer's fiber, which closing the subscription's scope doesn't reach. That scope
+          // closes with the caller's or when the grant is released.
+          const released = yield* Deferred.make<void>()
+          yield* Scope.addFinalizer(yield* Effect.scope, Deferred.succeed(released, undefined))
+          return events.pipe(Stream.interruptWhen(Deferred.await(released)))
+        })
+      )
   )
 }

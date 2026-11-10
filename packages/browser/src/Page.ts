@@ -3,7 +3,7 @@
  *
  * - An `ObservedPage` reports its state and events, and nothing more.
  * - A `ReadonlyPage` adds reads, run in an isolated world where the page's own globals are invisible; it never
- *   scrolls, focuses or sends input.
+ *   scrolls, focuses, or sends input.
  * - A `Page` adds input, navigation, evaluation among the page's own scripts, and declarations.
  *
  * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
@@ -120,7 +120,7 @@ export const Prompt = Schema.Struct({
 export type Prompt = typeof Prompt.Type
 
 /**
- * Schema for a page's state: open, with its URL, document and any open prompt, or closed, with why.
+ * Schema for a page's state: open, with its URL, document, and any open prompt, or closed, with why.
  *
  * @stability unstable
  * @category schemas
@@ -132,7 +132,7 @@ export const Status = Schema.Union([
 ])
 
 /**
- * A page's state: open, with its URL, document and any open prompt, or closed, with why.
+ * A page's state: open, with its URL, document, and any open prompt, or closed, with why.
  *
  * @stability unstable
  * @category models
@@ -540,7 +540,7 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
 }
 
 /**
- * A page you can read: locators, snapshots, captures and isolated-world evaluation.
+ * A page you can read: locators, snapshots, captures, and isolated-world evaluation.
  *
  * @stability unstable
  * @category models
@@ -554,7 +554,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * Page declarations take precedence over context and browser declarations; the most recent declaration
    * at the same scope wins. Removing it restores the next declaration. This reads configuration without
-   * querying the browser. Window resizing, document layout and settings made by another client are not measured.
+   * querying the browser. Window resizing, document layout, and settings made by another client are not measured.
    * It does not wait for a document to load. A closed page fails with `TargetGone`.
    *
    * **Example** (Read the configured viewport)
@@ -662,7 +662,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    * may explicitly capture again. In a controlled overlap on Chromium 155.0.8059.79, an immediate second
    * capture returned replacement-document pixels at the requested viewport dimensions. Completion and
    * unchanged dimensions are not guaranteed for every invalidation.
-   * Other backends, subframe replacement and hangs without a main-document commit keep the existing deadline.
+   * Other backends, subframe replacement, and hangs without a main-document commit keep the existing deadline.
    *
    * **Example** (Capturing one element)
    *
@@ -713,8 +713,8 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * **Details**
    *
-   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
-   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0, and infinities), booleans,
+   * bigints, Date, RegExp, Map, and Set retain their types recursively inside arrays and objects. Objects copy
    * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
    * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
    * separate from `JSHandle.Serialized`, which describes the returned value.
@@ -837,9 +837,9 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * Uses `document.open`, `document.write` and `document.close`. The URL, history entry, document identity
+   * Uses `document.open`, `document.write`, and `document.close`. The URL, history entry, document identity,
    * and main-world globals remain; the DOM and its event listeners are replaced. Scripts execute and resources
-   * load under the current document's origin, base URL and security policy. A `base` element can change resource URLs.
+   * load under the current document's origin, base URL, and security policy. A `base` element can change resource URLs.
    *
    * `waitUntil` defaults to `"load"`, including child-frame and resource loading. `"domContentLoaded"` waits
    * for parsing and deferred scripts, while `"commit"` returns after writing and closing, without waiting for
@@ -944,8 +944,8 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
-   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0, and infinities), booleans,
+   * bigints, Date, RegExp, Map, and Set retain their types recursively inside arrays and objects. Objects copy
    * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
    * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
    * separate from `JSHandle.Serialized`, which describes the returned value.
@@ -1015,7 +1015,7 @@ export interface Page extends ReadonlyPage {
    * - The route is in force for requests that start after this declaration returns.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
-   * - `options.phase` (`"request"`, `"response"` or `"auth"`) decides what the handler is given and may decide.
+   * - `options.phase` (`"request"`, `"response"`, or `"auth"`) decides what the handler is given and may decide.
    * - Each request's handler runs in a fiber of the registration's scope, under the `Deadline.DefaultBudget` in
    *   effect where `route` was called.
    *
@@ -1384,7 +1384,7 @@ export type PageErrorReason = typeof PageErrorReason.Type
 const PageErrorTypeId = "~@usestrider/browser/Page/PageError"
 
 /**
- * Error for a page operation that failed: navigation, evaluation, capture, reads or setting the page up.
+ * Error for a page operation that failed: navigation, evaluation, capture, reads, or setting the page up.
  *
  * **Example** (Recovering from a failed navigation)
  *

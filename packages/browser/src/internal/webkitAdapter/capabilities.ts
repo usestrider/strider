@@ -130,7 +130,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("network.requestBody.bytes", "unsupported", ["stock WebKit exposes decoded text, not original bytes"]),
       entry("network.requestBody.text", "partial", [
-        "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
+        "nonempty protocol-reported text only; empty, missing, and multipart reports cannot establish completeness and are refused"
       ]),
       entry("network.failure", "supported"),
       entry("network.headersSent", "partial", [

@@ -49,7 +49,7 @@ export const Credential = Schema.Struct({
     const url = URL.parse(`https://${value}`)
     return value.length > 0 && url !== null && url.hostname === value.toLowerCase() && url.host === url.hostname &&
       url.pathname === "/" && url.search === "" && url.hash === "" && url.username === "" && url.password === ""
-  }, { expected: "a relying-party host name without a scheme, port or path" })),
+  }, { expected: "a relying-party host name without a scheme, port, or path" })),
   privateKey: Schema.Redacted(Schema.Uint8Array),
   userHandle: Schema.optional(userHandle),
   signCount: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 0xffff_ffff })),

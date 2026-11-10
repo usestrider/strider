@@ -187,7 +187,7 @@ const notCollected = (error: Parameters<typeof Kit.protocolError>[0]) =>
 const terminalRedirect = () =>
   Kit.unsupported(
     "network.responseBody.terminalRedirect",
-    "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+    "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
   )
 
 export const responseBody = Effect.fnUntraced(function*(state: State, hop: NetworkRequest.HopId) {

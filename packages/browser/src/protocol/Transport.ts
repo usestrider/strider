@@ -488,7 +488,7 @@ export class ConnectFailed extends Schema.Error<ConnectFailed>("@usestrider/brow
  * **Details**
  *
  * `initiator` is `"local"` when this side closed it, by closing the transport's scope, and `"remote"` when the
- * browser closed it, exited or broke it. `description` says how.
+ * browser closed it, exited, or broke it. `description` says how.
  *
  * @stability experimental
  * @category reasons

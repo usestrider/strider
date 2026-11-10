@@ -1,5 +1,5 @@
 /**
- * Locators (API.md, Locators, actions and actionability). A locator is data: the engine's
+ * Locators (API.md, Locators, actions, and actionability). A locator is data: the engine's
  * steps, resolved again on every attempt. Built: the queries and chainers, frames, every read, every action,
  * `evaluate` and `snapshot`.
  *
@@ -67,7 +67,7 @@ interface Ready {
   readonly origin: { readonly x: number; readonly y: number }
 }
 
-/** The checks each action documents (API.md, Locators, actions and actionability). */
+/** The checks each action documents (API.md, Locators, actions, and actionability). */
 const pointerChecks: CheckSet = {
   rendered: true,
   visible: true,
@@ -1140,7 +1140,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           operation,
           new Locator.NotEditable({
             element: final.element,
-            hint: "Only inputs, textareas and contenteditable elements take text"
+            hint: "Only inputs, textareas, and contenteditable elements take text"
           }),
           id
         )
