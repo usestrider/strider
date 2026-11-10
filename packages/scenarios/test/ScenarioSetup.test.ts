@@ -75,3 +75,30 @@ it("applies the Firefox exclusion in the scenario runner", () => {
   expect(chosen.map((scenario) => scenario.name)).toContain("many-pages")
   expect(chosen.map((scenario) => scenario.name)).not.toContain("many-pages-emulated")
 })
+
+it("copies the scenario comparison driver into a benchmark checkout", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "scenario-overlay-"))
+  try {
+    // Run the real overlay before it launches workers: no browser or benchmark timing is needed.
+    const directory = path.resolve(import.meta.dirname, "../src/benchmarks")
+    const source = fs.readFileSync(path.join(directory, "compare-bin.ts"), "utf8")
+    const start = source.indexOf("const source = path.resolve(import.meta.dirname")
+    const end = source.indexOf("const entry =", start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const code = source.slice(start, end).replaceAll("import.meta.dirname", JSON.stringify(directory))
+    vm.runInNewContext(stripTypeScriptTypes(code), {
+      fs,
+      path,
+      root,
+      output: path.join(root, "evidence"),
+      role: "base",
+      values: { workload: "scenarios" },
+      manyPagesMode: false
+    })
+    expect(fs.readFileSync(path.join(root, "packages/scenarios/src/bin.ts"), "utf8"))
+      .toBe(fs.readFileSync(path.resolve(directory, "../bin.ts"), "utf8"))
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
