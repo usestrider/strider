@@ -9,6 +9,8 @@ export interface PhaseSample {
   readonly total: number
   /** The protocol messages of the close, in a traced run only */
   readonly events?: ReadonlyArray<WireEvent>
+  /** The protocol messages of the upload's `setInputFiles` call, in a traced run only */
+  readonly inputEvents?: ReadonlyArray<WireEvent>
 }
 
 export const median = (values: ReadonlyArray<number>): number => {
@@ -83,6 +85,8 @@ export interface WireEvent {
   readonly kind: "send" | "receive" | "mark"
   readonly name?: string
   readonly message?: Record<string, unknown>
+  /** The size of the raw message as sent or received, before `message` was cut short */
+  readonly bytes?: number
 }
 
 export interface Step {
@@ -128,6 +132,8 @@ export const timeline = (events: ReadonlyArray<WireEvent>) => {
     steps,
     sent: steps.filter((step) => step.what.startsWith("send ")).length,
     events: steps.filter((step) => step.what.startsWith("event ")).length,
+    sentBytes: events.reduce((sum, event) => sum + (event.kind === "send" ? event.bytes ?? 0 : 0), 0),
+    receivedBytes: events.reduce((sum, event) => sum + (event.kind === "receive" ? event.bytes ?? 0 : 0), 0),
     roundTrips,
     // Time between a reply and the next command: the host's, not waiting on a command
     hostGaps: commands.slice(1).map((step, index) => Math.max(0, step.at - commands[index]!.repliedAt!))
@@ -143,22 +149,25 @@ export const compactMessage = (raw: Record<string, unknown>): Record<string, unk
   ...(raw["params"] === undefined ? {} : { params: JSON.stringify(raw["params"]).slice(0, 160) })
 })
 
-/** For each scenario and library, the traced close whose duration is the median, as a step list with its counts. */
-export const closeReport = (samples: ReadonlyArray<PhaseSample>): string => {
+const windowReport = (
+  samples: ReadonlyArray<PhaseSample>,
+  label: string,
+  events: (sample: PhaseSample) => ReadonlyArray<WireEvent> | undefined,
+  duration: (sample: PhaseSample) => number
+): string => {
   const lines: Array<string> = []
-  const traced = samples.filter((sample) => !sample.warmup && sample.events !== undefined)
+  const traced = samples.filter((sample) => !sample.warmup && events(sample) !== undefined)
   for (const scenario of [...new Set(traced.map((sample) => sample.scenario))]) {
     for (const library of ["strider", "playwright"] as const) {
       const group = traced.filter((sample) => sample.scenario === scenario && sample.library === library)
       if (group.length === 0) continue
-      const closeMs = (sample: PhaseSample) => (sample.phases["release"] ?? 0) + (sample.phases["close"] ?? 0)
-      const chosen = [...group].sort((a, b) => closeMs(a) - closeMs(b))[group.length >> 1]!
-      const result = timeline(chosen.events!)
-      const counts = group.map((sample) => timeline(sample.events!)).map((t) => `${t.sent}/${t.roundTrips}`)
+      const chosen = [...group].sort((a, b) => duration(a) - duration(b))[group.length >> 1]!
+      const result = timeline(events(chosen)!)
+      const counts = group.map((sample) => timeline(events(sample)!)).map((t) => `${t.sent}/${t.roundTrips}`)
       lines.push(
-        `### ${scenario}, ${library}: close ${
-          closeMs(chosen).toFixed(1)
-        } ms (median of ${group.length}), ${result.sent} commands, ${result.events} events, ${result.roundTrips} serial round trips; commands/round trips per traced sample: ${
+        `### ${scenario}, ${library}: ${label} ${
+          duration(chosen).toFixed(1)
+        } ms (median of ${group.length}), ${result.sent} commands, ${result.events} events, ${result.roundTrips} serial round trips, ${result.sentBytes} bytes sent, ${result.receivedBytes} bytes received; commands/round trips per traced sample: ${
           [...new Set(counts)].join(", ")
         }`,
         "",
@@ -173,3 +182,21 @@ export const closeReport = (samples: ReadonlyArray<PhaseSample>): string => {
   }
   return lines.join("\n")
 }
+
+/** For each scenario and library, the traced close whose duration is the median, as a step list with its counts. */
+export const closeReport = (samples: ReadonlyArray<PhaseSample>): string =>
+  windowReport(
+    samples,
+    "close",
+    (sample) => sample.events,
+    (sample) => (sample.phases["release"] ?? 0) + (sample.phases["close"] ?? 0)
+  )
+
+/** The same for the upload's `setInputFiles` call, whose duration is its phase. */
+export const inputReport = (samples: ReadonlyArray<PhaseSample>): string =>
+  windowReport(
+    samples,
+    "setInputFiles",
+    (sample) => sample.inputEvents,
+    (sample) => sample.phases["setInputFiles"] ?? 0
+  )

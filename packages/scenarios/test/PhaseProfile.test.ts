@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   closeReport,
+  inputReport,
   median,
   type PhaseSample,
   summarize,
@@ -87,5 +88,17 @@ describe("phase profile summaries", () => {
     expect(text).toContain("upload, strider: close 21.0 ms (median of 3)")
     expect(text).toContain("| 0.0 | send Target.closeTarget | 20.0 |")
     expect(text).toContain("upload, playwright")
+  })
+  it("reports the traced setInputFiles call with the bytes it sent", () => {
+    const traced: PhaseSample = {
+      ...sample("strider", { setInputFiles: 12 }),
+      inputEvents: [
+        { at: 0, kind: "send", bytes: 100, message: { id: 1, method: "DOM.setFileInputFiles" } },
+        { at: 12, kind: "receive", bytes: 20, message: { id: 1 } }
+      ]
+    }
+    const text = inputReport([traced])
+    expect(text).toContain("upload, strider: setInputFiles 12.0 ms (median of 1), 1 commands")
+    expect(text).toContain("100 bytes sent, 20 bytes received")
   })
 })
