@@ -70,7 +70,7 @@ const rules = [
       "    yield* root.drainObserved",
       `    ${mark("autoattach.ack")}\n    yield* root.drainObserved\n    ${mark("targets.drained")}`
     ],
-    ["    return {\n      claims:", `    ${mark("adapter.end")}\n    return {\n      claims:`]
+    ["    return {\n      ownership:", `    ${mark("adapter.end")}\n    return {\n      ownership:`]
   ]],
   ["/internal/browser.ts", [
     [

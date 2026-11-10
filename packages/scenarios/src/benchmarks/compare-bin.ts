@@ -30,6 +30,7 @@ if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
 if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
+const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
 fs.mkdirSync(output, { recursive: true })
@@ -122,7 +123,10 @@ try {
     throw new Error(`Browser version mismatch: expected Chromium ${pins.chromium.version}, got ${version}`)
   }
   save()
-  if (roleMode) {
+  if (launchMode) {
+    const { launchDiagnostic } = await import("./launch-diagnostic.ts")
+    launchDiagnostic({ roots, output, runs })
+  } else if (roleMode) {
     const { roleDiagnostic } = await import("./role-engine.ts")
     await roleDiagnostic({ roots, output, runs })
   } else {
@@ -228,7 +232,9 @@ try {
     `${c.ratio.toFixed(3)} [${c.low.toFixed(3)}, ${c.high.toFixed(3)}]`
   fs.writeFileSync(
     path.join(output, "summary.md"),
-    roleMode && fs.existsSync(path.join(output, "role-summary.md"))
+    launchMode && fs.existsSync(path.join(output, "launch-summary.md"))
+      ? fs.readFileSync(path.join(output, "launch-summary.md"), "utf8")
+      : roleMode && fs.existsSync(path.join(output, "role-summary.md"))
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
       : [
         `Comparison status: **${report.status}**`,
