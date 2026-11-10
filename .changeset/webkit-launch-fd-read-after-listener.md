@@ -2,4 +2,4 @@
 "@usestrider/browser": patch
 ---
 
-Launching stock WebKit no longer fails now and then with `PermissionDenied` reading `/proc/<pid>/fd`. The launcher reads a child's descriptors only once a listener exists on the inspector port, so it no longer reads them while the child is still replacing the exec wrapper.
+Launching stock WebKit reads the child's `/proc/<pid>/fd` only once a listener exists on the inspector port, not on the first poll right after the spawn, where a `PermissionDenied` read was seen. A child that never listens now ends as a readiness timeout.

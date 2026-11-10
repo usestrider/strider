@@ -160,8 +160,8 @@ export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: 
           : []
       })
     )
-    // A listener can only appear after the exec has finished, so until one does the descriptors aren't read: the
-    // kernel can deny that read while the exec wrapper replaces itself with the browser.
+    // The first read of a live child's descriptors, just after it was spawned, was seen denied and never later, so
+    // they're read only once the table shows a listener on the port.
     if (inodes.size !== 1) return undefined
     const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
     for (const fd of descriptors) {

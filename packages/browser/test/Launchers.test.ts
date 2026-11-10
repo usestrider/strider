@@ -859,7 +859,7 @@ describe("WebKit launcher", () => {
                     pathOrDescriptor: path
                   }))
                 }
-                // The first poll finds no listener: the browser hasn't finished its exec.
+                // The first poll finds no listener on the port.
                 listening = mode !== "descriptors-denied-once" || reads > 1
                 if (!listening) {
                   return Effect.succeed(
@@ -876,7 +876,7 @@ describe("WebKit launcher", () => {
               : fs.readFileString(path, options),
           readDirectory: (path, options) => {
             if (path !== "/proc/9000001/fd") return fs.readDirectory(path, options)
-            // While the exec wrapper is still replacing itself with the browser, the kernel denies the read.
+            // Simulates the first read after spawn being denied, which was never seen later.
             if (mode === "descriptors-denied-once" && !listening) {
               descriptorsReadBeforeListener++
               return Effect.fail(
