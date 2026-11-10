@@ -337,6 +337,25 @@ export class ViewportMismatch extends Schema.Error<ViewportMismatch>("@usestride
  * Serialized diagnostics are a projection and do not promise lossless transport of arbitrary callback values.
  * Defects and interruption propagate as causes; step timeouts and ended targets retain their error types.
  *
+ * **Example** (Recovering a handler's original error)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Reason } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const submit = Effect.fn("submit")(function*(button: Locator.Locator) {
+ *   yield* button.click().pipe(
+ *     Effect.catchTag(
+ *       "LocatorError",
+ *       (error) =>
+ *         error.reason._tag === "LocatorHandlerFailed"
+ *           ? Effect.logWarning("handler failed", error.reason.error)
+ *           : Effect.fail(error)
+ *     )
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category reasons
  * @since 0.1.0

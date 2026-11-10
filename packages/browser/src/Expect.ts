@@ -814,10 +814,16 @@ export const withCheckInterval: {
 const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 
 /**
- * Error for an expectation that didn't pass before the deadline.
+ * Error for an expectation that didn't pass before the deadline, or that a locator handler's callback failed while
+ * the expectation was waiting.
  *
  * **Details**
  *
+ * - When a locator handler's callback fails with a typed error, `handlerFailure` is set, and holds that error as
+ *   `error`, unchanged and unserialized; `message` names the handler's failure rather than the unmet condition.
+ *   Narrow `error` yourself: it can be any value the callback failed with. A callback that exceeds the deadline
+ *   fails the expectation with `Deadline.Timeout` instead, and a callback that loses its page fails with
+ *   `TargetGone`; neither is wrapped here.
  * - `history` contains observed values and diagnostic error entries, with repeats in a row dropped;
  *   `last` is its final entry. For locator expectations, page values must reach Strider before the deadline.
  *   If neither a page value nor a diagnostic error is recorded, `history` is empty and `last` is `Option.none()`.

@@ -3323,6 +3323,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionTimeout,
     actionFrameTimeout,
     evaluate,
+    expectViewport,
     matchesValue: classMatches,
     clearTreeCaches,
     failureResponse,
@@ -3672,6 +3673,21 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       } else {
         helpers.clearTreeCaches()
         const expectation = session.request.expectation
+        if (expectation._tag === "Viewport") {
+          // The ordinary expectation's own observer round, kept short so the host rechecks its triggers between rounds.
+          const response = await helpers.expectViewport({
+            op: "expect",
+            steps: session.request.steps,
+            expectation,
+            cap: Math.max(0, Math.min(100, session.end - now()))
+          })
+          if (response._tag === "Expected" && response.passed) {
+            return finished(session, { ...response, changed: session.changed || response.changed })
+          }
+          if (response._tag === "Expected") session.observed = response.observed
+          session.changed = true
+          return check(session)
+        }
         const result = expectation._tag === "URL"
           ? { passed: helpers.matchesValue(expectation.expected, location.href), observed: location.href }
           : helpers.evaluate(session.request.steps, expectation)

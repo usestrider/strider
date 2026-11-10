@@ -1,6 +1,6 @@
 ---
 title: Overlay handlers
-description: Scoped overlay dismissal, invocation limits, removal, callback failures and shared deadlines.
+description: A locator handler dismisses an overlay that covers an element before an action or assertion checks it.
 order: 4
 ---
 
@@ -63,11 +63,30 @@ operation from succeeding. The last invocation still waits for disappearance unl
 
 ## Failures and deadlines
 
-Queueing, callback actions, disappearance waiting and the resumed operation share one absolute deadline.
+Queueing, callback actions, disappearance waiting, and the resumed operation share one absolute deadline.
 A handler cannot extend it. Callback timeouts keep their step evidence and receive the enclosing action or
 assertion's normal timeout attribution. An ordinary unmet assertion still fails with an expectation failure.
 
-Other typed callback failures immediately fail the action with a handler-failure reason, or the assertion with
+Other typed callback failures (not a `Timeout` or `TargetGone`, which pass through as themselves) immediately fail the action with a handler-failure reason, or the assertion with
 its handler-failure field. The original error retains its identity and custom fields in process; serialized
 diagnostics are a projection, not lossless transport of arbitrary error values. Defects and interruption remain
 causes. See [error handling](/docs/errors) and [deadlines](/docs/deadlines).
+
+To get the original error back, read it from the reason:
+
+```ts
+import { Locator } from "@usestrider/browser"
+import { Effect } from "effect"
+
+export const submit = Effect.fn("submit")(function*(button: Locator.Locator) {
+  yield* button.click().pipe(
+    Effect.catchTag(
+      "LocatorError",
+      (error) =>
+        error.reason._tag === "LocatorHandlerFailed"
+          ? Effect.logWarning("handler failed", error.reason.error)
+          : Effect.fail(error)
+    )
+  )
+})
+```
