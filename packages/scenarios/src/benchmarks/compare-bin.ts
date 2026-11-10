@@ -29,8 +29,8 @@ if (!["bench", "scenarios"].includes(values.workload)) {
 if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
-if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
 const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
+const phaseMode = values.workload === "bench" && values.only === "phase-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
 fs.mkdirSync(output, { recursive: true })
@@ -129,6 +129,9 @@ try {
   } else if (launchMode) {
     const { launchDiagnostic } = await import("./launch-diagnostic.ts")
     launchDiagnostic({ roots, output, runs })
+  } else if (phaseMode) {
+    const { phaseDiagnostic } = await import("./phase-diagnostic.ts")
+    phaseDiagnostic({ roots, output, runs })
   } else if (roleMode) {
     const { roleDiagnostic } = await import("./role-engine.ts")
     await roleDiagnostic({ roots, output, runs })
@@ -148,7 +151,8 @@ try {
             "report.ts",
             "scenarios.ts",
             "site.ts",
-            "replay.ts"
+            "replay.ts",
+            "selection.ts"
           ]
         for (const file of files) {
           const bytes = fs.readFileSync(path.join(source, file))
@@ -239,6 +243,8 @@ try {
       ? fs.readFileSync(path.join(output, "navigation-summary.md"), "utf8")
       : launchMode && fs.existsSync(path.join(output, "launch-summary.md"))
       ? fs.readFileSync(path.join(output, "launch-summary.md"), "utf8")
+      : phaseMode && fs.existsSync(path.join(output, "phase-summary.md"))
+      ? fs.readFileSync(path.join(output, "phase-summary.md"), "utf8")
       : roleMode && fs.existsSync(path.join(output, "role-summary.md"))
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
       : [

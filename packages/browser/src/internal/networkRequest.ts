@@ -1,12 +1,11 @@
 import * as ByteSize from "effect/ByteSize"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
-import * as Exit from "effect/Exit"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Redactable from "effect/Redactable"
-import * as Scope from "effect/Scope"
+import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Reason from "../Reason.ts"
 import * as Subscription from "../Subscription.ts"
@@ -290,22 +289,6 @@ const kind = (
   deliver: (request) => new Captured(request, Option.none())
 })
 
-/** A body subscription cannot outlive the borrowed access that allowed collecting it. */
-const withGrant = Effect.fnUntraced(
-  function*<A, E, R>(found: ReturnType<typeof Handles.target>, self: Effect.Effect<A, E, R>) {
-    const grant = found.behind.grant
-    yield* Access.check(grant)
-    if (Option.isNone(grant)) return yield* self
-    const lifetime = yield* Scope.fork(yield* Effect.scope)
-    const close = Scope.close(lifetime, Exit.void)
-    const result = yield* self.pipe(Scope.provide(lifetime), Effect.onError(() => close))
-    // Register after acquisition: release during acquisition closes everything once its native resources exist.
-    yield* grant.value.onRelease(close)
-    yield* Access.check(grant)
-    return result
-  }
-)
-
 export const next = (
   target: Target,
   filter: BodyFilter & { readonly url: string | Url.Pattern },
@@ -316,8 +299,8 @@ export const next = (
   return Effect.flatMap(
     prepare(target, filter, "NetworkRequest.next"),
     ({ found, channel, accepts }) =>
-      withGrant(
-        found,
+      Access.bound(
+        found.behind.grant,
         Effect.gen(function*() {
           const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
           const budget = yield* Deadline.DefaultBudget
@@ -343,8 +326,8 @@ export const stream = (target: Target, filter?: BodyFilter, where?: Subscription
   return Effect.flatMap(
     prepare(target, filter, "NetworkRequest.stream"),
     ({ found, channel, accepts }) =>
-      withGrant(
-        found,
+      Access.bound(
+        found.behind.grant,
         Effect.gen(function*() {
           const limit = ByteSize.toNumberUnsafe(yield* NetworkRequest.BodyLimit)
           const budget = yield* Deadline.DefaultBudget

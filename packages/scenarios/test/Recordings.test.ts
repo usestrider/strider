@@ -112,7 +112,7 @@ it("does not preserve bucket credentials in scenario output artifacts", () => {
     encoding: "utf8",
     timeout: 15_000
   })
-  expect(child.stderr).toContain("No supported scenarios selected")
+  expect(child.stderr).toContain("Unknown scenarios: no-such-scenario")
   const metadata = fs.readFileSync(path.join(output, "start.json"), "utf8")
   expect(metadata.includes("test-secret-key")).toBe(false)
   expect(metadata.includes("test-access-key")).toBe(false)

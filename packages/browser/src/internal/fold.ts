@@ -360,8 +360,10 @@ export const make = Effect.fnUntraced(function*(options: {
     page.contextEntry.storageSources?.origins.delete(page.id)
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
+    const closing = new Set<Target.NavigableId>([page.id])
     for (const [frame, owner] of frames) {
       if (owner !== page) continue
+      closing.add(frame)
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
     }
@@ -385,7 +387,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
     yield* Deferred.succeed(page.closed, reason)
     for (const document of Array.from(documents.values())) {
-      if (document.navigable === page.id) yield* endDocument(document.id, reason)
+      if (closing.has(document.navigable)) yield* endDocument(document.id, reason)
     }
     for (const worker of Array.from(workers.values())) {
       if (Option.isSome(worker.page) && worker.page.value === page) yield* endWorker(worker, reason)

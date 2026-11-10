@@ -336,21 +336,70 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(fromWorker.response.servedBy, precise ? "serviceWorker" : "cacheOrServiceWorker")
           }), timeout)
 
+        it.effect(
+          "reports a replaced document's realm removed before or after the document ends, as each backend does",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/frames`)
+              const frames = yield* Effect.all([
+                world.facts.next((fact): fact is Extract<Adapter.Fact, { _tag: "FrameAdded" }> =>
+                  fact._tag === "FrameAdded" && fact.parent === page
+                ),
+                world.facts.next((fact): fact is Extract<Adapter.Fact, { _tag: "FrameAdded" }> =>
+                  fact._tag === "FrameAdded" && fact.parent === page &&
+                  world.facts.all("FrameAdded").filter((other) =>
+                      other.parent === page
+                    ).indexOf(fact) === 1
+                )
+              ])
+              for (const frame of frames) {
+                yield* world.facts.when("DocumentCommitted", (fact) =>
+                  fact.navigable === frame.frame && fact.url.endsWith("/child"))
+              }
+              const navigables = [
+                page,
+                ...frames.map((frame) =>
+                  frame.frame
+                )
+              ]
+              const realms = yield* Effect.forEach(navigables, (navigable) => mainRealm(world, navigable))
+              // A cross-document navigation replaces the page's document and ends its frames' documents with it.
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const replacement = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
+              const ends = yield* Effect.forEach(navigables, (navigable, index): Effect.Effect<Adapter.Fact> =>
+                index === 0
+                  ? Effect.succeed(replacement)
+                  : world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable))
+              const removals = yield* Effect.forEach(realms, (realm) =>
+                world.facts.when("RealmRemoved", (fact) => fact.realm === realm))
+              // Whether the model still holds the document when its realm is reported gone: a call in the realm
+              // that fails there sees a live document.
+              const gap = removals.map((removal, index) =>
+                world.facts.facts.indexOf(removal) < world.facts.facts.indexOf(ends[index]!)
+              )
+              assert.deepStrictEqual(
+                gap,
+                world.adapter.info.protocol === "webkit" ? [false, true, true] : [true, true, true]
+              )
+            }),
+          timeout
+        )
+
         it.effect("follows a redirect as hops of one request", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             const { outcome } = yield* goto(world, page, `${world.site.origin}/redirect`)
             assert(outcome._tag === "Committed")
-            const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
-              fact.document === outcome.document)
+            const committed = yield* world.facts.when("DocumentCommitted", (fact) => fact.document === outcome.document)
             assert.strictEqual(committed.url, `${world.site.origin}/landed`)
             const hop = Option.getOrThrow(outcome.response)
             assert.match(hop, /\.1$/, "the second hop")
             const first = yield* world.facts.when(
               "ResponseReceived",
-              (fact) =>
-                fact.response.hop === hop.replace(/\.1$/, ".0")
+              (fact) => fact.response.hop === hop.replace(/\.1$/, ".0")
             )
             assert.strictEqual(first.response.status, 302)
             // The first hop's id is still the adapter's: asked for its body, it says it was a redirect (Q39)
