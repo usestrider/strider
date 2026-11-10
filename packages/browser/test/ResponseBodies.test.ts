@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { NetworkResponse, Page, Target, Url } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
@@ -114,6 +115,34 @@ describe("NetworkResponse body subscriptions and borrowed access", () => {
       yield* world.publish
       yield* Deferred.await(started)
       yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))
+      yield* Deferred.await(cancelled).pipe(Effect.timeout("500 millis"))
+    })))
+
+  it.live("interrupts an outstanding streamed body read when its subscription scope closes before borrowed access is released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const accessScope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(accessScope, Exit.void))
+      const subscriptionScope = yield* Scope.make()
+      const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
+      const started = yield* Deferred.make<void>()
+      const cancelled = yield* Deferred.make<void>()
+      const world = setup(
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.succeed(cancelled, undefined))
+        ),
+        Option.some(grant)
+      )
+      const stream = yield* NetworkResponse.stream(world.page, { url: "**/data", body: (message) => message.text })
+        .pipe(
+          Scope.provide(subscriptionScope)
+        )
+      yield* Stream.runDrain(stream).pipe(Effect.forkScoped)
+      yield* world.publish
+      yield* Deferred.await(started)
+      yield* Scope.close(subscriptionScope, yield* Effect.exit(Effect.void))
+      assert.strictEqual(world.released(), 1)
+      assert.strictEqual(grant.released(), false)
       yield* Deferred.await(cancelled).pipe(Effect.timeout("500 millis"))
     })))
 
