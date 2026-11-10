@@ -481,6 +481,59 @@ describe("Session's digest", () => {
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
 
+  it.effect("a navigation drained by an overlapping call is reported once and leaves nothing retained", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      const url = Schema.decodeUnknownSync(Url.Url)("https://example.test/same")
+      const document = Schema.decodeUnknownSync(Target.DocumentId)("document")
+      const id = (value: string) => Schema.decodeUnknownSync(PageNavigation.Id)(value)
+      const channel = Handles.page(page).entry.events.navigation
+      const publish = (value: string) =>
+        Effect.sync(() =>
+          Events.publish(channel, {
+            navigation: id(value),
+            frame: page.id,
+            url,
+            outcome: { _tag: "Committed" as const, document, response: Option.none() }
+          })
+        )
+      const line = `main navigated to ${url}`
+      // The event comes first, a concurrent call drains it, and then the navigation's own result arrives
+      for (let n = 0; n < 5; n++) {
+        const release = yield* Deferred.make<void>()
+        Object.defineProperty(page, "goto", {
+          configurable: true,
+          value: () =>
+            Effect.as(Deferred.await(release), {
+              _tag: "Committed" as const,
+              id: id(`n${n}`),
+              frame: page.id,
+              url,
+              document,
+              response: Option.none()
+            })
+        })
+        const own = yield* Effect.forkChild(
+          Effect.map(
+            Effect.flatMap(session.toolkit.handle("goto", { page: "main", url }), Stream.runLast),
+            (last) => (Option.getOrThrow(last).result as { readonly sinceLast: ReadonlyArray<string> }).sinceLast
+          )
+        )
+        yield* TestClock.adjust("1 millis")
+        yield* publish(`n${n}`)
+        yield* TestClock.adjust("1 millis")
+        assert.deepStrictEqual(yield* sinceLast(session), [line])
+        yield* Deferred.succeed(release, undefined)
+        assert.deepStrictEqual(yield* Fiber.join(own), [], "reported twice")
+      }
+      // Nothing is waiting for an event that already came: an event with an id seen before is reported again
+      yield* publish("n0")
+      yield* TestClock.adjust("1 millis")
+      assert.deepStrictEqual(yield* sinceLast(session), [line], "a delivered identity is still retained")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
   it.effect("opening a page preserves another page's pending and later navigation", () =>
     Effect.gen(function*() {
       const context = yield* Browser.newContext()
