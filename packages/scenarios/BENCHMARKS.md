@@ -782,31 +782,3 @@ query clears its caches. Original list/table outputs are recorded as incorrect a
 old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
 hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
 but does not eliminate JIT, GC, scheduling, order or thermal effects.
-
-## Node CPU and allocation attribution
-
-Dispatch `benchmarks.yml` with `workload=bench`, `only=native-cost-profile`, `runs=20` and immutable `base`/`head`
-refs for a bounded diagnostic. The driver runs only repeated-lifecycle and resources, with requestSizes omitted,
-three warmups and twenty workload repetitions per source/case. Source order reverses for resources. No ordinary
-paired timings or significance intervals are produced. Existing source/pin provenance and failure artifacts apply.
-
-Each child process records separate browser setup/cleanup, warmup and workload CPU/allocation profiles. Resources
-also records page/fixture setup and page cleanup separately; lifecycle acquisition/release and verification belong
-to its five-cycle workload. Phase markers include action and profiler boundaries. Node CPU sampling uses a 1 ms
-interval; heap sampling uses 32 KiB and includes objects collected by major/minor GC. GC observer records and native
-GC logs are retained. No explicit forced-GC command or browser runtime hook is installed. Imports before inspector
-attachment are outside capture; CPU windows include boundary bookkeeping and allocation windows also include
-inspector startup and shutdown.
-
-The inspector runs in the measured Node process: stopped CPU and allocation profiles arrive as JavaScript objects
-in its heap, then are serialized and written synchronously. Those objects and serialization perturb the measured
-heap and subsequent GC, even though file writing falls outside the profile windows. This is a plausible mechanism
-for the observed stop-window major GC, not an experimentally established cause. CPU and allocation sampling run
-simultaneously, so CPU samples include allocation-sampler overhead and possible code-generation effects. Each
-source/case is captured once in a fixed order; reversing source order for resources does not remove the confounding
-of source with run position within either case.
-
-These are sampled Node attributions, not exact accounting, browser-process profiles or new performance verdicts.
-Do not convert CPU sample counts into exact milliseconds or infer elapsed duration from counts; total and idle
-counts cannot establish an elapsed-time comparison between sources. An unsampled function may still have cost.
-Every attempt, including partial captures, is retained by the workflow.
