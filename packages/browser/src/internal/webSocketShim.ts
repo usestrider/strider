@@ -10,6 +10,7 @@ export const install = (name: string, token: string, pattern: string, transport:
   const Native = global.WebSocket
   const debug = global.console.debug.bind(global.console)
   const microtask = global.queueMicrotask.bind(global)
+  const wellFormed = global.String.prototype.toWellFormed
   const blobBytes = global.Blob.prototype.arrayBuffer
   const routes: Array<
     {
@@ -239,8 +240,10 @@ export const install = (name: string, token: string, pattern: string, transport:
       queue.count++
       const sequence = ++queue.sequence
       queue.pending.set(sequence, bytes)
-      // Views must be copied synchronously, after credit is spent, before the caller can mutate them.
-      const snapshot = global.ArrayBuffer.isView(value)
+      // Normalize browser strings and copy views only after credit is spent, before returning to the caller.
+      const snapshot = typeof value === "string"
+        ? wellFormed.call(value)
+        : global.ArrayBuffer.isView(value)
         ? new Uint8Array(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
         : value instanceof global.ArrayBuffer
         ? value.slice(0)
