@@ -92,9 +92,11 @@ deep.
 What every guide does the same way. The `review-guides` skill holds pages to it, and proposes a convention where
 the guide disagrees with itself; one is added here once the maintainer agrees.
 
-- **Openings.** A page opens, before its first section, with up to two plain sentences: what goes wrong without its
-  concept, and what the reader gets. A section introducing a concept does the same before its first code. No
-  history, scene-setting or praise.
+- **Openings.** A page opens, before its first section, with a sentence or two that say what its subject is and
+  does, as you'd explain it to a colleague: "A context is a fresh browser profile: its own cookies, storage, cache,
+  and permissions." Name a problem only when the subject exists to solve it, and say it as a plain fact. A section
+  that introduces a concept does the same before its first code. No template ("Without X, … so X …"), history,
+  scene-setting, or praise.
 - **Examples.** Whatever the prose names that a reader would type is shown in a block on the page, or linked to
   where it's shown. A block is one realistic task, written as a step with `Effect.fn`, that reads data through its
   types, such as a body decoded with a Schema, never `JSON.stringify`. Messages and hints are quoted from the
@@ -110,9 +112,9 @@ the guide disagrees with itself; one is added here once the maintainer agrees.
   a sentence or a fragment of one, and never the page's title again: Locators has "The queries". Parallel pages
   give the same section the same heading, and a heading on two pages means the same thing on both. A heading may
   join two words for one subject, as Handlers and decisions does.
-- **Decks.** A page's `description` is one noun phrase for what it covers, in the order of its sections: "A page's
-  requests and responses as events, their bodies decoded with a Schema, who answered them, the headers they sent,
-  and resending a request." The opening, not the deck, says why.
+- **Decks.** A page's `description` is one plain sentence for what the page is for, like a subtitle: "Separate
+  cookies, storage, and settings for each task." It doesn't list the page's sections, which its contents rail shows,
+  and the opening doesn't repeat it.
 - **Names.** One thing has one name on every page, the reference's: an endpoint, not an address. A session is the
   `strider` CLI's, or a protocol's own, CDP's or BiDi's, as the reference names it; a context has its own cookies
   and storage.
