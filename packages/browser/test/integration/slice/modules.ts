@@ -22,6 +22,7 @@ import {
   NetworkResponse,
   Page,
   PageNavigation,
+  Reason,
   Subscription,
   Target,
   UncaughtException,
@@ -672,6 +673,56 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             )
             assert.isTrue(Option.isNone(yield* links.from(request!)))
             assert.isTrue(Option.isNone(yield* links.to(request!)))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "collects a terminal redirect body or refuses it explicitly",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-unfollowed`,
+              status: 302,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            if (yield* supports("network.responseBody.terminalRedirect")) {
+              assert.strictEqual((yield* response).body, "<title>unfollowed</title>")
+            } else {
+              const error = yield* Effect.flip(response)
+              assert.strictEqual(error._tag, "ResponseError")
+              if (error._tag === "ResponseError") {
+                assert.deepStrictEqual(
+                  error.reason,
+                  new Reason.Unsupported({
+                    capability: "network.responseBody.terminalRedirect",
+                    backend: "firefox",
+                    hint:
+                      "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+                  })
+                )
+              }
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "collects the body of a 3xx status that isn't a redirect",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/multiple-choices`,
+              status: 300,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/multiple-choices`)
+            assert.strictEqual((yield* response).body, "<title>choices</title>")
           })),
         timeout
       )

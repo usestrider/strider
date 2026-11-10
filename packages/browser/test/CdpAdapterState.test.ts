@@ -18,6 +18,8 @@ import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
+import { runInNewContext } from "node:vm"
+import type * as CdpRuntime from "../src/cdp/Runtime.ts"
 import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
@@ -39,6 +41,7 @@ import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Serialization from "../src/internal/serialization.ts"
 import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
@@ -2407,6 +2410,140 @@ it.effect("bounds active native baselines and clears them when their frame close
     Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
     assert.strictEqual(store.size, 0)
   }).pipe(Effect.scoped))
+
+describe("CdpAdapter evaluation argument transport", () => {
+  const capture = Effect.fnUntraced(function*(values: ReadonlyArray<unknown>, fn: string, bindings = false) {
+    let sent!: CdpRuntime.CallFunctionOnParams
+    const mock = {
+      ...session,
+      send: (command: { readonly method: string; readonly params: CdpRuntime.CallFunctionOnParams }) => {
+        if (command.method === "DOM.resolveNode") {
+          return Effect.succeed({ object: { type: "object", objectId: "node" } })
+        }
+        if (command.method === "Runtime.releaseObject") return Effect.succeed({})
+        assert.strictEqual(command.method, "Runtime.callFunctionOn")
+        sent = command.params
+        return Effect.succeed({ result: { type: "undefined" } })
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "argument-transport",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const handle = state.ids.handle()
+    state.handles.set(handle, { target, realm, objectId: "handle", group: undefined })
+    const args: Array<Adapter.LocalValue> = values.map((value) => ({
+      _tag: "Value",
+      value: Serialization.toRemote(value)
+    }))
+    if (bindings) {
+      args.push(
+        { _tag: "Handle", handle },
+        { _tag: "Node", node: { document: "document" as never, binding: "1" } }
+      )
+    }
+    yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: fn,
+      arguments: args,
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    })
+    return sent
+  })
+
+  it.effect("sends ordinary arguments directly without compiling a decoder", () =>
+    Effect.gen(function*() {
+      const data = { text: "data" }
+      // This arbitrary callback text must not determine which argument transport is used.
+      const fn = "(...values) => values"
+      for (const values of [[], ["engine request"], [{ data, items: [null, true, 3, "text"] }], [undefined]]) {
+        const sent = yield* capture(values, fn)
+        assert.strictEqual(sent.functionDeclaration, fn)
+        assert.strictEqual(sent.arguments!.length, values.length)
+        const wire = JSON.parse(JSON.stringify(sent.arguments)) as Array<{ value?: unknown }>
+        const result = runInNewContext(`(${sent.functionDeclaration})`)(...wire.map((arg) => arg.value))
+        if (values.length === 1 && typeof values[0] === "object") {
+          assert.strictEqual(Object.prototype.hasOwnProperty.call(result[0].data, "text"), true)
+          assert.strictEqual(result[0].data.text, "data")
+        } else assert.deepStrictEqual(Array.from(result), values)
+      }
+      const sent = yield* capture(["request"], fn, true)
+      assert.strictEqual(sent.functionDeclaration, fn)
+      assert.deepStrictEqual(sent.arguments, [
+        { value: "request" },
+        { objectId: "handle" as CdpRuntime.RemoteObjectId },
+        { objectId: "node" as CdpRuntime.RemoteObjectId }
+      ])
+    }).pipe(Effect.scoped))
+
+  it.effect("reconstructs own __proto__ keys through objects and arrays", () =>
+    Effect.gen(function*() {
+      const data = Object.fromEntries([["__proto__", { polluted: true }]])
+      for (const value of [data, { nested: data }, [{ nested: data }]]) {
+        const sent = yield* capture([value], "value => value")
+        assert.notStrictEqual(sent.functionDeclaration, "value => value")
+      }
+    }).pipe(Effect.scoped))
+
+  it.effect("reconstructs nested special values and undefined while preserving bindings and callback scope", () =>
+    Effect.gen(function*() {
+      const fn = `(value, handle, node) => {
+        const map = value.items[0]; const key = Array.from(map.keys())[0]; const set = map.get(key);
+        return [map instanceof Map, key.id === 1, set instanceof Set, set.has(undefined), set.has(42n),
+          set.has(NaN), set.has(Infinity), Object.is(value.zero, -0), value.date instanceof Date,
+          value.regexp instanceof RegExp, value.absent === undefined,
+          Object.prototype.hasOwnProperty.call(value.data, "__proto__"), value.data["__proto__"] === "data",
+          handle.id === "handle", node.id === "node", args, kinds, decode, fn, arguments];
+      }`
+      const sent = yield* capture(
+        [{
+          items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+          zero: -0,
+          date: new Date("2020-01-02"),
+          regexp: /a+/gi,
+          absent: undefined,
+          data: Object.fromEntries([["__proto__", "data"]])
+        }],
+        fn,
+        true
+      )
+      assert.notStrictEqual(sent.functionDeclaration, fn)
+      assert.deepStrictEqual(sent.arguments!.slice(-2), [{ objectId: "handle" as CdpRuntime.RemoteObjectId }, {
+        objectId: "node" as CdpRuntime.RemoteObjectId
+      }])
+      const wire = JSON.parse(JSON.stringify(sent.arguments)) as Array<{ value?: unknown; objectId?: string }>
+      const call = runInNewContext(`(${sent.functionDeclaration})`, {
+        args: "page:args",
+        kinds: "page:kinds",
+        decode: "page:decode",
+        fn: "page:fn",
+        arguments: "page:arguments"
+      })
+      const result = call(...wire.map((arg) => arg.objectId === undefined ? arg.value : { id: arg.objectId }))
+      assert.deepStrictEqual(Array.from(result), [
+        ...Array.from({ length: 15 }, () => true),
+        "page:args",
+        "page:kinds",
+        "page:decode",
+        "page:fn",
+        "page:arguments"
+      ])
+      const nested = yield* capture(
+        [{ absent: undefined }],
+        "value => Object.hasOwn(value, 'absent') && value.absent === undefined"
+      )
+      assert.strictEqual(
+        runInNewContext(`(${nested.functionDeclaration})`)(...nested.arguments!.map((arg) => arg.value)),
+        true
+      )
+    }).pipe(Effect.scoped))
+})
 
 describe("CDP request sizes opt-in", () => {
   for (const enabled of [false, true]) {

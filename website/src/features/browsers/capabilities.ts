@@ -89,6 +89,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Network",
     names: {
       bodies: "Response bodies",
+      "network.responseBody.terminalRedirect": "Bodies of terminal 301/302/303/307/308 responses without Location",
       "network.requestBody.bytes": "Collected request bytes",
       "network.requestBody.text": "Collected request text",
       "network.requestBody.absence": "Reporting absent request bodies",

@@ -77,6 +77,11 @@ const routes: Record<string, Route> = {
     response.writeHead(302, { "content-type": "text/html" })
     response.end("<title>unfollowed</title>")
   },
+  // A 3xx that isn't a redirect status, with no location: Firefox reads Location only for 301, 302, 303, 307, 308
+  "/multiple-choices": (_request, response) => {
+    response.writeHead(300, { "content-type": "text/html" })
+    response.end("<title>choices</title>")
+  },
   "/redirect": (_request, response) => {
     response.writeHead(302, { location: "/landed" })
     response.end()

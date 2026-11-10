@@ -3434,3 +3434,247 @@ it.effect("removes an obsolete preload even when reinstalling its survivor fails
     yield* Scope.close(survivor, Exit.void)
     assert.strictEqual(native.size, 0)
   }))
+
+describe("BiDi response body completion", () => {
+  for (const successor of ["none", "waiting", "reading"] as const) {
+    it.effect(`keeps terminal completion and body identity with successor ${successor}`, () =>
+      Effect.gen(function*() {
+        const called = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<{ bytes: { type: string; value: string } }>()
+        const { state, page, sent } = yield* withPage({
+          "network.getData": Deferred.succeed(called, undefined).pipe(Effect.andThen(Deferred.await(reply)))
+        })
+        const retired: Array<string> = []
+        const tracked = {
+          ...state,
+          retire: (key: string) => {
+            retired.push(key)
+            state.retire(key)
+          }
+        }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const params = {
+          context: "C1",
+          userContext: "default",
+          navigation: null,
+          timestamp: 1,
+          redirectCount: 0,
+          isBlocked: false,
+          request: {
+            request: "response-body",
+            url: "http://site.test/",
+            method: "GET",
+            headers: [],
+            destination: "",
+            bodySize: 0
+          }
+        }
+        const apply = (method: string, extra: object = {}) =>
+          handlers.apply(method, { ...params, ...extra }, { state: tracked })
+        const complete = () =>
+          apply("network.responseCompleted", {
+            response: { status: 200, bytesReceived: 8, headers: [] }
+          })
+        apply("network.beforeRequestSent")
+        page.context.proxyAttempts = new Set(["response-body"])
+        const entry = state.requests.get("response-body")!
+        const hop = entry.hop
+        const reading = yield* Network.responseBody(state, hop).pipe(Effect.result, Effect.forkChild)
+        yield* Effect.yieldNow
+        if (successor === "waiting") apply("network.beforeRequestSent", { redirectCount: 1 })
+        complete()
+        // Isolate the in-flight identity check even on an adapter whose completion latch is broken.
+        if (successor === "reading") Deferred.doneUnsafe(entry.finished, Effect.void)
+        assert.isTrue(Deferred.isDoneUnsafe(entry.finished), "completed responses release body reads")
+        if (successor !== "waiting") {
+          yield* Deferred.await(called)
+          if (successor === "reading") apply("network.beforeRequestSent", { redirectCount: 1 })
+        }
+        yield* Deferred.succeed(reply, { bytes: { type: "string", value: "terminal" } })
+        const result = yield* Fiber.join(reading)
+        if (successor === "none") {
+          assert.strictEqual(result._tag, "Success")
+          if (result._tag === "Success") assert.strictEqual(new TextDecoder().decode(result.success), "terminal")
+        } else {
+          assert.strictEqual(result._tag, "Failure")
+          if (result._tag === "Failure") {
+            assert.strictEqual(result.failure.reason._tag, "Unsupported")
+            if (result.failure.reason._tag === "Unsupported") {
+              assert.strictEqual(result.failure.reason.capability, "body.redirect")
+            }
+          }
+        }
+        assert.deepStrictEqual(sent, successor === "waiting" ? [] : ["network.getData"])
+        assert.isFalse(page.context.proxyAttempts.has("response-body"))
+        assert.deepStrictEqual(retired, ["response-body"])
+      }))
+  }
+})
+
+it.effect("retires terminal BiDi responses without evicting an active redirect successor", () =>
+  Effect.gen(function*() {
+    const { state } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "final" } } })
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    const apply = (method: string, key: string, redirectCount = 0) =>
+      handlers.apply(method, {
+        context: "C1",
+        userContext: "default",
+        navigation: null,
+        timestamp: 1,
+        redirectCount,
+        isBlocked: false,
+        request: { request: key, url: "http://site.test/", method: "GET", headers: [], destination: "", bodySize: 0 },
+        response: { status: redirectCount === 1 ? 200 : 302, bytesReceived: 5, headers: [] }
+      }, { state })
+    apply("network.beforeRequestSent", "active")
+    apply("network.responseCompleted", "active")
+    const active = state.requests.get("active")!
+    const first = active.hop
+    apply("network.beforeRequestSent", "active", 1)
+    assert.isFalse(Deferred.isDoneUnsafe(active.finished), "each successor waits for its own completion")
+    for (let i = 0; i < 1001; i++) {
+      apply("network.beforeRequestSent", `terminal-${i}`)
+      apply("network.responseCompleted", `terminal-${i}`)
+    }
+    assert.strictEqual(state.requests.get("active"), active)
+    assert.isFalse(state.requests.has("terminal-0"))
+    assert.strictEqual(state.requests.size, 1001)
+    apply("network.responseCompleted", "active", 1)
+    assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, active.hop)), "final")
+    for (let i = 0; i < 1000; i++) {
+      apply("network.beforeRequestSent", `later-${i}`)
+      apply("network.responseCompleted", `later-${i}`)
+    }
+    assert.isFalse(state.requests.has("active"))
+    assert.isFalse(state.hops.has(first))
+    assert.isFalse(state.hops.has(active.hop))
+    assert.strictEqual(state.requests.size, 1000)
+  }))
+
+describe("BiDi terminal redirect body refusal", () => {
+  for (
+    const sample of [
+      { status: 299, headers: [], refused: false },
+      { status: 300, headers: [], refused: false },
+      { status: 301, headers: [], refused: true },
+      { status: 302, headers: [], refused: true },
+      { status: 303, headers: [], refused: true },
+      { status: 304, headers: [], refused: false },
+      { status: 306, headers: [], refused: false },
+      { status: 307, headers: [], refused: true },
+      { status: 308, headers: [], refused: true },
+      { status: 309, headers: [], refused: false },
+      { status: 399, headers: [], refused: false },
+      { status: 400, headers: [], refused: false },
+      { status: 302, headers: [{ name: "lOcAtIoN", value: { type: "string", value: "/next" } }], refused: false },
+      { status: 302, headers: [{ name: "Location", value: { type: "string", value: "" } }], refused: false }
+    ]
+  ) {
+    it.effect(`bounds refusal to status ${sample.status} with ${sample.headers.length} Location headers (${sample.headers[0]?.value.value ?? "absent"})`, () =>
+      Effect.gen(function*() {
+        const { state, sent } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "body" } } })
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const params = {
+          context: "C1",
+          userContext: "default",
+          navigation: null,
+          timestamp: 1,
+          redirectCount: 0,
+          isBlocked: false,
+          request: {
+            request: "terminal",
+            url: "http://site.test/",
+            method: "GET",
+            headers: [],
+            destination: "",
+            bodySize: 0
+          },
+          response: {
+            url: "http://site.test/",
+            status: sample.status,
+            statusText: "",
+            protocol: "HTTP/1.1",
+            headers: sample.headers,
+            fromCache: false,
+            bytesReceived: 4
+          }
+        }
+        handlers.apply("network.beforeRequestSent", params, { state })
+        handlers.apply("network.responseStarted", params, { state })
+        const entry = state.requests.get("terminal")!
+        if (sample.refused) {
+          // No completion event is needed to identify this unsupported native read.
+          const reading = yield* Network.responseBody(state, entry.hop).pipe(Effect.result, Effect.forkChild)
+          yield* Effect.yieldNow
+          assert.isDefined(reading.pollUnsafe(), "refusal must not wait for response completion")
+          const result = yield* Fiber.join(reading)
+          assert.strictEqual(result._tag, "Failure")
+          if (result._tag === "Failure") {
+            assert.deepStrictEqual(result.failure.reason, {
+              _tag: "Unsupported",
+              capability: "network.responseBody.terminalRedirect",
+              hint:
+                "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+            })
+          }
+          assert.deepStrictEqual(sent, [])
+          // A followed successor must clear the refusal and wait for its own completion.
+          const next = { ...params, redirectCount: 1, response: { ...params.response, status: 200 } }
+          handlers.apply("network.beforeRequestSent", next, { state })
+          handlers.apply("network.responseStarted", next, { state })
+          assert.isFalse(Deferred.isDoneUnsafe(entry.finished))
+          handlers.apply("network.responseCompleted", next, { state })
+          assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, entry.hop)), "body")
+        } else {
+          handlers.apply("network.responseCompleted", params, { state })
+          assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, entry.hop)), "body")
+        }
+      }))
+  }
+})
+
+it.effect("refuses a terminal BiDi response learned while a body read waits", () =>
+  Effect.gen(function*() {
+    const { state, sent } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "wrong" } } })
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    const params = {
+      context: "C1",
+      userContext: "default",
+      navigation: null,
+      timestamp: 1,
+      redirectCount: 0,
+      isBlocked: false,
+      request: {
+        request: "late-response",
+        url: "http://site.test/",
+        method: "GET",
+        headers: [],
+        destination: "",
+        bodySize: 0
+      },
+      response: {
+        url: "http://site.test/",
+        status: 302,
+        statusText: "",
+        protocol: "HTTP/1.1",
+        headers: [],
+        fromCache: false,
+        bytesReceived: 4
+      }
+    }
+    handlers.apply("network.beforeRequestSent", params, { state })
+    const entry = state.requests.get("late-response")!
+    const reading = yield* Network.responseBody(state, entry.hop).pipe(Effect.result, Effect.forkChild)
+    yield* Effect.yieldNow
+    handlers.apply("network.responseStarted", params, { state })
+    handlers.apply("network.responseCompleted", params, { state })
+    const result = yield* Fiber.join(reading)
+    assert.strictEqual(result._tag, "Failure")
+    if (result._tag === "Failure") {
+      assert.deepInclude(result.failure.reason, {
+        _tag: "Unsupported",
+        capability: "network.responseBody.terminalRedirect"
+      })
+    }
+    assert.deepStrictEqual(sent, [])
+  }))

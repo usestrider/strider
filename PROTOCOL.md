@@ -364,6 +364,10 @@ Adapter responsibilities:
   Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
   before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
   binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Shared BiDi preload reconciliation is serialized: it reads the current registry under that serialization,
+  installs replacements before retiring predecessors, and rolls back staged additions on failure. Native preload
+  IDs retain their declaration owner, so failed replacement preserves old survivors without retaining a removed
+  declaration. Unconfirmed native removals remain owned for later cleanup.
   Stock WebKit captures console.debug and sends a fresh object per envelope, carrying an exact marker and
   payload. Its target-local classifier consumes those objects before ordinary console publication, derives the
   realm from injectedScriptId, and releases every consumed remote object after extraction. Ordinary string and
@@ -378,6 +382,11 @@ Adapter responsibilities:
   deliberate drops; only one native error and close may wait, in native order. Removal/drain cancels those waits
   independently of conversion chains. Native close metadata is copied unchanged and emitted once with native
   provenance; the page close does not add a duplicate synthetic observation.
+  Accepted payloads carry a separate idempotent discard even before extraction starts. Fetch and discard waits
+  use the captured route budget on the browser clock; a stalled fetch faults its realm, releases its payload and
+  allows the serial consumer to proceed to other realms. A BiDi call rejected for a missing target realm retires
+  that exact realm through the fact buffer; routing uses its ended lifetime to reclaim leases without reporting
+  ordinary destruction as a user-handler failure.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
   - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
   - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;

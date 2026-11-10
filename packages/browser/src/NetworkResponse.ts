@@ -245,6 +245,11 @@ export const withBodyLimit: {
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
+ * On Firefox, a terminal response with status 301, 302, 303, 307 or 308 without a `Location` header fails body
+ * collection immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does
+ * not answer the native body command for it. Other statuses remain readable, and Chromium and WebKit can collect
+ * these terminal responses' bodies.
+ *
  * On WebKit, response-body collection makes navigation and reload wait for the responded, committed main
  * document to finish loading and for document body reads already started on the page to settle. Unresponded or
  * uncommitted loads and unfinished iframe loads do not delay dispatch. This interruptible wait uses the existing
@@ -317,6 +322,9 @@ export const next: {
  *
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
+ * Firefox terminal responses with status 301, 302, 303, 307 or 308 without a `Location` header fail body collection
+ * immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not
+ * answer the native body command for them. Other statuses remain readable.
  *
  * **Example** (Logging server errors)
  *
@@ -446,7 +454,12 @@ export class MalformedBody extends Schema.Error<MalformedBody>("@usestrider/brow
  * @category schemas
  * @since 0.1.0
  */
-export const ResponseErrorReason = Schema.Union([BodyUnavailable, MalformedBody, Reason.BackendFailure])
+export const ResponseErrorReason = Schema.Union([
+  BodyUnavailable,
+  MalformedBody,
+  Reason.Unsupported,
+  Reason.BackendFailure
+])
 
 /**
  * The reasons reading a response can fail.
