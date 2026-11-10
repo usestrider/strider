@@ -61,8 +61,8 @@ const rules = [
       `    ${mark("contexts.start")}\n    const contextIds = yield* Target.getBrowserContexts()`
     ],
     [
-      "    const defaultEntry: State.ContextEntry = {",
-      `    ${mark("contexts.end")}\n    const defaultEntry: State.ContextEntry = {`
+      "    const defaultEntry = new State.ContextEntry(",
+      `    ${mark("contexts.end")}\n    const defaultEntry = new State.ContextEntry(`
     ],
     [
       "    yield* Declare.applyDownloads(state, defaultEntry).pipe(Effect.ignore)",
@@ -95,16 +95,16 @@ const rules = [
   ]],
   ["/internal/cdpAdapter/targets.ts", [
     [
-      "Effect.ensuring(resume(target.session, waiting))",
-      "Effect.ensuring(resume(target.session, waiting)), Effect.ensuring(Effect.sync(() => globalThis.__launchTrace.mark(\"target.gate.end\", { targetId: target.targetId, kind: target.kind })))"
+      "      Effect.scoped\n    )\n  }\n)",
+      "      Effect.scoped,\n      Effect.ensuring(Effect.sync(() => globalThis.__launchTrace.mark(\"target.gate.end\", { targetId: target.targetId, kind: target.kind })))\n    )\n  }\n)"
     ],
     [
-      "  const on = Protocol.on(target.session)\n  yield* Effect.all([",
-      "  globalThis.__launchTrace.mark(\"target.snapshot.start\", { targetId: target.targetId, kind: target.kind });\n  const on = Protocol.on(target.session)\n  yield* Effect.all(["
+      "  const on = Protocol.on(target.session)\n  const autoAttach = Target.setAutoAttach({",
+      "  globalThis.__launchTrace.mark(\"target.snapshot.start\", { targetId: target.targetId, kind: target.kind });\n  const on = Protocol.on(target.session)\n  const autoAttach = Target.setAutoAttach({"
     ],
     [
-      "  const failure = yield* configure.pipe(Effect.flip, Effect.option)",
-      "  const failure = yield* configure.pipe(Effect.flip, Effect.option)\n  globalThis.__launchTrace.mark(\"target.snapshot.end\", { targetId: target.targetId, kind: target.kind });"
+      "  const { result, received, failure } = yield* initialized",
+      "  const { result, received, failure } = yield* initialized\n  globalThis.__launchTrace.mark(\"target.snapshot.end\", { targetId: target.targetId, kind: target.kind });"
     ]
   ]],
   ["/playwright-core/lib/coreBundle.js", [
