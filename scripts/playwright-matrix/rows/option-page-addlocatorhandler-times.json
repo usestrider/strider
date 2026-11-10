@@ -14,5 +14,11 @@
     "method:Page.addLocatorHandler"
   ],
   "option": "times",
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "scoped-overlay-dispatch",
+    "quote": "explicit removal prevents new selections, while scope release interrupts selected work.",
+    "revision": "4ca4efce6322c63e58e7a6fccb9374bdcdd2c38a"
+  }
 }
