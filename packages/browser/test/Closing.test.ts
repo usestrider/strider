@@ -178,3 +178,28 @@ describe("a context's removal", () => {
       )
     }))
 })
+
+describe("a context scope's release of its pages", () => {
+  it.effect("closes twenty pages at once, so it takes one close, not twenty", () =>
+    Effect.gen(function*() {
+      let sent = 0
+      yield* Effect.gen(function*() {
+        const released = yield* Effect.scoped(Effect.gen(function*() {
+          const context = yield* Browser.newContext()
+          for (let i = 0; i < 20; i++) yield* context.newPage
+          return context
+        })).pipe(Effect.forkChild({ startImmediately: true }))
+        // One close takes a second; twenty in turn would take twenty
+        yield* TestClock.adjust("2 seconds")
+        assert.isDefined(released.pollUnsafe())
+        assert.strictEqual(sent, 20)
+      }).pipe(
+        Effect.provide(layer((fake) => ({
+          closePage: (page, options) => {
+            sent++
+            return Effect.sleep("1 second").pipe(Effect.andThen(fake.closePage(page, options)))
+          }
+        })))
+      )
+    }))
+})
