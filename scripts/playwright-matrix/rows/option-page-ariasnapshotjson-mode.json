@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-ariasnapshotjson-mode",
+  "upstream": [
+    "method:Page.ariaSnapshotJSON"
+  ],
+  "option": "mode",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "ai",
+      "status": "missing"
+    },
+    {
+      "value": "default",
+      "status": "missing"
+    }
+  ]
+}

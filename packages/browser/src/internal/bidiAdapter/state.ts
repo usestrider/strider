@@ -6,7 +6,7 @@
  * browsing context, realms by BiDi's realm, navigations by BiDi's navigation id (or one made up for a navigation
  * BiDi gives none), requests by BiDi's request id. Every event arrives on the connection's one session.
  */
-import type * as Deferred from "effect/Deferred"
+import * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type * as BrowserBidi from "../../bidi-protocol/Browser.ts"
@@ -29,6 +29,8 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  readonly requestTiming?: boolean | undefined
+  readonly requestSizes?: boolean | undefined
   /** A navigable has existed, so setup rollback cannot establish that the proxy cache stayed unused. */
   proxyUsed?: boolean | undefined
   proxy?: Adapter.ProxyOptions | undefined
@@ -53,10 +55,12 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   restoring: {
     readonly navigation: PageNavigation.Id
     readonly arrived: (realm: RealmEntry) => void
+    /** Only events received before this reply may claim the same-document traversal. */
+    readonly sameDocumentThrough?: number | undefined
   } | undefined
   /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
   restorationAmbiguous: boolean
-  /** Traversal commands still awaiting replies, including ones whose restoration ownership was invalidated. */
+  /** Traversal commands awaiting replies or their observation drain, including invalidated owners. */
   readonly traversalCommands: Set<PageNavigation.Id>
   /** Navigations started by a command that the browser hasn't announced yet, oldest first. */
   readonly expected: Kit.Expectations
@@ -108,13 +112,16 @@ export interface NavigationEntry extends Kit.NavigationNode {
 }
 
 export interface RequestEntry {
+  credentialsAttempted?: boolean | undefined
+  terminalRedirect: boolean
   readonly id: NetworkRequest.Id
   readonly bidi: Network.Request
   redirects: number
   hop: NetworkRequest.HopId
   readonly navigable: NavigableEntry | undefined
   readonly navigation: NavigationEntry | undefined
-  readonly finished: Deferred.Deferred<void, string>
+  /** The current hop's completion; a successor gets a fresh latch. */
+  finished: Deferred.Deferred<void, string>
   /** A route fulfilled it, which Firefox reports as an ordinary response. */
   fulfilled: boolean
   /**
@@ -216,7 +223,7 @@ export interface State {
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
   /** The preload scripts registered, in order. */
-  preloads: ReadonlyArray<Script.PreloadScript>
+  preloads: ReadonlyArray<{ readonly script: Script.PreloadScript; readonly declaration: Adapter.RegistrationId }>
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
 }
@@ -262,7 +269,8 @@ export const make = (options: {
     hops,
     retire: Retired.make((key: string) => {
       const request = requests.get(key)
-      if (request === undefined) return
+      // A completed redirect may have resumed since it entered the retirement queue.
+      if (request === undefined || !Deferred.isDoneUnsafe(request.finished)) return
       requests.delete(key)
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(options.ids.hop(request.id, hop))
     }),
@@ -282,6 +290,7 @@ export const make = (options: {
 
 /** What a fold handler gets beside the event's params: every event is the one session's. */
 export interface Event {
+  readonly received?: number | undefined
   readonly state: State
 }
 

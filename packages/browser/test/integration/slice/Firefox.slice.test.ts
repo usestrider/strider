@@ -17,7 +17,11 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
+import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -41,3 +45,8 @@ attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefo
 webauthn("Firefox", backend)
 
 locatorHandlers("Firefox", backend)
+requestBodies("Firefox", backend)
+requestTiming("Firefox", backend)
+
+storageReplacement("Firefox", backend)
+requestSizes("Firefox", backend)

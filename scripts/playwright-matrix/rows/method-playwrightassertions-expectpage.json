@@ -1,0 +1,11 @@
+{
+  "id": "method-playwrightassertions-expectpage",
+  "upstream": [
+    "method:PlaywrightAssertions.expectPage"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

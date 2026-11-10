@@ -1,0 +1,11 @@
+{
+  "id": "property-testinfo-workerindex",
+  "upstream": [
+    "property:TestInfo.workerIndex"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Strider Playwright Test runner/reporter integration for this member. The Vitest integration does not implement this contract.",
+  "capabilities": [],
+  "requirements": []
+}

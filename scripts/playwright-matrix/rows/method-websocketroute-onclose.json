@@ -1,0 +1,11 @@
+{
+  "id": "method-websocketroute-onclose",
+  "upstream": [
+    "method:WebSocketRoute.onClose"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public WebSocket interception, mocking or forwarding API.",
+  "capabilities": [],
+  "requirements": []
+}

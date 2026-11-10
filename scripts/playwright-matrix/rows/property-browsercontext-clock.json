@@ -1,0 +1,23 @@
+{
+  "id": "property-browsercontext-clock",
+  "upstream": [
+    "property:BrowserContext.clock"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.clock",
+      "url": "/docs/api/browser/UserContext#UserContext.clock"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,35 @@
+---
+title: A request's response
+description: Pairing a request with its response.
+order: 3.5
+---
+
+`NetworkRequest.response` gives a wait for the response to one request you've seen, not to any request for its URL,
+so concurrent requests to the same endpoint don't get mixed up. Each redirect hop has its own.
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const requestStatus = Effect.fn("requestStatus")(function*(page: Page.Page) {
+  return yield* Effect.scoped(Effect.gen(function*() {
+    const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+    yield* page.goto("https://example.com/")
+    const response = yield* NetworkRequest.response(page, yield* sent)
+    return Option.map(yield* response, (value) => value.status)
+  }))
+})
+```
+
+The acquisition retains this hop until its scope closes. Its returned effect reads a response that already
+arrived or waits under the [deadline](/docs/deadlines) in force when it runs. A request ending without
+a response, including a failed or canceled request, returns `Option.none`. Each redirect hop resolves independently.
+
+Acquire while the request is still among the model's last 1000 retained hops, using the page or context that
+observed it. Acquisition does not recover an evicted hop. The wait fails with
+[RequestError](/docs/api/browser/NetworkRequest#RequestError), whose
+[ResponseUnavailable](/docs/api/browser/NetworkRequest#ResponseUnavailable) reason distinguishes an evicted hop,
+a foreign target, a released scope, and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
+
+This retains response metadata only. To read a body, set up a [response-body subscription](/docs/events/network#decoding-bodies)
+before the request starts. Continue a routed request before awaiting its response, so the browser can send it.

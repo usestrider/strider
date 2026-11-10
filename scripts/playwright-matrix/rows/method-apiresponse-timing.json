@@ -1,0 +1,11 @@
+{
+  "id": "method-apiresponse-timing",
+  "upstream": [
+    "method:APIResponse.timing"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in API testing response object; browser responses are NetworkResponse events.",
+  "capabilities": [],
+  "requirements": []
+}

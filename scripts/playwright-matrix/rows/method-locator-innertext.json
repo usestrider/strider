@@ -1,0 +1,28 @@
+{
+  "id": "method-locator-innertext",
+  "upstream": [
+    "method:Locator.innerText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.readText",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.readText"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "readText uses Strider’s whitespace-normalized text engine. For the native DOM value, use locator.evaluate to read element.textContent or an HTMLElement’s innerText. Reads are immediate and fail NoMatch; wait explicitly before reading when needed.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

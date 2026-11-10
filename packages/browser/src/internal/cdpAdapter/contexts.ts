@@ -20,7 +20,7 @@ import * as Urls from "../urls.ts"
 import { applyDownloads } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
   contextLock,
   contextOf,
   downloadDirectory,
@@ -110,16 +110,21 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
-  const entry: ContextEntry = {
-    id: state.ids.userContext(),
-    browserContextId,
-    isDefault: false,
-    removing: false,
-    proxy: Option.getOrUndefined(options.proxy)
-  }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.requestSizes) entry.requestSizes = new Map()
+  if (options.requestTiming) entry.requestTiming = new Map()
+  entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+  yield* state.buffer.run(() =>
+    state.buffer.emit({
+      _tag: "UserContextAdded",
+      context: entry.id,
+      isDefault: false,
+      ...(options.requestTiming ? { requestTiming: true } : {}),
+      ...(options.requestSizes ? { requestSizes: true } : {})
+    })
+  )
   yield* Kit.protocol(applyDownloads(state, entry))
   return entry.id
 })
@@ -132,7 +137,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     )
   }
   const browserContextId = context.browserContextId
-  yield* contextLock(context).withPermits(1)(Effect.gen(function*() {
+  const removal = contextLock(context).withPermits(1)(Effect.gen(function*() {
     // A successful disposal is final even while page-session shutdown is still pending.
     if (context.disposed) return
     context.removing = true
@@ -147,6 +152,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       })
     ))
     context.disposed = true
+    context.requestSizes?.clear()
     // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
     // a budget of its own (`Model.remove`); they end with the connection at the latest
     state.buffer.start(Effect.gen(function*() {
@@ -157,6 +163,9 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
     }))
   }))
+  // A removal the browser refused leaves the context in place: its download behavior, which the scope's declaration
+  // left alone because this removal was to follow, is applied again (no declaration in force says "default")
+  yield* removal.pipe(Effect.onError(() => applyDownloads(state, context).pipe(Effect.ignore)))
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {

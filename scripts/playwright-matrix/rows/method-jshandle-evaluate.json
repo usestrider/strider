@@ -1,0 +1,23 @@
+{
+  "id": "method-jshandle-evaluate",
+  "upstream": [
+    "method:JSHandle.evaluate"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "JSHandle",
+      "symbol": "JSHandle.evaluate",
+      "url": "/docs/api/browser/JSHandle#JSHandle.evaluate"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/JSHandle.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

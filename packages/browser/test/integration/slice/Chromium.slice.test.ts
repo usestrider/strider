@@ -16,7 +16,11 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
+import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -38,3 +42,8 @@ attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chro
 webauthn("Chromium", backend)
 
 locatorHandlers("Chromium", backend)
+requestBodies("Chromium", backend)
+requestTiming("Chromium", backend)
+
+storageReplacement("Chromium", backend)
+requestSizes("Chromium", backend)

@@ -1,0 +1,32 @@
+{
+  "id": "option-browsertype-launch-headless",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "headless",
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "WebKitGTK has no headless mode; provide its display explicitly.",
+  "capabilities": [],
+  "browserOverrides": {
+    "webkit.launched": {
+      "status": "missing",
+      "limitations": [
+        "WebKitGTK has no headless mode."
+      ]
+    },
+    "webkit.attached": {
+      "status": "missing",
+      "limitations": [
+        "An attached browser cannot change its launch mode."
+      ]
+    }
+  },
+  "requirements": []
+}

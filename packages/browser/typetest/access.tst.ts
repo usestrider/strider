@@ -6,17 +6,28 @@ import {
   Capability,
   Deadline,
   Download,
+  Expect,
   JSHandle,
   Locator,
   NetworkRequest,
   NetworkResponse,
   Page,
   Snapshot,
+  Subscription,
   Target
 } from "@usestrider/browser"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Schema, Scope } from "effect"
 import { HttpIncomingMessage } from "effect/http"
 import { describe, expect, it } from "tstyche"
+
+class RequestDecoderService extends Context.Service<RequestDecoderService, {}>()("RequestDecoderService") {}
+class RequestPredicateService extends Context.Service<RequestPredicateService, {}>()("RequestPredicateService") {}
+declare const requestDecoder: NetworkRequest.BodyDecoder<string, "decoder-error", RequestDecoderService>
+declare const requestPredicate: Subscription.Where<
+  NetworkRequest.CapturedRequest<string>,
+  "predicate-error",
+  RequestPredicateService
+>
 
 declare const observed: Page.ObservedPage
 declare const reader: Page.ReadonlyPage
@@ -24,7 +35,13 @@ declare const page: Page.Page
 declare const ref: Snapshot.RefId
 
 describe("access is typed", () => {
+  it("configured viewport requires only inspect access", () => {
+    expect(reader.viewportSize).type.not.toRaiseError()
+    expect(observed.viewportSize).type.toRaiseError()
+  })
+
   it("a page you may only inspect offers no actions", () => {
+    expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
     expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")
     expect(page.locator("input").selectText()).type.not.toRaiseError()
@@ -33,6 +50,14 @@ describe("access is typed", () => {
     )
     expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
     expect(page.getByRole("button").blur()).type.not.toRaiseError()
+  })
+
+  it("selected-value expectations need only inspect access and preserve typed failures", () => {
+    expect(reader.locator("select").pipe(Expect.toHaveValues(["red", /green/] as const))).type.toBe<
+      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone>
+    >()
+    expect(Expect.toHaveValues(reader.locator("select"), [])).type.not.toRaiseError()
+    expect(observed.locator("select").pipe(Expect.toHaveValues([]))).type.toRaiseError()
   })
 
   it("editability needs only inspect access and preserves read failures", () => {
@@ -85,6 +110,38 @@ describe("access is typed", () => {
         body: HttpIncomingMessage.schemaBodyJson(Schema.String)
       })
     ).type.toRaiseError()
+  })
+
+  it("request body collection needs inspect access, including filters stored in variables", () => {
+    const filter = {
+      url: "https://example.com/**",
+      body: (message: Parameters<NetworkRequest.BodyDecoder<string, never, never>>[0]) => message.text
+    }
+    expect(NetworkRequest.next(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.stream(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.next(reader, filter)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope
+      >
+    >()
+  })
+
+  it("request body subscriptions preserve decoder and predicate requirements and errors", () => {
+    expect(NetworkRequest.next(reader, { url: "**/submit", body: requestDecoder }, requestPredicate)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          "decoder-error" | "predicate-error" | NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | RequestDecoderService | RequestPredicateService
+      >
+    >()
   })
 
   it("kind guards never narrow access", () => {

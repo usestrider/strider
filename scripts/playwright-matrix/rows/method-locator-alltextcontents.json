@@ -1,0 +1,28 @@
+{
+  "id": "method-locator-alltextcontents",
+  "upstream": [
+    "method:Locator.allTextContents"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.all",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.all"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluate",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluate"
+    }
+  ],
+  "notes": "Read all, then Effect.forEach over locator.evaluate to read each element’s innerText/textContent by value. These are separate immediate reads, not one atomic evaluation; readText is an alternative only when whitespace normalization is wanted.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

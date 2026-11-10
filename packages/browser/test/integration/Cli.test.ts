@@ -167,6 +167,44 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  it.live(
+    "reports a failed call's digest through MCP and only once with JSON",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "failure-digest", ...args)
+        const started = yield* strider(env, "start", "--name", "failure-digest", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+          const emit = () => run("-p", "main", "eval", "console.error('pending failure event')")
+          assert.strictEqual((yield* emit()).code, 0)
+          const [answer] = yield* mcpTools(env, ["-s", "failure-digest", "mcp"], [{
+            name: "goto",
+            arguments: { page: "missing", url: "https://example.test/%typo%" }
+          }])
+          assert.isTrue(answer.result.isError)
+          const failure = JSON.parse(answer.result.content[0].text)
+          assert.strictEqual(failure.error, "PageNotFound")
+          assert.include(failure.message, "%typo% names no secret")
+          assert.deepStrictEqual(failure.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.strictEqual((yield* emit()).code, 0)
+          const json = yield* run("-p", "missing", "--json", "goto", "https://example.test/%typo%")
+          assert.strictEqual(json.code, 16, json.err)
+          const outcome = JSON.parse(json.out).outcome
+          assert.strictEqual(outcome.error, "PageNotFound")
+          assert.include(outcome.message, "%typo% names no secret")
+          assert.deepStrictEqual(outcome.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.notInclude(json.err, "pending failure event")
+        } finally {
+          yield* run("stop")
+        }
+      })),
+    timeout
+  )
+
   it.live("evaluates browser expressions and function files", () =>
     Effect.scoped(Effect.gen(function*() {
       const env = environment()
@@ -921,6 +959,42 @@ describe("strider", () => {
       assert.strictEqual(result.err, "InvalidInput: --idle 15m isn't a duration, such as \"30 minutes\"\n")
     }), timeout)
 
+  for (const navigation of ["page new", "goto"] as const) {
+    it.live(
+      `does not repeat ${navigation}'s own navigation in the next snapshot`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const served = yield* site
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent("<title>digest boundary</title><p>ready</p>")
+          }`
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "digest", "-p", "main", ...args)
+          const started = yield* strider(env, "start", "--name", "digest", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            if (navigation === "goto") {
+              const opened = yield* run("page", "new", "--name", "main", "about:blank")
+              assert.strictEqual(opened.code, 0, opened.err)
+              assert.strictEqual((yield* run("snapshot")).code, 0)
+            }
+            const navigated = navigation === "page new"
+              ? yield* run("page", "new", "--name", "main", url)
+              : yield* run("goto", url)
+            assert.strictEqual(navigated.code, 0, navigated.err)
+            assert.include(navigated.out, `at ${url}`)
+            const snapshot = yield* run("snapshot")
+            assert.strictEqual(snapshot.code, 0, snapshot.err)
+            assert.include(snapshot.out, "document \"digest boundary\"")
+            assert.notInclude(snapshot.out, `main navigated to ${url}`)
+          } finally {
+            yield* run("stop")
+          }
+        })),
+      timeout
+    )
+  }
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
@@ -1066,6 +1140,23 @@ describe("strider", () => {
         assert.strictEqual(warnedJson.code, 0, warnedJson.err)
         assert.include(JSON.parse(warnedJson.out).sinceLast.join("\n"), "%pasword% names no secret")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
+        // A failed command reports the events since the last one, and the next command doesn't repeat them
+        const noisy = `<button onclick="setTimeout(() => console.error('late boom'), 200)">Go</button>`
+        assert.strictEqual((yield* shop("goto", `${served.origin}/fixture?html=${encodeURIComponent(noisy)}`)).code, 0)
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missed = yield* shop("expect", "css=#absent", "visible")
+        assert.strictEqual(missed.code, 14, missed.err)
+        assert.include(missed.err, "ExpectationFailed")
+        assert.include(missed.err, "since last: console error on shop: late boom")
+        const after = yield* shop("find", "Go", "--role", "button")
+        assert.strictEqual(after.code, 0, after.err)
+        assert.notInclude(after.out, "late boom")
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missedJson = yield* shop("--json", "expect", "css=#absent", "visible")
+        assert.strictEqual(missedJson.code, 14, missedJson.err)
+        const failed = JSON.parse(missedJson.out)
+        assert.strictEqual(failed.outcome._tag, "Failed")
+        assert.include(failed.outcome.sinceLast.join("\n"), "console error on shop: late boom")
         // State for a program, and a test of what ran, into directories that don't exist yet
         const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
@@ -1829,7 +1920,7 @@ describe("strider", () => {
             const server = http.createServer((_, response) => {
               response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
               response.end(
-                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div role="textbox" contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
               )
             })
             yield* Effect.acquireRelease(
@@ -2393,7 +2484,7 @@ describe("strider", () => {
       assert.include(unnamed.err, "Every command names its session")
       const two = yield* run("start", "--name", "x", "--chromium", chromium.executable, "--firefox", firefox.executable)
       assert.strictEqual(two.code, 15)
-      assert.include(two.err, "exactly one of --chromium, --firefox or --webkit")
+      assert.include(two.err, "exactly one of --chromium, --firefox, or --webkit")
       const badName = yield* run("start", "--name", "Bad Name", "--chromium", chromium.executable)
       assert.strictEqual(badName.code, 15)
       assert.strictEqual(

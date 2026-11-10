@@ -1,0 +1,56 @@
+{
+  "id": "option-elementhandle-screenshot-scale-value-css",
+  "upstream": [
+    "method:ElementHandle.screenshot"
+  ],
+  "status": "missing",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "capabilities": [
+    "screenshot.cssScale"
+  ],
+  "requirements": [],
+  "parent": "option-elementhandle-screenshot-scale",
+  "value": "css",
+  "notes": "CSS-pixel screenshot scale is unsupported on Firefox and stock WebKit.",
+  "option": "scale",
+  "browserOverrides": {
+    "chromium.launched": {
+      "status": "has",
+      "limitations": []
+    },
+    "chromium.attached": {
+      "status": "has",
+      "limitations": []
+    },
+    "firefox.launched": {
+      "status": "missing",
+      "limitations": [
+        "CSS-pixel screenshot scale is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "firefox.attached": {
+      "status": "missing",
+      "limitations": [
+        "CSS-pixel screenshot scale is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "webkit.launched": {
+      "status": "missing",
+      "limitations": [
+        "CSS-pixel screenshot scale is unsupported on Firefox and stock WebKit."
+      ]
+    },
+    "webkit.attached": {
+      "status": "missing",
+      "limitations": [
+        "CSS-pixel screenshot scale is unsupported on Firefox and stock WebKit."
+      ]
+    }
+  }
+}

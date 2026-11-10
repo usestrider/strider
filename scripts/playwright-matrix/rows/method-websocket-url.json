@@ -1,0 +1,26 @@
+{
+  "id": "method-websocket-url",
+  "upstream": [
+    "method:WebSocket.url"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkConnection",
+      "symbol": "NetworkConnection.url",
+      "url": "/docs/api/browser/NetworkConnection#NetworkConnection.url"
+    }
+  ],
+  "notes": "Observe connections and frames; no frame interception.",
+  "capabilities": [
+    "networkConnections"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkConnection.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "patches": []
+}

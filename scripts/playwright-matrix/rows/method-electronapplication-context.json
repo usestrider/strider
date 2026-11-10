@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-context",
+  "upstream": [
+    "method:ElectronApplication.context"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

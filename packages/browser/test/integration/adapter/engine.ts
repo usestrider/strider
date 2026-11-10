@@ -5,11 +5,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import { beforeEach } from "vitest"
+import * as Browser from "../../../src/Browser.ts"
+import * as Expect from "../../../src/Expect.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as Engine from "../../../src/internal/engine.ts"
@@ -17,19 +19,17 @@ import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
-import { type Backend, makeRecorder, site } from "./harness.ts"
+import * as Connection from "./engineConnection.ts"
+import { type Backend, site } from "./harness.ts"
 
 const timeout = 60_000
 
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
 /** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
-const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeInstall?: string) {
-  const served = yield* site
-  const facts = makeRecorder()
-  const { adapter } = yield* backend.connect(facts.sink)
-  const context = yield* adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false })
-  const page = yield* adapter.createPage(context)
+const open = Effect.fnUntraced(function*(_backend: Backend, html: string, beforeInstall?: string, origin?: string) {
+  const served = origin === undefined ? yield* site : { origin }
+  const { adapter, page, context, facts } = yield* (yield* Connection.Shared).page
   const navigation = yield* adapter.navigate(
     page,
     `${served.origin}/fixture?html=${encodeURIComponent(html)}`,
@@ -69,7 +69,7 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeI
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, call, adapter, page }
+  return { send, call, adapter, page, context, document, realm }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -249,7 +249,16 @@ const cooperativeExercise = Effect.fnUntraced(function*(
 
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
-    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+    let shared: Effect.Success<ReturnType<typeof Connection.make>>
+    const isolated = new Set<string>()
+    const fixture = Layer.effect(
+      Connection.Shared,
+      Effect.gen(function*() {
+        shared = yield* Connection.make(backend)
+        return shared
+      })
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
+    layer(fixture, { excludeTestServices: true })(
       (it) => {
         it.effect("cooperative expectation yields before checking an overlay arriving during a round", () =>
           Effect.gen(function*() {
@@ -658,6 +667,120 @@ export const engine = (backend: Backend) =>
               }
             }).pipe(Effect.scoped, Effect.provide(browser))
           }), timeout)
+        it.effect("owns viewport observers only during requested rounds and releases them independently", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<div id="go" style="position:absolute;top:100000px;width:100px;height:100px"></div>`,
+              `function() {
+                globalThis.viewportActive = 0;
+                globalThis.viewportCreated = 0;
+                const Native = globalThis.IntersectionObserver;
+                globalThis.IntersectionObserver = class {
+                  active = true;
+                  constructor(callback, options) {
+                    this.native = new Native(callback, options);
+                    globalThis.viewportActive++;
+                    globalThis.viewportCreated++;
+                  }
+                  observe(element) { this.native.observe(element); }
+                  disconnect() {
+                    if (this.active) { globalThis.viewportActive--; this.active = false; }
+                    this.native.disconnect();
+                  }
+                };
+              }`
+            )
+            yield* send({ op: "count", steps: [] })
+            const result = yield* call(
+              `async function() {
+              const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})];
+              const unused = globalThis.viewportCreated;
+              const request = { op: 'expect', steps: [{ _tag: 'Css', selector: '#go' }],
+                expectation: { _tag: 'Viewport', ratio: 0, inViewport: true }, cap: 10000 };
+              const first = engine.run(JSON.stringify({ ...request, token: 'first' }));
+              const second = engine.run(JSON.stringify({ ...request, token: 'second' }));
+              const during = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ op: 'expectStop', token: 'first' }));
+              await first;
+              const remaining = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ op: 'expectStop', token: 'second' }));
+              await second;
+              const stopped = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ ...request, cap: 100, token: 'timeout' }));
+              const timedOut = globalThis.viewportActive;
+              await engine.run(JSON.stringify({ ...request, token: 'success', expectation: {
+                ...request.expectation, inViewport: false
+              } }));
+              return JSON.stringify({ unused, during, remaining, stopped, timedOut, success: globalThis.viewportActive });
+            }`,
+              []
+            )
+            assert(result._tag === "Value")
+            assert(result.value.type === "string")
+            assert.deepStrictEqual(JSON.parse(result.value.value), {
+              unused: 0,
+              during: 2,
+              remaining: 1,
+              stopped: 0,
+              timedOut: 0,
+              success: 0
+            })
+          }), timeout)
+
+        for (const publicExpectation of [false, true]) {
+          const name = `${
+            publicExpectation ? "public expectation" : "ordinary runtime"
+          } follows a navigation during a waiting round`
+          isolated.add(name)
+          it.effect(
+            name,
+            () =>
+              Effect.gen(function*() {
+                const served = yield* site
+                const browser = BrowserImpl.layer((sink) =>
+                  backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                    adapter
+                  ))
+                )
+                yield* Effect.gen(function*() {
+                  const page = yield* Browser.newPage()
+                  const next = `${served.origin}/fixture?html=${encodeURIComponent("<div id=\"done\">Done</div>")}`
+                  // Replace the document while the engine is waiting for the hidden target.
+                  yield* page.goto(
+                    `${served.origin}/fixture?html=${
+                      encodeURIComponent(
+                        `<div id="done" hidden>Done</div><script>setTimeout(() => { location.href = ${
+                          JSON.stringify(next)
+                        } }, 300)</script>`
+                      )
+                    }`
+                  )
+                  if (publicExpectation) {
+                    yield* page.locator("#done").pipe(Expect.toBeVisible)
+                    return
+                  }
+                  const target = page.locator("#done") as LocatorImpl
+                  const reply = yield* Effect.gen(function*() {
+                    const record = yield* Operation.record
+                    return yield* Runtime.send(
+                      target.owner.runtime,
+                      target.owner.page,
+                      { op: "expect", steps: target.steps, expectation: { _tag: "Visible" }, cap: 2000 },
+                      record.id,
+                      record.budget.at
+                    )
+                  }).pipe(Operation.named("Test.ordinaryNavigation"), Effect.result)
+                  assert(reply._tag === "Success", JSON.stringify(reply))
+                  assert.strictEqual(reply.success._tag, "Expected")
+                  if (reply.success._tag === "Expected") {
+                    assert.isTrue(reply.success.passed)
+                  }
+                }).pipe(Effect.scoped, Effect.provide(browser))
+              }),
+            timeout
+          )
+        }
         it.effect("returns bounded rendering timing evidence with an ordinary action response", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
@@ -928,6 +1051,31 @@ export const engine = (backend: Backend) =>
             })
             assert.deepStrictEqual(nodes[0]!.name, { _tag: "Accessible", value: "Article" })
           }), timeout)
+
+        it.effect("reports accessible-name mismatches and cardinality on an immediate check", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="named" aria-label="Updated"></button><button class="many">One</button><button class="many">Two</button>`
+            )
+            for (
+              const [selector, expected, observed] of [
+                ["#named", { _tag: "String", value: "updated", exact: true }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "updated", flags: "" }, "Updated"],
+                ["#named", { _tag: "RegExp", source: "Updated  ", flags: "" }, "Updated"],
+                ["#missing", { _tag: "String", value: "", exact: true }, { matches: 0 }],
+                [".many", { _tag: "RegExp", source: "One", flags: "" }, { matches: 2 }]
+              ] as const
+            ) {
+              const response = yield* send({
+                op: "expect",
+                steps: [{ _tag: "Css", selector }],
+                cap: 0,
+                expectation: { _tag: "AccessibleName", expected, ignoreCase: false }
+              })
+              assert.deepStrictEqual(response, { _tag: "Expected", passed: false, observed, changed: false })
+            }
+          }))
 
         it.effect("tracks chosen name contributions from fields without tainting public labels", () =>
           Effect.gen(function*() {
@@ -1987,6 +2135,64 @@ export const engine = (backend: Backend) =>
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        it.effect("keeps raw-engine documents, realms and storage private to each scoped context", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const first = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>First</p>", undefined, origin)
+              const written = yield* opened.call(
+                `() => {
+                localStorage.setItem("engine-fixture", "first");
+                document.cookie = "engineFixture=first; path=/";
+                globalThis.engineFixture = "first";
+                return JSON.stringify({
+                  storage: localStorage.getItem("engine-fixture"),
+                  cookie: document.cookie,
+                  global: globalThis.engineFixture
+                });
+              }`,
+                []
+              )
+              assert(written._tag === "Value" && written.value.type === "string")
+              assert.deepStrictEqual(JSON.parse(written.value.value), {
+                storage: "first",
+                cookie: "engineFixture=first",
+                global: "first"
+              })
+              return opened
+            }))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const second = yield* open(backend, "<p>Second</p>", undefined, origin)
+              assert.strictEqual(first.adapter, second.adapter)
+              assert.notStrictEqual(first.context, second.context)
+              assert.notStrictEqual(first.page, second.page)
+              assert.notStrictEqual(first.document, second.document)
+              assert.notStrictEqual(first.realm, second.realm)
+              const fresh = yield* second.call(
+                `() => JSON.stringify({
+                storage: localStorage.getItem("engine-fixture"),
+                cookie: document.cookie,
+                global: typeof globalThis.engineFixture
+              })`,
+                []
+              )
+              assert(fresh._tag === "Value" && fresh.value.type === "string")
+              assert.deepStrictEqual(JSON.parse(fresh.value.value), {
+                storage: null,
+                cookie: "",
+                global: "undefined"
+              })
+              assert.strictEqual(
+                count(yield* second.send({ op: "count", steps: [{ _tag: "Text", matcher: text("Second") }] })),
+                1
+              )
+            }))
+          }), timeout)
       }
+    )
+    beforeEach(({ task }) =>
+      Effect.runPromise(
+        isolated.has(task.name) ? shared.reset : shared.prepare
+      )
     )
   })

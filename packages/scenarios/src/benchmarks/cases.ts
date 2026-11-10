@@ -70,6 +70,13 @@ const snapshot = () =>
     label: input.getAttribute("aria-label")
   }))
 
+const presentationHeadings = () => {
+  document.body.innerHTML = Array.from(
+    { length: 100 },
+    (_, index) => `<h3 role="none" tabindex="0.5">Item ${index}</h3>`
+  ).join("")
+}
+
 const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
   name: `read-snapshot-${size}`,
   description:
@@ -179,6 +186,19 @@ export const cases: ReadonlyArray<Case> = [
     verify: equals("Shop")
   },
   {
+    name: "navigate-title-locator",
+    description: "Navigate through load, read the title, then resolve and read a heading",
+    strider: Effect.fnUntraced(function*(page, origin) {
+      yield* page.goto(`${origin}/`, { waitUntil: "load" })
+      return [yield* page.title, yield* page.getByRole("heading").readText]
+    }),
+    playwright: async (page, origin) => {
+      await page.goto(`${origin}/`, { waitUntil: "load" })
+      return [await page.title(), await page.getByRole("heading").textContent()]
+    },
+    verify: equals(["Shop", "Shop"])
+  },
+  {
     name: "resources",
     description: "Navigate to a document with 100 uncached images, wait for load, then count loaded images",
     strider: Effect.fnUntraced(function*(page, origin) {
@@ -213,6 +233,19 @@ export const cases: ReadonlyArray<Case> = [
       return values
     },
     verify: equals(Array.from({ length: 20 }, () => "Benchmark"))
+  },
+  {
+    name: "role-presentation",
+    description: "20 role counts over 100 presentational headings with focusable decimal tabindex (ms per batch)",
+    prepareStrider: (page) => page.evaluateInMainWorld(presentationHeadings),
+    preparePlaywright: (page) => page.evaluate(presentationHeadings),
+    strider: (page) => Effect.forEach(Array.from({ length: 20 }), () => page.getByRole("heading").count),
+    playwright: async (page) => {
+      const counts = []
+      for (let i = 0; i < 20; i++) counts.push(await page.getByRole("heading").count())
+      return counts
+    },
+    verify: equals(Array.from({ length: 20 }, () => 100))
   },
   {
     name: "locator-values",

@@ -21,8 +21,10 @@ import {
   Route,
   Trace
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -33,6 +35,8 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -139,12 +143,105 @@ interface HarEntry {
 
 export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} recordings`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+      it.effect("reads a protocol request failure with honest cancellation evidence", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const failedSite = yield* navigationFailure
+          const sent = yield* NetworkRequest.next(page, { url: `${failedSite.origin}/failure` })
+          yield* page.goto(`${failedSite.origin}/failure`).pipe(Effect.exit)
+          const request = yield* sent
+          const failure = Option.getOrThrow(yield* NetworkRequest.failure(page, request))
+          assert.isAbove(failure.errorText.length, 0)
+          assert.deepStrictEqual(
+            failure.canceled,
+            (yield* fullySupports("network.failure")) ? Option.some(false) : Option.none()
+          )
+          assert.deepStrictEqual(yield* NetworkRequest.failure(page.context, request), Option.some(failure))
+        })))
+
+      it.effect("keeps HTTP errors successful and refuses failure lookup after owner closure", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { page, request } = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const served = yield* site
+            const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/missing` })
+            yield* page.goto(`${served.origin}/missing`)
+            const request = yield* sent
+            assert.isTrue(Option.isNone(yield* NetworkRequest.failure(page, request)))
+            return { page, request }
+          }))
+          const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
+          assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
+        })))
+
+      it.effect("associates an observed request with its response before and after arrival", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          const release = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+          yield* page.route(`${origin}/json`, () => Deferred.await(release).pipe(Effect.andThen(Route.continue)))
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/json")
+            return true
+          })
+          const request = yield* next
+          const response = yield* NetworkRequest.response(page, request)
+          const waiting = yield* response.pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          assert.isUndefined(waiting.pollUnsafe())
+          yield* Deferred.succeed(release, undefined)
+          const arrived = Option.getOrThrow(yield* Fiber.join(waiting))
+          assert.strictEqual(arrived.status, 200)
+          assert.strictEqual(arrived.hop, request.hop)
+          assert.deepStrictEqual(yield* (yield* NetworkRequest.response(page.context, request)), Option.some(arrived))
+          const foreign = yield* Browser.newContext()
+          const error = yield* NetworkRequest.response(foreign, request).pipe(Effect.asVoid, Effect.flip)
+          assert.deepInclude(error.reason, { _tag: "ResponseUnavailable", why: "foreignTarget" })
+        })))
+
+      it.effect("returns no response for a request aborted before receiving headers", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(`${origin}/hello`)
+          yield* page.route(`${origin}/json`, () => Route.abort())
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(async () => {
+            await fetch("/json").catch(() => {})
+            return true
+          })
+          const wait = yield* NetworkRequest.response(page, yield* next)
+          assert.deepStrictEqual(yield* wait, Option.none())
+        })))
+
+      it.effect("associates each redirect hop with its own response", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const redirect = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+          const landed = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+          yield* page.goto(`${origin}/redirect`, { waitUntil: "load" })
+          const first = yield* redirect
+          const last = yield* landed
+          const firstResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, first)))
+          const lastResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, last)))
+          assert.notStrictEqual(first.hop, last.hop)
+          assert.strictEqual(firstResponse.hop, first.hop)
+          assert.strictEqual(firstResponse.status, 302)
+          assert.strictEqual(lastResponse.hop, last.hop)
+          assert.strictEqual(lastResponse.status, 200)
+        })))
+
       it.effect(
         "records URL expectation evidence with export-time redaction",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const served = yield* site
             const requested = `${served.origin}/json?token=observed-token-secret#observed-fragment-secret`
             const expected = `${served.origin}/done?token=expected-token-secret#expected-fragment-secret`
@@ -220,7 +317,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
           `redacts generic ${source} expectation evidence with ${boundary} boundary`,
           () =>
             Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const title = "generic-title-secret"
               const requested = `${yield* fixture(
                 `<title>${title}</title>`
@@ -289,7 +386,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "keeps password expectation values out of trace errors under both presets",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(yield* fixture("<input type=\"password\" aria-label=\"Password\">"))
             yield* page.getByLabel("Password").fill(Redacted.make("typed-password-secret"))
             const trace = yield* Trace.record(page)
@@ -322,7 +419,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "keeps real title failures classified through enclosing operations and rethrows",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(yield* fixture("<title>observed-title-secret</title>"))
             const trace = yield* Trace.record(page)
             const error = yield* page.pipe(
@@ -430,7 +527,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const served = yield* site
             const out = path.join(directory(), "json.zip")
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const har = yield* Har.record(page, {
                 content: "attach",
                 url: "**/json",
@@ -641,7 +738,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               }
             })
           )
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.route("**/*", yield* Route.fromHar(file).pipe(Effect.provide(NodeFileSystem.layer)))
           yield* page.goto(origin + "/login")
           yield* page.getByLabel("Username").fill("tomsmith")
@@ -664,7 +761,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               yield* page.title
             })
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const trace = yield* Trace.record(page, { screenshots: "perAction", network: true })
               yield* buy(page)
               yield* Effect.sleep("300 millis")
@@ -714,7 +811,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "captures completed locator expectations, including their final state after failure",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(yield* fixture("<p>initial</p>"))
             const trace = yield* Trace.record(page, { screenshots: "perAction", domSnapshots: true, network: true })
             yield* page.locator("p").pipe(Expect.toHaveText("initial"))
@@ -841,7 +938,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "keeps expectation screenshots off by default and when explicitly disabled",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(yield* fixture("<p>ready</p>"))
             for (const options of [undefined, { screenshots: "off" as const }]) {
               const trace = yield* Trace.record(page, options)
@@ -878,7 +975,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const strict = path.join(directory(), "strict.zip")
             const local = path.join(directory(), "local.zip")
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const trace = yield* Trace.record(page, { domSnapshots: true, network: true })
               yield* page.goto(url, { waitUntil: "load" })
               yield* page.locator("#name").fill("Ada")
@@ -971,7 +1068,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             for (const screencast of ["native", { polled: "100 millis" }] as const) {
               const out = path.join(directory(), "frames.zip")
               const recorded = yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* SharedContext.newPage
                 const trace = yield* Trace.record(page, { screencast })
                 yield* page.goto(url)
                 yield* Effect.sleep("1 second")

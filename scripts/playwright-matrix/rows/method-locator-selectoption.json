@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-selectoption",
+  "upstream": [
+    "method:Locator.selectOption"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.selectOption",
+      "url": "/docs/api/browser/Locator#Locator.selectOption"
+    }
+  ],
+  "notes": "Use a locator for the element; actions check actionability. Raw ElementHandle identity is not preserved.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

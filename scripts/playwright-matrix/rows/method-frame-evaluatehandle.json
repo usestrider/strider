@@ -1,0 +1,17 @@
+{
+  "id": "method-frame-evaluatehandle",
+  "upstream": [
+    "method:Frame.evaluateHandle"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public frame-locator evaluation-handle operation. Page.evaluateHandle addresses the top-level page; element by-value evaluation inside a frame is a different contract.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

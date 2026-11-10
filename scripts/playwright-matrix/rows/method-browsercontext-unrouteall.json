@@ -1,0 +1,23 @@
+{
+  "id": "method-browsercontext-unrouteall",
+  "upstream": [
+    "method:BrowserContext.unrouteAll"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Declaration",
+      "symbol": "Registration",
+      "url": "/docs/api/browser/Declaration#Registration"
+    }
+  ],
+  "notes": "Remove the returned route registration or close its scope.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobehidden",
+  "upstream": [
+    "method:LocatorAssertions.toBeHidden"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeHidden",
+      "url": "/docs/api/browser/Expect#toBeHidden"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

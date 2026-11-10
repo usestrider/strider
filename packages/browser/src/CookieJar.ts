@@ -1,5 +1,5 @@
 /**
- * A context's cookies: reading, setting and removing them.
+ * A context's cookies: reading, setting, and removing them.
  *
  * The jar is `context.cookies`. A `Cookie` is what a browser stores: Effect's cookie attributes, plus a partition
  * key and a priority. Cookie values are secrets, so they arrive `Redacted`; `toCookie` converts a cookie to

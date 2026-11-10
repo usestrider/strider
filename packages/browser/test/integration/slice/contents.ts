@@ -36,6 +36,7 @@ import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -47,6 +48,18 @@ const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
   const error = Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined
   return error as { readonly _tag: string; readonly reason?: { readonly _tag: string } } | undefined
 }
+
+/** A documented frame-mapping refusal is distinct from an element without a rect. */
+const frameRectRefused = Effect.fnUntraced(function*(read: Effect.Effect<unknown, unknown, Scope.Scope>) {
+  if (yield* fullySupports("boundingBox.frameTransforms")) return false
+  const error = yield* Effect.scoped(Effect.flip(read))
+  assert.deepInclude((error as { readonly reason: unknown }).reason, {
+    _tag: "Unsupported",
+    capability: "Locator.boundingBox"
+  })
+  assert.include((error as { readonly reason: { readonly hint: string } }).reason.hint, "frame")
+  return true
+})
 
 /** A frame's document: a counter button, a text input and what was typed. */
 const counter = (label: string) =>
@@ -120,12 +133,128 @@ export const contents = (
   backend: Layer.Layer<Browser.Browser, unknown>
 ) =>
   describe(`${name} contents`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+      it.effect("reads fresh titles before a locator and isolates page-world title overrides", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, "<title>First</title><h1>Ready</h1>"), { waitUntil: "load" })
+            assert.strictEqual(yield* page.title, "First")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("title")!.textContent = "Changed"
+            })
+            assert.strictEqual(yield* page.title, "Changed")
+            if (yield* supports("isolatedWorlds")) {
+              yield* page.evaluateInMainWorld(() => {
+                Object.defineProperty(document, "title", {
+                  get: () =>
+                    "Forged"
+                })
+              })
+              assert.strictEqual(yield* page.title, "Changed")
+            }
+            assert.strictEqual(yield* page.getByRole("heading").readText, "Ready")
+            yield* page.goto(fixtureUrl(origin, "<title>Replacement</title><h1>New</h1>"), { waitUntil: "load" })
+            assert.strictEqual(yield* page.title, "Replacement")
+            assert.strictEqual(yield* page.getByRole("heading").readText, "New")
+          }))
+        }), timeout)
+
+      it.effect("releases the requesting viewport round when its fiber is interrupted", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<div id="target" style="position:absolute;top:100000px;width:100px;height:100px"></div>`
+              )
+            )
+            const target = page.locator("#target")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const entered = yield* Deferred.make<void>()
+            const released = yield* Deferred.make<void>()
+            let token: string | undefined
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string; token?: string }
+                : undefined
+              const result = original(realm, options)
+              if (request?.op === "expect" && request.token !== undefined) {
+                token = request.token
+                return Deferred.succeed(entered, undefined).pipe(Effect.andThen(result))
+              }
+              if (request?.op === "expectStop") {
+                assert.strictEqual(request.token, token)
+                return result.pipe(Effect.tap(() =>
+                  Deferred.succeed(released, undefined)
+                ))
+              }
+              return result
+            })
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            const pending = yield* page.locator("#target").pipe(Expect.toBeInViewport(), Effect.forkChild)
+            yield* Deferred.await(entered)
+            yield* Fiber.interrupt(pending)
+            yield* Deferred.await(released)
+          }))
+        }), timeout)
+
+      it.effect("measures viewport intersection of a cross-site frame's match against the top-level viewport", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const child = fixtureUrl(
+            crossSite,
+            `<style>body{margin:0}</style><div id="target" style="position:absolute;top:50px;width:100px;height:100px"></div>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<style>body{margin:0}iframe{border:0;display:block;width:200px;height:100px}</style>
+<iframe id="clipped" src="${child}"></iframe><div style="height:3000px"></div><iframe id="below" src="${child}"></iframe>`
+            ))
+            // The iframe clips the match to its top half
+            const clipped = page.frame(page.locator("#clipped")).locator("#target")
+            yield* clipped.pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+            yield* clipped.pipe(Expect.toBeInViewport({ ratio: 0.6, inViewport: false }))
+            // Inside its own frame's viewport, but the frame is below the page's fold
+            yield* page.frame(page.locator("#below")).locator("#target").pipe(
+              Expect.toBeInViewport({ inViewport: false })
+            )
+          }))
+        }), timeout)
+
+      it.effect("checks viewport intersection while the page clock is controlled", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<div id="target" style="position:absolute;top:2000px;width:100px;height:100px"></div>
+<button style="position:fixed;top:0" onclick="window.scrollTo(0,2000)">Scroll</button>`
+            ))
+            yield* page.locator("#target").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* Effect.all([
+              page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
+              page.getByRole("button").click()
+            ], { concurrency: "unbounded" })
+          }))
+        }), timeout)
+
       it.effect("setContent waits for guarded native insertion before replacing the document", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
           const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
           yield* page.activate
           const target = page.frame(page.locator("iframe")).locator("#target")
@@ -177,7 +306,9 @@ export const contents = (
               }),
             () =>
               Deferred.succeed(release, undefined).pipe(
-                Effect.andThen(Effect.sync(() => Object.assign(adapter, { dispatchInput: original })))
+                Effect.andThen(Effect.sync(() =>
+                  Object.assign(adapter, { dispatchInput: original })
+                ))
               )
           )
         }), timeout)
@@ -185,7 +316,7 @@ export const contents = (
       it.effect("setContent replaces markup repeatedly without navigating and executes parser scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.setContent("<title>Fresh</title>")
           assert.strictEqual(yield* page.title, "Fresh")
           yield* page.goto(fixtureUrl(origin, "<title>Before</title><p>Old</p>"), { waitUntil: "load" })
@@ -226,7 +357,7 @@ export const contents = (
       it.effect("setContent waits for resources by default and supports domcontentloaded", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           const child = fixtureUrl(origin, "<img src=\"/slow-image\">")
           yield* page.setContent(`<img src="/slow-image"><iframe src="${child}"></iframe>`)
@@ -258,7 +389,7 @@ export const contents = (
       it.effect("setContent deadline stops waiting and permits a subsequent replacement", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           const error = yield* page.setContent("<img src=\"/pending-image\">").pipe(
             Deadline.within("500 millis"),
@@ -274,7 +405,9 @@ export const contents = (
           assert.strictEqual(yield* page.title, "Recovered")
           assert.deepStrictEqual(
             yield* page.evaluateInMainWorld(() =>
-              Object.keys(globalThis).filter((key) => key.startsWith("__strider_setContent_"))
+              Object.keys(globalThis).filter((key) =>
+                key.startsWith("__strider_setContent_")
+              )
             ),
             []
           )
@@ -283,7 +416,7 @@ export const contents = (
       it.effect("setContent commit skips readiness and interruption leaves the page reusable", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           yield* page.setContent("<img src=\"/pending-image\">", { waitUntil: "commit" })
           assert.isFalse(
@@ -310,7 +443,7 @@ export const contents = (
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<ul><li>One</li><li>Two</li><li>Three</li></ul>"))
           const items = page.getByRole("listitem")
           assert.strictEqual(yield* items.nth(0).readText, "One")
@@ -340,13 +473,460 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("reads bounding boxes without visibility checks, scrolling or input", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0;height:3000px">
+            <input id="focus"><div id="box" style="position:absolute;left:30px;top:40px;width:20px;height:10px;transform:translate(5px,7px) scale(2);transform-origin:0 0"></div>
+            <div id="hidden" style="display:none"></div>
+            <div id="contents" style="display:contents"><span>child</span></div>
+            <div id="invisible" style="visibility:hidden;width:20px;height:10px"></div>
+            <div id="transparent" style="opacity:0;width:20px;height:10px"></div>
+            <div id="zero" style="width:0;height:0"></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          yield* page.evaluateInMainWorld(() =>
+            document.querySelector("input")!.focus()
+          )
+          assert.deepStrictEqual(
+            yield* page.locator("#box").boundingBox,
+            Option.some({ x: 35, y: 47, width: 40, height: 20 })
+          )
+          for (const id of ["hidden", "contents"]) {
+            assert.deepStrictEqual(yield* page.locator(`#${id}`).boundingBox, Option.none())
+          }
+          for (const id of ["invisible", "transparent", "zero"]) {
+            assert.isTrue(Option.isSome(yield* page.locator(`#${id}`).boundingBox))
+          }
+          assert.strictEqual(
+            reasonOf(yield* Effect.exit(page.locator("#missing").boundingBox))?.reason?._tag,
+            "NoMatch"
+          )
+          assert.strictEqual(
+            reasonOf(yield* Effect.exit(page.locator("div").boundingBox))?.reason?._tag,
+            "StrictViolation"
+          )
+          yield* page.evaluateInMainWorld(() =>
+            window.scrollTo(0, 200)
+          )
+          assert.deepStrictEqual(
+            yield* page.locator("#box").boundingBox,
+            Option.some({ x: 35, y: -153, width: 40, height: 20 })
+          )
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => ({ scroll: scrollY, focus: document.activeElement?.id })),
+            { scroll: 200, focus: "focus" }
+          )
+          const expired = reasonOf(yield* Effect.exit(page.locator("#box").boundingBox.pipe(Deadline.within(0))))
+          assert.strictEqual(expired?._tag, "Timeout")
+        }), timeout)
+
+      it.effect("adds nested cross-site frame content origins including borders and padding", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(
+            crossSite,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:11px;top:13px;width:20px;height:30px"></div></body>`
+          )
+          const middle = fixtureUrl(
+            origin,
+            `<body style="margin:0"><iframe id="inner" style="position:absolute;left:17px;top:19px;border:3px solid;padding:4px" src="${child}"></iframe></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="outer" style="position:absolute;left:23px;top:29px;border:5px solid;padding:6px" src="${
+                middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
+              }"></iframe></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          const outer = page.frame(page.locator("#outer"))
+          const target = outer.frame(outer.locator("#inner")).locator("#target")
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 69, y: 79, width: 20, height: 30 }))
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              scrollY
+            ),
+            0
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.body.style.height = "3000px"
+            window.scrollTo(0, 100)
+          })
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 69, y: -21, width: 20, height: 30 }))
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const reference = document.createElement("div")
+            reference.style.cssText = "position:absolute;left:69px;top:79px;width:20px;height:30px"
+            document.body.append(reference)
+            document.body.style.transform = "scale(2)"
+            const r = reference.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const transformed = Option.getOrThrow(yield* target.boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(transformed[key], expected[key], .05, key)
+          }
+          yield* page.evaluateInMainWorld(() => {
+            document.body.style.transform = "none"
+            document.querySelector<HTMLElement>("#outer")!.style.display = "none"
+          })
+          assert.deepStrictEqual(yield* target.boundingBox, Option.none())
+        }), timeout)
+
+      it.effect("maps frame geometry scaled by a shadow wrapper around a slotted frame", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "open" }).innerHTML =
+              `<div style="position:absolute;left:0;top:0;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#slotted")).locator("#target")
+          // The frame's content is drawn at (20, 20) and 40px wide; adding the iframe's origin alone gives (10, 10).
+          assert.deepStrictEqual(yield* target.boundingBox, Option.some({ x: 20, y: 20, width: 40, height: 40 }))
+        }), timeout)
+
+      it.effect("maps slotted frame geometry scaled and zoomed inside a closed shadow root", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:rgb(255,0,0)"></div></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="slotted" style="border:0" src="${child}"></iframe></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
+              `<div style="position:absolute;left:0;top:0;zoom:1.25;transform:scale(2);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#slotted")).locator("#target")
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          const region = pngRegion(yield* page.screenshot(), { x: 0, y: 0, width: 100, height: 100 })
+          const red = region.flatMap((pixel, index) =>
+            pixel[0]! > 240 && pixel[1]! < 10 && pixel[2]! < 10 ? [{ x: index % 100, y: Math.floor(index / 100) }] : []
+          )
+          const painted = {
+            x: Math.min(...red.map((p) =>
+              p.x
+            )),
+            y: Math.min(...red.map((p) =>
+              p.y
+            )),
+            width: Math.max(...red.map((p) =>
+              p.x
+            )) - Math.min(...red.map((p) => p.x)) +
+              1,
+            height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
+          }
+          // Stock WebKit paints iframe contents differently from coincident slotted light-DOM boxes.
+          // Native paint is the reference here; rasterized edges may differ by one pixel.
+          assert.isAbove(red.length, 0)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], painted[key], key === "x" || key === "y" ? 1 : .0001, key)
+          }
+        }), timeout)
+
+      it.effect("maps or refuses browser rects through a rotated closed-slot frame", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:20px;width:30px;height:40px"></div></body>`
+          )
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="host"><iframe id="frame" style="border:0" src="${child}"></iframe></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("#host")!.attachShadow({ mode: "closed" }).innerHTML =
+              `<div style="position:absolute;left:100px;top:100px;transform:rotate(90deg);transform-origin:0 0"><slot></slot></div>`
+          })
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          for (const [key, expected] of Object.entries({ x: 40, y: 110, width: 40, height: 30 })) {
+            assert.closeTo(box[key as keyof typeof box], expected, .05, key)
+          }
+        }), timeout)
+
+      for (
+        const rule of [
+          { name: "scaling", css: "transform:scale(2,3)", world: "" },
+          { name: "rotation and skew", css: "transform:rotate(31deg) skew(17deg,-8deg)", world: "" },
+          { name: "nested CSS zoom", css: "zoom:1.5;transform:scale(.8,1.2)", world: "zoom:1.25" },
+          { name: "reflection", css: "transform:scale(-1,1)", world: "" },
+          {
+            name: "auto-rotating motion path",
+            css: "offset-path:path('M 0 0 L 100 100');offset-distance:50%;offset-rotate:auto;offset-anchor:0 0",
+            world: ""
+          },
+          {
+            name: "3D and perspective",
+            css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world: "perspective:600px;perspective-origin:0 0"
+          },
+          {
+            name: "zoomed preserved 3D",
+            css: "zoom:1.5;transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world:
+              "zoom:1.25;transform:rotateY(20deg);transform-style:preserve-3d;perspective:600px;perspective-origin:0 0"
+          },
+          {
+            name: "zoomed preserved 3D across camera plane",
+            css: "zoom:1.25;transform:translateZ(120px) rotateY(75deg)",
+            world: "transform-style:preserve-3d;perspective:100px;perspective-origin:0 0"
+          },
+          {
+            name: "grouped 3D flattening",
+            css: "transform:rotateY(35deg) rotateX(20deg) translateZ(25px)",
+            world:
+              "transform:rotateY(20deg);transform-style:preserve-3d;opacity:.8;perspective:600px;perspective-origin:0 0"
+          }
+        ]
+      ) {
+        it.effect(`composes browser rects through frame ${rule.name}`, () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const page = yield* SharedContext.newPage
+            const targetStyle = "position:absolute;left:10px;top:20px;width:30px;height:40px"
+            const child = fixtureUrl(
+              crossSite,
+              `<body style="margin:0"><div id="target" style="${targetStyle}"></div></body>`
+            )
+            const boxStyle =
+              `position:absolute;left:40px;top:60px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform-origin:0 0;${rule.css}`
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0;width:3000px;height:3000px"><div style="position:absolute;left:20px;top:30px;width:800px;height:800px;${rule.world}"><iframe id="frame" style="${boxStyle}" src="${child}"></iframe><div style="${boxStyle};pointer-events:none"><div style="position:relative;width:200px;height:150px"><div id="expected" style="${targetStyle}"></div></div></div></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            const target = page.frame(page.locator("#frame")).locator("#target")
+            for (const scrolled of [false, true]) {
+              if (scrolled) {
+                yield* page.evaluateInMainWorld(() =>
+                  scrollTo(80, 70)
+                )
+              }
+              // The reference is rendered by the browser in the same parent transform, without a frame boundary.
+              // The rect contract reads the browser rect, including its camera clipping convention.
+              const expected = yield* page.evaluateInMainWorld(() => {
+                const r = document.querySelector("#expected")!.getBoundingClientRect()
+                return { x: r.x, y: r.y, width: r.width, height: r.height }
+              })
+              const direct = Option.getOrThrow(yield* page.locator("#expected").boundingBox)
+              for (const key of ["x", "y", "width", "height"] as const) {
+                assert.closeTo(direct[key], expected[key], .05, `direct ${rule.name} ${key}, scrolled=${scrolled}`)
+              }
+              if (
+                !["scaling", "nested CSS zoom"].includes(rule.name) &&
+                (yield* frameRectRefused(target.boundingBox))
+              ) continue
+              const box = Option.getOrThrow(yield* target.boundingBox)
+              for (const key of ["x", "y", "width", "height"] as const) {
+                assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
+              }
+            }
+          }), timeout)
+      }
+
+      it.effect("composes a child browser rect through nested cross-origin counter-rotations", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* SharedContext.newPage
+          const targetStyle =
+            "position:absolute;left:10px;top:20px;width:30px;height:40px;transform:rotate(12deg);transform-origin:0 0"
+          const child = fixtureUrl(
+            origin,
+            `<body style="margin:0"><div id="target" style="${targetStyle}"></div></body>`
+          )
+          const innerStyle =
+            "position:absolute;left:30px;top:40px;width:100px;height:80px;border:2px solid;padding:3px;transform:rotate(-25deg) scale(1.2,.8);transform-origin:0 0;box-sizing:content-box"
+          const middle = fixtureUrl(
+            crossSite,
+            `<body style="margin:0"><iframe id="inner" style="${innerStyle}" src="${child}"></iframe></body>`
+          )
+          const outerStyle =
+            "position:absolute;left:300px;top:200px;width:300px;height:250px;border:3px solid;padding:4px;transform:rotate(25deg) scale(.7,1.3);transform-origin:0 0;box-sizing:content-box"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="outer" style="${outerStyle}" src="${
+                middle.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")
+              }"></iframe><div style="${outerStyle};pointer-events:none"><div style="position:relative;width:300px;height:250px"><div style="${innerStyle}"><div style="position:relative;width:100px;height:80px"><div id="expected" style="${targetStyle}"></div></div></div></div></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          const outer = page.frame(page.locator("#outer"))
+          const target = outer.frame(outer.locator("#inner")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          // Replace the reference element by its child-document rect before the frame transforms.
+          const childRect = yield* page.evaluateInMainWorld((css) => {
+            const el = document.createElement("div")
+            el.style.cssText = css
+            document.body.append(el)
+            const r = el.getBoundingClientRect()
+            el.remove()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          }, targetStyle)
+          yield* page.evaluateInMainWorld((r) => {
+            const el = document.querySelector<HTMLElement>("#expected")!
+            Object.assign(el.style, {
+              left: `${r.x}px`,
+              top: `${r.y}px`,
+              width: `${r.width}px`,
+              height: `${r.height}px`,
+              transform: "none"
+            })
+          }, childRect)
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* target.boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
+        }), timeout)
+
+      it.effect("maps fractional inline bounding geometry through a rotated cross-origin frame", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* SharedContext.newPage
+          const text = "<span id=\"target\" style=\"font:13.3px serif\">fractional glyphs</span>"
+          const child = fixtureUrl(crossSite, `<body style="margin:0">${text}</body>`)
+          const style =
+            "position:absolute;left:70px;top:90px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform:rotate(33deg) skew(9deg);transform-origin:0 0"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
+                text.replace("id=\"target\"", "id=\"expected\"")
+              }</div></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* page.frame(page.locator("#frame")).locator("#target").boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
+        }), timeout)
+
+      it.effect("composes the SVG browser rect through a transformed frame", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* SharedContext.newPage
+          const svg =
+            "<svg width=\"200\" height=\"150\"><rect id=\"target\" x=\"13\" y=\"17\" width=\"30\" height=\"20\" transform=\"rotate(23 13 17)\" fill=\"red\"/></svg>"
+          const child = fixtureUrl(crossSite, `<body style="margin:0">${svg}</body>`)
+          const style =
+            "position:absolute;left:80px;top:90px;width:200px;height:150px;border:3px solid;padding:4px;box-sizing:content-box;transform:rotate(-17deg) scale(.8,1.2);transform-origin:0 0"
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><iframe id="frame" style="${style}" src="${child}"></iframe><div style="${style}"><div style="position:relative;width:200px;height:150px">${
+                svg.replace("id=\"target\"", "id=\"expected\"")
+              }</div></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          const target = page.frame(page.locator("#frame")).locator("#target")
+          if (yield* frameRectRefused(target.boundingBox)) {
+            return
+          }
+          const childRect = yield* page.evaluateInMainWorld((url: string) => {
+            // A same-document SVG copy supplies the browser's own rect, before frame composition.
+            const container = document.createElement("div")
+            container.style.cssText = "position:absolute;left:0;top:0"
+            container.innerHTML = url
+            document.body.append(container)
+            const r = container.querySelector("#target")!.getBoundingClientRect()
+            container.remove()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          }, svg)
+          yield* page.evaluateInMainWorld((r) => {
+            const el = document.querySelector("#expected")!
+            const box = document.createElement("div")
+            box.style.cssText = `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px`
+            el.closest("svg")!.replaceWith(box)
+            box.id = "expected"
+          }, childRect)
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#expected")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          const box = Option.getOrThrow(yield* page.frame(page.locator("#frame")).locator("#target").boundingBox)
+          for (const key of ["x", "y", "width", "height"] as const) {
+            assert.closeTo(box[key], expected[key], .05, key)
+          }
+        }), timeout)
+
+      it.effect("reads the browser rect of an auto-rotating motion-path target", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<body style="margin:0"><div id="target" style="position:absolute;left:200px;top:100px;width:30px;height:20px;offset-path:path('M 0 0 L 100 100');offset-distance:50%;offset-rotate:auto;offset-anchor:0 0"></div></body>`
+            ),
+            { waitUntil: "load" }
+          )
+          const expected = yield* page.evaluateInMainWorld(() => {
+            const r = document.querySelector("#target")!.getBoundingClientRect()
+            return { x: r.x, y: r.y, width: r.width, height: r.height }
+          })
+          assert.deepStrictEqual(yield* page.locator("#target").boundingBox, Option.some(expected))
+        }), timeout)
+
       // ── Evaluation and handles ──
 
       it.effect("evaluates by value in the isolated world, and in the main world when asked", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
             if (
               yield* isolatedRefused(page.evaluate(() =>
@@ -395,11 +975,128 @@ export const contents = (
               "undefined"
             )
             assert.strictEqual(
-              yield* page.evaluateInMainWorld(() => (window as unknown as { secret: number }).secret),
+              yield* page.evaluateInMainWorld(() =>
+                (window as unknown as { secret: number }).secret
+              ),
               42
             )
             // Both worlds share the document
-            assert.strictEqual(yield* page.evaluate(() => document.getElementById("x")!.textContent), "hello")
+            assert.strictEqual(
+              yield* page.evaluate(() =>
+                document.getElementById("x")!.textContent
+              ),
+              "hello"
+            )
+          }))
+        }), timeout)
+
+      it.effect("preserves Map arguments in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate((value) =>
+                value instanceof Map && value.get("suffix"), new Map([["suffix", "!"]])),
+              "!"
+            )
+          }))
+        }), timeout)
+
+      it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate(
+                (set, date, regexp, nested) => {
+                  const map = nested.items[0]!
+                  const key = Array.from(map.keys())[0]!
+                  const values = map.get(key)!
+                  return set instanceof Set && set.has(3) &&
+                    date instanceof Date && date.toISOString() === "2020-01-02T00:00:00.000Z" &&
+                    regexp instanceof RegExp && regexp.source === "a+" && regexp.flags === "gi" &&
+                    map instanceof Map && key.id === 1 && values instanceof Set &&
+                    values.has(undefined) && values.has(42n) && values.has(NaN) && values.has(Infinity) &&
+                    Object.is(nested.zero, -0) && nested.absent === undefined && nested.nil === null
+                },
+                new Set([3]),
+                new Date("2020-01-02"),
+                /a+/gi,
+                {
+                  items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+                  zero: -0,
+                  absent: undefined,
+                  nil: null
+                }
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
+      it.effect("leaves the callback's free identifiers to its realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            // Names the argument wrapper might bind must resolve as they would in the callback's own realm
+            assert.deepStrictEqual(
+              yield* evaluate((value: number) => [
+                // @ts-expect-error: undeclared on purpose
+                typeof kinds,
+                // @ts-expect-error: undeclared on purpose
+                typeof args,
+                // @ts-expect-error: undeclared on purpose
+                typeof decode,
+                value
+              ], 1),
+              ["undefined", "undefined", "undefined", 1]
+            )
+          }))
+        }), timeout)
+
+      it.effect("resolves callback globals and arrow arguments in the page realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                // The arrow must not inherit adapter arguments
+                return typeof arguments
+              }),
+              "undefined"
+            )
+            yield* page.evaluateInMainWorld(() => {
+              for (const name of ["kinds", "args", "decode", "helper", "fn", "arguments"]) {
+                Object.defineProperty(globalThis, name, { value: `page:${name}`, configurable: true })
+              }
+            })
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(async (value) => [
+                // @ts-expect-error: these free names refer to page globals
+                kinds,
+                // @ts-expect-error: these free names refer to page globals
+                args,
+                // @ts-expect-error: these free names refer to page globals
+                decode,
+                // @ts-expect-error: these free names refer to page globals
+                helper,
+                // @ts-expect-error: these free names refer to page globals
+                fn,
+                // The arrow reads the page global
+                arguments,
+                value
+              ], 7),
+              ["page:kinds", "page:args", "page:decode", "page:helper", "page:fn", "page:arguments", 7]
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(function(value) {
+                return [arguments.length, arguments[0], value]
+              }, 7),
+              [1, 7, 7]
+            )
           }))
         }), timeout)
 
@@ -407,7 +1104,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const evaluate = yield* evaluator(page)
             const thrown = reasonOf(
@@ -423,9 +1120,7 @@ export const contents = (
               assert.strictEqual(reason.exception.message, "boom")
             }
             const rejected = reasonOf(
-              yield* Effect.exit(evaluate(() =>
-                Promise.reject(new Error("later"))
-              ))
+              yield* Effect.exit(evaluate(() => Promise.reject(new Error("later"))))
             )
             assert.strictEqual((rejected as unknown as Page.PageError).reason._tag, "EvaluationThrown")
             const argument = reasonOf(
@@ -442,7 +1137,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
             if (yield* isolatedRefused(page.evaluateHandle(() => document.body))) return
             const body = yield* page.evaluateHandle(() => document.body)
@@ -485,7 +1180,7 @@ export const contents = (
           })
           const worlds = yield* supports("isolatedWorlds")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`))
             if (
               yield* isolatedRefused(page.evaluateHandle(() =>
@@ -519,7 +1214,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`))
             if (
               yield* isolatedRefused(
@@ -547,7 +1242,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`))
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             assert.deepStrictEqual(
@@ -605,7 +1300,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             const original = Runtime.elements
@@ -646,7 +1341,7 @@ export const contents = (
           Effect.gen(function*() {
             const { origin } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
               if (
                 yield* isolatedRefused(
@@ -696,7 +1391,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const active = () => navigator.userActivation.isActive
             assert.isFalse(yield* page.evaluateInMainWorld(active))
@@ -710,7 +1405,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
@@ -757,7 +1452,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const inner = fixtureUrl(origin, counter("Inner"))
             const middle = fixtureUrl(
               crossSite,
@@ -800,7 +1495,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><div style="height:2000px"></div><div style="position:relative;width:300px;height:200px"><iframe id="far" style="width:300px;height:200px;border:0" src="${
@@ -833,7 +1528,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               fixtureUrl(
                 origin,
@@ -873,7 +1568,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               fixtureUrl(
                 origin,
@@ -918,7 +1613,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const snapshot = yield* page.snapshot()
             assert.isTrue(Snapshot.isSnapshot(snapshot))
@@ -965,7 +1660,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const snapshot = yield* page.snapshot()
             const refOf = (role: string, name: string) =>
@@ -1011,7 +1706,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const before = yield* page.snapshot()
             yield* page.getByRole("checkbox", { name: "Agree" }).uncheck()
@@ -1046,7 +1741,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<h1>Outer</h1><iframe id="cross" title="Payment" src="${
@@ -1071,7 +1766,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             // 16. Structure, matched explicitly
             yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
@@ -1134,7 +1829,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const failed = reasonOf(
               yield* Effect.exit(
@@ -1165,7 +1860,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const url = (color: string) =>
               fixtureUrl(
                 origin,
@@ -1205,7 +1900,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
@@ -1261,7 +1956,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const ratio = yield* page.evaluateInMainWorld(() =>
@@ -1278,7 +1973,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
             const width = yield* page.evaluateInMainWorld(() =>
               innerWidth
@@ -1321,7 +2016,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><title>Doc</title><h1>Printed</h1>`))
             const html = yield* page.readHtml
             assert.match(
@@ -1631,7 +2326,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const childUrl = fixtureUrl(crossSite, `<p>child</p>`)
             yield* page.goto(fixtureUrl(origin, `<iframe id="a" src="${childUrl}"></iframe>`))
             yield* page.frame(page.locator("#a")).locator("p").pipe(Expect.toHaveText("child"))

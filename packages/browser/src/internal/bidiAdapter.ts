@@ -32,6 +32,7 @@ import * as Capture from "./bidiAdapter/capture.ts"
 import * as Contexts from "./bidiAdapter/contexts.ts"
 import * as Declare from "./bidiAdapter/declare.ts"
 import * as Evaluation from "./bidiAdapter/evaluation.ts"
+import * as Geometry from "./bidiAdapter/geometry.ts"
 import * as Input from "./bidiAdapter/input.ts"
 import * as Navigation from "./bidiAdapter/navigation.ts"
 import * as Network from "./bidiAdapter/network.ts"
@@ -41,6 +42,7 @@ import * as Storage from "./bidiAdapter/storage.ts"
 import * as Tree from "./bidiAdapter/tree.ts"
 import * as BidiWire from "./bidiWire.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
@@ -56,15 +58,33 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "supported"),
+      entry("network.sizes.responseBody", "partial"),
+      entry("network.sizes.encoded", "supported"),
+      entry("network.sizes.decoded", "unsupported"),
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
       entry("input.topLevelDesignMode", "unsupported", [
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
         "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
       ]),
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
+      ]),
+      entry("boundingBox.frameTransforms", "partial", [
+        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective, and frame motion paths are Unsupported"
       ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
@@ -77,6 +97,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("input.native", "unsupported", ["WebDriver actions, not native input"]),
       entry("input.webdriver", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
@@ -91,8 +112,28 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.responseBody.terminalRedirect", "unsupported", [
+        "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
+      ]),
+      entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),
+      entry("network.requestBody.absence", "partial", ["zero body size conflates empty payload with absence"]),
+      entry("network.requestBody.empty", "unsupported", ["empty payload and no payload both report zero body size"]),
+      entry("network.requestBody.multipart", "supported", []),
+      entry("network.requestBody.bytes", "partial", [
+        "requires collection before the request; redirected bodies cannot be addressed independently"
+      ]),
+      entry("network.requestBody.text", "partial", [
+        "requires a complete collected body; redirected bodies cannot be addressed independently"
+      ]),
+      entry("network.failure", "partial", ["BiDi reports failure text without a cancellation flag"]),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -210,9 +251,9 @@ const snapshot = (state: State.State) =>
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
-  apply: (_session, method, params) =>
+  apply: (_session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, { state })
+      handlers.apply(method, params, { state, received })
       return state.buffer.flush
     }),
   lost: (session) =>
@@ -330,6 +371,11 @@ export const connect: (
       removeUserContext: (id) => Contexts.removeUserContext(state, id),
       createPage: (id) => Contexts.createPage(state, id),
       closePage: (id, options) => Contexts.closePage(state, id, options),
+      viewportSize: (id) =>
+        Effect.map(
+          State.navigableById(state, id),
+          (page) => Declarations.viewportSize(state.registry, State.placement(page))
+        ),
       activatePage: (id) => Contexts.activatePage(state, id),
       navigate: (id, url, options) => Navigation.navigate(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),
@@ -339,6 +385,8 @@ export const connect: (
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
+      releaseNodes: () => Effect.void,
+      geometry: (node, kind) => Geometry.read(state, node, kind),
       setInputFiles: (node, files) => Input.setInputFiles(state, node, files),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),
@@ -375,6 +423,7 @@ export const connect: (
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       downloadPath: (download) => Contexts.downloadPath(state, download),
       cancelDownload: (download) => Contexts.cancelDownload(state, download)

@@ -383,6 +383,12 @@ body {
   padding: 0.1em 0.35em;
 }
 
+/* Code on the band has a white wash of its own, as inline code on paper has the code ground */
+.bg-band code {
+  background: rgb(255 255 255 / 0.14);
+  padding: 0.1em 0.35em;
+}
+
 .prose :where(code):not(:where(pre *))::before,
 .prose :where(code):not(:where(pre *))::after {
   content: none;
@@ -604,6 +610,11 @@ body {
 
 .expressive-code .frame figcaption.header .title {
   font-family: var(--mono);
+}
+
+/* An example's numbered markers stand upright, though the night theme sets the comments they're written in in italic */
+:root .expressive-code .ec-line mark span {
+  font-style: normal !important;
 }
 
 /* A terminal's title sits at the left, as a file's does */

@@ -14,7 +14,8 @@ import {
   Page,
   PageClock,
   Route,
-  UncaughtException
+  UncaughtException,
+  UserContext
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -30,7 +31,7 @@ import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
-import { site } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -59,6 +60,86 @@ export const declarations = (
 ) =>
   describe(`${name} declarations`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("accepts untrusted HTTPS only in the opted-in context, or refuses without changing siblings", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* tlsSite
+          const sibling = yield* Browser.newPage()
+          const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
+          assert(Page.isPageError(rejected) && rejected.reason._tag === "NavigationFailed")
+          const options = { acceptInsecureCerts: true, eventLog: 0 }
+          if (!(yield* supports("acceptInsecureCerts"))) {
+            const error = yield* Browser.newContext(options).pipe(Effect.flip)
+            assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported")
+            assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+          } else {
+            const context = yield* Browser.newContext(options)
+            const page = yield* context.newPage
+            yield* page.goto(origin)
+            assert.strictEqual(yield* page.title, "secure")
+            // Browser.newPage must forward the same creation options.
+            const shortcut = yield* Browser.newPage(options)
+            yield* shortcut.goto(origin)
+            assert.strictEqual(yield* shortcut.title, "secure")
+          }
+          const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
+          assert(Page.isPageError(stillRejected) && stillRejected.reason._tag === "NavigationFailed")
+          const explicit = yield* Browser.newPage({ ...options, acceptInsecureCerts: false })
+          const explicitRejected = yield* explicit.goto(origin).pipe(Effect.flip)
+          assert(Page.isPageError(explicitRejected) && explicitRejected.reason._tag === "NavigationFailed")
+        }), timeout)
+
+      it.effect("reads configured viewport precedence and releases without measuring the page", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const context = yield* Browser.newContext()
+          const page = yield* context.newPage
+          const read: Page.ReadonlyPage = page
+          assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          // A real window has dimensions even when no viewport was declared.
+          const measured = yield* page.evaluateInMainWorld(() =>
+            [innerWidth, innerHeight] as const
+          )
+          assert.isAbove(measured[0]!, 0)
+          assert.isAbove(measured[1]!, 0)
+          if (!(yield* supports("emulation.viewport"))) {
+            const error = yield* page.emulate({ viewport: { width: 640, height: 480 } }).pipe(Effect.flip)
+            assert.strictEqual(error._tag, "DeclarationError")
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          } else {
+            const defaultContext = yield* browser.defaultContext.control
+            const inherited = yield* defaultContext.emulate({ viewport: { width: 900, height: 700 } })
+            // The default context declaration does not reach this page.
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+            yield* inherited.remove
+            const base = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 640, height: 480 }))
+            const later = yield* context.newPage
+            assert.deepStrictEqual(yield* later.viewportSize, Option.some({ width: 640, height: 480 }))
+            yield* later.close()
+            const first = yield* page.emulate({ viewport: { width: 400, height: 300 } })
+            const latest = yield* page.emulate({ viewport: { width: 500, height: 400 } })
+            if (yield* supports("emulation.extraHTTPHeaders")) {
+              const headers = yield* page.emulate({ extraHTTPHeaders: { "x-viewport-check": "independent" } })
+              assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+              yield* headers.remove
+              assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+            }
+            const contextLatest = yield* context.emulate({ viewport: { width: 800, height: 600 } })
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+            yield* first.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 500, height: 400 }))
+            yield* latest.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 800, height: 600 }))
+            yield* contextLatest.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.some({ width: 640, height: 480 }))
+            yield* base.remove
+            assert.deepStrictEqual(yield* read.viewportSize, Option.none())
+          }
+          yield* page.close()
+          const gone = yield* read.viewportSize.pipe(Effect.flip)
+          assert.strictEqual(gone._tag, "TargetGone")
+        })), timeout)
+
       // ── Routes ──
 
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
@@ -192,7 +273,8 @@ export const declarations = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const blocked = yield* page.route(`${origin}/analytics/**`, () => Route.abort())
+            const blocked = yield* page.route(`${origin}/analytics/**`, () =>
+              Route.abort())
             const result = yield* run(
               page,
               origin,
@@ -331,15 +413,193 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
+        Effect.gen(function*() {
+          const error = yield* Browser.newContext({
+            httpCredentials: {
+              origin: "https://user:do-not-print@example.com/path",
+              username: "strider",
+              password: Redacted.make("do-not-print")
+            }
+          }).pipe(Effect.flip)
+          assert(UserContext.isUserContextError(error) && error.reason._tag === "InvalidInput", String(error))
+          assert.notInclude(JSON.stringify(error), "do-not-print")
+        }), timeout)
+
+      it.effect(
+        "uses context HTTP credentials for navigation and subresources with route precedence and isolation",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const configured = Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            if (name === "WebKit") {
+              const error = yield* Effect.flip(configured)
+              assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            const context = yield* configured
+            const page = yield* context.newPage
+            assert.include(String(yield* run(page, origin, `return fetch('/auth').then(r => r.text())`)), "signed in")
+            yield* page.goto(`${origin}/auth`)
+            yield* page.getByText("signed in").pipe(Expect.toBeVisible)
+            const canceled = yield* Browser.newPage({
+              httpCredentials: {
+                origin: origin.toUpperCase() + "/",
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            yield* canceled.context.route("**", () =>
+              Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () =>
+              Route.continue, { phase: "auth" })
+            yield* canceled.goto(`${origin}/auth`)
+            yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
+            yield* cancel.remove
+            yield* canceled.goto(`${origin}/auth`)
+            yield* canceled.getByText("signed in").pipe(Expect.toBeVisible)
+            const isolated = yield* Browser.newPage()
+            yield* isolated.goto(`${origin}/auth`)
+            yield* isolated.getByText("who are you?").pipe(Expect.toBeVisible)
+            const refused = yield* Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("wrong")
+              }
+            })
+            const denied = yield* refused.newPage
+            yield* denied.goto(`${origin}/auth`).pipe(Deadline.within("5 seconds"))
+            yield* denied.getByText("who are you?").pipe(Expect.toBeVisible)
+            const mismatch = yield* Browser.newContext({
+              httpCredentials: {
+                origin: "https://example.com",
+                username: "strider",
+                password: Redacted.make("secret")
+              }
+            })
+            const unmatched = yield* mismatch.newPage
+            yield* unmatched.goto(`${origin}/auth`)
+            yield* unmatched.getByText("who are you?").pipe(Expect.toBeVisible)
+            const overridden = yield* Browser.newContext({
+              httpCredentials: {
+                origin,
+                username: "strider",
+                password: Redacted.make("wrong")
+              }
+            })
+            yield* overridden.route("**", () =>
+              Route.provideCredentials({
+                username: "strider",
+                password: Redacted.make("secret")
+              }), { phase: "auth" })
+            const routed = yield* overridden.newPage
+            yield* routed.goto(`${origin}/auth`)
+            yield* routed.getByText("signed in").pipe(Expect.toBeVisible)
+          }),
+        timeout
+      )
+
+      it.effect("authenticates a dedicated worker request with context HTTP credentials", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") {
+            return
+          }
+          const { origin } = yield* site
+          const page = yield* Browser.newPage({
+            httpCredentials: {
+              origin,
+              username: "strider",
+              password: Redacted.make("secret")
+            }
+          })
+          const result = yield* run(
+            page,
+            origin,
+            `
+            const source = URL.createObjectURL(new Blob([\`fetch('${origin}/auth', { signal: AbortSignal.timeout(5000) }).then(r => r.text()).then(postMessage, e => postMessage(e.message))\`], { type: 'text/javascript' }));
+            return await new Promise((resolve) => {
+              const worker = new Worker(source);
+              worker.onmessage = (event) => { worker.terminate(); URL.revokeObjectURL(source); resolve(event.data) };
+            });
+          `
+          ).pipe(Deadline.within("10 seconds"))
+          assert.include(String(result), "signed in")
+        }), timeout)
+
+      it.effect("bounds automatic credentials across an authenticated redirect chain", () =>
+        Effect.gen(function*() {
+          if (name === "WebKit") {
+            return
+          }
+          let origin = ""
+          let first = 0
+          let second = 0
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              new Promise<http.Server>((resolve, reject) => {
+                const server = http.createServer((request, response) => {
+                  const authorized =
+                    request.headers.authorization === `Basic ${Buffer.from("strider:secret").toString("base64")}`
+                  if (!authorized) {
+                    response.writeHead(401, {
+                      "www-authenticate": `Basic realm="${request.url}"`,
+                      "content-type": "text/html"
+                    })
+                    response.end("<title>denied</title>")
+                  } else if (request.url === "/first") {
+                    first++
+                    response.writeHead(302, { location: origin.replace("127.0.0.1", "localhost") + "/second" })
+                    response.end()
+                  } else {
+                    second++
+                    response.end("<title>signed in</title>")
+                  }
+                })
+                server.once("error", reject)
+                server.listen(0, "127.0.0.1", () =>
+                  resolve(server))
+              })
+            ),
+            (server) =>
+              Effect.promise(() =>
+                new Promise<void>((resolve) => {
+                  server.close(() =>
+                    resolve()
+                  )
+                  server.closeAllConnections()
+                })
+              )
+          )
+          origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+          const page = yield* Browser.newPage({
+            httpCredentials: { username: "strider", password: Redacted.make("secret") }
+          })
+          yield* page.goto(`${origin}/first`).pipe(Deadline.within("5 seconds"))
+          assert.strictEqual(yield* page.title, "denied")
+          assert.strictEqual(first, 1)
+          assert.strictEqual(second, 0)
+        }), timeout)
+
       it.effect("answers an authentication challenge where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            const registered = page.route(`${origin}/auth`, () =>
-              Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }), {
-              phase: "auth"
-            })
+            const registered = page.route(
+              `${origin}/auth`,
+              () =>
+                Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              {
+                phase: "auth"
+              }
+            )
             if (name === "WebKit") {
               const error = yield* Effect.flip(registered)
               assert(Route.isRouteError(error) && error.reason._tag === "Unsupported", String(error))
@@ -500,6 +760,19 @@ export const declarations = (
               Declaration.isDeclarationError(narrower) && narrower.reason._tag === "InvalidInput",
               String(narrower)
             )
+          }))
+        }), timeout)
+
+      it.effect("leaves no script running after concurrent removals", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const first = yield* page.addInitScript({ source: "(window.ran ??= []).push('first')" })
+            const second = yield* page.addInitScript({ source: "(window.ran ??= []).push('second')" })
+            assert.deepStrictEqual(yield* run(page, origin, "return window.ran"), ["first", "second"])
+            yield* Effect.all([first.remove, second.remove], { concurrency: "unbounded", discard: true })
+            assert.strictEqual(yield* run(page, origin, "return window.ran ?? null"), null)
           }))
         }), timeout)
 

@@ -1,10 +1,10 @@
 /**
- * The agent toolkit: browser tools for a model, defined once, and served in your program, over MCP and by the CLI.
+ * The agent toolkit: browser tools for a model, defined once, and served in your program, over MCP, and by the CLI.
  *
  * Every page tool names its page; there is no current tab. Action tools await browser/protocol completion, which
  * can include navigation or a busy page responding, without adding a wait for later page events. Each result has
  * the call's outcome, then a digest of what happened since the previous call. Tools are `effect/ai` tools whose failures are
- * returned to the model, so a `LocatorError`, a `Timeout` or a stale ref reaches the model as data, hint included.
+ * returned to the model, so a `LocatorError`, a `Timeout`, or a stale ref reaches the model as data, hint included.
  * Parameters are Schemas: a model's `"e12"` is decoded to a `Snapshot.RefId` and checked against that page's latest
  * snapshot.
  *
@@ -104,7 +104,7 @@ export interface MakeOptions {
    */
   readonly secrets: Readonly<Record<SecretName | string, Redacted.Redacted<string>>>
   /**
-   * What snapshots, screenshots and digests may contain before they reach the model.
+   * What snapshots, screenshots, and digests may contain before they reach the model.
    */
   readonly capture: CapturePolicy.CapturePolicy
   /**
@@ -123,18 +123,19 @@ export interface MakeOptions {
  *
  * - Pages are named when they're created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is.
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
- *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
+ *   `label=Email`, `testid=cart`, or `css=…`; a bad one fails at once.
  * - Each result is the call's outcome and `sinceLast`: what happened since the previous call, including
- *   navigations, popups, dialogs and who decided them,
- *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. The capture
+ *   navigations, popups, dialogs and who decided them. A successful `newPage`, `goto`, or `back` reports its own
+ *   navigation in its outcome and omits that event from the digest, including when delivered later. Other events include
+ *   downloads, uncaught exceptions, console errors, failed requests, and validation observed during clicks. The capture
  *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
  *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.
  *   Validation feedback is temporal, not proof of a blocked submission. It covers the top document and existing
- *   open shadow roots. Strict capture omits control names and masks messages. Dialogs, navigation, document loss
+ *   open shadow roots. Strict capture omits control names and masks messages. Dialogs, navigation, document loss,
  *   or the click's deadline can discard feedback; release never delays the caller or reports into a later call.
  * - A `%name%` in a parameter becomes the secret's value as the call runs, and results show the value as `%name%`
  *   again. Other text between `%` signs, such as `%C3%` in a URL, is sent as written.
- * - Waits, routes and dialog handlers end with the scope.
+ * - Waits, routes, and dialog handlers end with the scope.
  *
  * **Gotchas**
  *
@@ -142,7 +143,7 @@ export interface MakeOptions {
  * gets the text `%pasword%`. Successful results report unknown placeholder names in `sinceLast`; typed failures
  * append the same hints to their message, preserving the error and reason. Hints describe the input, without
  * claiming it reached the browser. A configured name is suggested when exactly one is within one insertion,
- * deletion or substitution. Names start with an ASCII letter and continue with ASCII letters, digits, underscores
+ * deletion, or substitution. Names start with an ASCII letter and continue with ASCII letters, digits, underscores,
  * or hyphens. Two hexadecimal digits are always treated as URL escapes. A longer candidate starting with a hex
  * pair, whose closing `%` starts another hex escape, is also exempt unless any configured name is within one edit.
  * This syntax is ambiguous: `%ACtext%20` normally stays quiet, but `%adminpas%2024` warns when `adminpass` is

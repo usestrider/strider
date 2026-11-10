@@ -1,0 +1,26 @@
+{
+  "id": "option-browser-newcontext-forcedcolors",
+  "upstream": [
+    "method:Browser.newContext"
+  ],
+  "option": "forcedColors",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "emulation.media"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

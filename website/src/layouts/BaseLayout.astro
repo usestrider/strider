@@ -86,10 +86,19 @@ const previewImage = new URL("/og.png", Astro.site)
     <SiteFooter />
     <BackToTop />
     <script>
+      const counter = window as { plausible?: (event: string, options: { props: Record<string, string> }) => void }
       document.addEventListener("click", (event) => {
         const target = event.target instanceof Element ? event.target : null
         const copy = target?.closest<HTMLElement>("[data-copy-text]")
         if (copy?.dataset["copyText"] !== undefined) void navigator.clipboard.writeText(copy.dataset["copyText"])
+        // Copying an install command, from the cover's button or a code block's Copy, is one of the counter's goals:
+        // the CLI's install, or the library's
+        const command = copy?.dataset["copyText"] ??
+          target?.closest<HTMLElement>(".expressive-code .copy button")?.dataset["code"]
+        if (command?.startsWith("pnpm add")) {
+          const goal = command.includes("@usestrider/cli") ? "Copy CLI install command" : "Copy install command"
+          counter.plausible?.(goal, { props: { command } })
+        }
       })
     </script>
   </body>

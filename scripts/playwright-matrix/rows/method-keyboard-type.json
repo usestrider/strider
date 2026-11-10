@@ -1,0 +1,26 @@
+{
+  "id": "method-keyboard-type",
+  "upstream": [
+    "method:Keyboard.type"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Keyboard",
+      "symbol": "Keyboard.pressSequentially",
+      "url": "/docs/api/browser/Keyboard#Keyboard.pressSequentially"
+    }
+  ],
+  "notes": "Sequential typing / clickCount are explicit options.",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

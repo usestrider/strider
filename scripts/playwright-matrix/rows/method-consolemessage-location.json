@@ -1,0 +1,19 @@
+{
+  "id": "method-consolemessage-location",
+  "upstream": [
+    "method:ConsoleMessage.location"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "SourceLocation",
+      "url": "/docs/api/browser/ConsoleMessage#SourceLocation"
+    }
+  ],
+  "notes": "Structured event data; not a remote Playwright object.",
+  "capabilities": [
+    "console"
+  ],
+  "requirements": []
+}

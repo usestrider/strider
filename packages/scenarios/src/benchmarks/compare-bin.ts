@@ -23,11 +23,15 @@ if (!Number.isSafeInteger(runs) || runs < 4 || runs > 1000 || runs % 4 !== 0) {
   throw new Error("--runs must be a multiple of 4 between 4 and 1000")
 }
 if (values.browser !== "chromium") throw new Error("Paired comparisons currently support only pinned stock Chromium")
-if (!["bench", "scenarios"].includes(values.workload)) throw new Error("--workload must be bench or scenarios")
+if (!["bench", "scenarios"].includes(values.workload)) {
+  throw new Error("--workload must be bench or scenarios")
+}
 if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
-if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
+const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
+const phaseMode = values.workload === "bench" && values.only === "phase-diagnostic"
+const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
 fs.mkdirSync(output, { recursive: true })
 const samples: Array<Message & { role: string; sequence: number }> = []
@@ -119,93 +123,109 @@ try {
     throw new Error(`Browser version mismatch: expected Chromium ${pins.chromium.version}, got ${version}`)
   }
   save()
-  const workers = Object.fromEntries(
-    Object.entries({ base: roots.base, head: roots.head }).map(([role, root]) => {
-      // Overlay only the measurement driver. Imports resolve to this ref's own source and dependencies.
-      const source = path.resolve(import.meta.dirname, "..")
-      const target = path.join(root, "packages/scenarios/src")
-      const files = values.workload === "bench"
-        ? ["benchmarks/bin.ts", "benchmarks/measure.ts", "benchmarks/remote.ts", "benchmarks/cases.ts", "site.ts"]
-        : [
-          "bin.ts",
-          "runner.ts",
-          "benchmarks/remote.ts",
-          "measure.ts",
-          "report.ts",
-          "scenarios.ts",
-          "site.ts",
-          "replay.ts"
+  if (values.workload === "bench" && values.only === "navigation-diagnostic") {
+    const { navigationDiagnostic } = await import("./navigation-diagnostic.ts")
+    navigationDiagnostic({ roots, output, runs })
+  } else if (launchMode) {
+    const { launchDiagnostic } = await import("./launch-diagnostic.ts")
+    launchDiagnostic({ roots, output, runs })
+  } else if (phaseMode) {
+    const { phaseDiagnostic } = await import("./phase-diagnostic.ts")
+    phaseDiagnostic({ roots, output, runs })
+  } else if (roleMode) {
+    const { roleDiagnostic } = await import("./role-engine.ts")
+    await roleDiagnostic({ roots, output, runs })
+  } else {
+    const workers = Object.fromEntries(
+      Object.entries({ base: roots.base, head: roots.head }).map(([role, root]) => {
+        // Overlay only the measurement driver. Imports resolve to this ref's own source and dependencies.
+        const source = path.resolve(import.meta.dirname, "..")
+        const target = path.join(root, "packages/scenarios/src")
+        const files = values.workload === "bench"
+          ? ["benchmarks/bin.ts", "benchmarks/measure.ts", "benchmarks/remote.ts", "benchmarks/cases.ts", "site.ts"]
+          : [
+            "bin.ts",
+            "runner.ts",
+            "benchmarks/remote.ts",
+            "measure.ts",
+            "report.ts",
+            "scenarios.ts",
+            "site.ts",
+            "replay.ts",
+            "selection.ts"
+          ]
+        for (const file of files) {
+          const bytes = fs.readFileSync(path.join(source, file))
+          fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true })
+          fs.writeFileSync(path.join(target, file), bytes)
+          fs.mkdirSync(path.dirname(path.join(output, "driver", file)), { recursive: true })
+          fs.writeFileSync(path.join(output, "driver", file), bytes)
+        }
+        const entry = values.workload === "bench" ? "benchmarks/bin.ts" : "bin.ts"
+        const args = [
+          "--runs",
+          String(runs),
+          "--output",
+          path.join(output, role, values.workload === "bench" ? "report.json" : "run")
         ]
-      for (const file of files) {
-        const bytes = fs.readFileSync(path.join(source, file))
-        fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true })
-        fs.writeFileSync(path.join(target, file), bytes)
-        fs.mkdirSync(path.dirname(path.join(output, "driver", file)), { recursive: true })
-        fs.writeFileSync(path.join(output, "driver", file), bytes)
-      }
-      const entry = values.workload === "bench" ? "benchmarks/bin.ts" : "bin.ts"
-      const args = [
-        "--runs",
-        String(runs),
-        "--output",
-        path.join(output, role, values.workload === "bench" ? "report.json" : "run")
-      ]
-      if (values.only) args.push("--only", values.only)
-      const log = fs.openSync(path.join(output, role, "worker.log"), "w")
-      const child = fork(path.join(target, entry), args, {
-        cwd: root,
-        env: { ...process.env, STRIDER_PAIRED: "1" },
-        stdio: ["ignore", log, log, "ipc"]
-      })
-      fs.closeSync(log)
-      children.push(child)
-      const inbox = workerMessages(child, role)
-      inboxes.push(inbox)
-      return [role, { child, ...inbox }]
-    })
-  ) as Record<
-    "base" | "head",
-    { child: ReturnType<typeof fork>; next: () => Promise<Message>; fail: (error: Error) => void }
-  >
-  while (true) {
-    const [base, head] = await Promise.all([workers.base.next(), workers.head.next()])
-    if (base.type === "exit" && head.type === "exit") break
-    if (base.type !== "ready" || head.type !== "ready" || base.name !== head.name) {
-      throw new Error("Workers selected different cases or exited early")
-    }
-    const start = samples.length
-    const warmups = values.workload === "bench" ? 3 : 0
-    for (let i = -warmups; i < runs; i++) {
-      for (const role of rotation(i < 0 ? i + warmups : i)) {
-        const [ref, library] = role.split(":") as ["base" | "head", "strider" | "playwright"]
-        workers[ref].child.send({ library, repetition: i + 1, warmup: i < 0 }, (error) => {
-          if (error) workers[ref].fail(error)
+        if (values.only) args.push("--only", values.only)
+        const log = fs.openSync(path.join(output, role, "worker.log"), "w")
+        const child = fork(path.join(target, entry), args, {
+          cwd: root,
+          env: { ...process.env, STRIDER_PAIRED: "1" },
+          stdio: ["ignore", log, log, "ipc"]
         })
-        const sample = await workers[ref].next()
-        if (
-          sample.type !== "sample" || sample.name !== base.name || sample.library !== library ||
-          !Number.isFinite(sample.ms) || sample.ms! <= 0
-        ) throw new Error("Invalid sample response")
-        const raw = { ...sample, role, sequence: samples.length }
-        samples.push(raw)
-        fs.appendFileSync(path.join(output, "samples.ndjson"), `${JSON.stringify(raw)}\n`)
+        fs.closeSync(log)
+        children.push(child)
+        const inbox = workerMessages(child, role)
+        inboxes.push(inbox)
+        return [role, { child, ...inbox }]
+      })
+    ) as Record<
+      "base" | "head",
+      { child: ReturnType<typeof fork>; next: () => Promise<Message>; fail: (error: Error) => void }
+    >
+    while (true) {
+      const [base, head] = await Promise.all([workers.base.next(), workers.head.next()])
+      if (base.type === "exit" && head.type === "exit") break
+      if (base.type !== "ready" || head.type !== "ready" || base.name !== head.name) {
+        throw new Error("Workers selected different cases or exited early")
       }
+      const start = samples.length
+      const warmups = values.workload === "bench" ? 3 : 0
+      for (let i = -warmups; i < runs; i++) {
+        for (const role of rotation(i < 0 ? i + warmups : i)) {
+          const [ref, library] = role.split(":") as ["base" | "head", "strider" | "playwright"]
+          workers[ref].child.send({ library, repetition: i + 1, warmup: i < 0 }, (error) => {
+            if (error) workers[ref].fail(error)
+          })
+          const sample = await workers[ref].next()
+          if (
+            sample.type !== "sample" || sample.name !== base.name || sample.library !== library ||
+            !Number.isFinite(sample.ms) || sample.ms! <= 0
+          ) throw new Error("Invalid sample response")
+          const raw = { ...sample, role, sequence: samples.length }
+          samples.push(raw)
+          fs.appendFileSync(path.join(output, "samples.ndjson"), `${JSON.stringify(raw)}\n`)
+        }
+      }
+      const timings = (role: string) =>
+        samples.slice(start).filter((s) => s.role === role && !s.warmup).map((s) => s.ms!)
+      comparisons.push({
+        name: base.name,
+        headBase: pairedInterval(timings("head:strider"), timings("base:strider")),
+        headPlaywright: pairedInterval(timings("head:strider"), timings("head:playwright"))
+      })
+      save()
+      workers.base.child.send({ done: true }, (error) => {
+        if (error) workers.base.fail(error)
+      })
+      workers.head.child.send({ done: true }, (error) => {
+        if (error) workers.head.fail(error)
+      })
     }
-    const timings = (role: string) => samples.slice(start).filter((s) => s.role === role && !s.warmup).map((s) => s.ms!)
-    comparisons.push({
-      name: base.name,
-      headBase: pairedInterval(timings("head:strider"), timings("base:strider")),
-      headPlaywright: pairedInterval(timings("head:strider"), timings("head:playwright"))
-    })
-    save()
-    workers.base.child.send({ done: true }, (error) => {
-      if (error) workers.base.fail(error)
-    })
-    workers.head.child.send({ done: true }, (error) => {
-      if (error) workers.head.fail(error)
-    })
+    if (comparisons.length === 0) throw new Error("No comparisons completed")
   }
-  if (comparisons.length === 0) throw new Error("No comparisons completed")
   report.status = "complete"
 } catch (error) {
   report.status = "failed"
@@ -219,17 +239,25 @@ try {
     `${c.ratio.toFixed(3)} [${c.low.toFixed(3)}, ${c.high.toFixed(3)}]`
   fs.writeFileSync(
     path.join(output, "summary.md"),
-    [
-      `Comparison status: **${report.status}**`,
-      "",
-      ...(report.status === "complete" ?
-        [
-          "| Case | Head/base (95% CI) | Head/Playwright (95% CI) |",
-          "| --- | --- | --- |",
-          ...comparisons.map((c) => `| ${c.name} | ${format(c.headBase)} | ${format(c.headPlaywright)} |`)
-        ] :
-        [`No valid comparison. ${report.error}. Raw partial evidence is retained.`]),
-      ""
-    ].join("\n")
+    values.only === "navigation-diagnostic" && fs.existsSync(path.join(output, "navigation-summary.md"))
+      ? fs.readFileSync(path.join(output, "navigation-summary.md"), "utf8")
+      : launchMode && fs.existsSync(path.join(output, "launch-summary.md"))
+      ? fs.readFileSync(path.join(output, "launch-summary.md"), "utf8")
+      : phaseMode && fs.existsSync(path.join(output, "phase-summary.md"))
+      ? fs.readFileSync(path.join(output, "phase-summary.md"), "utf8")
+      : roleMode && fs.existsSync(path.join(output, "role-summary.md"))
+      ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
+      : [
+        `Comparison status: **${report.status}**`,
+        "",
+        ...(report.status === "complete" ?
+          [
+            "| Case | Head/base (95% CI) | Head/Playwright (95% CI) |",
+            "| --- | --- | --- |",
+            ...comparisons.map((c) => `| ${c.name} | ${format(c.headBase)} | ${format(c.headPlaywright)} |`)
+          ] :
+          [`No valid comparison. ${report.error}. Raw partial evidence is retained.`]),
+        ""
+      ].join("\n")
   )
 }

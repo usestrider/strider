@@ -25,6 +25,8 @@ import type * as L1Target from "../Target.ts"
 import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
+import * as Declarations from "./declarations.ts"
+import * as Geometry from "./geometry.ts"
 import * as Launch from "./launch.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 import * as Automation from "./webkitAdapter/automation.ts"
@@ -62,13 +64,14 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
   apply: (session, method, params) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, State.eventOf(state, session))
+      const event = State.eventOf(state, session)
+      event.handlers.apply(method, params, event)
       return state.buffer.flush
     }),
-  lost: (session) => Effect.sync(() => Targets.lost(state, session)),
+  lost: (session) => Effect.sync(() => Targets.lostEvent(State.eventOf(state, session))),
   ended: (session, reason) =>
     Effect.suspend(() => {
-      Targets.ended(state, session, reason)
+      Targets.endedEvent(State.eventOf(state, session), reason)
       return state.buffer.flush
     })
 })
@@ -136,6 +139,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          handlers,
           connect: options,
           ids: Kit.makeIds(),
           buffer,
@@ -173,6 +177,8 @@ export const connect: (
       removeUserContext: refuse("userContexts", noPages),
       createPage: refuse("userContexts", noPages),
       closePage: refuse("userContexts", noPages),
+      viewportSize: (id) =>
+        Effect.map(State.pageOf(state, id), (page) => Declarations.viewportSize(state.registry, State.placement(page))),
       activatePage: refuse("emulation.focus", "stock WebKit's inspector has no Emulation domain"),
       navigate: (id, url, options) => Navigation.navigateByScript(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),
@@ -210,7 +216,16 @@ export const connect: (
       grantPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
       resetPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
       responseBody: (hop) => Network.responseBody(state, hop),
+      releaseNodes: (nodes) => Evaluation.releaseNodes(state, nodes),
+      geometry: Effect.fnUntraced(function*(node, kind) {
+        const realm = yield* Evaluation.realmFor(state, node.document, { _tag: "Main" })
+        const data = yield* Evaluation.evaluate(state, realm, Geometry.call(node, kind)).pipe(
+          Effect.flatMap(Geometry.decode)
+        )
+        return { document: node.document, data }
+      }),
       contentFrame: refuse("frames.contentFrame", "stock WebKit's inspector can't say which frame an iframe holds"),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),
       pausedResponseBody: (obligation) => Obligations.pausedResponseBody(state, obligation),
@@ -231,7 +246,7 @@ export const connect: (
       dispatchInput: (page, events) => Input.dispatchInputLaunched(state, page, events),
       cookies: (context) => Storage.cookiesLaunched(state, context),
       setCookies: (context, list) => Storage.setCookiesLaunched(state, context, list),
-      clearCookies: (context) => Storage.clearCookiesLaunched(state, context),
+      clearCookies: (context, options) => Storage.clearCookiesLaunched(state, context, options),
       setInputFiles: (node, files) => Input.setInputFilesLaunched(state, node, files),
       contentFrame: (node) => Input.contentFrameLaunched(state, node)
     } satisfies Adapter.AdapterConnection

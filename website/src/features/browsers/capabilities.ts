@@ -34,7 +34,7 @@ export const backends = (): ReadonlyArray<Backend> => {
 /** The capabilities, by group, in the order the guides show them; a label may use `code` */
 export const groups: ReadonlyArray<{ readonly label: string; readonly names: Readonly<Record<string, string>> }> = [
   {
-    label: "Contexts, pages and frames",
+    label: "Contexts, pages, and frames",
     names: {
       userContexts: "New contexts and pages",
       "userContexts.proxy": "HTTP proxies for a context",
@@ -89,8 +89,16 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Network",
     names: {
       bodies: "Response bodies",
+      "network.responseBody.terminalRedirect": "Bodies of terminal 301/302/303/307/308 responses without Location",
+      "network.requestBody.bytes": "Collected request bytes",
+      "network.requestBody.text": "Collected request text",
+      "network.requestBody.absence": "Reporting absent request bodies",
+      "network.requestBody.empty": "Distinguishing an empty request body",
+      "network.requestBody.multipart": "Complete multipart request bodies",
+      "network.requestBody.redirects": "Reading bodies by redirect hop",
       "network.headersSent": "The headers a request was sent with, `headersSent`",
       "network.servedBy": "What served a response, `servedBy`",
+      webSocketRouting: "Script WebSocket mocking and proxying",
       "interception.request": "Routes at the request phase",
       "interception.response": "Routes at the response phase",
       "interception.auth": "Routes at an authentication challenge",

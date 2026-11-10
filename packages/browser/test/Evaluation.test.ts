@@ -4,10 +4,13 @@ import { Protocol } from "@usestrider/browser/protocol"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { runInNewContext } from "node:vm"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as Evaluation from "../src/internal/evaluation.ts"
+import * as Argument from "../src/internal/evaluationArgument.ts"
 import * as Operation from "../src/internal/operation.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
+import * as Utility from "../src/internal/webkitUtility.ts"
 import * as Target from "../src/Target.ts"
 
 const runtime = (evaluate: Adapter.AdapterConnection["evaluate"]) =>
@@ -73,6 +76,32 @@ describe("Evaluation dispatch evidence", () => {
       }).pipe(Operation.named("Locator.evaluate")))
   }
 
+  it.effect("does not replay a possibly applied caller function when its realm ends", () =>
+    Effect.gen(function*() {
+      const record = yield* Operation.record
+      let calls = 0
+      const error = yield* Evaluation.call(
+        runtime(() =>
+          Effect.suspend(() => {
+            calls++
+            return Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          })
+        ),
+        { ...options(record, true), functionDeclaration: "() => { globalThis.applied = true }" }
+      ).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "Gone")
+      assert.strictEqual(calls, 1)
+      assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+    }).pipe(Operation.named("Locator.evaluate")))
+
   it.effect("does not use a read evaluation to confirm an earlier uncertain write", () =>
     Effect.gen(function*() {
       const record = yield* Operation.record
@@ -80,4 +109,38 @@ describe("Evaluation dispatch evidence", () => {
       yield* Evaluation.call(runtime(() => Effect.succeed(value)), options(record, false))
       assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
     }).pipe(Operation.named("query after input")))
+})
+
+describe("Evaluation argument reconstruction", () => {
+  it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
+    const call = runInNewContext(
+      `(${
+        Utility.callBeside(
+          "() => [kinds, args, helper, fn, arguments]",
+          "handle",
+          false
+        )
+      })`,
+      {
+        kinds: "page:kinds",
+        args: "page:args",
+        helper: "page:helper",
+        fn: "page:fn",
+        arguments: "page:arguments"
+      }
+    )
+    const result = call({ run: (fn: () => unknown) => fn() }, [])
+    assert.deepStrictEqual(Array.from(result), ["page:kinds", "page:args", "page:helper", "page:fn", "page:arguments"])
+  })
+
+  it("copies own __proto__ keys as data without changing the object prototype", () => {
+    const call = new Function(`return (${Argument.call("value => value")})`)()
+    const value = call(["v"], {
+      type: "object",
+      value: [["__proto__", { type: "string", value: "data" }]]
+    })
+    assert.strictEqual(Object.getPrototypeOf(value), Object.prototype)
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(value, "__proto__"), true)
+    assert.strictEqual(value["__proto__"], "data")
+  })
 })

@@ -3,7 +3,7 @@
  *
  * A profile is never a hidden flag: it's a value whose `args` and `prefs` you can read, and a launch's span records
  * which profile it used. `args` are Chromium's switches and `prefs` Firefox's preferences; WebKit takes neither. No
- * profile turns off the back/forward cache, third-party storage partitioning or popup blocking, because Strider
+ * profile turns off the back/forward cache, third-party storage partitioning, or popup blocking, because Strider
  * handles each of those itself.
  *
  * @stability unstable

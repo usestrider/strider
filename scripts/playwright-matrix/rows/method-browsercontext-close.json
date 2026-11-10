@@ -1,0 +1,29 @@
+{
+  "id": "method-browsercontext-close",
+  "upstream": [
+    "method:BrowserContext.close"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext",
+      "url": "/docs/api/browser/UserContext#UserContext"
+    }
+  ],
+  "notes": "The owning scope closes the context.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "removeUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

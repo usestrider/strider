@@ -1,0 +1,26 @@
+{
+  "id": "option-browser-newpage-hastouch",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "option": "hasTouch",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "emulation.touch"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createPage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

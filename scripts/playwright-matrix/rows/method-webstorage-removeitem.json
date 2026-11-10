@@ -1,0 +1,17 @@
+{
+  "id": "method-webstorage-removeitem",
+  "upstream": [
+    "method:WebStorage.removeItem"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "OriginStorage",
+      "symbol": "OriginStorage.remove",
+      "url": "/docs/api/browser/OriginStorage#OriginStorage.remove"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

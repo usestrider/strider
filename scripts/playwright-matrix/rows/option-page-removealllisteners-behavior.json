@@ -1,0 +1,26 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-removealllisteners-behavior",
+  "upstream": [
+    "method:Page.removeAllListeners"
+  ],
+  "option": "behavior",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "default",
+      "status": "missing"
+    },
+    {
+      "value": "ignoreErrors",
+      "status": "missing"
+    },
+    {
+      "value": "wait",
+      "status": "missing"
+    }
+  ]
+}

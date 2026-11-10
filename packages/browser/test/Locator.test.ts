@@ -7,19 +7,174 @@ import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
-import type * as Adapter from "../src/internal/adapter.ts"
+import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
 import { LocatorImpl } from "../src/internal/locator.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as Runtime from "../src/internal/runtime.ts"
+
+it.effect("runtime never reroutes an applying engine round after its realm ends", () =>
+  Effect.gen(function*() {
+    let calls = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("action-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          calls++
+          if (calls === 1) {
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Realm", id: "action-realm" as Target.RealmId },
+                  reason: new Target.RealmDestroyed({})
+                }
+              })
+            )
+          }
+          return {
+            _tag: "Value",
+            value: { type: "string", value: JSON.stringify({ _tag: "Count", count: 1 }) }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const result = yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        return yield* Runtime.send(
+          runtime,
+          entry,
+          {
+            op: "act",
+            steps: [],
+            action: { _tag: "Focus" },
+            apply: true,
+            cap: 100,
+            checks: {
+              rendered: false,
+              visible: false,
+              enabled: false,
+              editable: false,
+              notInert: false,
+              inViewport: false,
+              stable: 0,
+              receivesPointer: false
+            }
+          },
+          record.id,
+          record.budget.at
+        )
+      }).pipe(Operation.named("test.applyingRound"), Effect.result)
+      assert.strictEqual(result._tag, "Failure")
+      if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "Gone")
+      assert.strictEqual(calls, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }).pipe(Effect.scoped))
+
+for (const loss of ["realm", "engine"] as const) {
+  it.effect(
+    loss === "realm"
+      ? "runtime follows a realm lost while installing the engine, before an applying round is sent"
+      : "runtime reinstalls a missing engine without claiming an action was applied",
+    () =>
+      Effect.gen(function*() {
+        let installs = 0
+        let calls = 0
+        let operation: Operation.Record | undefined
+        const layer = BrowserImpl.layer((sink) =>
+          Fake.connect([], {
+            info: new Browser.Info(Fake.info),
+            capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+          })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+            ...adapter,
+            realm: () => Effect.succeed("action-realm" as Target.RealmId),
+            evaluate: Effect.fnUntraced(function*(_realm, call) {
+              if (call.functionDeclaration === Engine.install) {
+                assert.deepStrictEqual(operation?.diagnostics().dispatch, { _tag: "NotSent" })
+                installs++
+                // The document is replaced while the engine is installed: the action round was never sent.
+                if (installs === 1 && loss === "realm") {
+                  return yield* Effect.fail(
+                    new Adapter.AdapterError({
+                      reason: {
+                        _tag: "Gone",
+                        target: { _tag: "Realm", id: "action-realm" as Target.RealmId },
+                        reason: new Target.RealmDestroyed({})
+                      }
+                    })
+                  )
+                }
+                return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+              }
+              if (installs === 1 && loss === "engine") {
+                return { _tag: "Value", value: { type: "string", value: Engine.missing } } as const
+              }
+              assert.deepStrictEqual(operation?.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+              calls++
+              return {
+                _tag: "Value",
+                value: { type: "string", value: JSON.stringify({ _tag: "Count", count: 1 }) }
+              } as const
+            })
+          })))
+        )
+        yield* Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const { entry, runtime } = Handles.page(page)
+          const result = yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            operation = record
+            return yield* Runtime.send(
+              runtime,
+              entry,
+              {
+                op: "act",
+                steps: [],
+                action: { _tag: "Focus" },
+                apply: true,
+                cap: 100,
+                checks: {
+                  rendered: false,
+                  visible: false,
+                  enabled: false,
+                  editable: false,
+                  notInert: false,
+                  inViewport: false,
+                  stable: 0,
+                  receivesPointer: false
+                }
+              },
+              record.id,
+              record.budget.at
+            )
+          }).pipe(Operation.named("test.applyingRoundInstall"), Effect.result)
+          assert.strictEqual(result._tag, "Success")
+          assert.strictEqual(installs, 2)
+          assert.strictEqual(calls, 1)
+        }).pipe(Effect.scoped, Effect.provide(layer))
+      }).pipe(Effect.scoped)
+  )
+}
 
 describe("Locator.fill", () => {
   for (
@@ -140,7 +295,7 @@ describe("Locator.check refusal deadlines", () => {
                         _tag: "Final",
                         final: {
                           _tag: "WrongElement",
-                          expected: "a checkbox, a radio or an ARIA checkable",
+                          expected: "a checkbox, a radio, or an ARIA checkable",
                           element: "<option>"
                         }
                       })
@@ -210,6 +365,137 @@ describe("Locator.check refusal deadlines", () => {
   }
 })
 
+describe("Locator.boundingBox", () => {
+  for (const mode of ["success", "refusal", "deadline", "installation deadline", "document handoff"] as const) {
+    it.effect(
+      mode === "installation deadline"
+        ? "ends a read at its deadline during node installation"
+        : mode === "document handoff" ?
+        "resolves a document handoff before reading geometry"
+        : `releases the temporary node after geometry ${mode}`,
+      () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const reading = yield* Deferred.make<void>()
+          const finishInstallation = yield* Deferred.make<void>()
+          let document!: Target.DocumentId
+          const released: Array<string> = []
+          let inputs = 0
+          let queries = 0
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(
+              Effect.map((adapter): Adapter.AdapterConnection => ({
+                ...adapter,
+                realm: (id) =>
+                  Effect.sync(() => {
+                    document = id
+                    return "geometry-realm" as Target.RealmId
+                  }),
+                evaluate: (_realm, call) =>
+                  mode === "installation deadline" && call.functionDeclaration === Engine.install
+                    ? Deferred.succeed(reading, undefined).pipe(
+                      Effect.andThen(Deferred.await(finishInstallation)),
+                      Effect.as({ _tag: "Value", value: { type: "string", value: "installed" } } as const)
+                    )
+                    : Effect.succeed(
+                      call.functionDeclaration === Engine.install
+                        ? { _tag: "Value", value: { type: "string", value: "installed" } }
+                        : {
+                          _tag: "Value",
+                          value: {
+                            type: "node",
+                            node: mode === "document handoff" && queries++ === 0
+                              ? { document: "during-commit" as Target.DocumentId, binding: "handoff-box" }
+                              : { document, binding: "temporary-box" }
+                          }
+                        }
+                    ),
+                geometry: (node) =>
+                  mode === "deadline" ?
+                    Deferred.succeed(reading, undefined).pipe(Effect.andThen(Effect.never)) :
+                    mode === "refusal" ?
+                    Effect.fail(
+                      new Adapter.AdapterError({
+                        reason: {
+                          _tag: "Unsupported",
+                          capability: "Locator.boundingBox",
+                          hint: "native geometry refused"
+                        }
+                      })
+                    )
+                    : Effect.succeed({
+                      document: node.document,
+                      data: {
+                        quads: [[{ x: 1, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 6 }, { x: 1, y: 6 }]],
+                        matrix: null,
+                        width: 3,
+                        height: 4,
+                        contentX: 0,
+                        contentY: 0,
+                        pixelRatio: 1,
+                        hint: null
+                      }
+                    }),
+                releaseNodes: (nodes) =>
+                  Effect.sync(() => {
+                    released.push(...nodes.map((node) => node.binding))
+                  }),
+                dispatchInput: () =>
+                  Effect.sync(() => {
+                    inputs++
+                  })
+              }))
+            )
+          )
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            if (mode === "deadline" || mode === "installation deadline") {
+              const pending = yield* page.locator("#box").boundingBox.pipe(
+                Deadline.within("1 second"),
+                Effect.flip,
+                Effect.forkChild
+              )
+              yield* Deferred.await(reading)
+              yield* TestClock.adjust("1 second")
+              const settled = pending.pollUnsafe()
+              yield* Deferred.succeed(finishInstallation, undefined)
+              const error = yield* Fiber.join(pending)
+              assert.isDefined(settled, "the pending browser read must not mask the operation deadline")
+              assert(Deadline.isTimeout(error))
+              assert.strictEqual(error.phase, "resolving")
+              assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+            } else if (mode === "refusal") {
+              const error = yield* page.locator("#box").boundingBox.pipe(Effect.flip)
+              assert(Locator.isLocatorError(error))
+              assert.strictEqual(error.reason._tag, "Unsupported")
+            } else {
+              assert.deepStrictEqual(
+                yield* page.locator("#box").boundingBox,
+                Option.some({ x: 1, y: 2, width: 3, height: 4 })
+              )
+            }
+            if (mode === "document handoff") {
+              assert.sameMembers(released, ["temporary-box", "handoff-box"])
+              assert.strictEqual(queries, 2)
+            } else assert.deepStrictEqual(released, mode === "installation deadline" ? [] : ["temporary-box"])
+            assert.strictEqual(inputs, 0)
+          }).pipe(Effect.scoped, Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        }).pipe(Effect.scoped)
+    )
+  }
+
+  it.effect("reports backend refusal through the readonly read error contract", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const error = yield* page.locator("#box").boundingBox.pipe(Effect.flip)
+      assert(Locator.isLocatorError(error))
+      assert.strictEqual(error.operation, "Locator.boundingBox")
+      assert.strictEqual(error.reason._tag, "Unsupported")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
 describe("Locator.dispatchEvent", () => {
   it.effect("preserves a typed refusal when the backend cannot evaluate", () =>
     Effect.gen(function*() {
@@ -565,3 +851,284 @@ describe("Locator.isEditable", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 })
+
+it.effect("does not acknowledge native fill while its insertion guard is still pending", () =>
+  Effect.gen(function*() {
+    const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+    const guarding = yield* Deferred.make<void>()
+    const cleaned = yield* Deferred.make<void>()
+    let inputs = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("fill-realm" as Target.RealmId),
+        dispatchInput: () =>
+          Effect.sync(() => {
+            inputs++
+          }),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          if (call.functionDeclaration === Engine.install) {
+            return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+          }
+          const argument = call.arguments[0]
+          assert(argument?._tag === "Value" && argument.value.type === "string")
+          const request = JSON.parse(argument.value.value) as Engine.Request
+          if (request.op === "fillGuard") {
+            yield* Deferred.succeed(guarding, undefined)
+            return yield* Effect.never
+          }
+          if (request.op === "fillDisarm") {
+            yield* Deferred.succeed(cleaned, undefined)
+            return {
+              _tag: "Value",
+              value: {
+                type: "string",
+                value: JSON.stringify({
+                  _tag: "FillGuard",
+                  blocked: "input#other",
+                  unsafe: false,
+                  accepted: false
+                })
+              }
+            } as const
+          }
+          assert(request.op === "act" && request.action._tag === "Fill")
+          return {
+            _tag: "Value",
+            value: {
+              type: "string",
+              value: JSON.stringify({
+                _tag: "Ready",
+                element: "p#target",
+                scrolled: false,
+                point: null,
+                draggable: false,
+                checked: null,
+                fill: request.apply ? "guarded" : null
+              })
+            }
+          } as const
+        })
+      })))
+    )
+    yield* Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const pending = yield* page.locator("#target").fill("new").pipe(
+        Deadline.within("1 second"),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* Deferred.await(guarding)
+      yield* TestClock.adjust("1 second")
+      const error = yield* Fiber.join(pending)
+      yield* Deferred.await(cleaned)
+      assert(Deadline.isTimeout(error))
+      assert.strictEqual(inputs, 0)
+      assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+    })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+  }).pipe(Effect.scoped))
+
+const guardCleanup = Effect.fnUntraced(function*(disarm: "gone" | "missing", ends: boolean) {
+  const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+  const guarding = yield* Deferred.make<void>()
+  const cleaned = yield* Deferred.make<void>()
+  const warnings: Array<string> = []
+  const logger = Logger.make((options) => {
+    const message = (options.message as ReadonlyArray<string>).join(" ")
+    if (options.logLevel === "Warn") warnings.push(message)
+  })
+  let connection: Adapter.AdapterConnection | undefined
+  const layer = BrowserImpl.layer((sink) =>
+    Fake.connect([], {
+      info: new Browser.Info(Fake.info),
+      capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+    })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => (connection = {
+      ...adapter,
+      realm: () => Effect.succeed("fill-realm" as Target.RealmId),
+      evaluate: Effect.fnUntraced(function*(_realm, call) {
+        if (call.functionDeclaration === Engine.install) {
+          return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+        }
+        const argument = call.arguments[0]
+        assert(argument?._tag === "Value" && argument.value.type === "string")
+        const request = JSON.parse(argument.value.value) as Engine.Request
+        if (request.op === "fillGuard") {
+          yield* Deferred.succeed(guarding, undefined)
+          return yield* Effect.never
+        }
+        if (request.op === "fillDisarm") {
+          yield* Deferred.succeed(cleaned, undefined)
+          if (disarm === "missing") {
+            return { _tag: "Value", value: { type: "string", value: Engine.missing } } as const
+          }
+          // The navigation destroyed the realm; the model hasn't yet dropped the document.
+          return yield* Effect.fail(
+            new Adapter.AdapterError({
+              reason: {
+                _tag: "Gone",
+                target: { _tag: "Realm", id: "fill-realm" as Target.RealmId },
+                reason: new Target.RealmDestroyed({})
+              }
+            })
+          )
+        }
+        assert(request.op === "act" && request.action._tag === "Fill")
+        return {
+          _tag: "Value",
+          value: {
+            type: "string",
+            value: JSON.stringify({
+              _tag: "Ready",
+              element: "p#target",
+              scrolled: false,
+              point: null,
+              draggable: false,
+              checked: null,
+              fill: request.apply ? "guarded" : null
+            })
+          }
+        } as const
+      })
+    })))
+  )
+  yield* Effect.scoped(Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const pending = yield* page.locator("#target").fill("new").pipe(
+      Deadline.within("1 second"),
+      Effect.flip,
+      Effect.forkChild
+    )
+    yield* Deferred.await(guarding)
+    yield* TestClock.adjust("1 second")
+    yield* Fiber.join(pending)
+    yield* Deferred.await(cleaned)
+    if (ends) {
+      yield* connection!.navigate(page.id, "https://example.test/next", { referrer: Option.none() })
+    }
+    // Past the cleanup's default budget when nothing ends the document
+    yield* TestClock.adjust(ends ? "1 second" : "10 minutes")
+    assert.strictEqual(warnings.length, disarm === "gone" && ends ? 0 : 1)
+  })).pipe(
+    Effect.provide(layer),
+    Effect.provideService(BrowserClock.CurrentClock, clock),
+    Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+  )
+}, Effect.scoped)
+
+it.effect(
+  "does not leave input blocked when navigation destroys the realm during guard cleanup",
+  () => guardCleanup("gone", true)
+)
+
+it.effect(
+  "keeps input blocked when the realm is destroyed but the document is still live at the cleanup's deadline",
+  () => guardCleanup("gone", false)
+)
+
+it.effect("keeps input blocked when a live document's engine is missing during guard cleanup", () =>
+  guardCleanup("missing", true))
+
+for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as const) {
+  it.effect(`accounts for fill at the ${boundary} boundary`, () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      const reached = yield* Deferred.make<void>()
+      let record: Operation.Record | undefined
+      let inputs = 0
+      let disarms = 0
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: () => Effect.succeed("fill-boundary-realm" as Target.RealmId),
+          dispatchInput: Effect.fnUntraced(function*() {
+            inputs++
+            if (boundary === "confirmed") return
+            yield* Deferred.succeed(reached, undefined)
+            return yield* Effect.never
+          }),
+          evaluate: Effect.fnUntraced(function*(_realm, call) {
+            if (call.functionDeclaration === Engine.install) {
+              return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+            }
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            if (request.op === "fillGuard" || request.op === "fillDisarm") {
+              if (request.op === "fillDisarm" && boundary === "confirmed" && disarms++ === 0) {
+                yield* Deferred.succeed(reached, undefined)
+                return yield* Effect.never
+              }
+              return {
+                _tag: "Value",
+                value: {
+                  type: "string",
+                  value: JSON.stringify({
+                    _tag: "FillGuard",
+                    blocked: null,
+                    unsafe: false,
+                    accepted: true
+                  })
+                }
+              } as const
+            }
+            assert(request.op === "act" && request.action._tag === "Fill")
+            if (request.apply) {
+              record = yield* Operation.record
+              if (boundary === "unanswered") {
+                yield* Deferred.succeed(reached, undefined)
+                return yield* Effect.never
+              }
+            }
+            return {
+              _tag: "Value",
+              value: {
+                type: "string",
+                value: JSON.stringify({
+                  _tag: "Ready",
+                  element: "input#target",
+                  scrolled: false,
+                  point: null,
+                  draggable: false,
+                  checked: null,
+                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null
+                })
+              }
+            } as const
+          })
+        })))
+      )
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        if (boundary === "set") {
+          yield* page.locator("#target").fill("new")
+          assert.strictEqual(inputs, 0)
+          assert.deepStrictEqual(record?.dispatch, { _tag: "Acknowledged", result: "ok" })
+          return
+        }
+        const pending = yield* page.locator("#target").fill("new").pipe(
+          Deadline.within("1 second"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* Deferred.await(reached)
+        yield* TestClock.adjust("1 second")
+        const error = yield* Fiber.join(pending)
+        assert(Deadline.isTimeout(error))
+        assert.strictEqual(inputs, boundary === "unanswered" ? 0 : 1)
+        assert.deepStrictEqual(
+          error.diagnostics.dispatch,
+          boundary === "confirmed"
+            ? { _tag: "Acknowledged", result: "ok" }
+            : { _tag: "MayHaveBeenSent" }
+        )
+        assert.strictEqual(error.phase, boundary === "confirmed" ? "postcondition" : "dispatchedUnconfirmed")
+        if (boundary === "confirmed") assert.strictEqual(disarms, 2)
+      })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+    }).pipe(Effect.scoped))
+}

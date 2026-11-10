@@ -147,6 +147,8 @@ export type HopEnd =
   | {
     readonly _tag: "Failed"
     readonly error: string
+    /** Set only by connection teardown, never inferred from protocol error text. */
+    readonly connectionLost?: true
     /** Canceled by a navigation or the page, which isn't a failure of the network (CLI.md, the digest). */
     readonly canceled: boolean
     readonly at: MonotonicInstant.MonotonicInstant
@@ -338,7 +340,16 @@ export interface ContextState {
   readonly grants: ReadonlyArray<GrantEntry>
 }
 
+export interface StorageSourceObserver {
+  readonly observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  readonly origins: Map<Target.NavigableId, string>
+}
+
 export interface ContextEntry {
+  storageReplacing?: boolean | undefined
+  storageSources?: StorageSourceObserver | undefined
+  timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
+  sizes?: Map<NetworkRequest.HopId, NetworkRequest.Sizes> | undefined
   readonly id: UserContext.Id
   /** Fixed: the default context exists for the whole connection. */
   readonly isDefault: boolean
@@ -402,6 +413,11 @@ export interface Model {
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
+  /** Observes storage sources only within the requesting context's scope. */
+  readonly observeStorageSources: (
+    context: ContextEntry,
+    observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  ) => Effect.Effect<void, never, Scope.Scope>
   /** The navigation's entry, created by whichever comes first: its first fact, or the caller waiting for it. */
   readonly navigation: (id: PageNavigation.Id) => Effect.Effect<NavigationEntry>
   /** Forgets a navigation once its caller has its outcome. */
@@ -440,6 +456,7 @@ export interface Model {
    * budget.
    */
   readonly remove: (context: ContextEntry) => Effect.Effect<void>
+  readonly removedWith: (context: ContextEntry, scope: Scope.Scope, removes: () => boolean) => void
   /** Moves a page's ownership to `to`, which then releases it (CONCEPTS.md §3, transfers). */
   readonly transfer: (page: Target.NavigableId, to: Scope.Scope) => Effect.Effect<void>
 }
@@ -484,6 +501,7 @@ export const make = Effect.fnUntraced(function*() {
         lost: fold.lost,
         context: (id) => fold.context(id, false),
         configure: fold.configure,
+        observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,
         forget: fold.forget,
         handlePrompts: (page, handler) => fold.register(page, "promptHandlers", handler),
@@ -494,6 +512,7 @@ export const make = Effect.fnUntraced(function*() {
         release,
         closeApart: ownership.closeApart,
         remove: ownership.remove,
+        removedWith: ownership.removedWith,
         transfer: (page, to) =>
           Effect.suspend(() => {
             const entry = fold.page(page)

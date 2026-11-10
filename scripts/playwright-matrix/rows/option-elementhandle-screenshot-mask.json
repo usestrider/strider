@@ -1,0 +1,12 @@
+{
+  "id": "option-elementhandle-screenshot-mask",
+  "upstream": [
+    "method:ElementHandle.screenshot"
+  ],
+  "option": "mask",
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "capabilities": [],
+  "requirements": []
+}

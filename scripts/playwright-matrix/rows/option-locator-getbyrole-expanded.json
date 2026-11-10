@@ -1,0 +1,18 @@
+{
+  "id": "option-locator-getbyrole-expanded",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "option": "expanded",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

@@ -79,7 +79,14 @@ export interface Registry {
   /** The init-script bundle for each world, by world key. */
   readonly bundles: (
     placement: Placement
-  ) => ReadonlyMap<string, { readonly world: Adapter.World; readonly source: string }>
+  ) => ReadonlyMap<
+    string,
+    {
+      readonly world: Adapter.World
+      readonly source: string
+      readonly webSockets?: ReadonlyArray<Adapter.WebSocketBridge> | undefined
+    }
+  >
   /** The intercept patterns in force, per phase. */
   readonly intercepts: (placement: Placement) => {
     readonly request: ReadonlyArray<string>
@@ -172,7 +179,10 @@ export const make = (): Registry => {
     },
     bundles: (placement) => {
       const scripts = scriptsOf(placement)
-      const bundles = new Map<string, { world: Adapter.World; sources: Array<string> }>()
+      const bundles = new Map<
+        string,
+        { world: Adapter.World; sources: Array<string>; webSockets?: Array<Adapter.WebSocketBridge> }
+      >()
       for (const entry of scripts) {
         const key = worldKey(entry.declaration.world)
         let bundle = bundles.get(key)
@@ -181,9 +191,16 @@ export const make = (): Registry => {
           bundles.set(key, bundle)
         }
         bundle.sources.push(wrap(entry.id, entry.declaration.source, entry.declaration.after))
+        if (entry.declaration.webSocket !== undefined) (bundle.webSockets ??= []).push(entry.declaration.webSocket)
       }
       return new Map(
-        [...bundles].map(([key, bundle]) => [key, { world: bundle.world, source: block(bundle.sources) }])
+        [...bundles].map((
+          [key, bundle]
+        ) => [key, {
+          world: bundle.world,
+          source: block(bundle.sources),
+          ...(bundle.webSockets === undefined ? {} : { webSockets: bundle.webSockets })
+        }])
       )
     },
     intercepts: (placement) => {
@@ -226,3 +243,11 @@ const wrap = (id: Adapter.RegistrationId, source: string, after: ReadonlyArray<A
 // One block, so its bookkeeping is invisible to the page, while a script's top-level `var` and functions stay
 // global, as they would be on their own.
 const block = (scripts: ReadonlyArray<string>): string => `{ const ${ran} = new Set()\n${scripts.join("\n")}\n}`
+
+/** Copies only the dimensions, keeping the registry's override private. */
+export const viewportSize = (registry: Registry, placement: Placement) => {
+  const override = registry.overrides(placement).get("Viewport")
+  return override?._tag === "Viewport"
+    ? Option.some({ width: override.width, height: override.height })
+    : Option.none<{ readonly width: number; readonly height: number }>()
+}

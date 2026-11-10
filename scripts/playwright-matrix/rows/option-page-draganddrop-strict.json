@@ -1,0 +1,33 @@
+{
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator",
+      "url": "/docs/api/browser/Locator#Locator"
+    }
+  ],
+  "notes": "Locators are always strict where one element is required; there is no per-call strictness switch.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Strictness: ambiguity fails at once instead of picking an element.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "id": "option-page-draganddrop-strict",
+  "upstream": [
+    "method:Page.dragAndDrop"
+  ],
+  "option": "strict",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

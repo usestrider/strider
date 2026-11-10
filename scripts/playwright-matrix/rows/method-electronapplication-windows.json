@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-windows",
+  "upstream": [
+    "method:ElectronApplication.windows"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

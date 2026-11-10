@@ -1,0 +1,32 @@
+{
+  "id": "method-locator-type",
+  "upstream": [
+    "method:Locator.type"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.pressSequentially",
+      "url": "/docs/api/browser/Locator#Locator.pressSequentially"
+    }
+  ],
+  "notes": "Sequential typing is explicit; the redundant type alias is absent.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

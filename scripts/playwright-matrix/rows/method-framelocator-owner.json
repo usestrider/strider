@@ -1,0 +1,23 @@
+{
+  "id": "method-framelocator-owner",
+  "upstream": [
+    "method:FrameLocator.owner"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyFrameLocator.owner",
+      "url": "/docs/api/browser/Locator#ReadonlyFrameLocator.owner"
+    }
+  ],
+  "notes": "The frame locator’s owner is its iframe element locator; reading it does not wait for an attached document.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

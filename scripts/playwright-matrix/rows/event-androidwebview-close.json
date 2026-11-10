@@ -1,0 +1,11 @@
+{
+  "id": "event-androidwebview-close",
+  "upstream": [
+    "event:AndroidWebView.close"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

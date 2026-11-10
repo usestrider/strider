@@ -38,18 +38,14 @@ export type Scenario =
   & {
     readonly name: string
     readonly title: string
-    /** What the Strider program shows, for its page on the documentation site. */
+    /** What the Strider program shows, above its code in the report. */
     readonly description: string
     /** The value both implementations must return. */
     readonly expected: string
     /** What writing it found, shown under its code. */
     readonly note?: string
-    /** A video the program recorded, kept in the site's `public/videos/`, shown on its page. */
-    readonly video?: string
     /** The browser the Strider program runs on: Chromium unless it says Firefox */
     readonly browser?: "firefox"
-    /** Another scenario that does the same on another browser, shown on this one's page, with no page of its own */
-    readonly compare?: string
     /** The Strider program: given the local site's address, and needing nothing of the runner's */
     readonly strider: (origin: string) => Effect.Effect<string, unknown, StriderNeeds>
     /** Its twin, for the comparison; none for a scenario that only shows Strider */
@@ -673,8 +669,6 @@ export const scenarios: ReadonlyArray<Scenario> = [
     expected: "Strider, recorded",
     recording: "the-internet",
     requiredPages: [controls],
-    video: "dynamic-controls.webm",
-    compare: "video-firefox",
     strider: videoStrider
   },
   {
@@ -685,7 +679,6 @@ export const scenarios: ReadonlyArray<Scenario> = [
     expected: "Strider, recorded",
     recording: "the-internet",
     requiredPages: [controls],
-    video: "dynamic-controls-firefox.webm",
     browser: "firefox",
     strider: videoFirefoxStrider
   }

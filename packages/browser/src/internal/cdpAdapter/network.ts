@@ -12,6 +12,9 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import type * as ProtocolClient from "../protocolClient.ts"
+import * as Sizes from "../requestSizes.ts"
+import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
@@ -49,7 +52,16 @@ const sentBody = (state: State, target: TargetEntry, request: Network.Request) =
 }
 
 /** Reports headers the network sent or received for a hop; the current hop's received ones go with its response. */
-const deliver = (state: State, request: RequestEntry, hop: NetworkRequest.HopId, { headers, phase }: ExtraInfo) => {
+const deliver = (
+  state: State,
+  request: RequestEntry,
+  hop: NetworkRequest.HopId,
+  { headers, phase, statusCode }: ExtraInfo
+) => {
+  if (statusCode === 304) {
+    const sizes = request.frame?.page.context.requestSizes?.get(hop)
+    if (sizes !== undefined) sizes.network = false
+  }
   state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
   if (hop !== request.hop) return
   if (phase === "response") {
@@ -128,6 +140,24 @@ const webSocketFrame = (
   })
 }
 
+/**
+ * Chunk accounting belongs only to live page-attributed sessions in an opted-in context.
+ * The reader may see attachment state before the fold catches up. Launched browsers pause new targets;
+ * attached browsers need not pause pages. Both send Network.enable only from the gate, after the fold registers
+ * the target, so chunk events cannot precede registration. The claims path refuses requestSizes on existing
+ * contexts. Keep these invariants so the early filter cannot drop bytes from an enabled request.
+ */
+export const eventScopes = (state: State): NonNullable<ProtocolClient.Fold["eventScopes"]> =>
+  new Map([
+    [Network.dataReceived.method, (session: ProtocolClient.Session) => {
+      const target = state.targets.get(session)
+      const page = target?.page ?? target?.frame?.page
+      return target !== undefined && !target.ended &&
+        page !== undefined && !page.ended && !page.context.disposed &&
+        page.context.requestSizes !== undefined
+    }]
+  ])
+
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -140,6 +170,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         // The redirect says whether `ExtraInfo` comes for the hop it ends
         if (params.redirectHasExtraInfo === true) expectExtraInfo(state, request, ["request", "response"])
         else noExtraInfo(state, request)
+        request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.redirectResponse.timing)
+        request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+        request.frame?.page.context.requestTiming?.delete(request.hop)
+        request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -181,6 +215,25 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
       }
+      if (
+        request.frame?.page.context.requestSizes !== undefined &&
+        !(target.page ?? target.frame?.page ?? request.frame.page).context.disposed
+      ) {
+        Sizes.keep(request.frame.page.context.requestSizes, request.hop, request.frame.id)
+      }
+      if (request.frame?.page.context.requestTiming !== undefined) {
+        const hop = request.hop
+        Timing.keep(
+          request.frame.page.context.requestTiming,
+          hop,
+          Timing.collector(
+            Timing.cdp,
+            { timestamp: params.timestamp, wallTime: params.wallTime },
+            (timing) => state.buffer.emit({ _tag: "HopTiming", hop, timing }),
+            request.frame.id
+          )
+        )
+      }
       state.pendingAttribution.delete(key)
       if (request.navigation !== undefined && (params.requestId as string) === (params.loaderId as string)) {
         request.navigation.documentHop = request.hop
@@ -217,7 +270,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.responseReceivedExtraInfo, (params, { state, target }) => {
       if (target === undefined) return
-      rawHeaders(state, requestKey(target, params.requestId), { phase: "response", headers: params.headers })
+      rawHeaders(state, requestKey(target, params.requestId), {
+        phase: "response",
+        headers: params.headers,
+        ...((target.page ?? target.frame?.page)?.context.requestSizes === undefined
+          ? {}
+          : { statusCode: params.statusCode })
+      })
     })
     .on(Network.requestServedFromCache, (params, { state, target }) => {
       if (target === undefined) return
@@ -229,6 +288,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes !== undefined) {
+        sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
+      }
+      request.frame?.page.context.requestTiming?.get(request.hop)?.response(
+        servedBy(request, params.response) === "network" ? params.response.timing : undefined
+      )
       // The network's headers, `Set-Cookie` among them, come in an `ExtraInfo` the response says will follow; it
       // is reported with them (QUIRKS.md, Q158). A response from a cache, a service worker or a route can say so
       // too and get none, so only the network's waits; one that gets none was sent with the request event's
@@ -240,6 +306,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       noExtraInfo(state, request)
       emitResponse(state, request, params.response)
     })
+    .on(Network.dataReceived, (params, { state, target }) => {
+      if (target === undefined || (target.page ?? target.frame?.page)?.context.requestSizes === undefined) return
+      const request = state.requests.get(requestKey(target, params.requestId))
+      const sizes = request?.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes !== undefined && sizes.decoded !== undefined) {
+        const length = Sizes.count(params.dataLength)
+        sizes.decoded = Option.isSome(length)
+          ? Option.getOrUndefined(Sizes.count(sizes.decoded + length.value))
+          : undefined
+      }
+    })
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
@@ -248,6 +325,18 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      // A still-held response lacks final raw-header evidence (including a possible 304).
+      if (sizes?.network && request.held === undefined) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: request.hop,
+          sizes: Sizes.cdp(params.encodedDataLength, sizes.decoded)
+        })
+      }
+      request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+      request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
@@ -269,6 +358,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const routed = state.routeFailed.delete(requestKey(target, params.requestId))
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
+      request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       // Keep the failed hop eligible for late sent headers. Earlier redirect obligations
       // still consume their own ExtraInfo first; failure itself settles public waits.
       const phases = new Set<ExtraInfo["phase"]>(["request", ...request.ahead.map((extra) => extra.phase)])
@@ -405,3 +496,50 @@ export const requestBody = Effect.fnUntraced(function*(state: State, hop: Networ
   )
   return Option.some(yield* Kit.bodyBytes(postData, base64Encoded === true, "Network.getRequestPostData"))
 })
+
+/** Exact event bytes, or a guarded current-hop native read; legacy recording reads remain unchanged. */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    const page = request.target.page
+    if (page === undefined || Option.isNone(state.registry.bodyLimit(placement(page), "request"))) {
+      return { _tag: "Unavailable", why: "notCollected" }
+    }
+    const sent = request.sentBodies[state.ids.redirectsOf(snapshot.hop)]
+    if (sent === undefined) return { _tag: "Unavailable", why: "unavailable" }
+    if (!sent.hasBody) return { _tag: "Absent" }
+    if (Option.isSome(sent.carried)) {
+      return sent.carried.value.length > limit
+        ? { _tag: "OverLimit" }
+        : { _tag: "Bytes", bytes: sent.carried.value }
+    }
+    // A multipart fallback can silently omit files. No partial input reaches a decoder.
+    if (/^multipart\//i.test(snapshot.headers["content-type"] ?? "")) return { _tag: "Incomplete" }
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    const result = yield* Kit.protocol(
+      Network.getRequestPostData({ requestId: request.requestId as Network.RequestId }).pipe(
+        Protocol.on(request.target.session)
+      )
+    ).pipe(Effect.result)
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    if (result._tag === "Failure") {
+      if (result.failure.reason._tag === "Protocol" && result.failure.reason.error.reason._tag === "Rejected") {
+        return { _tag: "Unavailable", why: "unavailable" }
+      }
+      return yield* Effect.fail(result.failure)
+    }
+    const bytes = yield* Kit.bodyBytes(
+      result.success.postData,
+      result.success.base64Encoded === true,
+      "Network.getRequestPostData"
+    )
+    // The fallback can omit file parts. An empty string cannot establish a complete
+    // empty payload; only carried event bytes can establish that representation.
+    if (bytes.length === 0) return { _tag: "Unavailable", why: "unavailable" }
+    return bytes.length > limit ? { _tag: "OverLimit" } : { _tag: "Bytes", bytes }
+  }
+)

@@ -1,0 +1,28 @@
+{
+  "id": "method-frame-isdisabled",
+  "upstream": [
+    "method:Frame.isDisabled"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isEnabled",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isEnabled"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toBeDisabled",
+      "url": "/docs/api/browser/Expect#toBeDisabled"
+    }
+  ],
+  "notes": "For a current read, map isEnabled to its boolean inverse, preserving errors. isEnabled fails on no match and does not wait for attachment; use toBeDisabled when a waiting check is needed. Multiple matches still fail strictness.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

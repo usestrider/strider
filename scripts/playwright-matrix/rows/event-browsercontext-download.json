@@ -1,0 +1,25 @@
+{
+  "id": "event-browsercontext-download",
+  "upstream": [
+    "event:BrowserContext.download"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Download",
+      "symbol": "stream",
+      "url": "/docs/api/browser/Download#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [
+    "downloads"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

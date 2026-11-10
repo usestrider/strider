@@ -38,7 +38,7 @@ export const url = (
 ): Effect.Effect<Option.Option<(url: string) => boolean>, Subscription.SubscriptionError> =>
   pattern === undefined ? Effect.succeed(Option.none()) : Effect.try({
     try: () => Option.some(UrlPattern.compile(pattern)),
-    catch: (error) => invalid(operation, input, "a URL, a glob or a URLPattern", String(error))
+    catch: (error) => invalid(operation, input, "a URL, a glob, or a URLPattern", String(error))
   })
 
 /** Whether a URL matches a compiled filter, or there is none. */

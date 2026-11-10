@@ -47,6 +47,22 @@
  * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained. This is a per-file disk bound, so
  * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
  *
+ * On Chromium, `pointerRecipients.ts` also records which document receives each trusted pointer event
+ * (`pointer-*` entries, kept from passing scopes with STRIDER_TRACE_RETAIN_PASSES=1). When a page or frame target
+ * attaches, the Transport instrumentation sends extra commands on its session: a binding and a capture-phase,
+ * passive `window` listener in an isolated world, which never touch the document's own listeners or their order.
+ * `pointer-dispatch` is each `Input.dispatchMouseEvent` sent; `pointer-recipient` is each trusted
+ * `pointer*`/`mouse*`/`click` event a document received, with its URL, session and target (page, or out-of-process
+ * frame), event type, client coordinates, target element, and the page's `performance.now()` plus time origin
+ * (add them for epoch milliseconds; the entry timestamps are the host's). `pointer-recipient-summary` lists, for each
+ * dispatched press, the documents that received a `mousedown`, or says none did. It shows where the browser
+ * delivered a gesture, such as the middle frame instead of the leaf. It cannot show why, and it doesn't know which
+ * document should have received it. Frames in the same process as their parent share a session, so tell them apart
+ * by URL. Only documents with the capture installed are seen, a target attached before the recorder connected
+ * isn't, and each document keeps 256 events. The added commands are not free: they can change the timing of a
+ * frame's attach, and a race can come out differently. STRIDER_POINTER_CAPTURE=0 leaves the capture out and keeps
+ * `pointer-dispatch`. Firefox and WebKit have no capture.
+ *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
  * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
  * acquisition is pending records that observation too; later records can show its eventual failure.

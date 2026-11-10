@@ -1,0 +1,23 @@
+{
+  "id": "method-clock-install",
+  "upstream": [
+    "method:Clock.install"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "PageClock.install",
+      "url": "/docs/api/browser/PageClock#PageClock.install"
+    }
+  ],
+  "notes": "Clock modes are explicit; adjust fires every due timer and setTime jumps to an absolute instant.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

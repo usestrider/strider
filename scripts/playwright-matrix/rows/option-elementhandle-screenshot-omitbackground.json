@@ -1,0 +1,20 @@
+{
+  "id": "option-elementhandle-screenshot-omitbackground",
+  "upstream": [
+    "method:ElementHandle.screenshot"
+  ],
+  "option": "omitBackground",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
+  "capabilities": [
+    "screenshot.omitBackground"
+  ],
+  "requirements": []
+}

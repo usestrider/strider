@@ -34,7 +34,7 @@ layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })("checkou
 })
 ```
 
-Call `VitestBrowser.withTest(context)` inside each callback and retry to capture its identity, attempt and attachment
+Call `VitestBrowser.withTest(context)` inside each callback and retry to capture its identity, attempt, and attachment
 owner. It works over the shared browser layer and with a per-effect browser layer in either composition order.
 Complete bound attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without binding, the layer uses Vitest's global current-test lookup,
 which supports sequential tests only; concurrent callbacks can read another test's identity or attach to it.
@@ -62,7 +62,7 @@ binding returns. Successful callbacks retain no archives. A failing scope stages
 a callback that recovers deletes the staged archive. Keep the binding inside the scope owning the targets for
 export before cleanup; targets whose scopes already succeeded and closed are exported from retained recordings
 if the callback later fails. Tracing failures warn and preserve the test result. Existing/default/reclaimed
-contexts, failures outside the bound effect and hard process termination are outside automatic capture.
+contexts, failures outside the bound effect, and hard process termination are outside automatic capture.
 
 `TestRun.TestInfo.repeat` is the zero-based repetition, separate from the retry attempt. Constructors and
 decoding default it to zero when omitted. Bind every retry and repeat with `withTest(context)` to capture

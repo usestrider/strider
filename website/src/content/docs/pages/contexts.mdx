@@ -1,17 +1,16 @@
 ---
 title: Contexts
-description: Pages in one context, settings for a context's life and for a while, logging in once with storage state, and cookies and storage.
+description: Separate cookies, storage, and settings for each task.
 order: 4
 ---
 
-Pages that share cookies and storage leak state from one task or test into the next. A context has its own, so
-pages in different contexts share nothing, and its settings hold for every page in it.
+A context is a fresh browser profile: its own cookies, storage, cache, and permissions. Give each task or test its
+own, and nothing one leaves behind reaches the next.
 
 ## Pages in one context
 
-A context is like a fresh profile: its own cookies, storage, cache and permissions. `Browser.newPage()` makes a
-context with one page in it. For pages that share them, such as two tabs of one signed-in user, make the context
-and open pages in it:
+`Browser.newPage()` makes a context with one page in it. For pages that share cookies and storage, such as two
+tabs of one signed-in user, make the context and open pages in it:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -34,9 +33,8 @@ A context and its pages close with the scope that made them, popups included.
 
 ## Settings for a context's life
 
-A page reads its viewport, locale and time zone as it loads, so settings applied after it opens can miss what it
-rendered first. Options to `newContext` or `newPage` hold for the context's life, and apply before its first page
-loads:
+Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what
+it renders first already uses them:
 
 ```ts
 import { Browser, Expect } from "@usestrider/browser"
@@ -57,14 +55,20 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
     },
     permissions: ["geolocation"]
   })
+  const viewport = yield* page.viewportSize // Some({ width: 390, height: 844 }), in CSS pixels
   yield* page.goto("https://maps.example.com")
   yield* page.getByRole("button", { name: "Route berechnen" }).pipe(Expect.toBeVisible)
 }, Effect.scoped)
 ```
 
+`page.viewportSize` reads the configured width and height, returning `None` when no viewport is declared.
+It follows page, context, and browser declaration precedence, and release restores the next setting.
+It does not measure the window or document layout, and is available with inspect access.
+
 | Option           | Sets                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------- |
 | `emulation`      | viewport, user agent, locale, time zone, position, media features, network, CPU     |
+| [`httpCredentials`](/docs/events/routes#http-authentication) | website credentials, optionally limited to one origin; Chromium and Firefox |
 | `permissions`    | permissions granted to every origin; not on WebKit, nor on Firefox, where [`grant`](#settings-for-a-while) with an `origin` grants to one |
 | [`storageState`](#logging-in-once) | cookies and storage to start from                                |
 | `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs-and-file-choosers) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
@@ -78,16 +82,33 @@ its previous map and merges over context headers; page values win when names mat
 headers while clearing page-specific ones, and removal restores the previous map.
 Names are case-insensitive, values must be strings valid as HTTP field values, and invalid input fails with
 `InvalidInput`. Request route overrides take precedence; header order is not guaranteed. This setting works on
-Chromium, Firefox and launched stock WebKit; attached stock WebKit refuses it.
+Chromium, Firefox, and launched stock WebKit; attached stock WebKit refuses it.
 
 A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
 applied. [`browser.capabilities`](/docs/browsers/choosing#capabilities) lists what a backend can do.
 
+For local HTTPS sites with an untrusted certificate, create a context with `acceptInsecureCerts`:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const localHttps = Effect.fn("localHttps")(function*() {
+  const context = yield* Browser.newContext({ acceptInsecureCerts: true })
+  const page = yield* context.newPage
+  yield* page.goto("https://localhost:8443")
+}, Effect.scoped)
+```
+
+Certificate checks remain enabled by default and in sibling contexts. Firefox and launched stock WebKit support
+this option; Chromium refuses `true` with `Unsupported` because its override affects the whole browser. Attached
+stock WebKit cannot create contexts. `Browser.newPage` accepts the same option. It is fixed at creation:
+`UserContext.reclaim` refuses either explicit value and preserves the existing setting when omitted.
+
 ## Settings for a while
 
-Some states come and go while a context is open, such as the network dropping or a permission granted after a
-prompt. Set as an option, they'd hold for every step; set for a scope, only the steps that test them see them.
-`emulate` and `grant` apply settings until their scope closes, then restore what was there. `emulate` works on a
+`emulate` and `grant` apply settings for a state only some steps should see, such as the network dropping or a
+permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
 context, for every page in it, popups included, or on a page, for that page alone; `grant` works only on a context,
 and not on WebKit:
 
@@ -115,9 +136,9 @@ const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
 
 ## Logging in once
 
-Signing in through the form before every task is slow, and fails every task when only the login page is broken.
 Storage state is a context's cookies, and the `localStorage` and IndexedDB of each origin it has open.
-`exportStorageState` reads it; the `storageState` option starts a context from it, already signed in:
+`exportStorageState` reads it after signing in, and the `storageState` option starts a later context from it,
+already signed in:
 
 ```ts
 import { Browser, Expect, StorageState } from "@usestrider/browser"
@@ -146,7 +167,7 @@ const signedIn = Effect.fn("signedIn")(function*() {
 
 - In memory, its secrets are `Redacted`. `StorageState.Json` writes them out in full: keep the file out of version
   control.
-- It doesn't carry `sessionStorage`, service workers or logins bound to a device. For those, use a profile
+- It doesn't carry `sessionStorage`, service workers, or logins bound to a device. For those, use a profile
   directory: `userDataDir` keeps the profile in a directory of yours instead of a temporary one, so a login made
   there once, by hand in a headed run, is there at the next launch.
 
@@ -179,9 +200,9 @@ const profileInbox = Effect.fn("profileInbox")(
 
 ## Cookies and storage
 
-Reaching a state through the UI, such as a feature flag or a dismissed banner, adds steps the task isn't about;
-setting the cookie or storage entry does it in one. `context.cookies` reads and changes a context's cookies; `page.localStorage` and `page.sessionStorage`, the current
-origin's storage:
+`context.cookies` reads and changes a context's cookies, and `page.localStorage` and `page.sessionStorage` the
+current origin's storage. Setting an entry puts a page in a state, such as a feature flag on or a banner dismissed,
+without the steps the UI takes:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -217,3 +238,51 @@ const lastVisit = Effect.fn("lastVisit")(function*(page: Page.Page) {
   the context's open pages were sent.
 - Cookie values are `Redacted`.
 - A set cookie stays when the scope closes.
+
+## Replacing storage in a live context
+
+`context.setStorageState` replaces a live context's cookies and storage with a saved state, such as another user's
+login, and keeps its pages open. It works only on a context created with `storageStateTracking: true`, which
+records the origins and partitions the context visits so replacement can clear them after their pages close:
+
+```ts
+import { Browser, StorageState } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const replaceLogin = Effect.fn("replaceLogin")(
+  function*(state: StorageState.StorageState) {
+    const context = yield* Browser.newContext({ storageStateTracking: true })
+    const page = yield* context.newPage
+    yield* page.goto("https://example.com")
+    yield* context.setStorageState(state)
+    return page
+  }
+)
+```
+
+Replacement clears all cookies and the localStorage, IndexedDB databases, and available origin-private files of
+incoming and previously visited origins and partitions, then restores the supplied cookies, localStorage, and
+IndexedDB. Omitted data is cleared. Pages keep their identity and URLs; reload a page yourself if its application
+needs to read the new state. Existing-page sessionStorage, HTTP cache, and service-worker registrations are unchanged.
+
+Stop page and worker writes, including storage-writing init scripts, and release IndexedDB connections and file handles first. A blocked database deletion,
+locked file, backend error, or deadline can leave partial changes. Interruption has the same risk. There is no
+rollback. Runtime failures use `UserContextError` with reason `StorageState.PartiallyApplied`, meaning changes
+may have occurred, even if the failure happened before the first deletion; deadlines remain
+`Deadline.Timeout`, and interruption remains interruption. An issued IndexedDB deletion may complete later when its connection closes. Temporary pages and
+routes are released even on failure or interruption. Temporary pages appear in [`context.pages`](/docs/api/browser/UserContext#ObservedUserContext) while replacement
+runs, and the context's routes and init scripts apply to them. A successful call confirms completed storage operations,
+not an atomic snapshot against concurrent writers.
+
+Untracked contexts and contexts with acquired virtual authenticators refuse before mutation. Close the
+authenticator's scope before replacement. Tracking is chosen at creation and cannot be added when reclaiming a
+context. Non-HTTP(S) storage and opaque ancestor partitions cannot be replayed. Those histories remain refused after their pages close: file storage persists, and complete opaque-partition
+unreachability across descendants and workers has not been established. Unreproducible incoming metadata also
+refuses before mutation, including a partition explicitly marked
+`crossSiteAncestor: false`. A top-level origin must belong to its declared site, and incoming same-site partitions
+requiring a cross-site ancestor refuse because the saved format carries no ancestor chain. Nested partition history is replayed with its ancestor origins. No storage history is
+collected for contexts that omit the option.
+
+This is **not full Playwright equivalence**: it requires opt-in, preserves cache and service-worker registrations,
+and refuses held virtual authenticators. It does not import saved OPFS files or credentials. Existing new-context
+storage import and storage export keep their existing behavior and format.

@@ -1,0 +1,12 @@
+{
+  "id": "option-framelocator-getbyrole-description",
+  "upstream": [
+    "method:FrameLocator.getByRole"
+  ],
+  "option": "description",
+  "status": "missing",
+  "api": [],
+  "notes": "No accessible-description role filter; name and supported state filters remain separate.",
+  "capabilities": [],
+  "requirements": []
+}
