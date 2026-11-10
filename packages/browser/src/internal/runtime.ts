@@ -404,17 +404,6 @@ const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
     }))
   )
 
-/**
- * Where a lookup that found no node ran. There is no binding to name its document, so it is the document the
- * frame the lookup went to holds when the lookup ends, which a commit during realm acquisition may have replaced.
- */
-const searched = (runtime: Runtime, page: Model.PageEntry, routed: Routed): Effect.Effect<Routed> =>
-  Effect.map(
-    runtime.model.documentOf(routed.hops.at(-1)?.frame ?? page.id),
-    (current) =>
-      Option.isSome(current) && current.value !== routed.document ? { ...routed, document: current.value } : routed
-  )
-
 /** The one match in a document, by its node binding, or the engine's answer for why there is none. */
 type Element =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
@@ -817,10 +806,9 @@ export const element = (
                   ? route.routed
                   : { ...route.routed, document: found.node.document }
               })
-              : Effect.map(
-                searched(runtime, page, route.routed),
-                (routed): Option.Option<Found> => Option.some({ ...found, routed })
-              )
+              // No binding names a document, so the one routed to is the one whose realm ran the lookup: a realm
+              // acquired for a document is that document's, or fails and the lookup routes again.
+              : Effect.succeedSome<Found>({ ...found, routed: route.routed })
         }))
       )
     }),
@@ -892,9 +880,7 @@ export const elements = (
           return Option.some({
             _tag: "Found" as const,
             nodes,
-            routed: first === undefined
-              ? yield* searched(runtime, page, routed)
-              : first.document === routed.document
+            routed: first === undefined || first.document === routed.document
               ? routed
               : { ...routed, document: first.document }
           })

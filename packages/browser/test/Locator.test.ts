@@ -1251,11 +1251,22 @@ it.effect("evaluateAll uses the committed document for an empty match set after 
         })
       })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
         ...adapter,
+        // A realm acquired for a document is that document's, or the document has ended: the commit during
+        // the first acquisition ends the requested document, so its realm fails and the lookup routes again.
         realm: Effect.fnUntraced(function*(document) {
           requested.push(document)
           if (!acquired) {
             acquired = true
             yield* acquire
+            return yield* Effect.fail(
+              new Adapter.AdapterError({
+                reason: {
+                  _tag: "Gone",
+                  target: { _tag: "Document", id: document },
+                  reason: new Target.DocumentReplaced({})
+                }
+              })
+            )
           }
           return "committed-realm" as Target.RealmId
         }),
@@ -1279,7 +1290,8 @@ it.effect("evaluateAll uses the committed document for an empty match set after 
       assert.strictEqual(yield* page.locator(".absent").evaluateAll((elements) => elements.length), 0)
       const committed = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
       assert.notStrictEqual(committed, previous)
-      assert.strictEqual(requested.at(-1), committed, "the empty snapshot's callback must use the document searched")
+      assert.deepStrictEqual(requested.slice(0, 2), [previous, committed], "the lookup routes again to the replacement")
+      assert.strictEqual(requested.at(-1), committed, "the empty snapshot's callback runs in the replacement document")
     }).pipe(Effect.scoped, Effect.provide(layer))
   }))
 
