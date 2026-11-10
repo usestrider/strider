@@ -6,7 +6,7 @@
  * browsing context, realms by BiDi's realm, navigations by BiDi's navigation id (or one made up for a navigation
  * BiDi gives none), requests by BiDi's request id. Every event arrives on the connection's one session.
  */
-import type * as Deferred from "effect/Deferred"
+import * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type * as BrowserBidi from "../../bidi-protocol/Browser.ts"
@@ -111,13 +111,15 @@ export interface NavigationEntry extends Kit.NavigationNode {
 
 export interface RequestEntry {
   credentialsAttempted?: boolean | undefined
+  terminalRedirect: boolean
   readonly id: NetworkRequest.Id
   readonly bidi: Network.Request
   redirects: number
   hop: NetworkRequest.HopId
   readonly navigable: NavigableEntry | undefined
   readonly navigation: NavigationEntry | undefined
-  readonly finished: Deferred.Deferred<void, string>
+  /** The current hop's completion; a successor gets a fresh latch. */
+  finished: Deferred.Deferred<void, string>
   /** A route fulfilled it, which Firefox reports as an ordinary response. */
   fulfilled: boolean
   /**
@@ -265,7 +267,8 @@ export const make = (options: {
     hops,
     retire: Retired.make((key: string) => {
       const request = requests.get(key)
-      if (request === undefined) return
+      // A completed redirect may have resumed since it entered the retirement queue.
+      if (request === undefined || !Deferred.isDoneUnsafe(request.finished)) return
       requests.delete(key)
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(options.ids.hop(request.id, hop))
     }),

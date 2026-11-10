@@ -210,6 +210,8 @@ const delivery = <B, DE, DR>(
           // The browser followed it, whatever its headers say: the backend keeps only the last hop's body
           : error.reason._tag === "Unsupported" && error.reason.capability === "body.redirect"
           ? unavailable(url, "redirect", "A redirect hop has no body; its next hop has one")
+          : error.reason._tag === "Unsupported" && error.reason.capability === "network.responseBody.terminalRedirect"
+          ? responseError(url, new Reason.Unsupported({ ...error.reason, backend: runtime.backend }))
           : unavailable(url, "evicted", `The browser no longer has it: ${error.message}`)
       )
     )
