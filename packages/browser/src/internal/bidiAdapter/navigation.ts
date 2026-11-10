@@ -45,8 +45,11 @@ const sameDocument = (
   if (known === undefined && bound === undefined) {
     let index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
     // Traversal reservations have no destination URL. Only the surviving, unambiguous
-    // traversal owner can claim them; never fall back to an arbitrary older command.
-    if (index < 0 && !navigable.restorationAmbiguous && navigable.restoring !== undefined) {
+    // traversal owner can claim them while its command is in flight; never take an older command.
+    if (
+      index < 0 && !navigable.restorationAmbiguous && navigable.restoring !== undefined &&
+      navigable.traversalCommands.has(navigable.restoring.navigation)
+    ) {
       index = navigable.expected.list.findIndex((expected) =>
         expected.id === navigable.restoring!.navigation && expected.initiatedAs === "traversal"
       )
