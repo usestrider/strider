@@ -125,14 +125,16 @@ describe("CDP click cleanup", () => {
           })
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(protocolSession)
-      const exit = yield* CdpInput.dispatchInput(
-        state,
-        page.id,
-        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
-      ).pipe(Effect.exit)
+      const input = Input.make()
+      const events = Input.click(input, { x: 10, y: 20 }, "left", 1)
+      const exit = yield* CdpInput.dispatchInput(state, page.id, events).pipe(Effect.exit)
       assert(Exit.isFailure(exit))
       assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      // The release runs apart from the click; what the next gesture waits for is that it has finished
+      Input.uncertain(input, "click", events)
+      yield* Input.recover(input, () => Effect.void)
       assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+      assert.isTrue(Option.isNone(input.broken))
     }).pipe(Effect.scoped))
 
   it.effect("doesn't release again when interruption arrives after the release was written", () =>
@@ -154,14 +156,16 @@ describe("CDP click cleanup", () => {
           })
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(protocolSession)
-      const exit = yield* CdpInput.dispatchInput(
-        state,
-        page.id,
-        Input.click(Input.make(), { x: 10, y: 20 }, "left", 1)
-      ).pipe(Effect.exit)
+      const input = Input.make()
+      const events = Input.click(input, { x: 10, y: 20 }, "left", 1)
+      const exit = yield* CdpInput.dispatchInput(state, page.id, events).pipe(Effect.exit)
       assert(Exit.isFailure(exit))
       assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      // The release runs apart from the click; what the next gesture waits for is that it has finished
+      Input.uncertain(input, "click", events)
+      yield* Input.recover(input, () => Effect.void)
       assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+      assert.isTrue(Option.isNone(input.broken))
     }).pipe(Effect.scoped))
 })
 

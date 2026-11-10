@@ -1219,6 +1219,10 @@ export interface Locator extends ReadonlyLocator {
    * On stock WebKit, a `mousedown` handler that opens a dialog causes the browser to lose the `mouseup` and
    * `click` events, even though this operation can succeed.
    *
+   * A click that fails, or is cut short, after it may have pressed a button leaves that button's release to the next
+   * gesture: when the browser didn't confirm the release, it is sent again before that gesture, which can deliver
+   * one extra `mouseup` to a page that already got the first.
+   *
    * **Example** (Adding to the cart)
    *
    * ```ts import.meta.vitest
