@@ -138,3 +138,56 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       yield* registration.remove
     }).pipe(Effect.provide(backend), Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
   }))
+
+it.effect("drains rejected constructor lookups before processing another admission", () =>
+  Effect.gen(function*() {
+    const rejectedTwice = yield* Deferred.make<void>()
+    let bridge!: Adapter.WebSocketBridge
+    let rejected = 0, drained = 0
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const backend = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((fake) => ({
+        ...fake,
+        ownership: "launched" as const,
+        declare: (scope, declaration) =>
+          fake.declare(scope, declaration).pipe(Effect.tap(() =>
+            Effect.sync(() => {
+              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
+                bridge = declaration.webSocket
+              }
+            })
+          )),
+        evaluate: Effect.fnUntraced(function*(_realm: Target.RealmId, call: Adapter.EvaluationCall) {
+          if (call.functionDeclaration.includes("\"type\":\"drain\"")) drained++
+          if (call.functionDeclaration.includes("\"type\":\"fail\"") && ++rejected === 2) {
+            yield* Deferred.succeed(rejectedTwice, undefined)
+          }
+          return { _tag: "Value" as const, value: { type: "undefined" as const } }
+        })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+      const realm = Target.RealmId.make("R-constructors")
+      for (let id = 1; id <= 16; id++) {
+        bridge.receive(
+          realm,
+          Effect.succeed(JSON.stringify({
+            token: bridge.token,
+            type: "create",
+            id: String(id),
+            url: "ws://example.com/socket",
+            protocols: []
+          })),
+          { _tag: "Worker", realm }
+        )
+      }
+      yield* Deferred.await(rejectedTwice)
+      assert(drained > 0, "the previous rejected constructor must have drained before the next rejection")
+      yield* registration.remove
+    }).pipe(Effect.provide(backend), Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+  }))
