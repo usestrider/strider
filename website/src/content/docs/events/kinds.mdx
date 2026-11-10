@@ -1,12 +1,12 @@
 ---
-title: Navigations, popups, dialogs and downloads
+title: Navigations, popups, dialogs, and downloads
 description: The navigation an action causes, popups, handlers for dialogs and file choosers, and downloads and their files.
 order: 2
 ---
 
 A navigation can end on an error page, a popup is a page to act on, a dialog blocks its page until something
 decides it, and a download's file isn't whole when its event comes. Their modules add what each needs to the
-[`next`, `stream` and `history`](/docs/events/events#next-stream-and-history) every event module has.
+[`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has.
 
 ## Navigations
 
@@ -136,7 +136,7 @@ A chooser no handler answers is canceled, and reported as an `AutoResolution` to
 
 ## Downloads
 
-A download's event comes when it starts, before its file is complete. The handle, with its file, status and
+A download's event comes when it starts, before its file is complete. The handle, with its file, status, and
 suggested name, follows it to the end, so you save or read the file once it's whole:
 
 ```ts

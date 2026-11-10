@@ -5,7 +5,7 @@ order: 5
 ---
 
 A Playwright program translates to Strider almost line by line, but kept habit for habit, it reads elements
-before they appear, keeps pages open past their step and returns from `goto` before the load. Each section pairs
+before they appear, keeps pages open past their step, and returns from `goto` before the load. Each section pairs
 Playwright's calls with Strider's and says which habit changes.
 
 ## Browsers and pages
@@ -16,7 +16,7 @@ Playwright's calls with Strider's and says which habit changes.
 | `chromium.launch()`                 | [`Chromium.layer({ executablePath })`](/docs/installation#backends), a layer you provide to the program; `Firefox.layer` and `WebKit.layer` likewise |
 | `browser.close()`                   | the end of the program the layer is provided to                                                       |
 | `chromium.connectOverCDP(endpoint)` | [`Chromium.layerConnect(endpoint)`](/docs/pages/attaching#connecting), whose tabs you [`control`](/docs/pages/attaching#access-levels) before acting on them |
-| `browser.newContext(options)`       | [`Browser.newContext(options)`](/docs/pages/contexts), with `viewport`, `locale`, `userAgent` and `timezone` (Playwright's `timezoneId`) under `emulation` |
+| `browser.newContext(options)`       | [`Browser.newContext(options)`](/docs/pages/contexts), with `viewport`, `locale`, `userAgent`, and `timezone` (Playwright's `timezoneId`) under `emulation` |
 | `browser.newPage()`                 | `Browser.newPage()`, in a new context, as in Playwright                                               |
 | `context.newPage()`                 | `context.newPage`, a value                                                                            |
 | `page.close()`                      | `page.close()`, or the end of the `Scope` that opened the page                                        |
@@ -40,7 +40,7 @@ const orderStatus = Effect.fn("orderStatus")(function*(orderId: string) {
 
 `Effect.scoped`, as `Effect.fn`'s last argument, gives each call its own scope: the page closes when
 `orderStatus` ends, even on failure. A member with nothing to configure is a value, not a method, so
-`context.newPage`, `locator.first` and `status.readText` take no parentheses.
+`context.newPage`, `locator.first`, and `status.readText` take no parentheses.
 
 ## Reads and waits
 
@@ -58,7 +58,7 @@ const orderStatus = Effect.fn("orderStatus")(function*(orderId: string) {
 | `page.waitForURL("**/orders")`       | `page.pipe(Expect.toHaveURL(/\/orders$/))`, which doesn't wait for the load: a string must equal the whole URL |
 | `page.waitForTimeout(ms)`            | an expectation of what the pause was for                                                     |
 
-Playwright's `textContent()`, `inputValue()` and `getAttribute()` wait for an element to match. Strider's reads
+Playwright's `textContent()`, `inputValue()`, and `getAttribute()` wait for an element to match. Strider's reads
 take the page as it is and fail with `NoMatch` when nothing matches yet. Actions and expectations wait, as in
 Playwright, so wait with an expectation, then read, as `orderStatus` does.
 
@@ -101,10 +101,10 @@ page opened a popup, so there `Popup.next` fails with `Unsupported`:
 
 | Playwright                          | Strider                                                                                           |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `page.route(url, handler)`          | [`page.route(url, handler)`](/docs/events/routes), whose handler returns a decision, such as `Route.continue`, `Route.abort()` or `Route.fulfill(response)`, instead of calling `route.continue()` |
+| `page.route(url, handler)`          | [`page.route(url, handler)`](/docs/events/routes), whose handler returns a decision, such as `Route.continue`, `Route.abort()`, or `Route.fulfill(response)`, instead of calling `route.continue()` |
 | `context.routeFromHAR(path)`        | [`context.route("**/*", yield* Route.fromHar(path))`](/docs/events/routes#replaying-a-recording) |
 | `context.storageState()`            | [`context.exportStorageState`](/docs/pages/contexts#logging-in-once)                              |
-| `context.setStorageState(state)` | [`context.setStorageState(state)`](/docs/pages/contexts#replacing-storage-in-a-live-context), with creation-time `storageStateTracking: true`; deliberate limits on cache, service workers, virtual authenticators and partial failure mean this is not full equivalence |
+| `context.setStorageState(state)` | [`context.setStorageState(state)`](/docs/pages/contexts#replacing-storage-in-a-live-context), with creation-time `storageStateTracking: true`; deliberate limits on cache, service workers, virtual authenticators, and partial failure mean this is not full equivalence |
 | `browser.newContext({ recordHar })` | [`Har.record(context, { content: "embed" })`](/docs/tools/recordings#har-files), then `har.exportHar(path)`; replaying a POST matches its body, which the export keeps only with `include: ["requestBodies"]` |
 | `context.tracing.start()`           | [`Trace.record(context)`](/docs/tools/recordings#traces), then `trace.exportTrace(path)`, which Playwright's trace viewer opens |
 

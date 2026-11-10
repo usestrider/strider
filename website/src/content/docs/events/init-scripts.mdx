@@ -1,6 +1,6 @@
 ---
 title: Init scripts
-description: Scripts that run before a page's own, the order they run in and what they depend on, and scripts for a whole context, its workers or an isolated world.
+description: Scripts that run before a page's own, the order they run in and what they depend on, and scripts for a whole context, its workers, or an isolated world.
 order: 5
 ---
 
@@ -50,7 +50,7 @@ const purchaseTracked = Effect.fn("purchaseTracked")(function*(page: Page.Page) 
 - A script that throws is reported as an [`UncaughtException`](/docs/events/events#history).
 - Added to a loaded page, it runs from the next document.
 
-## Contexts, workers and isolated worlds
+## Contexts, workers, and isolated worlds
 
 Added to a context, a script runs in every page of it. `workers: true` also runs it in dedicated workers, on
 Chromium and WebKit, and `world: "isolated"`, on Chromium and Firefox, runs it apart from the page's scripts, which

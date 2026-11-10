@@ -17,7 +17,7 @@ const renderReceipt = Effect.fn("renderReceipt")(function*(page: Page.Page) {
 })
 ```
 
-The call opens, writes and closes the current document. It preserves the URL, history entry, document identity
+The call opens, writes, and closes the current document. It preserves the URL, history entry, document identity,
 and main-world globals while replacing the DOM and its event listeners. Scripts execute and resources load with
 the current document's origin and security policy. Relative resource URLs use its base URL; include an HTML
 `base` element when the fixture needs another one.

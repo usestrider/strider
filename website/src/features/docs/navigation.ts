@@ -27,7 +27,7 @@ export const groups: ReadonlyArray<Group> = [
     label: "Events and the network",
     directory: "events",
     description:
-      "Subscribing before you act, navigations, popups, dialogs and downloads, watching requests and responses, routes, init scripts, and the page clock."
+      "Subscribing before you act, navigations, popups, dialogs, downloads, watching requests and responses, routes, init scripts, and the page clock."
   },
   {
     label: "Testing and recordings",
@@ -44,7 +44,7 @@ export const groups: ReadonlyArray<Group> = [
     label: "Browsers",
     directory: "browsers",
     description:
-      "What's different about Chromium, Firefox and WebKit: launching each, attaching, what each can do, its quirks, and the settings that trade fidelity for speed."
+      "What's different about Chromium, Firefox, and WebKit: launching each, attaching, what each can do, its quirks, and the settings that trade fidelity for speed."
   }
 ]
 
