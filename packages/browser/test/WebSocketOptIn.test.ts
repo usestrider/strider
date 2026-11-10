@@ -265,3 +265,68 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
       assert.strictEqual(error.reason._tag, "InvalidState")
     }).pipe(Effect.provide(backend), Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
   }))
+
+it.effect("ends owned connections even when the browser cannot acknowledge removal", () =>
+  Effect.gen(function*() {
+    const captured = yield* Deferred.make<WebSocketRoute.Connection>()
+    let bridge!: Adapter.WebSocketBridge
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const backend = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((fake) => ({
+        ...fake,
+        ownership: "launched" as const,
+        declare: (scope, declaration) =>
+          fake.declare(scope, declaration).pipe(Effect.tap(() =>
+            Effect.sync(() => {
+              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
+                bridge = declaration.webSocket
+              }
+            })
+          )),
+        evaluate: (_realm, call) =>
+          Effect.succeed(
+            call.functionDeclaration.includes("\"type\":\"remove\"")
+              ? {
+                _tag: "Exception" as const,
+                text: "deliberate removal failure",
+                exception: { type: "undefined" as const },
+                stack: Option.none()
+              }
+              : { _tag: "Value" as const, value: { type: "undefined" as const } }
+          )
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const registration = yield* context.routeWebSocket(
+        "**",
+        (socket) => Deferred.succeed(captured, socket).pipe(Effect.asVoid),
+        { implementation: "script" }
+      )
+      const realm = Target.RealmId.make("R-unacknowledged")
+      bridge.receive(
+        realm,
+        Effect.succeed(
+          JSON.stringify({
+            token: bridge.token,
+            type: "create",
+            id: "1",
+            url: "ws://example.com/socket",
+            protocols: []
+          })
+        ),
+        { _tag: "Worker", realm }
+      )
+      const socket = yield* Deferred.await(captured)
+      yield* socket.open({})
+      yield* registration.remove
+      assert.strictEqual(yield* socket.status, "closed")
+      const result = yield* socket.page.send({ _tag: "Text", data: "late" }).pipe(Effect.exit)
+      const error = Option.getOrThrow(Exit.findErrorOption(result))
+      assert(WebSocketRoute.isWebSocketRouteError(error))
+      assert.strictEqual(error.reason._tag, "InvalidState")
+    }).pipe(Effect.provide(backend), Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+  }))
