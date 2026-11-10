@@ -147,7 +147,8 @@ try {
             "report.ts",
             "scenarios.ts",
             "site.ts",
-            "replay.ts"
+            "replay.ts",
+            "selection.ts"
           ]
         for (const file of files) {
           const bytes = fs.readFileSync(path.join(source, file))
