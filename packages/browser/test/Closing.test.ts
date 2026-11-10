@@ -14,6 +14,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import type * as Dialogs from "../src/Dialog.ts"
 import * as Adapter from "../src/internal/adapter.ts"
@@ -184,11 +185,12 @@ describe("a context scope's release of its pages", () => {
     Effect.gen(function*() {
       let sent = 0
       yield* Effect.gen(function*() {
-        const released = yield* Effect.scoped(Effect.gen(function*() {
+        const scope = yield* Scope.make()
+        yield* Effect.gen(function*() {
           const context = yield* Browser.newContext()
           for (let i = 0; i < 20; i++) yield* context.newPage
-          return context
-        })).pipe(Effect.forkChild({ startImmediately: true }))
+        }).pipe(Scope.provide(scope))
+        const released = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild({ startImmediately: true }))
         // One close takes a second; twenty in turn would take twenty
         yield* TestClock.adjust("2 seconds")
         assert.isDefined(released.pollUnsafe())

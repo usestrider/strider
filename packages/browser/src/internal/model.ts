@@ -439,7 +439,8 @@ export interface Model {
   readonly own: (page: PageEntry, scope: Scope.Scope) => Effect.Effect<void>
   /**
    * Closes a page its owner's scope released, and waits for the page's end under the default budget; with `by`,
-   * only while `by` still owns it.
+   * only while `by` still owns it, and the other pages `by` owns are sent their closes at once, so they close
+   * together.
    */
   readonly release: (page: Target.NavigableId, by?: Scope.Scope) => Effect.Effect<void>
   /**
@@ -485,7 +486,9 @@ export const make = Effect.fnUntraced(function*() {
       const release = (page: Target.NavigableId, by?: Scope.Scope) =>
         Effect.suspend(() => {
           const entry = fold.page(page)
-          return Option.isNone(entry) ? Effect.void : ownership.release(entry.value, by)
+          return Option.isNone(entry)
+            ? Effect.void
+            : ownership.release(entry.value, by, by === undefined ? undefined : fold.pages.getUnsafe())
         })
       const model: Model = {
         scope: modelScope,
