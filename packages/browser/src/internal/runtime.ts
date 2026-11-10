@@ -244,7 +244,11 @@ export interface Hop {
   readonly frame: Target.NavigableId
 }
 
-/** Where a request went: its document, and the iframes entered on the way, outermost first. */
+/**
+ * Where a request went: its document, and the iframes entered on the way, outermost first. For a lookup that
+ * returns node bindings, `document` is the bindings' document, which differs from the one first routed to when a
+ * frame commits mid-lookup.
+ */
 export interface Routed {
   readonly document: Target.DocumentId
   readonly hops: ReadonlyArray<Hop>
@@ -790,7 +794,22 @@ export const element = (
         return Effect.succeedSome({ _tag: "Response", response: stale.value, routed: route.routed })
       }
       return elementIn(runtime, route.routed.document, last, null, id).pipe(
-        Effect.map(Option.map((found): Found => ({ ...found, routed: route.routed })))
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.succeedNone,
+          onSome: (found) =>
+            found._tag === "Found"
+              // A child document can commit while the utility realm is installed: the binding then names the
+              // new document, which is the one the node lives in. The frames' parent hops still hold.
+              ? Effect.succeedSome<Found>({
+                ...found,
+                routed: found.node.document === route.routed.document
+                  ? route.routed
+                  : { ...route.routed, document: found.node.document }
+              })
+              // No binding names a document, so the one routed to is the one whose realm ran the lookup: a realm
+              // acquired for a document is that document's, or fails and the lookup routes again.
+              : Effect.succeedSome<Found>({ ...found, routed: route.routed })
+        }))
       )
     }),
     promptBlocked(page)
@@ -856,7 +875,15 @@ export const elements = (
             }
             nodes.push(member.node)
           }
-          return Option.some({ _tag: "Found" as const, nodes, routed })
+          // As in `element`: the bindings' document is authoritative when a commit straddled the lookup.
+          const first = nodes[0]
+          return Option.some({
+            _tag: "Found" as const,
+            nodes,
+            routed: first === undefined || first.document === routed.document
+              ? routed
+              : { ...routed, document: first.document }
+          })
         }
       )
     ),
