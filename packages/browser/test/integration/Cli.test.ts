@@ -2484,7 +2484,7 @@ describe("strider", () => {
       assert.include(unnamed.err, "Every command names its session")
       const two = yield* run("start", "--name", "x", "--chromium", chromium.executable, "--firefox", firefox.executable)
       assert.strictEqual(two.code, 15)
-      assert.include(two.err, "exactly one of --chromium, --firefox or --webkit")
+      assert.include(two.err, "exactly one of --chromium, --firefox, or --webkit")
       const badName = yield* run("start", "--name", "Bad Name", "--chromium", chromium.executable)
       assert.strictEqual(badName.code, 15)
       assert.strictEqual(

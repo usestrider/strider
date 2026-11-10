@@ -99,11 +99,11 @@ const refused = (exit: Exit.Exit<void, Adapter.AdapterError>): Option.Option<str
     : Option.some(failure.error.message)
 }
 
-/** Pages' ids, as a sentence lists them: `N1`, `N1 and N2`, `N1, N2 and N3`. */
+/** Pages' ids, as a sentence lists them: `N1`, `N1 and N2`, `N1, N2, and N3`. */
 const listed = (pages: ReadonlyArray<Model.PageEntry>): string =>
-  pages.length === 1
-    ? pages[0]!.id
-    : `${pages.slice(0, -1).map((page) => page.id).join(", ")} and ${pages.at(-1)!.id}`
+  pages.length < 3
+    ? pages.map((page) => page.id).join(" and ")
+    : `${pages.slice(0, -1).map((page) => page.id).join(", ")}, and ${pages.at(-1)!.id}`
 
 /**
  * Sends `command` in a fiber of `scope`, which runs to its own end, and waits for `ended` under the default budget

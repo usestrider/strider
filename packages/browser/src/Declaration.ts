@@ -1,7 +1,7 @@
 /**
  * Declarations: settings and handlers that change how a page or context behaves for as long as their scope lasts.
  *
- * Routes, dialog and file-chooser handlers, init scripts, emulation, permission grants and page clocks are all
+ * Routes, dialog and file-chooser handlers, init scripts, emulation, permission grants, and page clocks are all
  * declarations. Each needs a `Scope`, returns a handle whose `remove` is safe to call more than once, and is undone
  * when its scope closes. Removing one early leaves nothing for the scope to undo.
  *

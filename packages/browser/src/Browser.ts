@@ -3,13 +3,13 @@
  *
  * A backend's layer provides `Browser`: `Chromium.layer({ executablePath })` launches the browser at that path, and
  * `Chromium.layerConnect(endpoint)` attaches to one that's already running. Each backend is an import of its own
- * (`@usestrider/browser/chromium`, `/firefox`, `/webkit` and `/bidi`), so a program loads only the protocol code it
+ * (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, and `/bidi`), so a program loads only the protocol code it
  * uses. A launched browser gets a temporary profile, made before it starts and deleted after it exits.
  *
  * **Tracing**
  *
  * Every operation you call opens one span, named like `Locator.click`, with attributes in OpenTelemetry's style:
- * `browser.operation`, `browser.page.id`, `url.full` (redacted under the current diagnostics preset) and
+ * `browser.operation`, `browser.page.id`, `url.full` (redacted under the current diagnostics preset), and
  * `error.type`. What happens inside an operation isn't traced, unless `TraceProtocolCommands` adds a span for each
  * protocol command. `SpanNameGenerator` and `TracerDisabledWhen` rename or suppress spans, as their namesakes do
  * for Effect's `HttpClient`.
@@ -377,11 +377,11 @@ export interface ConnectOptions {
  * - `-` is a tick of 10 ms;
  * - `commit` commits a document at `https://example.test/`, and `load` makes it interactive, then complete;
  * - `resp(name)` is a request for `https://example.test/name`, answered with 200 and finished;
- * - `dialog(kind)` opens an `alert`, `confirm`, `prompt` or `beforeunload` prompt, decided as any dialog is;
+ * - `dialog(kind)` opens an `alert`, `confirm`, `prompt`, or `beforeunload` prompt, decided as any dialog is;
  * - `popup` opens a popup with the page as its opener;
  * - `crash` ends the page as crashed, and `|` as closed by its script.
  *
- * The same model that follows a real browser's events follows the fake's, so events, waits and lifetimes behave
+ * The same model that follows a real browser's events follows the fake's, so events, waits, and lifetimes behave
  * as they do with a browser. `goto` and `reload` commit at once; `info.protocol` is `"fake"`.
  *
  * **Gotchas**
@@ -444,7 +444,7 @@ export interface Operation extends Tracing.Operation {
  * **Details**
  *
  * Every operation opens one span. Its attributes are `browser.operation`, the id of what it acts on
- * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), attributes of its own, such as
+ * (`browser.page.id`, `browser.context.id`, or `browser.realm.id`), attributes of its own, such as
  * `browser.locator`, and a URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
  *
  * **Example** (Prefixing every span with the service's name)

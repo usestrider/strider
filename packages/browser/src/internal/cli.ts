@@ -62,7 +62,7 @@ export const render = (found: ReadonlyArray<Browsers.Found>): string => {
   lines.push(
     `Searched PATH for ${
       [...Browsers.commandNames.chromium, ...Browsers.commandNames.firefox].join(", ")
-    }; the locations Chrome's, Edge's and Firefox's installers use; and, on Linux, where WebKitGTK's and WPE's packages put their MiniBrowser.`,
+    }; the locations Chrome's, Edge's, and Firefox's installers use; and, on Linux, where WebKitGTK's and WPE's packages put their MiniBrowser.`,
     `For code that runs on several machines, read the path from each one's environment, as in Chromium.layerConfig({ executablePath: Config.string("CHROMIUM_PATH") }).`
   )
   return lines.join("\n")

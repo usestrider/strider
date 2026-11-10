@@ -233,7 +233,7 @@ export const dom = function(
       return finish({
         ...data,
         hint:
-          "This browser cannot reliably compose a frame rect through rotation, skew, reflection, 3D, perspective or motion paths; native frame point conversion is unavailable"
+          "This browser cannot reliably compose a frame rect through rotation, skew, reflection, 3D, perspective, or motion paths; native frame point conversion is unavailable"
       })
     }
   }

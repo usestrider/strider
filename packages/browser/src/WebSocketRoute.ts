@@ -13,7 +13,7 @@
  *
  * Page scripts can see and interfere with the replacement. It does not reach sockets opened before the route,
  * constructors a page saved earlier, `WebSocketStream`, or shared and service workers. The events a mocked socket
- * fires are synthetic: native event trust, buffering, compression and wire fragments are not reproduced.
+ * fires are synthetic: native event trust, buffering, compression, and wire fragments are not reproduced.
  *
  * @stability unstable
  * @since 0.1.0
@@ -174,7 +174,7 @@ export const isWebSocketRouteError = (value: unknown): value is WebSocketRouteEr
   Predicate.hasProperty(value, ErrorTypeId)
 
 /**
- * A message, error or close observed on one routed connection. Synthetic closes remain distinct from native closes.
+ * A message, error, or close observed on one routed connection. Synthetic closes remain distinct from native closes.
  *
  * @stability unstable
  * @category schemas
@@ -445,7 +445,7 @@ export interface Connection {
    */
   readonly page: Writable
   /**
-   * Whether the connection is `"connecting"`, `"open"` or `"closed"`. A proxied connection stays connecting until
+   * Whether the connection is `"connecting"`, `"open"`, or `"closed"`. A proxied connection stays connecting until
    * the real server accepts it.
    *
    * **Example** (Waiting for the connection to close)
@@ -458,7 +458,7 @@ export interface Connection {
    */
   readonly status: Watchable.Watchable<"connecting" | "open" | "closed">
   /**
-   * A stream of what happens on the connection: messages in either direction, closes and errors. It only watches;
+   * A stream of what happens on the connection: messages in either direction, closes, and errors. It only watches;
    * it never changes what is forwarded. It fails with `EventOverflow` if the reader falls too far behind.
    *
    * **Example** (Logging the messages)
@@ -500,7 +500,7 @@ export interface Connection {
     options?: OpenOptions | undefined
   ): Effect.Effect<void, WebSocketRouteError | Target.TargetGone | Deadline.Timeout, R>
   /**
-   * Connects the page's socket to the real server from inside the page, so cookies, origin and TLS stay the
+   * Connects the page's socket to the real server from inside the page, so cookies, origin, and TLS stay the
    * browser's own. Messages are forwarded unchanged unless a handler takes a direction over. It fails with
    * `InvalidState` if the connection was already opened or connected.
    *

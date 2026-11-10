@@ -184,7 +184,7 @@ const parseTarget = (
       case "css":
         return value === "" ? invalid("a CSS selector after css=") : Effect.succeed(page.locator(value))
       default:
-        return invalid(`expected a ref like e12, or role=…, text=…, label=…, testid=… or css=…`)
+        return invalid(`expected a ref like e12, or role=…, text=…, label=…, testid=…, or css=…`)
     }
   })
 

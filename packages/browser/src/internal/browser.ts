@@ -607,7 +607,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             new Reason.InvalidInput({
               input: "httpCredentials.origin",
               expected: "an HTTP(S) origin (scheme://host:port)",
-              hint: "Supply an origin without credentials, path, query or fragment"
+              hint: "Supply an origin without credentials, path, query, or fragment"
             }),
             id
           ))

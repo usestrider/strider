@@ -84,7 +84,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),
       entry("boundingBox.frameTransforms", "partial", [
-        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective and frame motion paths are Unsupported"
+        "Frame rect composition requires positive axis-aligned scaling or translation; rotation, skew, reflection, 3D, perspective, and frame motion paths are Unsupported"
       ]),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported", [
@@ -121,7 +121,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
       entry("network.responseBody.terminalRedirect", "unsupported", [
-        "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+        "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
       ]),
       entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),
       entry("network.requestBody.absence", "partial", ["zero body size conflates empty payload with absence"]),

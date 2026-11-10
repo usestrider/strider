@@ -726,7 +726,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
                     capability: "network.responseBody.terminalRedirect",
                     backend: "firefox",
                     hint:
-                      "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+                      "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
                   })
                 )
               }

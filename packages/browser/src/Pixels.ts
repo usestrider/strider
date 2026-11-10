@@ -1,7 +1,7 @@
 /**
  * CSS pixels and device pixels, which differ by the device pixel ratio.
  *
- * Layout, positions and viewports are in CSS pixels. Screenshots and screencast frames are measured in device
+ * Layout, positions, and viewports are in CSS pixels. Screenshots and screencast frames are measured in device
  * pixels. Inputs that are always CSS pixels take a plain `number` as well.
  *
  * @stability unstable

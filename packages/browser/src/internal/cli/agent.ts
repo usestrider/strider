@@ -109,17 +109,17 @@ const guide = (syntax: string) =>
 
 ## Starting and selecting a session
 
-A session keeps its browser, pages and event waits alive between shell commands. Install the command with \`pnpm add -g @usestrider/cli\`, or replace \`strider\` in these examples with \`pnpx @usestrider/cli\`.
+A session keeps its browser, pages, and event waits alive between shell commands. Install the command with \`pnpm add -g @usestrider/cli\`, or replace \`strider\` in these examples with \`pnpx @usestrider/cli\`.
 
 ${example(examples.start)}
 
-\`browsers\` lists installed browser paths; it does not install one. \`start\` takes an absolute executable path through \`--chromium\`, \`--firefox\` or \`--webkit\`, or an endpoint through \`--attach\`. WebKit here is WebKitGTK's or WPE's MiniBrowser on Linux, not Safari.
+\`browsers\` lists installed browser paths; it does not install one. \`start\` takes an absolute executable path through \`--chromium\`, \`--firefox\`, or \`--webkit\`, or an endpoint through \`--attach\`. WebKit here is WebKitGTK's or WPE's MiniBrowser on Linux, not Safari.
 
 Session commands select a session with \`-s NAME\` (or \`STRIDER_SESSION\`, with the flag taking precedence). Page commands also select a page with \`-p NAME\`. Neither has an implicit current selection. Explicit selectors work across agent shell calls that do not preserve environment variables.
 
 \`strider sessions\` lists sessions; \`strider -s shop pages\` lists that session's pages. \`page new --name main URL\` opens and names a page; without \`--name\`, it prints a generated name such as \`p1\`. A failed \`page new\` leaves no page behind. \`strider -s shop -p main page name cart\` renames a page.
 
-## Reading, acting and checking
+## Reading, acting, and checking
 
 A snapshot gives an accessibility tree with element refs such as \`e3\`. A ref belongs to that page's latest snapshot, not to another page or a later snapshot. \`find\` searches the stored snapshot, taking one if none exists; a new \`snapshot\` refreshes it after the page changes.
 
@@ -145,11 +145,11 @@ ${example(examples.events)}
 
 ## Results and failures
 
-Session commands print their outcome, elapsed time, and a digest of events since the previous tool call: navigation, popups, dialogs, console errors and failed requests where the capture policy permits them. A digest describes what happened; it does not by itself prove a task succeeded. \`--json\` on a session command prints structured output. Files such as screenshots are written to the session's artifacts directory, and their paths are printed.
+Session commands print their outcome, elapsed time, and a digest of events since the previous tool call: navigation, popups, dialogs, console errors, and failed requests where the capture policy permits them. A digest describes what happened; it does not by itself prove a task succeeded. \`--json\` on a session command prints structured output. Files such as screenshots are written to the session's artifacts directory, and their paths are printed.
 
 ${example(examples.results)}
 
-Failures have a tag, message and hints where available. A timeout or failed multi-step operation can leave earlier actions done; inspecting the page distinguishes a completed action from one that needs another attempt. Exit codes are:
+Failures have a tag, message, and hints where available. A timeout or failed multi-step operation can leave earlier actions done; inspecting the page distinguishes a completed action from one that needs another attempt. Exit codes are:
 
 | Code | Meaning |
 | --- | --- |
@@ -166,7 +166,7 @@ Named secrets are read from environment variables at startup. Tools substitute \
 
 ${example(examples.login)}
 
-A state file contains cookies, localStorage and IndexedDB, not sessionStorage or a whole browser profile. It contains plaintext credentials and belongs outside version control. The examples save to an explicit home-directory path. \`state save\` warns on stderr when Git could commit the file. Each \`--state FILE\` start loads an independent copy, so separate agents can reuse one login without sharing tabs. The source session may already have stopped. Refresh the file when the login expires; \`stop\` never saves it automatically.
+A state file contains cookies, localStorage, and IndexedDB, not sessionStorage or a whole browser profile. It contains plaintext credentials and belongs outside version control. The examples save to an explicit home-directory path. \`state save\` warns on stderr when Git could commit the file. Each \`--state FILE\` start loads an independent copy, so separate agents can reuse one login without sharing tabs. The source session may already have stopped. Refresh the file when the login expires; \`stop\` never saves it automatically.
 
 \`${
     shellCommand(examples.fork[0])
@@ -178,7 +178,7 @@ ${example(examples.attach)}
 
 \`tabs\` lists browser tabs outside the session's control. \`control ID --name NAME\` (or \`control --url PATTERN --name NAME\`) takes one; \`release\` ends that access and its routes and handlers while leaving the tab open.
 
-\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. It returns success only after browser cleanup, directory cleanup and ledger removal finish; cleanup failure returns a nonzero exit code. \`stop --keep\` retains the directory. Concurrent stop callers share cleanup, with the first choosing directory retention; disconnecting a caller does not cancel shutdown. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
+\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. It returns success only after browser cleanup, directory cleanup, and ledger removal finish; cleanup failure returns a nonzero exit code. \`stop --keep\` retains the directory. Concurrent stop callers share cleanup, with the first choosing directory retention; disconnecting a caller does not cancel shutdown. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
 
 ## Other operations and help
 
@@ -196,7 +196,7 @@ An MCP client can run \`${
     shellCommand(examples.mcpShare[0])
   }\` serves an existing session and uses its existing capture policy. Shell commands and MCP tools can act on the same named pages.
 
-The default capture policy is \`local\`: screenshots, field text and console text can reach the client. \`--capture strict\` on \`start\` or \`mcp --start\` denies screenshots, masks editable fields in snapshots and omits console text from the digest; other page text is still returned. The tools report structured failures and events with each result. This guide explains CLI syntax; MCP clients use their supplied tool schemas for arguments.
+The default capture policy is \`local\`: screenshots, field text, and console text can reach the client. \`--capture strict\` on \`start\` or \`mcp --start\` denies screenshots, masks editable fields in snapshots, and omits console text from the digest; other page text is still returned. The tools report structured failures and events with each result. This guide explains CLI syntax; MCP clients use their supplied tool schemas for arguments.
 
 Full CLI guide: https://usestrider.dev/docs/agents/cli
 `

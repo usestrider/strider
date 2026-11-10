@@ -194,7 +194,7 @@ describe("Spans", () => {
 describe("Browser.layerTest", () => {
   it("fails at once on a step it can't read, naming where", () => {
     assert.throws(() => Fake.parse("--resp(cart)--wat"), /"wat" at 14/)
-    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt or beforeunload/)
+    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt, or beforeunload/)
     assert.deepStrictEqual(Fake.parse(" - | ").map((step) => step._tag), ["Tick", "Close"])
   })
 

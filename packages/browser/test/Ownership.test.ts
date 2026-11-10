@@ -208,7 +208,7 @@ describe("Ownership.remove", () => {
       yield* TestClock.adjust("15 seconds")
       assert.deepStrictEqual(warnings, [
         "Context U2 is still being removed after 15s: the browser answered the command to remove it, and its pages " +
-        "N1, N2 and N3 haven't ended; its removal waits up to 30s for the context to end"
+        "N1, N2, and N3 haven't ended; its removal waits up to 30s for the context to end"
       ])
       yield* removed(context)
       yield* Fiber.join(removal)
