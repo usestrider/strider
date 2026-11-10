@@ -65,6 +65,14 @@ const sending = <E>(
       const events = build(state)
       if (!Array.isArray(events)) return yield* Effect.fail(fail(events as Failure, id))
       yield* owner.runtime.model.adapter.dispatchInput(owner.page.id, events as ReadonlyArray<Adapter.InputEvent>).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            // A page that is gone took its input with it; otherwise the gesture may have left input pressed
+            if (Deadline.isTimeout(error) || error.reason._tag !== "Gone") {
+              Input.uncertain(state, `${operation}: ${error.message}`, events as ReadonlyArray<Adapter.InputEvent>)
+            }
+          })
+        ),
         Effect.catch((error) => {
           const mapped = Operation.fromAdapter(error, id, owner.runtime.backend)
           return Effect.fail(mapped._tag !== "Reason" ? mapped.error : fail(mapped.reason, id))

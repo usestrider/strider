@@ -1820,6 +1820,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               events,
               frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
             ).pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  // A page that is gone took its input with it; otherwise the gesture may have left input pressed
+                  if (Deadline.isTimeout(error) || error.reason._tag !== "Gone") {
+                    Input.uncertain(owner.page.inputState, `${operation}: ${error.message}`, events)
+                  }
+                })
+              ),
               Effect.mapError((error) =>
                 Runtime.fromAdapter(error, id, owner.runtime.backend)
               ),

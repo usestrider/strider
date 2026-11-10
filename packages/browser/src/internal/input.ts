@@ -70,6 +70,35 @@ export const recover = <E>(
       ))
   })
 
+/**
+ * After a gesture's dispatch failed: records the release of what it may have left pressed, the buttons and keys
+ * its events press that weren't already held, so the next gesture sends it first. `buttons` and `keys` stay as
+ * observed: this is protocol uncertainty, not input seen held. Keeps an earlier failure's release, which comes first.
+ */
+export const uncertain = (state: State, description: string, events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const release: Array<Adapter.InputEvent> = []
+  const held: ReadonlySet<string> = state.buttons
+  const buttonsSeen = new Set<string>()
+  const keysSeen = new Set<string>()
+  for (const event of events) {
+    if (event._tag === "Mouse" && event.type === "down" && event.button !== "none") {
+      if (held.has(event.button) || buttonsSeen.has(event.button)) continue
+      buttonsSeen.add(event.button)
+      release.push({ ...event, type: "up", buttons: buttons(state) })
+    } else if (event._tag === "Key" && event.type === "down") {
+      if (state.keys.some((held) => held.code === event.code) || keysSeen.has(event.code)) continue
+      keysSeen.add(event.code)
+      release.push({ ...event, type: "up", text: Option.none() })
+    }
+  }
+  if (release.length === 0) return
+  const earlier = Option.isSome(state.broken) ? state.broken.value.release : []
+  state.broken = Option.some({
+    description: Option.isSome(state.broken) ? state.broken.value.description : description,
+    release: [...earlier, ...release.reverse()]
+  })
+}
+
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
 
 /** One move, press and release at the same point, with no other buttons held or modifier transitions. */
