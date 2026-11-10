@@ -953,7 +953,11 @@ describe("Chromium adapter, CDP only", () => {
           Effect.gen(function*() {
             const served = yield* site
             const facts = makeRecorder()
-            const { transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
+            // A supplied profile opens a page of its own, which the adapter adopts
+            const userDataDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+              prefix: "strider-adopt-"
+            })
+            const { transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable, userDataDir })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "attached" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
             assert.strictEqual(adapter.pauseScope, "related")
