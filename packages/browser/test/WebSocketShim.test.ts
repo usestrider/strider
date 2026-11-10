@@ -110,10 +110,10 @@ describe("WebSocket shim admission and conversion", () => {
   it("keeps unrouted sockets and the constructor native-looking", () => {
     const { context } = setup()
     const result = vm.runInContext(
-      `({ name: WebSocket.name, native: new WebSocket("ws://elsewhere.test/") instanceof WebSocket })`,
+      `({ name: WebSocket.name, native: new WebSocket("ws://elsewhere.test/") instanceof WebSocket, constructed: new WebSocket("ws://elsewhere.test/").constructor === WebSocket })`,
       context
     )
-    assert.deepStrictEqual({ ...result }, { name: "WebSocket", native: true })
+    assert.deepStrictEqual({ ...result }, { name: "WebSocket", native: true, constructed: true })
   })
 
   it("sends text as the browser's USVString, replacing lone surrogates", async () => {
