@@ -2000,7 +2000,8 @@ export const LocatorErrorReason = Schema.Union([
   Reason.NotPermitted,
   Reason.Unsupported,
   Reason.BackendFailure,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.LocatorHandlerFailed
 ])
 
 /**

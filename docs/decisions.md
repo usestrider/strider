@@ -1394,6 +1394,24 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Cooperative readiness checks
+
+Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
+and evaluation helpers, following [Pay for what you use](#pay-for-what-you-use). Single-use continuations yield to
+the host before checking; callbacks invalidate samples and final checks can restart before application. Sessions
+own and dispose their timers, observers and DOM references on every exit. Expired answers are serialized separately
+for single-use delivery, bounded by 64 entries, one MiB of estimated UTF-16 string storage and a 30-second retention
+period; cancellation, consumption and navigation clear them earlier. The host reports unavailable evidence rather
+than silently restarting after eviction on the same document. An in-flight wait reports departure separately from disposal; no departure cache is retained. Otherwise,
+disposal triggers rerouting only when resolving the target and ancestor chain proves movement, always under
+the original deadline. A bounded read-only finish handoff can collect timeout evidence after the
+operation deadline without applying anything. Rejected: retaining live sessions for delivery, which keeps DOM state
+and wait resources alive, and discarding an expired answer immediately, which loses observations while the host
+holds the continuation. Ordinary loops have no handler branches or continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing
+an observer against an already-running check, which cannot prevent that check from passing or applying; and
+always-on hooks in ordinary loops, which charge unused contexts for the feature. Cross-frame host probes remain
+sequential observations, not an atomic browser snapshot.
+
 ## Request failure observations
 
 Request failure reads inspect the existing bounded hop index immediately, using the original request instance
@@ -1444,6 +1462,16 @@ context headers. This matches BiDi's native header merging and Playwright's cont
 whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
+
+## Scoped overlay dispatch
+
+Locator handlers replace execution dispatch on their page, following [Pay for what you use](#pay-for-what-you-use),
+so existing locators observe activation without a registry probe on ordinary pages. A page-local semaphore and
+inherited suppression serialize callbacks without recursion. Final checks restart before input; explicit removal
+prevents new selections, while scope release interrupts selected work. Dispatch restores only after outstanding
+invocations and hidden waits drain, including the last finite invocation. Rejected: a global registry lookup on
+every action, which charges unused pages; and restoring immediately at the last selection, which lets concurrent
+actions bypass its callback or disappearance wait.
 
 ## Bounded redirect evidence
 

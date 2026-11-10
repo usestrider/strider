@@ -768,6 +768,15 @@ Head/Playwright figures retain the existing library defaults and timing boundari
 lifecycle cases compare different readiness/release paths and resources; their ratios are not isolated protocol
 costs. Ratios from these controls describe this source revision and these runners, not a general parity claim.
 
+The `unused-handlers-never`, `unused-handlers-other` and `unused-handlers-removed` controls create a locator and
+its effect before setup, then time fill, a waiting visibility assertion and a value read. Extra pages in the same
+context and another context remain open during timing. Setup, activation and cleanup are excluded. The `other`
+control registers handlers only on those extra pages; `removed` registers and removes one on the measured page.
+The identical driver harness is overlaid onto both refs. A ref without the registration API omits that optional
+setup, so these controls compare the measured ordinary path against its pre-feature behavior; they do not measure
+registration or callback performance. Playwright receives the same extra-page and handler setup. The ordinary
+click, fill, visible, visible-delayed, evaluate and locator-read controls remain separate.
+
 The `role-presentation` workload counts 100 headings with `role="none" tabindex="0.5"` twenty times per sample.
 Preparation is outside the timer. It exercises role traversal and the presentation-conflict tabindex predicate
 without using `Expect.toHaveRole`; Strider and Playwright must each return 100 every time. Ordinary `locator-read`,
