@@ -54,6 +54,165 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
   )
 })
 
+describe("CDP paused page initialization", () => {
+  for (const rejected of [false, true]) {
+    it.effect(`writes declarations before resume and handles the first request before renderer replies${rejected ? " when a declaration fails" : ""}`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const paused = yield* Deferred.make<void>()
+        const facts: Array<Adapter.Fact> = []
+        const commands: Array<Sent> = []
+        const held: Array<Sent> = []
+        let resumed = false
+        const reply = (command: Sent) =>
+          browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            ...(rejected && command.method === "Page.addScriptToEvaluateOnNewDocument" &&
+                command.params?.worldName === "isolated"
+              ? { error: { code: -32000, message: "script installation rejected" } }
+              : {
+                result: command.method === "Browser.getVersion"
+                  ? {
+                    protocolVersion: "1.3",
+                    product: "Chrome/155.0.8059.79",
+                    revision: "test",
+                    userAgent: "HeadlessChrome",
+                    jsVersion: "test"
+                  }
+                  : command.method === "Target.getBrowserContexts" ?
+                  { browserContextIds: [] }
+                  : command.method === "Page.getFrameTree" ?
+                  {
+                    frameTree: {
+                      frame: {
+                        id: "T1",
+                        loaderId: "initial",
+                        url: "about:blank",
+                        securityOrigin: "://",
+                        mimeType: "text/html"
+                      }
+                    }
+                  }
+                  : command.method === "Page.addScriptToEvaluateOnNewDocument" ?
+                  { identifier: `script-${command.id}` }
+                  : command.method === "Page.getLayoutMetrics"
+                  ? metrics
+                  : {}
+              })
+          })
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+              held.push(command)
+              continue
+            }
+            if (command.method === "Runtime.runIfWaitingForDebugger") {
+              yield* browser.receive({
+                sessionId: "S1",
+                method: "Fetch.requestPaused",
+                params: {
+                  requestId: "fetch-1",
+                  frameId: "T1",
+                  resourceType: "Document",
+                  request: {
+                    url: "https://target.test/",
+                    method: "GET",
+                    headers: {},
+                    initialPriority: "High",
+                    referrerPolicy: "strict-origin-when-cross-origin"
+                  }
+                }
+              })
+              // The browser cannot create the renderer to answer these commands until its route can run.
+              yield* Deferred.await(paused)
+              resumed = true
+              for (const pending of held.splice(0).reverse()) yield* reply(pending)
+            }
+            yield* reply(command)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "launched",
+          sink: Effect.fnUntraced(function*(fact) {
+            facts.push(fact)
+            if (fact._tag === "ObligationOpened") yield* Deferred.succeed(paused, undefined)
+            if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+              yield* Deferred.succeed(ready, undefined)
+            }
+          })
+        })
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        const scripts = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+        for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
+          yield* adapter.declare(context, {
+            _tag: "InitScript",
+            source: "self.initialized = true",
+            world,
+            phase: "user",
+            workers: false,
+            timing: "beforeAuthorScript",
+            after: []
+          }).pipe(Scope.provide(scripts))
+        }
+        yield* adapter.declare(context, {
+          _tag: "Intercept",
+          patterns: ["https://target.test/**"],
+          phases: ["request"]
+        })
+        yield* adapter.declare(context, { _tag: "Override", override: { _tag: "Locale", locale: "fr-FR" } })
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: {
+            _tag: "Viewport",
+            width: 400,
+            height: 300,
+            deviceScaleFactor: 1,
+            mobile: false
+          }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+            waitingForDebugger: true
+          }
+        })
+        yield* Deferred.await(ready)
+        const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+        assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
+        assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
+        for (
+          const method of [
+            "Page.addScriptToEvaluateOnNewDocument",
+            "Fetch.enable",
+            "Emulation.setLocaleOverride",
+            "Emulation.setUserAgentOverride",
+            "Emulation.setDeviceMetricsOverride"
+          ]
+        ) {
+          assert.include(sent, method)
+        }
+        assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
+        assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
+        assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
+        const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
+        yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+        assert.isTrue(commands.some((command) =>
+          command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+          command.params?.identifier === `script-${firstScript.id}`
+        ))
+        // Tear down the connection before declarations release, so no renderer replies are needed by cleanup.
+        yield* browser.lose("test complete")
+      }).pipe(Effect.scoped))
+  }
+})
+
 describe("CDP combined locale and user-agent declarations", () => {
   for (const order of ["Locale first", "UserAgent first"] as const) {
     for (const timing of ["existing target", "new targets"] as const) {
