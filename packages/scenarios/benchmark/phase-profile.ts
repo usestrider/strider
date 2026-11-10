@@ -115,6 +115,8 @@ try {
       upload: {
         expected: "receipt.txt:4",
         strider: Effect.fnUntraced(function*(mark: (name: string) => void) {
+          // First finalizer added, so it runs last: the scope has released everything, only the runPromise exit is left
+          yield* Effect.addFinalizer(() => Effect.sync(() => mark("release")))
           mark("enter")
           const page = yield* Browser.newPage()
           mark("newPage")
@@ -152,6 +154,8 @@ try {
       response: {
         expected: "tea × 1",
         strider: Effect.fnUntraced(function*(mark: (name: string) => void) {
+          // First finalizer added, so it runs last: the scope has released everything, only the runPromise exit is left
+          yield* Effect.addFinalizer(() => Effect.sync(() => mark("release")))
           mark("enter")
           const page = yield* Browser.newPage()
           mark("newPage")
