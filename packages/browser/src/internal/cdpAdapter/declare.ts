@@ -35,7 +35,7 @@ export interface Setup {
   ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
-type Send = <M extends string, P>(command: Protocol.Command<M, P, void>) => Effect.Effect<void, Protocol.ProtocolError>
+type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
 
 /** A URL pattern no request matches: a scheme nothing uses. */
 const nothing = "strider-intercepts-nothing:"
@@ -46,7 +46,7 @@ const network = (
   session: ProtocolClient.Session,
   offline: boolean,
   conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
-  on: Send = Protocol.on(session)
+  on: Send = (command) => command.pipe(Protocol.on(session), Effect.asVoid)
 ) => {
   const state = {
     offline,
@@ -159,7 +159,7 @@ const applyOverride = (
   target: TargetEntry,
   kind: Adapter.Override["_tag"],
   effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>,
-  on: Send = Protocol.on(target.session)
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
 ): Effect.Effect<void, Protocol.ProtocolError> => {
   const session = target.session
   const override = effective.get(kind)
@@ -286,7 +286,10 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
 })
 
 const applyIntercepts = Effect.fnUntraced(function*(
-  state: State, target: TargetEntry, page: PageEntry, on: Send = Protocol.on(target.session)
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
 ) {
   const intercepts = state.registry.intercepts(placement(page))
   const proxyAuth = page.context.proxy?.credentials !== undefined
@@ -322,7 +325,12 @@ const applyIntercepts = Effect.fnUntraced(function*(
 
 // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps them in
 // the browser, past the next navigation (QUIRKS.md, Q160)
-const keepBodies = (state: State, target: TargetEntry, page: PageEntry, on: Send = Protocol.on(target.session)) => {
+const keepBodies = (
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) => {
   const limit = state.registry.bodyLimit(placement(page), "response")
   return Option.isNone(limit)
     ? Effect.void
@@ -340,66 +348,72 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 }
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
-export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  yield* Effect.all([
-    withOverrides(
-      target,
-      Effect.suspend(() => {
-        const overrides = state.registry.overrides(placement(page))
-        return Effect.forEach(
-          overrides,
-          ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
-          {
-            discard: true
+export const configureTarget = Effect.fnUntraced(
+  function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+    if (setup === undefined) {
+      yield* Effect.all([
+        withOverrides(
+          target,
+          Effect.suspend(() => {
+            const overrides = state.registry.overrides(placement(page))
+            return Effect.forEach(
+              overrides,
+              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              {
+                discard: true
+              }
+            )
+          })
+        ),
+        // Viewport has its own permit and fresh registry read. Its renderer wait must not
+        // hold up locale or other overrides, including when this target is still configuring.
+        Effect.suspend(() => {
+          const overrides = state.registry.overrides(placement(page))
+          return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
+        })
+      ], { concurrency: "unbounded", discard: true })
+    } else {
+      yield* Effect.all([
+        Effect.gen(function*() {
+          yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const overrides = state.registry.overrides(placement(page))
+          yield* Effect.forEach(
+            overrides,
+            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            {
+              discard: true
+            }
+          )
+        }),
+        Effect.gen(function*() {
+          yield* (target.viewportLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const override = state.registry.overrides(placement(page)).get("Viewport")
+          if (override?._tag !== "Viewport") {
+            return
           }
-        )
-      })
-    ),
-    // Viewport has its own permit and fresh registry read. Its renderer wait must not
-    // hold up locale or other overrides, including when this target is still configuring.
-    Effect.suspend(() => {
-      const overrides = state.registry.overrides(placement(page))
-      return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
-    })
-  ], { concurrency: "unbounded", discard: true })
-  yield* applyScripts(state, target, page)
-  yield* applyIntercepts(state, target, page)
-  yield* keepBodies(state, target, page)
-  if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
-    yield* Page.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(target.session))
+          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+          // creating an isolated world whose identifier would require a renderer reply before resume.
+          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+          })
+          yield* setup.send(Emulation.setDeviceMetricsOverride({
+            width: override.width,
+            height: override.height,
+            deviceScaleFactor: override.deviceScaleFactor,
+            mobile: override.mobile
+          }))
+        })
+      ], { concurrency: "unbounded", discard: true })
+    }
+    yield* applyScripts(state, target, page, setup)
+    yield* applyIntercepts(state, target, page, setup?.send)
+    yield* keepBodies(state, target, page, setup?.send)
+    if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
+      const command = Page.setInterceptFileChooserDialog({ enabled: true })
+      yield* setup === undefined ? command.pipe(Protocol.on(target.session)) : setup.send(command)
+    }
   }
-})
-
-/** Writes declarations without waiting for a renderer that cannot start until the gate resumes it. */
-export const prepareTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup: Setup) {
-  yield* Effect.all([
-    Effect.gen(function*() {
-      yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
-      const overrides = state.registry.overrides(placement(page))
-      yield* Effect.forEach(overrides, ([kind]) =>
-        kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send), { discard: true })
-    }),
-    Effect.gen(function*() {
-      yield* (target.viewportLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
-      const override = state.registry.overrides(placement(page)).get("Viewport")
-      if (override?._tag !== "Viewport") return
-      // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-      // creating an isolated world whose identifier would require a renderer reply before resume.
-      yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-        target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-      })
-      yield* setup.send(Emulation.setDeviceMetricsOverride({
-        width: override.width, height: override.height, deviceScaleFactor: override.deviceScaleFactor, mobile: override.mobile
-      }))
-    })
-  ], { concurrency: "unbounded", discard: true })
-  yield* applyScripts(state, target, page, setup)
-  yield* applyIntercepts(state, target, page, setup.send)
-  yield* keepBodies(state, target, page, setup.send)
-  if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
-    yield* setup.send(Page.setInterceptFileChooserDialog({ enabled: true }))
-  }
-})
+)
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>

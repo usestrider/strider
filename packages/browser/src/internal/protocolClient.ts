@@ -147,7 +147,10 @@ export interface Session extends Protocol.ProtocolSession {
   readonly start: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>,
     scope: Scope.Scope
-  ) => Effect.Effect<Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>, Protocol.ProtocolError>
+  ) => Effect.Effect<
+    Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>,
+    Protocol.ProtocolError
+  >
   /**
    * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
    * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
@@ -172,9 +175,14 @@ export interface FoldControl {
   /**
    * Syncs a session. `sync` runs in a fiber of its own while the session's events are held; once it succeeds,
    * its snapshot is applied in the worker and the held events after it are folded. A sync that fails ends the
-   * session with `modelUnavailable`.
+   * session with `modelUnavailable`. `live` selects events the snapshot does not represent, whose decisions must
+   * be folded while syncing so the browser can produce the snapshot. They are never replayed.
    */
-  readonly sync: (session: Session, sync: Effect.Effect<Synced, unknown>) => void
+  readonly sync: (
+    session: Session,
+    sync: Effect.Effect<Synced, unknown>,
+    live?: (method: string) => boolean
+  ) => void
   readonly session: (key: Protocol.SessionKey) => Session | undefined
   /**
    * Runs an effect in the worker, after every event received so far, and waits for it: for what an operation
@@ -625,7 +633,7 @@ export const make: (
     Effect.uninterruptible(Effect.gen(function*() {
       const prepared = yield* prepare(state, command)
       yield* Scope.addFinalizer(scope, prepared.abandon)
-      yield* prepared.traced(prepared.write)
+      yield* prepared.write
       return prepared.traced(prepared.reply)
     }))
 

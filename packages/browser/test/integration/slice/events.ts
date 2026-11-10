@@ -13,6 +13,7 @@ import {
   Dialog,
   Expect,
   Locator,
+  NetworkRequest,
   Page,
   Popup,
   Route,
@@ -85,24 +86,33 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           Effect.gen(function*() {
             if (yield* popupsRefused()) return
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* Browser.newPage({
+                emulation: { extraHTTPHeaders: { "x-popup-init": "configured" } }
+              })
+              let firstRequestHeader: string | undefined
               yield* page.context.addInitScript({ source: "window.__popupInit = 'initialized'" })
               yield* page.context.route("https://opener.test/**", () =>
                 Route.fulfill(HttpServerResponse.text(
                   `<a href="https://target.test/" target="_blank" rel="${rel}">Open</a>`,
                   { contentType: "text/html" }
                 )))
-              yield* page.context.route("https://target.test/**", () =>
-                Route.fulfill(HttpServerResponse.text(
+              yield* page.context.route("https://target.test/**", (intercepted) => {
+                firstRequestHeader = intercepted.request.headers["x-popup-init"]
+                return Route.fulfill(HttpServerResponse.text(
                   "<script>document.title = window.__popupInit ?? 'missing init script'</script>",
                   { contentType: "text/html" }
-                )))
+                ))
+              })
               yield* page.goto("https://opener.test/")
               const popups = yield* Popup.next(page)
               yield* page.getByRole("link", { name: "Open" }).click()
               const popup = yield* popups
               yield* popup.pipe(Expect.toHaveURL("https://target.test/"))
               yield* popup.pipe(Expect.toHaveTitle("initialized"))
+              const requests = yield* NetworkRequest.history(popup, { url: "https://target.test/" })
+              assert.strictEqual(requests.entries.length, 1)
+              assert.strictEqual(requests.dropped, 0)
+              assert.strictEqual(firstRequestHeader, "configured")
             }))
           }), timeout)
       }
