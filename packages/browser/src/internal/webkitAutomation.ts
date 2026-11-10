@@ -160,9 +160,10 @@ export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: 
           : []
       })
     )
-    // Read the descriptor directory even before a listener exists: permission failures are refusals, not readiness.
-    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
+    // The first read of a live child's descriptors, just after it was spawned, was seen denied and never later, so
+    // they're read only once the table shows a listener on the port.
     if (inodes.size !== 1) return undefined
+    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
     for (const fd of descriptors) {
       const target = yield* fs.readLink(`/proc/${pid}/fd/${fd}`).pipe(
         Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.succeed(""))

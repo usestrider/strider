@@ -103,7 +103,8 @@ export interface ConnectOptions extends Browser.ConnectOptions {
  * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
  *
  * Launch requires Linux with readable child procfs (`/proc/<pid>/net/tcp` and `/proc/<pid>/fd`). Before and after
- * connecting, the spawned PID itself must hold the same inspector listener. A wrapper must exec MiniBrowser rather
+ * connecting, the spawned PID itself must hold the same inspector listener; its descriptors are read only once a
+ * listener on the port exists. A wrapper must exec MiniBrowser rather
  * than only fork it. Unsupported operating systems and unverifiable ownership fail with `ConnectionFailed`.
  * A procfs read failure stops ownership attempts and closes any rejected connection, then waits for the child's
  * exit event within the remaining launch deadline. If no exit is observed, refusal retains the access error.
