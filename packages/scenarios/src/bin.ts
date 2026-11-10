@@ -160,12 +160,16 @@ if (argv.includes("--record")) {
 const unsupported = engine === "firefox"
   ? [
     "video and video-firefox: no equivalent Playwright video twin; Chromium screencast and Firefox native capture perform different work",
-    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
+    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics",
+    ...scenarios.flatMap((scenario) =>
+      scenario.chromiumOnly === undefined ? [] : [`${scenario.name}: excluded from Firefox, ${scenario.chromiumOnly}`]
+    )
   ]
   : []
 const chosen = scenarios.filter((scenario) =>
   (only === undefined || only.split(",").includes(scenario.name)) &&
-  (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
+  (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined &&
+    scenario.chromiumOnly === undefined))
 )
 if (chosen.length === 0) throw new Error("No supported scenarios selected")
 if (process.env["STRIDER_PAIRED"] === "1" && chosen.some((scenario) => scenario.playwright === undefined)) {
