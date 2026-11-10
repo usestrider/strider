@@ -606,6 +606,11 @@ body {
   font-family: var(--mono);
 }
 
+/* An example's numbered markers stand upright, though the night theme sets the comments they're written in in italic */
+:root .expressive-code .ec-line mark span {
+  font-style: normal !important;
+}
+
 /* A terminal's title sits at the left, as a file's does */
 :root .expressive-code .frame.is-terminal .header {
   justify-content: flex-start;
