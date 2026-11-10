@@ -3176,3 +3176,78 @@ describe("BiDi request collector limits", () => {
       }
     }))
 })
+
+describe("BiDi response body completion", () => {
+  for (const successor of ["none", "waiting", "reading"] as const) {
+    it.effect(`keeps terminal completion and body identity with successor ${successor}`, () =>
+      Effect.gen(function*() {
+        const called = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<{ bytes: { type: string; value: string } }>()
+        const { state, page, sent } = yield* withPage({
+          "network.getData": Deferred.succeed(called, undefined).pipe(Effect.andThen(Deferred.await(reply)))
+        })
+        const retired: Array<string> = []
+        const tracked = {
+          ...state,
+          retire: (key: string) => {
+            retired.push(key)
+            state.retire(key)
+          }
+        }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const params = {
+          context: "C1",
+          userContext: "default",
+          navigation: null,
+          timestamp: 1,
+          redirectCount: 0,
+          isBlocked: false,
+          request: {
+            request: "response-body",
+            url: "http://site.test/",
+            method: "GET",
+            headers: [],
+            destination: "",
+            bodySize: 0
+          }
+        }
+        const apply = (method: string, extra: object = {}) =>
+          handlers.apply(method, { ...params, ...extra }, { state: tracked })
+        const complete = () =>
+          apply("network.responseCompleted", {
+            response: { status: 302, bytesReceived: 8 }
+          })
+        apply("network.beforeRequestSent")
+        page.context.proxyAttempts = new Set(["response-body"])
+        const entry = state.requests.get("response-body")!
+        const hop = entry.hop
+        const reading = yield* Network.responseBody(state, hop).pipe(Effect.result, Effect.forkChild)
+        yield* Effect.yieldNow
+        complete()
+        if (successor !== "none") Deferred.doneUnsafe(entry.finished, Effect.void)
+        assert.isTrue(Deferred.isDoneUnsafe(entry.finished), "completed responses release body reads")
+        if (successor === "waiting") apply("network.beforeRequestSent", { redirectCount: 1 })
+        if (successor !== "waiting") {
+          yield* Deferred.await(called)
+          if (successor === "reading") apply("network.beforeRequestSent", { redirectCount: 1 })
+        }
+        yield* Deferred.succeed(reply, { bytes: { type: "string", value: "terminal" } })
+        const result = yield* Fiber.join(reading)
+        if (successor === "none") {
+          assert.strictEqual(result._tag, "Success")
+          if (result._tag === "Success") assert.strictEqual(new TextDecoder().decode(result.success), "terminal")
+        } else {
+          assert.strictEqual(result._tag, "Failure")
+          if (result._tag === "Failure") {
+            assert.strictEqual(result.failure.reason._tag, "Unsupported")
+            if (result.failure.reason._tag === "Unsupported") {
+              assert.strictEqual(result.failure.reason.feature, "body.redirect")
+            }
+          }
+        }
+        assert.deepStrictEqual(sent, successor === "waiting" ? [] : ["network.getData"])
+        assert.isFalse(page.context.proxyAttempts.has("response-body"))
+        assert.deepStrictEqual(retired, ["response-body"])
+      }))
+  }
+})
