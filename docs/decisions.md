@@ -589,7 +589,9 @@ hold the loopback LISTEN socket inode; after connecting, it must still hold the 
 any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
 establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
 fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
-the caller to attach to an externally managed inspector HTTP endpoint. A procfs read failure, including permission
+the caller to attach to an externally managed inspector HTTP endpoint. The descriptors are read only once the
+namespace's table shows a listener on the port, which can appear only after the exec has finished: the kernel can deny
+that read while the exec wrapper is still replacing itself with the browser. A procfs read failure, including permission
 errors, can precede the child exit event, so it stops ownership attempts and closes any rejected connection before
 waiting for the actual event within the remaining launch deadline. No later collision report restarts ownership
 attempts. If no exit is observed, `ConnectionFailed` retains the original access error and uses `stage: "refused"`.

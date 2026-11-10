@@ -801,7 +801,8 @@ describe("WebKit launcher", () => {
         let connected = 0
         let closed = 0
         let writes = 0
-        let deniedDescriptors = 0
+        let listening = true
+        let descriptorsReadBeforeListener = 0
         let inspected = yield* Deferred.make<void>()
         const spawner = ChildProcessSpawner.make((command) =>
           Effect.gen(function*() {
@@ -858,6 +859,13 @@ describe("WebKit launcher", () => {
                     pathOrDescriptor: path
                   }))
                 }
+                // The first poll finds no listener: the browser hasn't finished its exec.
+                listening = mode !== "descriptors-denied-once" || reads > 1
+                if (!listening) {
+                  return Effect.succeed(
+                    "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+                  )
+                }
                 Deferred.doneUnsafe(inspected, Effect.void)
                 return Effect.succeed(
                   `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
@@ -868,8 +876,9 @@ describe("WebKit launcher", () => {
               : fs.readFileString(path, options),
           readDirectory: (path, options) => {
             if (path !== "/proc/9000001/fd") return fs.readDirectory(path, options)
-            // While the exec wrapper is still replacing itself with the browser, the kernel denies the first read.
-            if (mode === "descriptors-denied-once" && deniedDescriptors++ === 0) {
+            // While the exec wrapper is still replacing itself with the browser, the kernel denies the read.
+            if (mode === "descriptors-denied-once" && !listening) {
+              descriptorsReadBeforeListener++
               return Effect.fail(
                 PlatformError.systemError({
                   _tag: "PermissionDenied",
@@ -928,7 +937,7 @@ describe("WebKit launcher", () => {
           reads: () => reads,
           stops: () => stopped
         })
-        return { error, spawned, stopped, connected, closed, writes }
+        return { error, spawned, stopped, connected, closed, writes, descriptorsReadBeforeListener }
       }
     )
 
@@ -969,9 +978,10 @@ describe("WebKit launcher", () => {
         assert.strictEqual(result.stopped, 1)
       }))
 
-    it.effect("launches when the first read of the spawned process's descriptors is denied and later reads succeed", () =>
+    it.effect("doesn't read the spawned process's descriptors until a listener exists", () =>
       Effect.gen(function*() {
         const result = yield* ownershipAttempt("descriptors-denied-once")
+        assert.strictEqual(result.descriptorsReadBeforeListener, 0)
         assert.strictEqual(result.writes, 1)
         assert.strictEqual(result.connected, 1)
         assert.strictEqual(result.stopped, 1)
