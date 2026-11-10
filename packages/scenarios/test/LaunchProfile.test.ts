@@ -9,6 +9,30 @@ const directory = path.join(root, "packages/scenarios/benchmark")
 
 // Launches real browsers, so it runs only in the integration environment, holding the browser lock.
 describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch diagnostics", () => {
+  it.each(["default", "persistent"])("retains a complete successful report (%s)", (mode) => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "launch-profile-success-"))
+    try {
+      const output = path.join(scratch, "report.json")
+      const result = spawnSync(process.execPath, [
+        "--import", path.join(directory, "launch-profile-hooks.mjs"),
+        path.join(directory, "launch-profile.ts"), output, "1",
+        ...(mode === "persistent" ? [mode] : [])
+      ], { cwd: root, encoding: "utf8", timeout: 60_000 })
+      expect(result.status, result.stderr).toBe(0)
+      const report = JSON.parse(fs.readFileSync(output, "utf8"))
+      expect(report.status).toBe("completed")
+      expect(report.error).toBeNull()
+      expect(report.samples).toHaveLength(8)
+      expect(report.samples.filter((sample: { index: number }) => sample.index >= 0)).toHaveLength(2)
+      for (const sample of report.samples) {
+        expect(sample.ms).toBeGreaterThan(0)
+        expect(sample.events.some((event: { name: string }) => event.name === "launch.available")).toBe(true)
+        expect(sample.events.some((event: { kind: string }) => event.kind === "wire")).toBe(true)
+      }
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true })
+    }
+  }, 90_000)
   it.each(
     ["/internal/chromiumLauncher.ts", "/chromium/Chromium.ts", "/internal/cdpAdapter.ts"].flatMap((suffix) =>
       ["default", "persistent"].map((mode) => [suffix, mode] as const)
