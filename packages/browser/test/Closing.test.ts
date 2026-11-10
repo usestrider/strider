@@ -178,3 +178,23 @@ describe("a context's removal", () => {
       )
     }))
 })
+
+describe("A context's download declaration", () => {
+  it.effect("is released knowing its context is removed with its scope, after the removal is decided", () =>
+    Effect.gen(function*() {
+      const seen: Array<boolean | undefined> = []
+      yield* Effect.scoped(Browser.newContext({ downloads: "deny" })).pipe(
+        Effect.provide(layer((fake) => ({
+          declare: Effect.fnUntraced(function*(scope, declaration) {
+            const id = yield* fake.declare(scope, declaration)
+            // Added after the library's own finalizer for this declaration, so it runs before it is released
+            if (declaration._tag === "Downloads") {
+              yield* Effect.addFinalizer(() => Effect.sync(() => seen.push(declaration.retiring?.())))
+            }
+            return id
+          })
+        })))
+      )
+      assert.deepStrictEqual(seen, [true])
+    }))
+})

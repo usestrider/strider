@@ -1128,6 +1128,47 @@ describe("CDP restoration cleanup", () => {
       })))
   }
 
+  for (const retiring of [undefined, () => false, () => true]) {
+    const skipped = retiring?.() === true
+    it.effect(
+      `${skipped ? "skips" : "sends"} the download restore when its release ${
+        skipped ? "precedes the context's removal" : "leaves the context in place"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const restored: Array<string> = []
+          const mock = {
+            ...session,
+            ended: Effect.void,
+            send: (command: {
+              readonly method: string
+              readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+            }) =>
+              Effect.sync(() => {
+                if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                  restored.push(command.params.browserContextId ?? "none")
+                }
+                return {}
+              })
+          } as unknown as ProtocolClient.Session
+          const { state, page } = yield* withPage(mock)
+          const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+          state.contexts.set(context.id, context)
+          state.contextsByCdp.set("scoped", context)
+          state.pages.set(page.id, { ...page, context })
+          const lifetime = yield* Scope.make()
+          yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Deny" },
+            ...(retiring === undefined ? {} : { retiring })
+          }).pipe(Scope.provide(lifetime))
+          restored.length = 0
+          yield* Scope.close(lifetime, Exit.void)
+          assert.deepStrictEqual(restored, skipped ? [] : ["scoped"])
+        }))
+    )
+  }
+
   it.effect("holds disposal until a download restore already sent to the context has replied", () =>
     Effect.scoped(Effect.gen(function*() {
       const restoreSent = yield* Deferred.make<void>()

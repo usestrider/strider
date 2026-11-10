@@ -579,6 +579,11 @@ export type Declaration =
   | {
     readonly _tag: "Downloads"
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
+    /**
+     * Whether the context is about to be removed when this declaration is released, which makes restoring the
+     * download behavior pointless: the context's removal follows. Absent, or false, the release restores it.
+     */
+    readonly retiring?: (() => boolean) | undefined
   }
   | { readonly _tag: "FileChooser" }
   /**
