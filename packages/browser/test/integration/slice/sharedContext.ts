@@ -87,6 +87,8 @@ interface Held {
 
 export class Shared extends Context.Service<Shared, {
   readonly current: Effect.Effect<UserContext.UserContext>
+  /** The scope that lives as long as the suite: background work the harness still owns runs in it. */
+  readonly owner: Scope.Scope
   /** Records what a case's page found in the context as it closed. */
   readonly note: (found: ReadonlyArray<string>) => Effect.Effect<void>
   /** What the last case left, after which the cases get a new context if it left anything. */
@@ -141,6 +143,7 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
 
       return Shared.of({
         current: Effect.sync(() => held.context),
+        owner: outer,
         note: (found) => Effect.sync(() => void notes.push(...found)),
         settle: Effect.gen(function*() {
           const found = yield* left
@@ -186,10 +189,15 @@ const probed = Effect.fnUntraced(function*<A, E>(record: TraceRecord, probe: str
  * how long each took, in the failure trace (every backend runs it): whether the same page still answers a trivial
  * script, and whether a new page in the same context, on the stalled page's origin, answers `indexedDB.databases()`.
  * Each gets a budget of its own, whatever deadline encloses the read, and none changes the outcome. The new page's
- * close is waited for only that long; it finishes in the background.
+ * close is waited for only that long; it continues on a fiber of `owner` (the current scope if none is given).
  */
 export const probeStalledRead = Effect.fnUntraced(
-  function*(context: UserContext.UserContext, page: Page.Page, record: TraceRecord) {
+  function*(
+    context: UserContext.UserContext,
+    page: Page.Page,
+    record: TraceRecord,
+    owner?: Scope.Scope
+  ) {
     yield* probed(record, "same page answers a trivial script", page.evaluate(() => 1 + 1))
     const origin = yield* page.url.pipe(
       Effect.map((url) => new URL(String(url)).origin),
@@ -212,9 +220,13 @@ export const probeStalledRead = Effect.fnUntraced(
         return yield* fresh.evaluate(async () => (await indexedDB.databases()).length)
       })
     )
-    // Releasing a page isn't an operation under any deadline, so it runs on its own fiber that outlives this wait
-    const closing = yield* Effect.forkDetach(Scope.close(scope, Exit.void).pipe(Operation.detached))
-    yield* probed(record, "closing that page", Fiber.await(closing))
+    // Releasing a page isn't an operation under any deadline, so it runs on a fiber of the owner's scope, which
+    // outlives this wait and is settled when that scope closes
+    const closing = yield* Effect.forkIn(
+      Scope.close(scope, Exit.void).pipe(Operation.detached),
+      owner ?? (yield* Effect.scope)
+    )
+    yield* probed(record, "closing that page", Fiber.join(closing))
   },
   (effect) => Effect.ignore(effect).pipe(Operation.detached)
 )
@@ -228,14 +240,15 @@ export const readStorage = (
   context: UserContext.UserContext,
   page: Page.Page,
   record: TraceRecord,
-  deadline: Duration.Input = "5 seconds"
+  deadline: Duration.Input = "5 seconds",
+  owner?: Scope.Scope
 ) =>
   context.exportStorageState.pipe(
     Deadline.within(deadline),
     Effect.flatMap((state) => note(stored(state))),
     Effect.catchTag("TargetGone", () => Effect.void),
     Effect.catch((error) =>
-      (isStalledRead(error) ? probeStalledRead(context, page, record) : Effect.void).pipe(
+      (isStalledRead(error) ? probeStalledRead(context, page, record, owner) : Effect.void).pipe(
         Effect.andThen(note([`storage that couldn't be read: ${error.message}`]))
       )
     )
@@ -249,7 +262,9 @@ export const newPage = Effect.gen(function*() {
   const shared = yield* Shared
   const context = yield* shared.current
   const page = yield* context.newPage
-  yield* Effect.addFinalizer(() => readStorage(shared.note, context, page, connection("shared-context")))
+  yield* Effect.addFinalizer(() =>
+    readStorage(shared.note, context, page, connection("shared-context"), "5 seconds", shared.owner)
+  )
   return page
 })
 
