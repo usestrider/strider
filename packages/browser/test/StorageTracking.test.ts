@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { NetworkRequest, Target, Url, UserContext } from "@usestrider/browser"
+import { NetworkConnection, NetworkRequest, Target, Url, UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Headers from "effect/http/Headers"
@@ -91,3 +91,52 @@ it.effect("dispatches storage tracking only to its context using the existing re
     yield* send("other-tracked")
     assert.strictEqual(otherCalls, 1)
   }))
+
+it.effect("records ws and wss cookie scopes only for the owning tracked connection", () =>
+  Effect.scoped(Effect.gen(function*() {
+    const fold = yield* Fold.make({ release: () => Effect.void })
+    const calls: Array<{ origins: ReadonlyArray<string>; cookieOnly: boolean | undefined }> = []
+    for (const name of ["tracked", "sibling"]) {
+      yield* fold.sink({
+        _tag: "PageAdded",
+        page: name as Target.NavigableId,
+        context: name as UserContext.Id,
+        kind: "tab",
+        origin: { _tag: "Created" },
+        url: "about:blank" as Url.Url
+      })
+    }
+    yield* fold.observeStorageSources(
+      yield* fold.context("tracked" as UserContext.Id, false),
+      (origins, cookieOnly) => {
+        calls.push({ origins, cookieOnly })
+      }
+    )
+    const open = Effect.fnUntraced(function*(name: string, url: string) {
+      let targetReads = 0
+      let urlReads = 0
+      yield* fold.sink({
+        _tag: "ConnectionOpened",
+        connection: `${name}-${url}` as NetworkConnection.Id,
+        kind: "webSocket",
+        get url() {
+          urlReads++
+          return url as Url.Url
+        },
+        get navigable() {
+          targetReads++
+          return Option.some(name as Target.NavigableId)
+        }
+      })
+      assert.strictEqual(targetReads, 1)
+      if (name === "sibling") assert.strictEqual(urlReads, 1)
+    })
+    yield* open("sibling", "wss://untracked.socket.test/handshake")
+    assert.deepStrictEqual(calls, [])
+    yield* open("tracked", "ws://plain.socket.test:8080/seed")
+    yield* open("tracked", "wss://secure.socket.test:9443/seed")
+    assert.deepStrictEqual(calls, [
+      { origins: ["http://plain.socket.test:8080"], cookieOnly: true },
+      { origins: ["https://secure.socket.test:9443"], cookieOnly: true }
+    ])
+  })))

@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { createHash } from "node:crypto"
 import * as http from "node:http"
-import type * as net from "node:net"
+import * as net from "node:net"
 import { site, tlsSite } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
@@ -50,7 +50,7 @@ for (const [name, backend] of backends) {
                     const connection = socket as net.Socket
                     sockets.add(connection)
                     connection.on("close", () => sockets.delete(connection))
-                    const path = request.url ?? "/"
+                    const path = new URL(request.url ?? "/", `http://${request.headers.host}`).pathname
                     handshakes.push({ path, cookie: request.headers.cookie ?? "" })
                     const accept = createHash("sha1").update(
                       `${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
@@ -61,6 +61,29 @@ for (const [name, backend] of backends) {
                       }\r\n`
                     )
                     connection.on("data", () => connection.end(Buffer.from([0x88, 0x00])))
+                  })
+                  // WebKit may tunnel WebSockets through CONNECT. Resolve the controlled same-site
+                  // fixture names here, without consulting DNS or contacting any external address.
+                  server.on("connect", (request, socket, head) => {
+                    const target = new URL(`http://${request.url}`)
+                    if (!target.hostname.endsWith(".socket.example.com")) {
+                      socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n")
+                      return
+                    }
+                    const upstream = net.connect(port, "127.0.0.1", () => {
+                      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+                      upstream.write(head)
+                      socket.pipe(upstream).pipe(socket)
+                    })
+                    sockets.add(upstream)
+                    upstream.on("close", () => sockets.delete(upstream))
+                    upstream.on("error", () => socket.destroy())
+                    socket.on("error", () => upstream.destroy())
+                    socket.on("close", () => upstream.destroy())
+                  })
+                  server.on("connection", (socket) => {
+                    sockets.add(socket)
+                    socket.on("close", () => sockets.delete(socket))
                   })
                   return server
                 }),
@@ -73,18 +96,21 @@ for (const [name, backend] of backends) {
               )
               yield* Effect.promise(() => new Promise<void>((resolve) => server.listen(0, "::", resolve)))
               const port = (server.address() as net.AddressInfo).port
-              const context = yield* Browser.newContext({ storageStateTracking: true })
+              const context = yield* Browser.newContext({
+                storageStateTracking: true,
+                proxy: { server: `http://127.0.0.1:${port}`, bypass: [] }
+              })
               const page = yield* context.newPage
-              yield* page.goto(`http://a.socket.127.0.0.1.nip.io:${port}`)
+              yield* page.goto("http://a.socket.example.com")
               const connect = (path: string) =>
-                page.evaluateInMainWorld(async ({ port, path }) => {
+                page.evaluateInMainWorld(async (path: string) => {
                   await new Promise<void>((resolve, reject) => {
-                    const socket = new WebSocket(`ws://b.socket.127.0.0.1.nip.io:${port}${path}`)
+                    const socket = new WebSocket(`ws://b.socket.example.com${path}`)
                     socket.onopen = () => socket.close()
                     socket.onclose = () => resolve()
                     socket.onerror = () => reject(new Error("WebSocket handshake failed"))
                   })
-                }, { port, path })
+                }, path)
               // Reading the Cookie header of another handshake never visits the socket host as a document,
               // nor writes it through CookieJar. All sockets close before replacement begins.
               yield* connect("/seed")
