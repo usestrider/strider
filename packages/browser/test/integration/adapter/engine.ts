@@ -307,6 +307,36 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(result.terminal.response.observed, { matches: 0 })
             assert.strictEqual(result.resumed._tag, "Done")
           }), timeout)
+        it.effect("cooperative viewport yields before checking an overlay arriving during a round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"done\" hidden>Done</div>",
+              countFrames(`
+              document.querySelector('#done').hidden = false
+              if (!document.querySelector('#overlay')) document.body.insertAdjacentHTML('beforeend', '<div id="overlay">Overlay</div>')
+            `)
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+              } })
+              if (reply._tag !== "Check") throw Error("No initial check")
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              const overlayBeforeCheck = document.querySelector('#overlay') !== null
+              const yielded = reply._tag
+              document.querySelector('#overlay')?.remove()
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              return JSON.stringify({ yielded, overlayBeforeCheck, reply })
+            `
+            )
+            assert.strictEqual(result.yielded, "Check")
+            assert.isTrue(result.overlayBeforeCheck)
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.isTrue(result.reply.response.passed)
+          }), timeout)
         it.effect("cooperative expectation yields before checking an overlay arriving during a round", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
