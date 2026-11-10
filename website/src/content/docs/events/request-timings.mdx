@@ -1,13 +1,13 @@
 ---
 title: Request timings
-description: Opt into native request phase timings and read immutable snapshots with explicit missing phases.
+description: Where a request spent its time.
 order: 4
 ---
 
-A response can arrive long before its body finishes. Native request timings show which phases the browser measured
-and whether a successful transfer end has been observed.
+Request timings are the browser's own measurements of when each phase of a request happened, such as its DNS
+lookup, connection, and response. A phase it didn't measure is missing rather than zero.
 
-Create a context with `requestTiming: true` before opening its pages. Read a request with `NetworkRequest.timing`:
+Create a context with `requestTiming: true`, then read a request with `NetworkRequest.timing`:
 
 ```ts
 import { Browser, NetworkRequest } from "@usestrider/browser"

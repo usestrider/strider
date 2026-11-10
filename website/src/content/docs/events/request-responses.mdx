@@ -1,11 +1,11 @@
 ---
 title: A request's response
-description: Associate an observed request hop with its response, within an explicit scope.
+description: Pairing a request with its response.
 order: 3.5
 ---
 
-Matching responses by URL can confuse concurrent requests to the same endpoint. Retaining an observed request's
-hop lets you wait for exactly its response, including an individual redirect's response.
+`NetworkRequest.response` gives a wait for the response to one request you've seen, not to any request for its URL,
+so concurrent requests to the same endpoint don't get mixed up. Each redirect hop has its own.
 
 ```ts
 import { NetworkRequest, Page } from "@usestrider/browser"

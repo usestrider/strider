@@ -1,16 +1,14 @@
 ---
 title: Expectations and reads
-description: Expectations before reads, the matchers, conditions of your own, accessibility trees, the reads, watchable state, and functions run in the page.
+description: Checking a page, and reading values from it.
 order: 3
 ---
 
-A check that reads the page once can run before the page catches up, and pass or fail by timing. An expectation
-waits until the page is right, so a read after it gets the value you meant.
+An expectation, such as `Expect.toHaveText`, retries on each change to the page until it passes or the deadline
+does. A read, such as `readText`, `isChecked`, or [`page.title`](/docs/first-program#reads), says what's true now,
+and never waits or retries.
 
 ## Expectations before reads
-
-- **An expectation** (`Expect.to*`) retries on each change to the page until it passes or the deadline does.
-- **A read** (`readText`, `count`, `isChecked`, [`page.title`](/docs/first-program#reads)) says what's true now. It never waits or retries.
 
 Expect the state you need, then read the value:
 
@@ -262,9 +260,10 @@ A [`Watchable`](#watchables) such as `page.url` re-checks on each change; any ot
 
 ## Accessibility trees
 
-Expecting each element alone can't check their order, or that nothing else is there. `toMatchAria` matches a
-region's accessibility tree, its roles, names, and order, against a pattern in one expectation. Each node says how
-its children compare: `exactly`, `including` (in order, others allowed between), or `unchecked`:
+`toMatchAria` matches a region's accessibility tree, the roles and names of its elements in order, against a
+pattern. One expectation then checks what expecting each element alone can't: their order, and that nothing else
+is there. Each node says how its children compare: `exactly`, `including` (in order, others allowed between), or
+`unchecked`:
 
 ```ts
 import { AriaPattern, Expect, Page } from "@usestrider/browser"
@@ -340,8 +339,9 @@ const savedSettings = Effect.fn("savedSettings")(function*(page: Page.Page) {
 
 ## Watchables
 
-A URL read once misses the redirect after it. A page's status, URL, and frames; a download's progress; and a
-browser's pages are `Watchable`s, which read the value now, stream its `changes`, or wait for one with `waitFor`:
+A `Watchable` is a read-only view of state that changes, such as a page's URL. Yield it to read the value now,
+stream its `changes`, or wait for a value with `waitFor`, so a redirect after a read isn't missed. A page's status,
+URL, and frames, a download's progress, and a browser's pages are watchables:
 
 ```ts
 import { Page } from "@usestrider/browser"

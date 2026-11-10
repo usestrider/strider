@@ -1,11 +1,12 @@
 ---
 title: Traces for failed tests
-description: Configure recording once and attach each failed Vitest attempt's browser trace.
+description: Debugging a browser test after it fails.
 order: 1.5
 ---
 
-A failed browser test needs a record of its actions and page state to explain what happened.
-Configure failure traces once on the Vitest browser layer, then bind each test callback so its traces carry its own identity and retry attempt.
+With a `trace` option, `VitestBrowser.layer` records the contexts of each test wrapped in
+`VitestBrowser.withTest(context)` and, if the test fails, attaches each context's
+[trace](/docs/tools/recordings#traces) to it, named for the test and its retry attempt.
 
 ```ts title="checkout.test.ts"
 import { NodeServices } from "@effect/platform-node"

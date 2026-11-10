@@ -1,12 +1,11 @@
 ---
 title: Chromium
-description: Chromium, Chrome, and Edge over the Chrome DevTools Protocol, launching them, popups and the windows pages open in, attaching, what Chromium can't do or does differently, and the raw protocol.
+description: Running Strider on Chromium, Chrome, or Edge.
 order: 2
 ---
 
-A program written against `Browser` runs on Chromium unchanged, but Chromium's popups, launch switches, and attached
-tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
-works around each, and can send CDP itself for what Strider doesn't wrap.
+Chromium is the backend with the most capabilities, and the one to start with. A program written against `Browser`
+runs on it unchanged, though its popups, launch switches, and attached tabs have rules of their own.
 
 ## Protocol and versions
 
@@ -126,7 +125,7 @@ const SharedChrome = Layer.unwrap(Effect.gen(function*() {
 
 ## Limits
 
-Chromium supports nearly every capability Strider has. From the backend's capability list:
+From the backend's capability list:
 
 <BrowserLimits browser="chromium" />
 

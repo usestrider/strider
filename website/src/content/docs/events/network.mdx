@@ -1,19 +1,19 @@
 ---
 title: Requests and responses
-description: A page's requests and responses as events, their bodies decoded with a Schema, who answered them, the headers they sent, and resending a request.
+description: What a page asks the server for, and what it gets back.
 order: 3
 ---
 
-What a page shows can lag behind its calls to the server, or look the same when one failed. Waiting on the
-response an action causes checks what the server said, and decoding its body gives what it returned as typed data.
+A page's requests and responses are events, reported as each is sent and arrives. Wait on the response an action
+causes to check what the server said, and decode its body with a Schema to get typed data.
 
 ## Request and response events
 
 `NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream`, and `history`.
-Read a transfer's reported failure with [request failures](/docs/events/request-failures).
 
-- A request is reported when sent and a response when it arrives, one of each per redirect hop.
+- Each redirect hop has its own request and response.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
+- [`NetworkRequest.failure`](/docs/events/request-failures) reads why a request's transfer failed.
 
 `next` needs a `url`: a glob such as `"**/api/**"`, a URL, or a `URLPattern` string with `:name` groups, such as
 `"https://shop.example.com/api/orders/:id"`. A filter can also name a `method`; a request filter a `resourceType`,
@@ -39,9 +39,8 @@ that exact hop rather than matching by URL.
 
 ## Decoding bodies
 
-A status says the call went through, not what came back. A body decoded with a Schema gives the data the server
-returned, typed, and fails if it isn't that shape. A body is collected only when a subscription asks with `body`: a
-decoder of an Effect `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson`. The response arrives
+A body is collected only when a subscription asks with `body`: a decoder of an Effect `HttpIncomingMessage`, such
+as `HttpIncomingMessage.schemaBodyJson`, which fails if the body isn't the Schema's shape. The response arrives
 decoded, and `where`, the [predicate](/docs/events/events#next-stream-and-history) after the filter, gets it typed:
 
 ```ts
@@ -142,8 +141,8 @@ const failedCalls = Effect.fn("failedCalls")(function*(page: Page.Page) {
 
 ## Response sources
 
-A response from a cache or a service worker never reached the server, so a check of caching or offline support
-needs to know where it came from. `servedBy` is `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
+A response's `servedBy` says what answered it, such as a cache or a service worker rather than the server, so you
+can check caching or offline support. It's `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
 [route](/docs/events/routes) fulfilled it, `"cacheOrServiceWorker"` on Firefox, which can't tell them apart, or
 `"unknown"`, which WebKit can report when it doesn't know:
 
@@ -200,9 +199,9 @@ Credential headers, such as cookies and authorization, are redacted in logs, err
 
 ## Resending requests
 
-Rebuilt by hand, a call to the page's API misses what the page put in it, such as an auth header.
-`NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest`, to send again or
-changed: its method, URL, and headers, with their values, still redacted in logs. It has no body, so a replay of a
+`NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest` with its method,
+URL, and headers, to send again as it is or changed. It keeps what the page put in, such as an auth header, which
+stays redacted in logs. It has no body, so a replay of a
 `POST` sets one. Sent from outside the browser, it goes without the browser's cache, proxy, and service workers, and
 without its cookies, except on Firefox, whose request events carry the `Cookie` the browser sent:
 

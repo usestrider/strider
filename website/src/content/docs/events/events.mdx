@@ -1,16 +1,16 @@
 ---
 title: Events
-description: Subscribing before the action, the three ways to read events, the modules that report them, several outcomes of one action, streams, history, and deadlines for waits.
+description: Seeing what an action caused, and what a page does over time.
 order: 1
 ---
 
-An action's effects, such as a popup or a download, can arrive before the action returns, so a program that looks
-for them afterwards can miss them. A subscription made before the action sees everything the action causes.
+An event is something the browser reports about a page as it happens, such as a popup, a download, or a console
+message. Each kind has a module that waits for the next one, streams them, or reads the ones already logged.
 
 ## Subscribing before acting
 
-`Download.next` subscribes when it's called and gives a wait, an `Effect` of the first matching download, so call
-it before the action:
+A download or a popup can arrive before the action that caused it returns. `Download.next` subscribes when it's
+called and gives a wait, an `Effect` of the first matching download, so call it before the action:
 
 ```ts
 import { Download, Page } from "@usestrider/browser"
@@ -29,8 +29,8 @@ came 12 ms before Download.next subscribed; call Download.next before the action
 
 ## Next, stream, and history
 
-Each kind of event is a module with three functions. Use `next` for the one event an action causes, `stream` to
-watch every event for a while, such as console errors, and `history` to read what happened before you looked.
+Use `next` for the one event an action causes, `stream` to watch every event for a while, such as console errors,
+and `history` to read what happened before you looked.
 Dialogs and file choosers also have [`handle`](/docs/events/kinds#dialogs-and-file-choosers):
 
 | Verb      | Does                                                                                          |
@@ -148,8 +148,8 @@ const pageErrors = Effect.fn("pageErrors")(function*(page: Page.Page) {
 
 ## Deadlines for waits
 
-Without one, a wait gets the 30-second default, counted from `next`, which a large export can outlast. Set a longer
-one on `next`:
+A wait's deadline counts from `next`, so set one there for a wait that can outlast the default, such as a large
+export:
 
 ```ts
 import { Deadline, Download, Page } from "@usestrider/browser"

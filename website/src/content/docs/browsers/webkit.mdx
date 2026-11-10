@@ -1,12 +1,12 @@
 ---
 title: WebKit
-description: Stock WebKitGTK and WPE on Linux, launching a MiniBrowser, attaching to a running browser, the isolated worlds it lacks, what WebKit can't do or does differently, and the commands Strider sends it.
+description: Running Strider on WebKitGTK or WPE.
 order: 4
 ---
 
-A program written for Chromium can fail on WebKit at launch, without a display or a socket connector, or at an
-operation WebKit refuses, such as `page.evaluate`. Knowing what its layers need, and what to use where it refuses,
-a program written against `Browser` runs on WebKit too.
+Unlike the other browsers, WebKit needs a display and a `SocketConnector` to launch, and it can do less once it's
+running: it refuses `page.evaluate`, for one. Within those limits, a program written against `Browser` runs on it
+unchanged.
 
 ## Protocol and versions
 
