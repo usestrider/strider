@@ -71,7 +71,7 @@ The chapters are the groups in `src/features/docs/navigation.ts`, each a directo
 | 3. Events and the network | `events/` | events, navigations, popups, dialogs and downloads, requests and responses, routes, init scripts, page clock |
 | 4. Testing and recordings | `tools/`  | Vitest, traces and HAR files, video |
 | 5. Agents and the command line | `agents/` | snapshots, the agent toolkit, the `strider` CLI |
-| 6. Browsers               | `browsers/` | browser support, Chromium, Firefox, WebKit                |
+| 6. Browsers               | `browsers/` | browser support, Chromium, Firefox, WebKit, WebKit video, performance tuning |
 
 The browser pages render each backend's capabilities with `<Capabilities />` (every backend, side by side) and
 `<BrowserLimits browser="firefox" />` (one backend's limits, `when="attached"` for what attaching changes). Both read

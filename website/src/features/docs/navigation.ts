@@ -44,7 +44,7 @@ export const groups: ReadonlyArray<Group> = [
     label: "Browsers",
     directory: "browsers",
     description:
-      "What's different about Chromium, Firefox and WebKit: launching each, attaching, what each can do, and its quirks."
+      "What's different about Chromium, Firefox and WebKit: launching each, attaching, what each can do, its quirks, and the settings that trade fidelity for speed."
   }
 ]
 
