@@ -16,7 +16,9 @@ import * as Snapshot from "../Snapshot.ts"
 export class ToolFailure extends Schema.Class<ToolFailure>("@usestrider/browser/ai/BrowserToolkit/ToolFailure")({
   error: Schema.String,
   reason: Schema.optional(Schema.String),
-  message: Schema.String
+  message: Schema.String,
+  /** What happened since the previous call, as a result's `sinceLast` says, when the call failed with some of it unreported. */
+  sinceLast: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
 const PageName = Schema.String.annotate({ description: "The page, by the name `pages` or `newPage` gave it" })

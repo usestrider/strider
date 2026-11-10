@@ -317,12 +317,19 @@ export const commands = (getDaemon: () => Daemon) => {
     const result = yield* Effect.result(callTool(getDaemon(), call))
     if (Result.isFailure(result)) {
       const failure = result.failure
+      const sinceLast = "sinceLast" in failure ? failure.sinceLast ?? [] : []
       if (config.json) {
         yield* Console.log(
           JSON.stringify({ page, outcome: { _tag: "Failed", ...failure }, elapsed: elapsedSince(started) })
         )
       }
-      return yield* Effect.fail(new CommandFailed(failure))
+      return yield* Effect.fail(
+        new CommandFailed(
+          sinceLast.length === 0
+            ? failure
+            : { ...failure, output: `${failure.error}: ${failure.message}\nsince last: ${sinceLast.join(" · ")}` }
+        )
+      )
     }
     const value = result.success
     const shown = yield* present(value.outcome)
