@@ -5,6 +5,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, WebSocketRoute } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -17,6 +18,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import * as Deadline from "../src/Deadline.ts"
@@ -3696,6 +3698,32 @@ it.effect("removes an obsolete preload even when reinstalling its survivor fails
     failing = false
     yield* Scope.close(survivor, Exit.void)
     assert.strictEqual(native.size, 0)
+  }))
+
+it.effect("bounds the whole preload-removal loop once, not once per preload", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    let stalled = false
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          if (command.method === "script.addPreloadScript") return Effect.succeed({ script: `P${Math.random()}` })
+          if (command.method === "script.removePreloadScript" && stalled) return Effect.never
+          return Effect.succeed({})
+        })
+    } as unknown as ProtocolClient.Session
+    yield* Effect.gen(function*() {
+      const { state } = yield* withPage({}, {}, root)
+      const scopes = yield* Effect.forEach(["a", "b", "c"], () => Scope.fork(Scope.makeUnsafe()))
+      for (const [index, scope] of scopes.entries()) {
+        yield* Declare.declare(state, { _tag: "Browser" }, preload(`s${index}`)).pipe(Scope.provide(scope))
+      }
+      stalled = true
+      const closing = yield* Scope.close(scopes[0]!, Exit.void).pipe(Effect.forkChild)
+      yield* TestClock.adjust(Duration.millis(5001))
+      for (let index = 0; index < 20; index++) yield* Effect.yieldNow
+      assert.isDefined(closing.pollUnsafe(), "three stalled removals must share one five-second budget")
+    }).pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
   }))
 
 describe("BiDi response body completion", () => {
