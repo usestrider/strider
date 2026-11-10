@@ -26,8 +26,11 @@ const response = new NetworkResponse.NetworkResponse({
   at: 0 as NetworkResponse.NetworkResponse["at"]
 })
 
-const setup = (body: Effect.Effect<unknown, never>, grant: Option.Option<Access.Grant>) => {
-  const channel = Events.make<Model.ResponseEvent>({ _tag: "Browser" }, () => 10)
+const setup = (
+  body: Effect.Effect<unknown, never>,
+  grant: Option.Option<Access.Grant>,
+  channel = Events.make<Model.ResponseEvent>({ _tag: "Browser" }, () => 10)
+) => {
   const declarations: Array<Adapter.Declaration> = []
   let released = 0
   const page = {} as Page.ReadonlyPage
@@ -118,9 +121,10 @@ describe("NetworkResponse body subscriptions and borrowed access", () => {
     Effect.scoped(Effect.gen(function*() {
       const accessScope = yield* Scope.make()
       const grant = yield* Access.acquire("inspect", { _tag: "Browser" }).pipe(Scope.provide(accessScope))
-      const world = setup(bytes, Option.some(grant))
-      const own = Option.none<Access.Grant>()
-      const ownWorld = setup(bytes, own)
+      const channel = Events.make<Model.ResponseEvent>({ _tag: "Browser" }, () => 10)
+      const world = setup(bytes, Option.some(grant), channel)
+      // The same page channel, observed through a handle with no grant
+      const ownWorld = setup(bytes, Option.none(), channel)
       yield* NetworkResponse.next(world.page, { url: "**/data", body: (message) => message.text }).pipe(Effect.asVoid)
       const wait = yield* NetworkResponse.next(ownWorld.page, { url: "**/data", body: (message) => message.text })
       yield* Scope.close(accessScope, yield* Effect.exit(Effect.void))

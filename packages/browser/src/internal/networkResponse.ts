@@ -308,7 +308,7 @@ export const stream = (
           const budget = yield* Deadline.DefaultBudget
           yield* collect(found, "NetworkResponse.stream", limit)
           const context = yield* Effect.context<unknown>()
-          return yield* Events.stream(
+          const events = yield* Events.stream(
             kind("NetworkResponse.stream") as unknown as Events.Kind<
               Model.ResponseEvent,
               NetworkResponse.CapturedResponse<unknown>
@@ -318,6 +318,12 @@ export const stream = (
             where,
             delivery(found.behind.runtime, found.behind.grant, decoder, context, limit, Option.some(budget))
           )
+          // Body reads run in the consumer's fiber, which closing the subscription's scope doesn't reach.
+          const grant = found.behind.grant
+          if (Option.isNone(grant)) return events
+          const released = yield* Deferred.make<void>()
+          yield* grant.value.onRelease(Deferred.succeed(released, undefined))
+          return events.pipe(Stream.interruptWhen(Deferred.await(released)))
         })
       )
   )

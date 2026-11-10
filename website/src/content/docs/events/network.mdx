@@ -66,7 +66,7 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
 ```
 
 - The body is copied out of the browser, so it outlives the page.
-- Collection ends with the subscription's scope or when borrowed inspect access is released; later waits fail with `TargetGone`.
+- Collection ends with the subscription's scope or when borrowed inspect access is released; a subscription started with an expired grant fails with `TargetGone`.
 - A body that can't be read fails the wait with a `ResponseError`, whose reason is one of:
   - `BodyUnavailable`: there's no body to read. Its `why` says which: a redirect, over the limit, released by the
     browser, a failed transfer, or a stream that never ends, such as server-sent events.
