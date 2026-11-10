@@ -115,7 +115,8 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
             protocols: []
           })
         ),
-        origin
+        origin,
+        { isAlive: () => true }
       )
       const socket = yield* Deferred.await(captured)
       const opening = yield* socket.connectToServer({}).pipe(Effect.forkChild)
@@ -126,7 +127,8 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       bridge.receive(
         realm,
         Effect.succeed(JSON.stringify({ token: bridge.token, type: "opened", id: "1", protocol: "" })),
-        origin
+        origin,
+        { isAlive: () => true }
       )
       yield* Fiber.join(opening)
       assert.strictEqual(before, "connecting")
@@ -183,7 +185,8 @@ it.effect("drains rejected constructor lookups before processing another admissi
             url: "ws://example.com/socket",
             protocols: []
           })),
-          { _tag: "Worker", realm }
+          { _tag: "Worker", realm },
+          { isAlive: () => true }
         )
       }
       yield* Deferred.await(rejectedTwice)
@@ -243,7 +246,8 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
             protocols: []
           })
         ),
-        origin
+        origin,
+        { isAlive: () => true }
       )
       const socket = yield* Deferred.await(captured)
       yield* socket.open({})
@@ -252,7 +256,8 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
         Effect.succeed(
           JSON.stringify({ token: bridge.token, type: "closed", id: "1", code: 1000, reason: "done", wasClean: true })
         ),
-        origin
+        origin,
+        { isAlive: () => true }
       )
       yield* Deferred.await(draining)
       const status = yield* socket.status
@@ -318,7 +323,8 @@ it.effect("ends owned connections even when the browser cannot acknowledge remov
             protocols: []
           })
         ),
-        { _tag: "Worker", realm }
+        { _tag: "Worker", realm },
+        { isAlive: () => true }
       )
       const socket = yield* Deferred.await(captured)
       yield* socket.open({})

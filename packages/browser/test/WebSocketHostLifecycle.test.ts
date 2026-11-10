@@ -61,21 +61,26 @@ it.effect("releases every accepted payload in a pulled batch when removal interr
           Effect.andThen(Deferred.await(firstRelease)),
           Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
         ),
-        origin
+        origin,
+        { isAlive: () => true }
       ))
       yield* Deferred.await(firstStarted)
       for (const id of [1, 2, 3]) {
-        // Like WebKit callFunctionOn(...).ensuring(releaseObject), release is
-        // owned by the accepted fetch, including cancellation during the fetch.
+        // Fetch and discard are separate: an accepted but unstarted fetch must
+        // still release its WebKit object when the registration is removed.
         const fetch = id === 1
           ? Deferred.succeed(batchStarted, undefined).pipe(Effect.andThen(Effect.never))
           : Effect.succeed(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
         assert.isTrue(bridge.receive(
           realm,
-          fetch.pipe(Effect.ensuring(Effect.sync(() => {
-            released.push(id)
-          }))),
-          origin
+          fetch,
+          origin,
+          {
+            isAlive: () => true,
+            release: Effect.sync(() => {
+              released.push(id)
+            })
+          }
         ))
       }
       yield* Deferred.succeed(firstRelease, undefined)
@@ -109,7 +114,8 @@ it.effect("rejects a queued constructor after its realm destruction has complete
             Effect.andThen(Deferred.await(fetchRelease)),
             Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
           ),
-          origin
+          origin,
+          { isAlive: () => true }
         ))
         yield* Deferred.await(fetchStarted)
         assert.isTrue(
@@ -124,7 +130,8 @@ it.effect("rejects a queued constructor after its realm destruction has complete
                 protocols: []
               })
             ),
-            origin
+            origin,
+            { isAlive: () => true }
           )
         )
         assert.isTrue(
@@ -134,7 +141,8 @@ it.effect("rejects a queued constructor after its realm destruction has complete
               Effect.andThen(Deferred.succeed(tailReached, undefined)),
               Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
             ),
-            origin
+            origin,
+            { isAlive: () => true }
           )
         )
         bridge.ended(realm)
@@ -153,3 +161,71 @@ it.effect("rejects a queued constructor after its realm destruction has complete
         return { _tag: "Value" as const, value: { type: "undefined" as const } }
       }))
   }))
+
+for (const failure of ["defect", "interrupt"] as const) {
+  it.effect(`continues releasing accepted payloads after a release ${failure}`, () =>
+    harness((getBridge) =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+        const bridge = getBridge()
+        const realm = Target.RealmId.make("R-release")
+        const started = yield* Deferred.make<void>()
+        const released: Array<number> = []
+        for (const id of [1, 2, 3]) {
+          assert.isTrue(
+            bridge.receive(realm, Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)), {
+              _tag: "Worker",
+              realm
+            }, {
+              isAlive: () => true,
+              release: Effect.sync(() => {
+                released.push(id)
+              }).pipe(Effect.andThen(
+                id !== 1 ? Effect.void : failure === "defect" ? Effect.die("release failed") : Effect.interrupt
+              ))
+            })
+          )
+        }
+        yield* Deferred.await(started)
+        yield* registration.remove
+        yield* registration.remove
+        assert.deepStrictEqual(released.sort(), [1, 2, 3])
+      })
+    ))
+}
+
+it.effect("rejects late dead-realm payloads and duplicate destruction without rejecting a replacement", () =>
+  harness((getBridge) =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const captured = yield* Deferred.make<WebSocketRoute.Connection>()
+      const registration = yield* context.routeWebSocket("**", (socket) =>
+        Deferred.succeed(captured, socket).pipe(Effect.asVoid), { implementation: "script" })
+      const bridge = getBridge()
+      const old = Target.RealmId.make("R-old")
+      const next = Target.RealmId.make("R-next")
+      let alive = true
+      const payload = (id: string) =>
+        Effect.succeed(
+          JSON.stringify({ token: bridge.token, type: "create", id, url: "ws://example.com/", protocols: [] })
+        )
+      assert.isTrue(bridge.receive(old, payload("1"), { _tag: "Worker", realm: old }, {
+        isAlive: () =>
+          alive
+      }))
+      const previous = yield* Deferred.await(captured)
+      alive = false
+      bridge.ended(old)
+      bridge.ended(old)
+      assert.isFalse(bridge.receive(old, payload("late"), { _tag: "Worker", realm: old }, {
+        isAlive: () =>
+          alive
+      }))
+      assert.isTrue(bridge.receive(next, payload("replacement"), { _tag: "Worker", realm: next }, {
+        isAlive: () => true
+      }))
+      yield* registration.remove
+      assert.strictEqual(yield* previous.status, "closed")
+    })
+  ))
