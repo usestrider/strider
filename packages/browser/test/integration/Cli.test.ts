@@ -921,6 +921,42 @@ describe("strider", () => {
       assert.strictEqual(result.err, "InvalidInput: --idle 15m isn't a duration, such as \"30 minutes\"\n")
     }), timeout)
 
+  for (const navigation of ["page new", "goto"] as const) {
+    it.live(
+      `does not repeat ${navigation}'s own navigation in the next snapshot`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const served = yield* site
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent("<title>digest boundary</title><p>ready</p>")
+          }`
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "digest", "-p", "main", ...args)
+          const started = yield* strider(env, "start", "--name", "digest", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            if (navigation === "goto") {
+              const opened = yield* run("page", "new", "--name", "main", "about:blank")
+              assert.strictEqual(opened.code, 0, opened.err)
+              assert.strictEqual((yield* run("snapshot")).code, 0)
+            }
+            const navigated = navigation === "page new"
+              ? yield* run("page", "new", "--name", "main", url)
+              : yield* run("goto", url)
+            assert.strictEqual(navigated.code, 0, navigated.err)
+            assert.include(navigated.out, `at ${url}`)
+            const snapshot = yield* run("snapshot")
+            assert.strictEqual(snapshot.code, 0, snapshot.err)
+            assert.include(snapshot.out, "document \"digest boundary\"")
+            assert.notInclude(snapshot.out, `main navigated to ${url}`)
+          } finally {
+            yield* run("stop")
+          }
+        })),
+      timeout
+    )
+  }
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site

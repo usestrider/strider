@@ -348,6 +348,7 @@ export interface ContextEntry {
   storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
+  sizes?: Map<NetworkRequest.HopId, NetworkRequest.Sizes> | undefined
   readonly id: UserContext.Id
   /** Fixed: the default context exists for the whole connection. */
   readonly isDefault: boolean

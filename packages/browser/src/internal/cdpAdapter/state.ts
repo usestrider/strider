@@ -28,6 +28,7 @@ import * as Retired from "../retired.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  readonly requestSizes?: Map<string, import("../requestSizes.ts").Collector> | undefined
   readonly requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
   proxy?: Adapter.ProxyOptions | undefined
   readonly id: UserContext.Id
@@ -125,6 +126,7 @@ export interface NavigationEntry extends Kit.NavigationNode {
 
 /** A hop's headers as the network sent or received them, from an `ExtraInfo` event. */
 export interface ExtraInfo {
+  readonly statusCode?: number | undefined
   readonly phase: "request" | "response"
   readonly headers: Network.Headers
 }

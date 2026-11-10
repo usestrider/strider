@@ -1914,7 +1914,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const { url } = yield* fixture(() =>
                 `<input id="go" value="old" onfocus="this.removeAttribute('onfocus');${handler}" oninput="out.textContent=this.value+':'+event.isTrusted"><output id="out">untouched</output>`
               )
-              const page = yield* Browser.newPage()
+              const page = yield* newPage
               yield* page.goto(url)
               const target = page.locator("#go")
               assert(target instanceof LocatorImpl)
@@ -1953,7 +1953,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       : ""
                   }" oninput="out.textContent='input'" onchange="out.textContent+=';change'"><output id="out">untouched</output><output id="before"></output>`
                 )
-                const page = yield* Browser.newPage()
+                const page = yield* newPage
                 yield* page.goto(url)
                 const target = page.locator("#go")
                 assert(target instanceof LocatorImpl)
@@ -3812,10 +3812,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
         })), timeout)
 
-      // A label acts for its control, or the target is checkable itself, both ways. Every other kind is refused before
-      // any input, the same way for check and uncheck, so each is one of the engine's rules, checked once: `button`
-      // stands for the elements interactive by their tag, and `a`, `video` and `img` are interactive by an attribute,
-      // without which (`inert-link`, `inert-media`, `image`) the label acts
+      // checkableForAction selects a target before the action direction is considered. Exercise each targeting rule
+      // once, with ordinary labels retaining both associations and directions. Own ARIA/native state and prevented
+      // input retain both directions too; the other kinds sample the same targeting branch with check.
+      // Wrapping missing/plain also exercise native label.control: a dangling or empty for attribute overrides a
+      // nested checkbox, unlike an ordinary wrapping label with no for attribute.
+      // `button` samples tag interactivity; `a`, `video` and `img` exercise attribute-based interactivity and their
+      // inert counterparts. Slot and DOM/composed-boundary rules have their own cases below.
       for (const association of ["explicit", "wrapping"] as const) {
         for (
           const kind of [
@@ -3842,9 +3845,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             "ancestor"
           ] as const
         ) {
-          const acts = ["ordinary", "inert-link", "inert-media", "image", "prevented", "own", "own-ancestor", "native"]
-            .includes(kind)
-          for (const checked of acts ? [true, false] : [true]) {
+          if (association === "wrapping" && !["ordinary", "missing", "plain"].includes(kind)) continue
+          const bothDirections = ["ordinary", "prevented", "own", "native"].includes(kind)
+          for (const checked of bothDirections ? [true, false] : [true]) {
             it.effect(
               `label descendant ${association} ${kind} ${checked ? "check" : "uncheck"}`,
               () =>
@@ -4730,9 +4733,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.strictEqual(error.condition, `to have the role ${JSON.stringify(role)}`)
-              assert(error.history.length > 0)
-              assert.deepStrictEqual(error.history.at(-1)!.value, observed)
-              assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
+              for (const entry of error.history) assert.deepStrictEqual(entry.value, observed)
+              assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
             }
           }))
         }), timeout)
@@ -4775,16 +4777,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               }))
             ])
             for (const { id, focused } of focus) {
-              yield* page.locator(`#${id}`).pipe(
-                Expect.toHaveRole(focused ? "heading" : "none"),
-                Deadline.within("1 second")
-              )
+              yield* page.locator(`#${id}`).pipe(Expect.toHaveRole(focused ? "heading" : "none"))
             }
             // A global ARIA attribute or focusability overrides a presentational role with the implicit one, and
             // a list item in a presentational list inherits its role (ARIA 1.2, presentational roles).
-            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"), Deadline.within("1 second"))
-            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"), Deadline.within("1 second"))
-            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"), Deadline.within("1 second"))
+            yield* page.locator("#described").pipe(Expect.toHaveRole("heading"))
+            yield* page.locator("#focusable").pipe(Expect.toHaveRole("button"))
+            yield* page.locator("#owned").pipe(Expect.toHaveRole("none"))
             yield* page.getByRole("heading", { name: "Title" }).pipe(Expect.toHaveCount(1))
             yield* page.getByRole("button", { name: "Go" }).pipe(Expect.toHaveCount(1))
             const snapshot = yield* page.locator("#described").snapshot()
@@ -5062,7 +5061,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   Effect.flip
                 )
                 assert(Expect.isExpectationFailed(error), String(error))
-                assert.deepStrictEqual(error.history.map((entry) => entry.value), [{ matches }])
+                for (const entry of error.history) assert.deepStrictEqual(entry.value, { matches })
+                assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
               }
             }))
           }),

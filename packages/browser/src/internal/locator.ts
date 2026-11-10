@@ -1699,7 +1699,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           Effect.tap((answer) =>
             Effect.sync(() => {
               if (apply && inRound) {
-                if (answer.response._tag === "Ready") record.markConfirmed()
+                // A native fill's Ready response confirms only preparation; its input is still unsent.
+                // Until this response arrives, the applying round may itself have changed the value.
+                if (
+                  answer.response._tag === "Ready" &&
+                  (action._tag !== "Fill" || answer.response.fill === "set")
+                ) record.markConfirmed()
                 else record.markNotSent()
               }
             })

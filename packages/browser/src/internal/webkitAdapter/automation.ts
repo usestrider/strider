@@ -260,6 +260,7 @@ export const createUserContextLaunched = Effect.fnUntraced(
     )
     const entry: ContextEntry = {
       ...(options.requestTiming ? { requestTiming: new Map() } : {}),
+      ...(options.requestSizes ? { requestSizes: new Map() } : {}),
       id: state.ids.userContext(),
       browserContextId: process.key,
       isDefault: false,
@@ -272,7 +273,8 @@ export const createUserContextLaunched = Effect.fnUntraced(
         _tag: "UserContextAdded",
         context: entry.id,
         isDefault: false,
-        ...(options.requestTiming ? { requestTiming: true } : {})
+        ...(options.requestTiming ? { requestTiming: true } : {}),
+        ...(options.requestSizes ? { requestSizes: true } : {})
       })
     )
     return entry.id

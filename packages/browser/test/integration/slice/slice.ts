@@ -11,6 +11,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { site } from "../adapter/harness.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -47,7 +48,8 @@ export const slice = (
   pinned: (info: Browser.Info) => void
 ) =>
   describe(`${name} slice`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("launches the pinned browser", () =>
         Effect.gen(function*() {
           const browser = yield* Browser.Browser
@@ -58,7 +60,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(shop)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const navigation = yield* page.goto(url)
             assert.strictEqual(navigation._tag, "Committed")
             assert(navigation._tag === "Committed" && Option.isSome(navigation.response))
@@ -75,7 +77,7 @@ export const slice = (
             counter("disabled", "setTimeout(() => document.getElementById('b').disabled = false, 400)")
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Press" }).click()
             yield* page.getByText("clicked 1", { exact: true }).pipe(Expect.toBeVisible)
@@ -86,7 +88,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<div style="height: 4000px"></div>${counter("")}`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* page.locator("#b").click({ trial: true })
             yield* page.getByText("not clicked", { exact: true }).pipe(Expect.toBeVisible)
@@ -103,7 +105,7 @@ export const slice = (
             }<div class="toast" style="position: absolute; inset: 0; background: white">Saved</div></div>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.locator("#b").click().pipe(Deadline.within("1500 millis"), Effect.flip)
             assert(Deadline.isTimeout(error), String(error))
@@ -127,7 +129,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<button>Buy</button><button style="display: none">Buy</button>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.getByRole("button", { name: "Buy", includeHidden: true }).click().pipe(
               Deadline.within("20 seconds"),
@@ -145,7 +147,7 @@ export const slice = (
         Effect.gen(function*() {
           const served = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const failed = yield* page.goto("http://127.0.0.1:1/").pipe(Effect.flip)
             assert(failed._tag === "PageError", String(failed))
             assert.strictEqual(failed.reason._tag, "NavigationFailed")
@@ -164,7 +166,7 @@ export const slice = (
 <button onclick="setTimeout(() => document.querySelector('#slot').innerHTML='', 100)">Detach</button><button onclick="document.querySelector('#slot').innerHTML='<i></i><i></i>'">Multiple</button><div id="slot"></div>`
           )
           const scope = yield* Scope.make()
-          const page = yield* Browser.newPage().pipe(Scope.provide(scope))
+          const page = yield* SharedContext.newPage.pipe(Scope.provide(scope))
           yield* Effect.gen(function*() {
             yield* page.goto(url)
             yield* page.getByRole("button", { name: "Attach", exact: true }).click()
@@ -184,7 +186,7 @@ export const slice = (
           const url = yield* fixture(`<div id="hidden" style="display:none"></div><i></i><i></i><div id="host"></div>
 <script>document.querySelector("#host").attachShadow({mode:"open"}).innerHTML="<b id=shadow></b>"</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* page.locator("#hidden").pipe(Expect.toBeAttached)
             yield* page.locator("#shadow").pipe(Expect.toBeAttached)
@@ -212,7 +214,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<p>1 item</p><p>2 items</p>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.getByText("item").pipe(
               Expect.toBeVisible,
@@ -238,7 +240,7 @@ export const slice = (
 <div id="hidden" class="box" style="display:none"></div>
 <div id="edge" class="box" style="position:fixed;top:0;left:-100px"></div>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* page.locator("#half").pipe(Expect.toBeInViewport())
             yield* Expect.toBeInViewport(page.locator("#half"), { ratio: 0.5 })
@@ -255,7 +257,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<div class="box" style="width:100px;height:100px"></div><div class="box"></div>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             for (
               const [selector, options, observed] of [
@@ -285,7 +287,7 @@ export const slice = (
 <button style="position:fixed" onclick="document.querySelector('#target').outerHTML='<div id=target style=width:100px;height:100px></div>'">Replace</button>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* Effect.all([
               page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
@@ -301,7 +303,7 @@ export const slice = (
 <button style="position:fixed" onclick="window.scrollTo(0,2000)">Scroll</button>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* Effect.all([
               page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),

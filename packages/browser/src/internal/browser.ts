@@ -548,6 +548,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      if (options?.requestSizes && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.sizes",
+            backend: adapter.info.product,
+            hint: "Request sizes must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
       if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
         return yield* Effect.fail(contextError(
           operation,
@@ -708,7 +719,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
-            requestTiming: options?.requestTiming
+            requestTiming: options?.requestTiming,
+            requestSizes: options?.requestSizes
           })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)

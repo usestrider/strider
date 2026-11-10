@@ -125,7 +125,8 @@ export interface MakeOptions {
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  *   `label=Email`, `testid=cart` or `css=…`; a bad one fails at once.
  * - Each result is the call's outcome and `sinceLast`: what happened since the previous call, including
- *   navigations, popups, dialogs and who decided them,
+ *   navigations, popups, dialogs and who decided them. A successful `newPage`, `goto` or `back` reports its own
+ *   navigation in its outcome and omits that event from the digest, including when delivered later. Other events include
  *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks. The capture
  *   policy's `consoleText` decides the console errors: `"full"` lists them with their text, `"redacted"` without
  *   it, and `"omitted"`, as `CapturePolicy.strict` has it, leaves them out.

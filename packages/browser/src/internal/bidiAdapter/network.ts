@@ -10,6 +10,7 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Sizes from "../requestSizes.ts"
 import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
@@ -72,6 +73,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.responseStarted, (params, { state }) => {
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestSizes && !request.fulfilled) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: state.ids.hop(request.id, params.redirectCount),
+          sizes: Sizes.bidi(params.response, false)
+        })
+      }
       if (request.navigable?.context.requestTiming) {
         state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, false) })
       }
@@ -100,6 +108,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestSizes && !request.fulfilled) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: state.ids.hop(request.id, params.redirectCount),
+          sizes: Sizes.bidi(params.response, true)
+        })
+      }
       if (request.navigable?.context.requestTiming) {
         state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, true) })
       }

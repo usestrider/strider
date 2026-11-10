@@ -17,6 +17,7 @@ import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -46,3 +47,4 @@ requestBodies("Firefox", backend)
 requestTiming("Firefox", backend)
 
 storageReplacement("Firefox", backend)
+requestSizes("Firefox", backend)

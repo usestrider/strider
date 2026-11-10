@@ -58,6 +58,14 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "supported"),
+      entry("network.sizes.responseBody", "partial"),
+      entry("network.sizes.encoded", "supported"),
+      entry("network.sizes.decoded", "unsupported"),
       entry("network.timing.redirect", "supported"),
       entry("network.timing", "partial", [
         "context-creation opt-in; bounded original-instance observations with live owners",

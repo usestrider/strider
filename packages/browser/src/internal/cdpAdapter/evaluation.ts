@@ -20,6 +20,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as Argument from "../evaluationArgument.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
@@ -138,25 +139,6 @@ const toRemoteValue = (
     default:
       // An opaque value, or a kind CDP added since: a handle with no value
       return { type: isOpaque(type) ? type : "object" }
-  }
-}
-
-/** An argument by value, as `Runtime.callFunctionOn` takes it. */
-const callValue = (value: Adapter.RemoteValue): Runtime.CallArgument => {
-  switch (value.type) {
-    case "undefined":
-      return {}
-    case "null":
-      return { value: null }
-    case "number":
-      return typeof value.value === "number" ? { value: value.value } : { unserializableValue: value.value }
-    case "bigint":
-      return { unserializableValue: `${value.value}n` }
-    case "string":
-    case "boolean":
-      return { value: value.value }
-    default:
-      return { value: Kit.plain(value) }
   }
 }
 
@@ -377,7 +359,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
         Kit.argument<Runtime.CallArgument>(local, {
           ids: state.ids,
           realm: id,
-          value: callValue,
+          value: (value) => ({ value }),
           handle: (handle) => {
             const entry = state.handles.get(handle)
             return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
@@ -389,9 +371,12 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
         })).pipe(
           Effect.flatMap((args) =>
             Runtime.callFunctionOn({
-              functionDeclaration: call.functionDeclaration,
+              functionDeclaration: Argument.call(call.functionDeclaration),
               uniqueContextId: realm.uniqueId,
-              arguments: args,
+              arguments: [
+                { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
+                ...args
+              ],
               awaitPromise: call.awaitPromise,
               userGesture: call.userActivation,
               ...(call.group === undefined ? {} : { objectGroup: call.group }),

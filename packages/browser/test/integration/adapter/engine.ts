@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import { beforeEach } from "vitest"
 import * as Browser from "../../../src/Browser.ts"
 import * as Expect from "../../../src/Expect.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
@@ -18,19 +19,17 @@ import type { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
-import { type Backend, makeRecorder, site } from "./harness.ts"
+import * as Connection from "./engineConnection.ts"
+import { type Backend, site } from "./harness.ts"
 
 const timeout = 60_000
 
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
 /** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
-const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeInstall?: string) {
-  const served = yield* site
-  const facts = makeRecorder()
-  const { adapter } = yield* backend.connect(facts.sink)
-  const context = yield* adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false })
-  const page = yield* adapter.createPage(context)
+const open = Effect.fnUntraced(function*(_backend: Backend, html: string, beforeInstall?: string, origin?: string) {
+  const served = origin === undefined ? yield* site : { origin }
+  const { adapter, page, context, facts } = yield* (yield* Connection.Shared).page
   const navigation = yield* adapter.navigate(
     page,
     `${served.origin}/fixture?html=${encodeURIComponent(html)}`,
@@ -70,7 +69,7 @@ const open = Effect.fnUntraced(function*(backend: Backend, html: string, beforeI
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, call, adapter, page }
+  return { send, call, adapter, page, context, document, realm }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -158,7 +157,16 @@ const revalidate = Effect.fnUntraced(function*(
 
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
-    layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
+    let shared: Effect.Success<ReturnType<typeof Connection.make>>
+    const isolated = new Set<string>()
+    const fixture = Layer.effect(
+      Connection.Shared,
+      Effect.gen(function*() {
+        shared = yield* Connection.make(backend)
+        return shared
+      })
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
+    layer(fixture, { excludeTestServices: true })(
       (it) => {
         it.effect("owns viewport observers only during requested rounds and releases them independently", () =>
           Effect.gen(function*() {
@@ -222,10 +230,12 @@ export const engine = (backend: Backend) =>
           }), timeout)
 
         for (const publicExpectation of [false, true]) {
+          const name = `${
+            publicExpectation ? "public expectation" : "ordinary runtime"
+          } follows a navigation during a waiting round`
+          isolated.add(name)
           it.effect(
-            `${
-              publicExpectation ? "public expectation" : "ordinary runtime"
-            } follows a navigation during a waiting round`,
+            name,
             () =>
               Effect.gen(function*() {
                 const served = yield* site
@@ -1618,6 +1628,64 @@ export const engine = (backend: Backend) =>
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        it.effect("keeps raw-engine documents, realms and storage private to each scoped context", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const first = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>First</p>", undefined, origin)
+              const written = yield* opened.call(
+                `() => {
+                localStorage.setItem("engine-fixture", "first");
+                document.cookie = "engineFixture=first; path=/";
+                globalThis.engineFixture = "first";
+                return JSON.stringify({
+                  storage: localStorage.getItem("engine-fixture"),
+                  cookie: document.cookie,
+                  global: globalThis.engineFixture
+                });
+              }`,
+                []
+              )
+              assert(written._tag === "Value" && written.value.type === "string")
+              assert.deepStrictEqual(JSON.parse(written.value.value), {
+                storage: "first",
+                cookie: "engineFixture=first",
+                global: "first"
+              })
+              return opened
+            }))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const second = yield* open(backend, "<p>Second</p>", undefined, origin)
+              assert.strictEqual(first.adapter, second.adapter)
+              assert.notStrictEqual(first.context, second.context)
+              assert.notStrictEqual(first.page, second.page)
+              assert.notStrictEqual(first.document, second.document)
+              assert.notStrictEqual(first.realm, second.realm)
+              const fresh = yield* second.call(
+                `() => JSON.stringify({
+                storage: localStorage.getItem("engine-fixture"),
+                cookie: document.cookie,
+                global: typeof globalThis.engineFixture
+              })`,
+                []
+              )
+              assert(fresh._tag === "Value" && fresh.value.type === "string")
+              assert.deepStrictEqual(JSON.parse(fresh.value.value), {
+                storage: null,
+                cookie: "",
+                global: "undefined"
+              })
+              assert.strictEqual(
+                count(yield* second.send({ op: "count", steps: [{ _tag: "Text", matcher: text("Second") }] })),
+                1
+              )
+            }))
+          }), timeout)
       }
+    )
+    beforeEach(({ task }) =>
+      Effect.runPromise(
+        isolated.has(task.name) ? shared.reset : shared.prepare
+      )
     )
   })

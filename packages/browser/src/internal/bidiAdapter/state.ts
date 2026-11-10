@@ -30,6 +30,7 @@ import * as Retired from "../retired.ts"
 
 export interface ContextEntry {
   readonly requestTiming?: boolean | undefined
+  readonly requestSizes?: boolean | undefined
   /** A navigable has existed, so setup rollback cannot establish that the proxy cache stayed unused. */
   proxyUsed?: boolean | undefined
   proxy?: Adapter.ProxyOptions | undefined
