@@ -358,4 +358,25 @@ describe("A context removed with the scope that released its pages", () => {
       assert.deepStrictEqual(sent, ["removeUserContext", "closePage page-0", "closePage page-1"])
       assert.isFalse(yield* Deferred.isDone(context.closed), "the context did not end")
     }).pipe(Effect.scoped, withClock))
+
+  it.effect("falls back after the removal budget with a fresh page budget, without interrupting the removal", () =>
+    Effect.gen(function*() {
+      const interrupted = yield* Deferred.make<void>()
+      const { owner, context, pages, ownership, sent } = yield* setup(
+        () => true,
+        1,
+        () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)))
+      )
+      yield* ownership.release(pages[0]!, owner)
+      const removal = yield* ownership.remove(context).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("30 seconds")
+      yield* settle
+      assert.deepStrictEqual(sent, ["removeUserContext", "closePage page-0"])
+      yield* TestClock.adjust("29 seconds")
+      assert.isUndefined(removal.pollUnsafe(), "the fallback still waits under its own budget")
+      yield* ends(pages[0]!)
+      yield* Fiber.join(removal)
+      assert.isFalse(yield* Deferred.isDone(interrupted))
+      assert.isFalse(yield* Deferred.isDone(context.closed))
+    }).pipe(Effect.scoped, withClock))
 })
