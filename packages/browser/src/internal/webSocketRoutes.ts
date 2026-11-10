@@ -653,11 +653,27 @@ export const register = <E, R>(
         else yield* forget(connection, false, true)
       }
       yield* Queue.clear(incoming)
-      yield* Scope.close(bridgeScope, Exit.void)
-      yield* Scope.close(scope, Exit.void)
-      // Intake bounds this set; start every discard even if another release stalls.
-      yield* Effect.forEach([...owned], (item) => item.release, { concurrency: "unbounded", discard: true })
-    }).pipe(Operation.detached)
+    }).pipe(
+      Effect.ensuring(
+        Scope.close(bridgeScope, Exit.void).pipe(
+          Effect.catchCause((cause) => Handlers.report("WebSocket bridge teardown failed", cause)),
+          Effect.ensuring(
+            Scope.close(scope, Exit.void).pipe(
+              Effect.catchCause((cause) => Handlers.report("WebSocket consumer teardown failed", cause))
+            )
+          ),
+          // Intake bounds this set; start every discard even if another release stalls.
+          Effect.ensuring(Effect.suspend(() =>
+            Effect.forEach(
+              [...owned],
+              (item) => item.release,
+              { concurrency: "unbounded", discard: true }
+            )
+          ))
+        )
+      ),
+      Operation.detached
+    )
     let removing: Fiber.Fiber<void, never> | undefined
     const remove: Effect.Effect<void> = Effect.suspend(() =>
       removing === undefined
