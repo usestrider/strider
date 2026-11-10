@@ -167,12 +167,14 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
+  // Where focus is emulated every page reports it, so a page behind another still renders and a tab does
+  const emulated = state.registry.overrides({ context: id }).get("FocusEmulation")
   const { targetId } = yield* Kit.protocol(
     Target.createTarget({
       url: "about:blank",
-      // A window of its own, so a page opened after it doesn't put it in the background, where headless Chromium
-      // renders nothing
-      newWindow: true,
+      // Otherwise a window of its own, so a page opened after it doesn't put it in the background, where headless
+      // Chromium renders nothing
+      ...(emulated?._tag === "FocusEmulation" && emulated.enabled ? {} : { newWindow: true }),
       ...(context.isDefault || context.browserContextId === undefined
         ? {}
         : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID })
