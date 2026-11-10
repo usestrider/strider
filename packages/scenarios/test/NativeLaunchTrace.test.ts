@@ -27,7 +27,10 @@ const native = {
       args: { call_id: 2, method: "Target.setAutoAttach" }
     }
   ],
-  metadata: {}
+  metadata: {
+    "clock-domain": "LINUX_CLOCK_MONOTONIC",
+    trace_processor_stats: { traced_buf: [{ bytes_overwritten: 0 }] }
+  }
 }
 const fixture = async (body: (file: string) => Promise<void>) => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "native-launch-"))
@@ -75,5 +78,16 @@ it("rejects inconsistent clock bounds and preserves the trace", async () =>
     const result = await retainNativeTrace(file, events.map((e, i) => i === 3 ? { ...e, at: 31.1 } : e), 1)
     expect(result.status).toBe("error")
     expect(result.error).toMatch(/clock/)
+    expect(fs.existsSync(file)).toBe(true)
+  }))
+
+it.each(["clock", "loss", "handler"])("rejects unusable native evidence (%s)", async (kind) =>
+  fixture(async (file) => {
+    const value = structuredClone(native)
+    if (kind === "clock") value.metadata["clock-domain"] = "unknown"
+    if (kind === "loss") value.metadata.trace_processor_stats.traced_buf[0]!.bytes_overwritten = 1
+    if (kind === "handler") value.traceEvents = value.traceEvents.slice(1)
+    fs.writeFileSync(file, JSON.stringify(value))
+    expect((await retainNativeTrace(file, events, 1)).status).toBe("error")
     expect(fs.existsSync(file)).toBe(true)
   }))

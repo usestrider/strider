@@ -23,7 +23,7 @@ const retainOutput = (scratch: string, result: { stdout: string; stderr: string 
 
 // Launches real browsers, so it runs only in the integration environment, holding the browser lock.
 describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch diagnostics", () => {
-  it.each(["default", "persistent"])("retains a complete successful report (%s)", (mode) => {
+  it.each(["default", "persistent", "native"])("retains a complete successful report (%s)", (mode) => {
     const scratch = scratchDirectory("launch-profile-success-")
     try {
       const output = path.join(scratch, "report.json")
@@ -34,7 +34,12 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
         output,
         "1",
         ...(mode === "persistent" ? [mode] : [])
-      ], { cwd: root, encoding: "utf8", timeout: 60_000 })
+      ], {
+        cwd: root,
+        env: { ...process.env, STRIDER_LAUNCH_NATIVE: mode === "native" ? "1" : "0" },
+        encoding: "utf8",
+        timeout: 60_000
+      })
       retainOutput(scratch, result)
       expect(result.status, result.stderr).toBe(0)
       const report = JSON.parse(fs.readFileSync(output, "utf8"))
@@ -43,6 +48,16 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
       expect(report.samples).toHaveLength(8)
       expect(report.samples.filter((sample: { index: number }) => sample.index >= 0)).toHaveLength(2)
       for (const sample of report.samples) {
+        if (mode === "native") {
+          expect(sample.native.status).toBe("complete")
+          expect(sample.native.uncertaintyMs).toBeGreaterThanOrEqual(0)
+          expect(JSON.parse(fs.readFileSync(sample.native.file, "utf8")).traceEvents.length).toBeGreaterThan(0)
+          if (sample.library === "strider") {
+            expect(sample.events.some((event: { name: string }) => event.name === "diagnostic.initialPage.alive")).toBe(
+              true
+            )
+          }
+        }
         expect(sample.ms).toBeGreaterThan(0)
         expect(sample.events.some((event: { name: string }) => event.name === "launch.available")).toBe(true)
         expect(sample.events.some((event: { kind: string }) => event.kind === "wire")).toBe(true)
