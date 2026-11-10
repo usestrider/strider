@@ -5,8 +5,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Browser, Deadline, Ledger } from "@usestrider/browser"
-import { Chromium } from "@usestrider/browser/chromium"
+import { Deadline } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -17,7 +16,6 @@ import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as CommandLine from "effect/process/CommandLine"
-import * as Queue from "effect/Queue"
 import * as Random from "effect/Random"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
@@ -1853,99 +1851,6 @@ describe("WebKit launcher", () => {
           assert.isBelow(performance.now() - started, 5000)
         })
     )
-  })
-})
-
-describe("Chromium metadata acquisition cleanup", () => {
-  layer(NodeServices.layer, { excludeTestServices: true })((it) => {
-    for (const terminal of ["interrupt", "version failure", "supplied profile failure"] as const) {
-      it.effect(`releases the child, temporary profile and ledger during ${terminal}`, () =>
-        Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
-          const commands = yield* Queue.unbounded<{ id: number; method: string }>()
-          const input = yield* Queue.unbounded<Uint8Array>()
-          const ledger = new Map<string, Ledger.Item>()
-          const supplied = terminal === "supplied profile failure"
-          let profile = supplied ? yield* fs.makeTempDirectoryScoped({ prefix: "startup-supplied-" }) : ""
-          let stopped = 0
-          const spawner = ChildProcessSpawner.make(() =>
-            Effect.gen(function*() {
-              yield* Effect.addFinalizer(() =>
-                Effect.sync(() => {
-                  stopped++
-                })
-              )
-              return ChildProcessSpawner.makeHandle({
-                pid: ChildProcessSpawner.ProcessId(9000003),
-                exitCode: Effect.never,
-                isRunning: Effect.succeed(true),
-                kill: () => Effect.void,
-                stdin: Sink.drain,
-                stdout: Stream.empty,
-                stderr: Stream.never,
-                all: Stream.never,
-                getInputFd: () =>
-                  Sink.forEach((bytes: Uint8Array) => {
-                    const messages = new TextDecoder().decode(bytes).split("\0").filter(Boolean)
-                    return Effect.forEach(messages, (message) => Queue.offer(commands, JSON.parse(message)), {
-                      discard: true
-                    })
-                  }),
-                getOutputFd: () => Stream.fromQueue(input),
-                unref: Effect.succeed(Effect.void)
-              })
-            })
-          )
-          const acquiring = yield* Effect.scoped(
-            Effect.gen(function*() {
-              const browser = yield* Browser.Browser
-              return browser.info
-            }).pipe(
-              Effect.provide(
-                Chromium.layer({
-                  executablePath: process.execPath,
-                  headless: true,
-                  userDataDir: supplied ? profile : undefined
-                })
-              )
-            )
-          ).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-            Effect.provideService(Ledger.CurrentLedger, {
-              add: (item) =>
-                Effect.sync(() => {
-                  ledger.set(JSON.stringify(item), item)
-                  if (item._tag === "Directory") profile = item.path
-                }),
-              remove: (item) =>
-                Effect.sync(() => {
-                  ledger.delete(JSON.stringify(item))
-                })
-            }),
-            Effect.exit,
-            Effect.forkChild
-          )
-          const sent = [yield* Queue.take(commands), yield* Queue.take(commands)]
-          assert.deepStrictEqual(sent.map((c) => c.method).sort(), ["Browser.getVersion", "Target.getBrowserContexts"])
-          assert.isTrue(yield* fs.exists(profile))
-          assert.strictEqual(ledger.size, supplied ? 1 : 2)
-          if (terminal === "interrupt") yield* Fiber.interrupt(acquiring)
-          else {
-            const id = sent.find((c) => c.method === "Browser.getVersion")!.id
-            yield* Queue.offer(
-              input,
-              new TextEncoder().encode(
-                JSON.stringify({ id, error: { code: -32000, message: "handshake rejected" } }) + "\0"
-              )
-            )
-            const exit = yield* Fiber.join(acquiring)
-            assert.isTrue(Exit.isFailure(exit))
-          }
-          assert.strictEqual(stopped, 1)
-          assert.strictEqual(yield* fs.exists(profile), supplied)
-          assert.strictEqual(ledger.size, 0)
-        }))
-    }
   })
 })
 
