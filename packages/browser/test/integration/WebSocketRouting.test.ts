@@ -81,6 +81,56 @@ for (const [name, backend] of backends) {
         60_000
       )
       it.effect(
+        "converts text like a native WebSocket while preserving valid surrogate pairs",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const target = origin.replace("http:", "ws:")
+            const observed: Array<string> = []
+            yield* page.context.routeWebSocket(`${target}/mock-unicode`, (connection) =>
+              connection.open({
+                fromPage: Effect.fnUntraced(function*(message, endpoint) {
+                  assert.strictEqual(message._tag, "Text")
+                  if (message._tag === "Text") observed.push(message.data)
+                  yield* endpoint.send(message)
+                })
+              }), { implementation: "script", timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript" })
+            const inputs = ["a\uD800b", "a\uDC00b", "a\uD83D\uDE00b", "\uD800\uD800\uDC00\uDC00"]
+            const html = `<pre id="out">pending</pre><script>
+            const inputs = ${JSON.stringify(inputs)};
+            const exchange = path => new Promise((resolve, reject) => {
+              const received = []; const ws = new WebSocket(${JSON.stringify(target)} + path);
+              ws.onopen = () => ws.send(inputs[0]);
+              ws.onerror = reject;
+              ws.onmessage = event => {
+                received.push(event.data);
+                if (received.length === inputs.length) { ws.close(); resolve(received); }
+                else ws.send(inputs[received.length]);
+              };
+            });
+            (async () => {
+              const native = await exchange('/native-unicode');
+              const mocked = await exchange('/mock-unicode');
+              document.querySelector('#out').textContent = JSON.stringify({ native, mocked });
+            })();
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("both sockets replied", (text: string) => text !== "pending")
+            )
+            const expected = ["a\uFFFDb", "a\uFFFDb", "a\uD83D\uDE00b", "\uFFFD\uD800\uDC00\uFFFD"]
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), {
+              native: expected,
+              mocked: expected
+            })
+            assert.deepStrictEqual(observed, expected)
+          }),
+        60_000
+      )
+
+      it.effect(
         "preserves a maximum-sized text message when JSON escaping expands its wire envelope",
         () =>
           Effect.gen(function*() {

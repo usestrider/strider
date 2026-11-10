@@ -64,7 +64,7 @@ describe("WebSocket shim admission and conversion", () => {
   it("sends text as the browser's USVString, replacing lone surrogates", async () => {
     // WebSocket.send(string) takes a USVString: a native socket transmits U+FFFD for a lone surrogate.
     const { context, dispatch, messages, waitFor } = setup()
-    await dispatch({ type: "grant", direction: "page", bytes: 16 })
+    await dispatch({ type: "grant", direction: "page", bytes: 64 })
     await dispatch({ type: "open" })
     vm.runInContext(`ws.send("a\\uD800b")`, context)
     await waitFor(1)
@@ -72,6 +72,14 @@ describe("WebSocket shim admission and conversion", () => {
       _tag: "Text",
       data: "a\uFFFDb"
     })
+    vm.runInContext(`ws.send("a\\uDC00b");ws.send("a\\uD83D\\uDE00b");ws.send("\\uD800\\uD800\\uDC00\\uDC00")`, context)
+    await waitFor(4)
+    assert.deepStrictEqual(messages.filter((message) => message.type === "message").map((message) => message.message), [
+      { _tag: "Text", data: "a\uFFFDb" },
+      { _tag: "Text", data: "a\uFFFDb" },
+      { _tag: "Text", data: "a\uD83D\uDE00b" },
+      { _tag: "Text", data: "\uFFFD\uD800\uDC00\uFFFD" }
+    ])
   })
 
   it("snapshots views synchronously and orders them after a pending Blob", async () => {
