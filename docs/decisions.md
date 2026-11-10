@@ -1464,15 +1464,9 @@ unavailable to fork PRs.
 
 ## Existing-context storage replacement
 
-Storage replacement requires `storageStateTracking: true` at context creation and retains native document origins
-and their ancestor origins only for those contexts. Cookie hosts also come from request origins, WebSocket connections (using HTTP/HTTPS cookie scope) and explicit cookie writes, so cookies without open documents can be cleared on stock WebKit. It preserves context identity and existing pages, clears
-tracked and incoming storage before restoring saved state, and refuses untracked contexts or held virtual
-authenticators before mutation. This follows “Pay for what you use”: native protocols cannot enumerate and clear
-all closed origins across the supported browsers without destroying the context. Always-on history and context
-replacement were rejected. Dispatch reads the listener field on the context already resolved by ordinary request,
-connection or document folding; only a registered listener parses origins or retains history. Untracked contexts still pay
-that field read/branch (plus the request owner-presence check), independently of whether a sibling is tracked;
-a browser-wide observer wrapper, repeated owner resolution and observer-map lookup were rejected. Running writers and open storage handles can cause typed partial failure; IndexedDB
-requests cannot be cancelled and may delete data after interruption or failure. Atomic rollback, silently merging
-state and claiming full Playwright equivalence were rejected. HTTP cache, existing-page sessionStorage and service
-worker registrations remain outside this saved-state operation; callers must quiesce their writers explicitly.
+Replacement requires creation-time tracking and preserves live pages. Native protocols cannot enumerate closed
+origins across backends, so only opted-in contexts retain history, following [Pay for what you use](#pay-for-what-you-use).
+Untracked contexts have only context-local dispatch checks. Replacement refuses live authenticator handles and
+unreproducible histories, and clears origins before cookies. Running writers and open storage handles can cause typed partial failure;
+pending deletions cannot be cancelled. Always-on history, context replacement, silent merging and atomic rollback
+were rejected.
