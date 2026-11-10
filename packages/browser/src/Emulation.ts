@@ -1,5 +1,5 @@
 /**
- * Emulated settings: viewport, locale, time zone, media features, network conditions and more.
+ * Emulated settings: viewport, locale, time zone, media features, network conditions, and more.
  *
  * The same settings have two lifetimes. `UserContext.Options.emulation` holds them for a context's whole life, and
  * `emulate(settings)` on a page or context holds them until its registration is removed. Fields you leave unset are
@@ -250,8 +250,8 @@ export interface Geolocation {
  * once; JavaScript and touch handlers apply at its next document.
  *
  * - Firefox can't emulate `media`, `touch`, `javaScript`, a mobile `viewport`, network throttling, a CPU
- *   slowdown or an unavailable position.
- * - WebKit can emulate only `extraHTTPHeaders`, `media`, `javaScript` and a `viewport`, which sizes the window, at a device scale of
+ *   slowdown, or an unavailable position.
+ * - WebKit can emulate only `extraHTTPHeaders`, `media`, `javaScript`, and a `viewport`, which sizes the window, at a device scale of
  *   1 and not mobile. Attached, it can emulate nothing.
  * - Chromium can emulate every field.
  *

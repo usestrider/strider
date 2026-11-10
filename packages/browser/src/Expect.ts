@@ -2,7 +2,7 @@
  * Expectations that retry: each `Expect.to*` checks until it passes or the deadline passes.
  *
  * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
- * mutation, an `input`, `change` or focus event, an animation frame), so there is no polling interval and no change
+ * mutation, an `input`, `change`, or focus event, an animation frame), so there is no polling interval and no change
  * is missed between checks. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
  * each change, and runs any other effect again every `CheckInterval`. Everything runs on the real clock, within the
  * deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
@@ -362,7 +362,7 @@ export const toHaveText: DualMatcher<
  * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
  * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
- * visible element. Roles that prohibit naming, such as generic, paragraph and code, have an empty name;
+ * visible element. Roles that prohibit naming, such as generic, paragraph, and code, have an empty name;
  * their content can still contribute to another element's name. An explicit nameable role can override the
  * implicit role. Missing or multiple matches keep retrying and fail with their match count.
  *
@@ -402,7 +402,7 @@ export const toHaveAccessibleName: DualMatcher<
  *
  * **Details**
  *
- * Strings compare the whole class string, preserving case, whitespace and class order. Regular expressions
+ * Strings compare the whole class string, preserving case, whitespace, and class order. Regular expressions
  * are tested as given. Missing class attributes are empty strings. Scalars retry zero or multiple matches;
  * an empty array passes when nothing matches. Failures include the observed class strings or match count.
  *

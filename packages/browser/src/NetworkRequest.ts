@@ -360,7 +360,7 @@ export const history = (
  *
  * **Gotchas**
  *
- * - The result has the request's method, URL and headers, and no body: a replay of a `POST` sets one.
+ * - The result has the request's method, URL, and headers, and no body: a replay of a `POST` sets one.
  * - Header values are whole, so a replay sends the credentials the page put in, such as an `Authorization`
  *   header. Effect's `Headers` still redact them wherever the result is logged or inspected.
  * - On Chromium and WebKit, the headers leave out what the network adds, `Cookie` among them. On Firefox they
@@ -402,7 +402,7 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
  *   adds, such as `Cookie`. On Chromium this can wait for response or redirect information even after the extra
  *   headers arrive, so they cannot be confused with another redirect hop's headers. On WebKit it waits for the
  *   response. On Firefox it returns at once. The operation's deadline bounds the wait.
- * - If the request finishes, fails, is canceled, is evicted from retention, or loses its frame, worker, context, page
+ * - If the request finishes, fails, is canceled, is evicted from retention, or loses its frame, worker, context, page,
  *   or browser connection before its sent headers are known, this
  *   returns the available sent headers, or the request event's headers if none were reported. Those can omit
  *   network additions such as `Cookie`.
@@ -460,7 +460,7 @@ export interface CapturedRequest<B> extends NetworkRequest {
 }
 
 /**
- * Reads collected request data with Effect's HTTP decoders, using `text`, `arrayBuffer`, `json` or `urlParamsBody`.
+ * Reads collected request data with Effect's HTTP decoders, using `text`, `arrayBuffer`, `json`, or `urlParamsBody`.
  *
  * **Gotchas**
  *
@@ -598,8 +598,8 @@ export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkR
  *
  * **Details**
  *
- * `notRetained` includes unknown, evicted, copied or decoded request snapshots. `foreignTarget` means the
- * request belongs to another page or context. `ownerLost` means its page, context, frame, worker or browser
+ * `notRetained` includes unknown, evicted, copied, or decoded request snapshots. `foreignTarget` means the
+ * request belongs to another page or context. `ownerLost` means its page, context, frame, worker, or browser
  * connection is gone. `timingNotEnabled` or `sizesNotEnabled` means its context did not opt into
  * the corresponding collection.
  * None of these proves that the network request failed.
@@ -692,7 +692,7 @@ export class RedirectUnknown
 }
 
 /**
- * Schema for the reasons reading a request body, timing, sizes, failure, response association or redirect links can fail.
+ * Schema for the reasons reading a request body, timing, sizes, failure, response association, or redirect links can fail.
  *
  * @stability unstable
  * @category schemas
@@ -711,7 +711,7 @@ export const RequestErrorReason = Schema.Union([
 ])
 
 /**
- * The reasons reading a request body, timing, sizes, failure, response association or redirect links can fail.
+ * The reasons reading a request body, timing, sizes, failure, response association, or redirect links can fail.
  *
  * @stability unstable
  * @category models
@@ -720,11 +720,11 @@ export const RequestErrorReason = Schema.Union([
 export type RequestErrorReason = typeof RequestErrorReason.Type
 
 /**
- * Error for a request body, timing, sizes, failure, response association or redirect links that could not be read.
+ * Error for a request body, timing, sizes, failure, response association, or redirect links that could not be read.
  *
  * **Details**
  *
- * Body collection failures include the request URL; timing, response association and redirect failures may omit it.
+ * Body collection failures include the request URL; timing, response association, and redirect failures may omit it.
  *
  * @stability unstable
  * @category errors
@@ -766,10 +766,10 @@ export class RequestError
  *
  * Firefox decoded size is unavailable because the browser reports zero for nonempty bodies.
  * Sums and differences require valid counts from the same completed network hop. Cache,
- * revalidation, routed responses and uncollected worker requests can leave every field unavailable.
+ * revalidation, routed responses, and uncollected worker requests can leave every field unavailable.
  * Chromium returns `None` for every size field when `loadingFinished` arrives before
  * `responseReceivedExtraInfo`, which is common for images.
- * No sizes are estimated from header objects, Content-Length or downloaded bodies.
+ * No sizes are estimated from header objects, Content-Length, or downloaded bodies.
  *
  * @stability unstable
  * @category models
@@ -798,7 +798,7 @@ export class Sizes extends Schema.Class<Sizes>("@usestrider/browser/NetworkReque
  * `responseReceivedExtraInfo` leaves all sizes `None`; this ordering is common for images.
  *
  * Reads require the original request instance in the bounded 1000-hop index and live page/context,
- * frame/worker and browser owners. Copied, decoded, evicted and foreign requests refuse with
+ * frame/worker, and browser owners. Copied, decoded, evicted, and foreign requests refuse with
  * `RequestError` / `RequestUnavailable`; omitted opt-in refuses with `sizesNotEnabled`.
  * History does not pin sizes. Save the returned immutable Schema snapshot to retain it beyond its owners.
  * See `Sizes` for the per-browser availability table.
@@ -835,7 +835,7 @@ export const sizes = (
  *
  * `startTime` is milliseconds since the Unix epoch. Every other value is milliseconds from that same
  * hop's native baseline. A missing value proves neither completion nor failure. Earlier snapshots never
- * change. Connection reuse, cache responses and missing browser evidence can leave phases unavailable.
+ * change. Connection reuse, cache responses, and missing browser evidence can leave phases unavailable.
  * `requestStart` can describe browser-reported cache access as well as request sending. Cache reuse can omit
  * a second observable request entirely. Source labels alone do not establish whether the server was contacted.
  * `secureConnectionStart` is currently unavailable; TLS phase mapping is not advertised.
@@ -863,8 +863,8 @@ export class Timing extends Schema.Class<Timing>("@usestrider/browser/NetworkReq
  *
  * Create the context with `requestTiming: true` before opening its pages. Omitted or false configuration
  * collects no timing state. Reads otherwise fail with `RequestError` / `RequestUnavailable`.
- * The original request must remain in the bounded 1000-hop index with live page, context, frame or worker
- * and connection owners. Copied, decoded, evicted and foreign requests refuse. Save the returned Schema
+ * The original request must remain in the bounded 1000-hop index with live page, context, frame or worker,
+ * and connection owners. Copied, decoded, evicted, and foreign requests refuse. Save the returned Schema
  * snapshot to retain it beyond those owners. History does not pin timing observations.
  *
  * `responseEnd` appears only after successful transfer completion, including redirect hops. A failure after
@@ -953,10 +953,10 @@ export const response = (
  * `Some` preserves the failure text and cancellation evidence; it does not classify HTTP status codes.
  *
  * Pass the original request observation and its page or context. The bounded index keeps at most 1000 hops
- * across the connection, dropping completed hops first. Missing, evicted, copied and foreign requests fail
- * with `RequestError` / `RequestUnavailable`. Loss of the owning page, context, frame, worker or connection
+ * across the connection, dropping completed hops first. Missing, evicted, copied, and foreign requests fail
+ * with `RequestError` / `RequestUnavailable`. Loss of the owning page, context, frame, worker, or connection
  * makes even a completed request unavailable. Save a returned `Failure` if it must outlive that owner.
- * This read adds no retention, subscription or instrumentation.
+ * This read adds no retention, subscription, or instrumentation.
  *
  * **Example** (Inspecting a request after an action completes)
  *
@@ -1009,7 +1009,7 @@ export interface Redirects {
  *
  * All backends reuse the existing connection-wide index of at most 1000 hops. Completed hops are evicted
  * oldest first, then unfinished hops if necessary. Other contexts can therefore evict evidence. This retains
- * no additional requests, installs no listeners and sends no protocol commands. Closing the scope revokes access;
+ * no additional requests, installs no listeners, and sends no protocol commands. Closing the scope revokes access;
  * closing the target or connection also prevents reads. Access may read requests sent before it opened.
  *
  * `from` and `to` use chain identity and hop ordinal, including when URLs repeat. They require the exact original
@@ -1024,7 +1024,7 @@ export interface Redirects {
  * fetch redirect mode. Firefox and WebKit manual fetches can therefore remain unknown. A missing retained
  * navigation outcome cannot prove a boundary either. If the needed outcome is absent and navigation history is
  * disabled or has dropped entries, `RedirectUnavailable` (`unavailable`) preserves that retention failure.
- * Neither member waits, installs tracking or sends commands.
+ * Neither member waits, installs tracking, or sends commands.
  *
  * **Example** (Reading a redirect's predecessor)
  *

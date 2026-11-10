@@ -1,5 +1,5 @@
 /**
- * What every event module shares: `next`, `stream` and `history`, the `where` predicate, and their errors.
+ * What every event module shares: `next`, `stream`, and `history`; the `where` predicate; and their errors.
  *
  * Each kind of event is a module of its own (`Download`, `Popup`, `NetworkResponse`, …) with the same three
  * functions. Waits look forward, and reads look back:
@@ -141,7 +141,7 @@ const SubscriptionErrorTypeId = "~@usestrider/browser/Subscription/SubscriptionE
  *
  * **Details**
  *
- * It fails the call that took the filter (`next`, `stream` or `history`), before any event, never the wait or
+ * It fails the call that took the filter (`next`, `stream`, or `history`), before any event, never the wait or
  * the stream that call returns. An invalid filter, such as a malformed URL pattern, is `InvalidInput`, and one
  * that asks for events the backend can't report is `Unsupported`, naming the capability. `operation` names the
  * call, such as `NetworkResponse.next`.

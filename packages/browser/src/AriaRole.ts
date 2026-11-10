@@ -1,7 +1,7 @@
 /**
- * The WAI-ARIA roles that `getByRole`, snapshots and `AriaPattern` use.
+ * The WAI-ARIA roles that `getByRole`, snapshots, and `AriaPattern` use.
  *
- * Like `effect/http`'s `HttpMethod`, the module has the type (`AriaRole`), the roles Strider knows (`all`) and a
+ * Like `effect/http`'s `HttpMethod`, the module has the type (`AriaRole`), the roles Strider knows (`all`), and a
  * guard (`isAriaRole`).
  *
  * @stability unstable

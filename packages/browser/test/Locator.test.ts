@@ -295,7 +295,7 @@ describe("Locator.check refusal deadlines", () => {
                         _tag: "Final",
                         final: {
                           _tag: "WrongElement",
-                          expected: "a checkbox, a radio or an ARIA checkable",
+                          expected: "a checkbox, a radio, or an ARIA checkable",
                           element: "<option>"
                         }
                       })

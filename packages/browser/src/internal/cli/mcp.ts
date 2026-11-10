@@ -53,7 +53,7 @@ const flags = {
   ),
   capture: Flag.Literals("capture", ["local", "strict"]).pipe(
     Flag.withDescription(
-      "What the started session's snapshots, screenshots and digests may hold: local or strict (default: local)"
+      "What the started session's snapshots, screenshots, and digests may hold: local or strict (default: local)"
     ),
     Flag.optional
   ),

@@ -1140,7 +1140,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           operation,
           new Locator.NotEditable({
             element: final.element,
-            hint: "Only inputs, textareas and contenteditable elements take text"
+            hint: "Only inputs, textareas, and contenteditable elements take text"
           }),
           id
         )

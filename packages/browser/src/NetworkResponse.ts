@@ -102,7 +102,7 @@ export type ServedBy = typeof ServedBy.Type
  *
  * **Details**
  *
- * - `servedBy` says what answered: the network, a cache, a service worker or a route.
+ * - `servedBy` says what answered: the network, a cache, a service worker, or a route.
  * - `statusText` is the status line's reason phrase as the browser reports it, empty for HTTP/2 and later.
  * - `httpVersion` is the protocol as the browser names it, such as `http/1.1` or `h2`. It's `None` where the
  *   browser doesn't report it with the response, as WebKit doesn't: it reports it only when the response ends.
@@ -246,7 +246,7 @@ export const withBodyLimit: {
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
  *
- * On Firefox, a terminal response with status 301, 302, 303, 307 or 308 without a `Location` header fails body
+ * On Firefox, a terminal response with status 301, 302, 303, 307, or 308 without a `Location` header fails body
  * collection immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does
  * not answer the native body command for it. Other statuses remain readable, and Chromium and WebKit can collect
  * these terminal responses' bodies.
@@ -324,7 +324,7 @@ export const next: {
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
  * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
- * Firefox terminal responses with status 301, 302, 303, 307 or 308 without a `Location` header fail body collection
+ * Firefox terminal responses with status 301, 302, 303, 307, or 308 without a `Location` header fail body collection
  * immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not
  * answer the native body command for them. Other statuses remain readable.
  *

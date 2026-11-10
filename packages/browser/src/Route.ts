@@ -1,9 +1,9 @@
 /**
  * Routes intercept a page's or context's requests, and a route's handler decides what happens to each one.
  *
- * A route works at one phase: before the request is sent (the default), when its response starts or at an
+ * A route works at one phase: before the request is sent (the default), when its response starts, or at an
  * authentication challenge. Its handler returns an Effect that produces a `Decision` valid at that phase. A
- * handler that fails, is interrupted, runs out of time or returns a decision the backend can't apply gets the
+ * handler that fails, is interrupted, runs out of time, or returns a decision the backend can't apply gets the
  * default, `continue`, and
  * its failure is logged. A fulfilled response is an `HttpServerResponse`, and a change to a request is a function
  * of `HttpClientRequest`. The page's routes are asked before its context's, the most recent first.
@@ -45,7 +45,7 @@ import type * as Watchable from "./Watchable.ts"
 const DecisionTypeId = RouteDecision.TypeId
 
 /**
- * Where a request is paused: before it's sent, when its response starts or at an authentication challenge.
+ * Where a request is paused: before it's sent, when its response starts, or at an authentication challenge.
  *
  * @stability unstable
  * @category models
