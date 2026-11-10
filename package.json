@@ -30,6 +30,7 @@
     "readme": "node packages/tools/utils/src/bin.mjs readme",
     "release": "pnpm build && pnpm pack-check && changeset publish",
     "scenarios": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORDINGS_ACCOUNT_ID --keep STRIDER_RECORDINGS_BUCKET --keep STRIDER_RECORDINGS_ACCESS_KEY_ID --keep STRIDER_RECORDINGS_SECRET_ACCESS_KEY --command node packages/scenarios/src/bin.ts",
+    "scenarios:recorded": "eval \"$(sops -d --output-type dotenv packages/scenarios/recordings.sops.env | sed 's/^/export /')\" && pnpm scenarios",
     "scenarios:report": "node packages/scenarios/src/report-bin.ts",
     "bench": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/src/benchmarks/bin.ts",
     "all": "pnpm check && pnpm lint && pnpm test --run && pnpm test-types && pnpm reference && pnpm website:check && pnpm website:build && pnpm matrix:check --built",

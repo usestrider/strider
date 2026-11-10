@@ -150,14 +150,19 @@ Fetch interception and automation-tell diagnostics. It never substitutes differe
   | -------------------------------------- | --------------------------------------- |
   | `STRIDER_RECORDINGS_ACCOUNT_ID`        | The Cloudflare account                  |
   | `STRIDER_RECORDINGS_BUCKET`            | The bucket's name, `strider-recordings` |
-  | `STRIDER_RECORDINGS_ACCESS_KEY_ID`     | An R2 token's access key (read-only)    |
+  | `STRIDER_RECORDINGS_ACCESS_KEY_ID`     | The bucket's R2 token's access key      |
   | `STRIDER_RECORDINGS_SECRET_ACCESS_KEY` | That token's secret                     |
 
   Without all four, the local-site scenarios run and each real-site scenario whose recording isn't already in
   `.data/scenarios/` is skipped: the output and the report's unsupported comparisons say so and why.
 
-  The bucket is declared in `storage/alchemy.run.ts`, a stack of its own: `pnpm --filter @usestrider/scenarios
-  storage:deploy` deploys it with the maintainer's Cloudflare credentials.
+  The bucket, `strider-recordings`, was made by hand in Cloudflare's dashboard: private, with no public access or
+  domain. Its one token reads and writes only that bucket. The four values are kept encrypted in
+  `recordings.sops.env`, for the maintainer's age key and the benchmarks' CI key (`.sops.yaml`).
+  `pnpm scenarios:recorded` decrypts them and runs `pnpm scenarios` with them, taking the same arguments, and
+  `benchmarks.yml` decrypts them with the `benchmarks` environment's `SOPS_AGE_KEY`. Every recording's hash is
+  committed, so a key that can write can delete or replace a recording, which makes runs fail naming it, but can't
+  change one unnoticed.
 
 ## Refreshing recordings
 
@@ -169,8 +174,8 @@ the login pages used by other scenarios.
 
 `pnpm scenarios --record` visits the live sites, overwrites the ignored working recordings in `.data/scenarios/`,
 uploads each to the bucket under its hash, and rewrites `recordings.json`: commit that file with the refresh. Uploading
-needs the same four variables with a write token; without them the recording is kept locally and the command fails
-saying it wasn't uploaded. `pnpm scenarios --upload` does the upload and the manifest alone, for the recordings already in `.data/scenarios/`, without visiting any site: use it to pin the recordings an earlier run was measured on. It needs the write token and fails naming any recording file that is missing. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
+needs the same four variables, which `pnpm scenarios:recorded --record` supplies; without them the recording is kept locally and the command fails
+saying it wasn't uploaded. `pnpm scenarios --upload` does the upload and the manifest alone, for the recordings already in `.data/scenarios/`, without visiting any site: use it to pin the recordings an earlier run was measured on. Run it as `pnpm scenarios:recorded --upload`; it fails naming any recording file that is missing. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
 from the repository root (choose an absolute `evidence` path that does not already exist):
 
 ```sh
