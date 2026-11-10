@@ -10,6 +10,7 @@ import { contextKey, type Event, placement, type State, type TargetEntry, type W
 type Installation = { readonly view: State; readonly registered: Set<string> }
 let installed: WeakMap<TargetEntry, Installation> | undefined
 let originals: WeakMap<State, State> | undefined
+let retired: WeakSet<Adapter.WebSocketBridge> | undefined
 
 const restore = (state: State, target: TargetEntry, installation: Installation) => {
   const events = [
@@ -30,6 +31,8 @@ export const prepare: (
   bridges: ReadonlyArray<Adapter.WebSocketBridge>
 ) => Effect.Effect<void> = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, bridges: ReadonlyArray<Adapter.WebSocketBridge>) {
+    const closed = retired
+    if (closed !== undefined) bridges = bridges.filter((bridge) => !closed.has(bridge))
     const base = originals?.get(state) ?? state
     const previous = installed?.get(target)
     if (previous !== undefined) restore(base, target, previous)
@@ -139,6 +142,9 @@ export const prepare: (
       yield* Scope.addFinalizer(
         bridge.scope,
         Effect.suspend(() => {
+          retired ??= new WeakSet()
+          retired.add(bridge)
+          registered.delete(bridge.token)
           const current = base.registry.bundles(placement(target.page)).get("")?.webSockets ?? []
           return prepare(base, target, current)
         })

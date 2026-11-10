@@ -64,6 +64,7 @@ interface Connection {
   readonly status: SubscriptionRef.SubscriptionRef<State>
   readonly events: Events.Channel<WebSocketRoute.Event>
   readonly lock: Semaphore.Semaphore
+  released: boolean
   readonly opened: Deferred.Deferred<string, WebSocketRoute.WebSocketRouteError | Target.TargetGone>
   fromPage?: ((message: WebSocketRoute.Message) => Effect.Effect<void, unknown>) | undefined
   fromServer?: ((message: WebSocketRoute.Message) => Effect.Effect<void, unknown>) | undefined
@@ -171,7 +172,8 @@ export const register = <E, R>(
     const command = (connection: Pick<Connection, "id" | "realm">, value: Record<string, unknown>) =>
       evaluate(connection.realm, Shim.command(token, { id: connection.id, ...value }))
     const forget = Effect.fnUntraced(function*(connection: Connection, destroyed: boolean, uncertain = false) {
-      if (SubscriptionRef.getUnsafe(connection.status) === "closed") return
+      if (connection.released) return
+      connection.released = true
       yield* SubscriptionRef.set(connection.status, "closed")
       connections.delete(`${connection.realm}:${connection.id}`)
       if (uncertain) {
@@ -191,8 +193,9 @@ export const register = <E, R>(
       )
       Events.end(connection.events, { normal: !destroyed, reason })
       yield* Scope.close(connection.scope, Exit.void).pipe(Effect.forkIn(scope))
-    })
+    }, Effect.uninterruptible)
     const terminate = Effect.fnUntraced(function*(connection: Connection, reason: string) {
+      yield* SubscriptionRef.set(connection.status, "closed")
       Events.publish(connection.events, { _tag: "Error", message: reason })
       yield* command(connection, { type: "fail", reason }).pipe(Effect.ignore)
       // Reclaim only after the realm has stopped accepting and conversion chains have acknowledged draining.
@@ -275,7 +278,10 @@ export const register = <E, R>(
         const owner = `${realm}:${message.id}`
         if (connections.has(owner)) return
         const lease = allocation.admit(owner, 1)
-        const reject = () => command({ realm, id: message.id }, { type: "fail", reason: "constructor admission" })
+        const reject = () =>
+          command({ realm, id: message.id }, { type: "fail", reason: "constructor admission" }).pipe(
+            Effect.andThen(command({ realm, id: message.id }, { type: "drain" }))
+          )
         if (lease === undefined) return yield* reject()
         const child = yield* Scope.fork(scope)
         const status = yield* SubscriptionRef.make<State>("connecting")
@@ -290,6 +296,7 @@ export const register = <E, R>(
           status,
           events,
           opened,
+          released: false,
           lock
         }
         const page = writable(connection, "page"), server = writable(connection, "server")
@@ -487,6 +494,7 @@ export const register = <E, R>(
             )
           )
         } else if (envelope.type === "closed") {
+          yield* SubscriptionRef.set(connection.status, "closed")
           Events.publish(connection.events, {
             _tag: "Closed",
             direction: envelope.direction ?? "page",
@@ -587,7 +595,7 @@ export const register = <E, R>(
       }
       for (const connection of connections.values()) {
         if (acknowledged.has(connection.realm)) yield* forget(connection, false)
-        else yield* Scope.close(connection.scope, Exit.void)
+        else yield* forget(connection, false, true)
       }
       const pending = yield* Queue.clear(incoming)
       for (const item of pending) if (item.payload !== undefined) yield* item.payload.pipe(Effect.ignore)

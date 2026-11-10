@@ -364,7 +364,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       } else socket.closed(command.code ?? 1000, command.reason ?? "", true)
     } else if (command.type === "fail") socket.fail(command.reason)
     else if (command.type === "drain") {
-      socket.readyState = 2
+      if (socket.readyState !== 3) socket.readyState = 2
       socket.native?.close(1000, "route removed")
       await Promise.all([socket.queues.page.chain, socket.queues.server.chain])
       socket.closed(1000, "route removed", true, false)
