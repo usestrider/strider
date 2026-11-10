@@ -32,7 +32,8 @@ if (!values.base || !values.head || !values.output) {
 }
 if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
 const manyPagesMode = values.workload === "scenarios" && values.only === "many-pages-diagnostic"
-if (manyPagesMode) values.only = "many-pages"
+const traceMode = values.workload === "scenarios" && values.only === "many-pages-trace"
+if (manyPagesMode || traceMode) values.only = "many-pages"
 const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
@@ -188,13 +189,29 @@ try {
         ]
         if (values.only) args.push("--only", values.only)
         const log = fs.openSync(path.join(output, role, "worker.log"), "w")
+        // Trace mode loads the existing session-profile loader, which records every protocol message with a host
+        // timestamp for each attempt. Trace output is written outside the timed region, so only these diagnostic
+        // repetitions carry its overhead.
+        const execArgv = [...process.execArgv]
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          STRIDER_PAIRED: "1",
+          STRIDER_PHASE_OUTPUT: path.join(output, role, "phases.ndjson")
+        }
+        if (traceMode) {
+          for (const file of ["session-profile-loader.mjs", "session-profile-config.ts", "session-profile-hooks.ts"]) {
+            const from = path.join(source, "../benchmark", file)
+            const to = path.join(root, "packages/scenarios/benchmark", file)
+            fs.mkdirSync(path.dirname(to), { recursive: true })
+            fs.copyFileSync(from, to)
+          }
+          execArgv.push("--import", path.join(root, "packages/scenarios/benchmark/session-profile-loader.mjs"))
+          env["STRIDER_SESSION_PROFILE"] = path.join(output, role, "protocol-trace.jsonl")
+        }
         const child = fork(path.join(target, entry), args, {
           cwd: root,
-          env: {
-            ...process.env,
-            STRIDER_PAIRED: "1",
-            STRIDER_PHASE_OUTPUT: path.join(output, role, "phases.ndjson")
-          },
+          execArgv,
+          env,
           stdio: ["ignore", log, log, "ipc"]
         })
         fs.closeSync(log)
