@@ -62,14 +62,13 @@ export const dispatchInput = Effect.fnUntraced(
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
       }).pipe(
+        // The adapter takes the release over from the first moment it is owed, so the caller's accounting, which
+        // runs as the dispatch ends, doesn't record a second one
         Effect.onError(() =>
-          releaseWritten
-            ? Effect.sync(() => Gestures.released.add(events))
-            : release.pipe(
-              Effect.tap(() => Effect.sync(() => Gestures.released.add(events))),
-              Operation.detached,
-              Effect.ignore
-            )
+          Effect.suspend(() => {
+            Gestures.released.add(events)
+            return releaseWritten ? Effect.void : release.pipe(Operation.detached, Effect.ignore)
+          })
         )
       )
       return

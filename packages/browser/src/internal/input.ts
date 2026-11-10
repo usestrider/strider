@@ -71,9 +71,9 @@ export const recover = <E>(
   })
 
 /**
- * Gestures whose events an adapter has already released after its own dispatch failed or was cut short, or whose
- * release it had written before that: the page holds nothing from them, so none is recorded as uncertain. An adapter
- * adds the events array it was given.
+ * Gestures whose pressed input an adapter has taken over: it released it itself when the dispatch failed or was cut
+ * short, or had written the release before that. The page holds nothing from them, so none is recorded as
+ * uncertain. An adapter adds the events array it was given.
  */
 export const released: WeakSet<ReadonlyArray<Adapter.InputEvent>> = new WeakSet()
 
