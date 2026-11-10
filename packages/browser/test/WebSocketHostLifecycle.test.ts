@@ -1,8 +1,11 @@
 import { assert, it } from "@effect/vitest"
-import { Browser, Target, WebSocketRoute } from "@usestrider/browser"
+import { Browser, Deadline, Target, WebSocketRoute } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as TestClock from "effect/testing/TestClock"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -200,6 +203,7 @@ it.effect("rejects late dead-realm payloads and duplicate destruction without re
     Effect.gen(function*() {
       const context = yield* Browser.newContext()
       const captured = yield* Deferred.make<WebSocketRoute.Connection>()
+      const replacement = yield* Deferred.make<WebSocketRoute.Connection>()
       const registration = yield* context.routeWebSocket("**", (socket) =>
         Deferred.succeed(captured, socket).pipe(Effect.asVoid), { implementation: "script" })
       const bridge = getBridge()
@@ -225,7 +229,45 @@ it.effect("rejects late dead-realm payloads and duplicate destruction without re
       assert.isTrue(bridge.receive(next, payload("replacement"), { _tag: "Worker", realm: next }, {
         isAlive: () => true
       }))
+      const current = yield* Deferred.await(replacement)
+      bridge.ended(old)
+      assert.strictEqual(yield* current.status, "connecting")
       yield* registration.remove
       assert.strictEqual(yield* previous.status, "closed")
+      assert.strictEqual(yield* current.status, "closed")
     })
   ))
+
+it.effect("bounds removal when an accepted fetch and its release never complete", () =>
+  harness((getBridge) =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+      const bridge = getBridge()
+      const realm = Target.RealmId.make("R-stuck-release")
+      const fetching = yield* Deferred.make<void>()
+      const releasing = yield* Deferred.make<void>()
+      let releases = 0
+      assert.isTrue(
+        bridge.receive(realm, Deferred.succeed(fetching, undefined).pipe(Effect.andThen(Effect.never)), {
+          _tag: "Worker",
+          realm
+        }, {
+          isAlive: () => true,
+          release: Effect.sync(() => {
+            releases++
+          }).pipe(
+            Effect.andThen(Deferred.succeed(releasing, undefined)),
+            Effect.andThen(Effect.never)
+          )
+        })
+      )
+      yield* Deferred.await(fetching)
+      const removal = yield* registration.remove.pipe(Effect.forkChild)
+      yield* Deferred.await(releasing)
+      yield* TestClock.adjust("100 millis")
+      yield* Fiber.join(removal)
+      yield* registration.remove
+      assert.strictEqual(releases, 1)
+    })
+  ).pipe(Effect.provideService(Deadline.DefaultBudget, Duration.millis(100))))
