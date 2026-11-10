@@ -79,6 +79,16 @@ describe("WebSocket shim admission and conversion", () => {
     )
   })
 
+  it("keeps host dispatch intact when the page replaces the holder's dispatch method", async () => {
+    const { context, dispatch } = setup()
+    vm.runInContext(
+      `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")].dispatch = () => {}`,
+      context
+    )
+    await dispatch({ type: "open" })
+    assert.strictEqual(vm.runInContext("ws.readyState", context), 1)
+  })
+
   it("removes the page-visible binding once the shim has captured it", () => {
     const calls: Array<string> = []
     const context = vm.createContext({
