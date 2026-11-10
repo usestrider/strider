@@ -180,12 +180,18 @@ export interface FoldControl {
 }
 
 /**
- * An adapter's model of each session, kept up to date by the worker. Every hook runs in the worker, in
- * receive order, and must never wait on a command, a subscriber or user code.
+ * An adapter's model of each session, kept up to date by the worker. State-changing hooks run in the worker,
+ * in receive order, and must never wait on a command, a subscriber or user code. Event scopes also run in the reader.
  */
 export interface Fold {
   /** The events the fold needs, by method. Each is decoded before it is folded. */
   readonly events: ReadonlyMap<string, Protocol.EventDef<string, any>>
+  /**
+   * Optional per-method session scopes, checked before queueing and before fold decoding.
+   * A scoped-out event is still published to explicitly registered protocol subscribers.
+   * Predicates run synchronously in the reader as well as the worker; they must only inspect state.
+   */
+  readonly eventScopes?: ReadonlyMap<string, (session: Session) => boolean> | undefined
   /** Folds one event, before it is published. */
   readonly apply: (session: Session, method: string, params: unknown, received: number) => Effect.Effect<void>
   /**

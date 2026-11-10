@@ -35,6 +35,7 @@ import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
 import * as Operation from "./operation.ts"
+import * as Sizes from "./requestSizes.ts"
 import * as Timing from "./requestTiming.ts"
 
 const plain = EventModule.make<
@@ -380,10 +381,13 @@ const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry)
     target.behind.entry
 
 /** An immediate read of existing terminal facts, valid only while the original owner remains observable. */
-export const timing = (
+const observation = <A>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
-  request: NetworkRequest.NetworkRequest
-): Effect.Effect<NetworkRequest.Timing, NetworkRequest.RequestError> => {
+  request: NetworkRequest.NetworkRequest,
+  kind: "timing" | "sizes",
+  read: (context: Model.ContextEntry) => Map<NetworkRequest.HopId, A> | undefined,
+  empty: () => A
+): Effect.Effect<A, NetworkRequest.RequestError> => {
   const owner = Handles.target(target)
   return Effect.gen(function*() {
     const { model } = owner.behind.runtime
@@ -425,16 +429,29 @@ export const timing = (
         }
       }
       const context = Option.getOrUndefined(hop.context)
-      if (context?.timings === undefined) return unavailable("timingNotEnabled")
-      return Effect.succeed(context.timings.get(request.hop) ?? Timing.empty())
+      const store = context === undefined ? undefined : read(context)
+      if (store === undefined) return unavailable(kind === "timing" ? "timingNotEnabled" : "sizesNotEnabled")
+      return Effect.succeed(store.get(request.hop) ?? empty())
     })
-  }).pipe(Operation.named("NetworkRequest.timing", {
+  }).pipe(Operation.named(`NetworkRequest.${kind}`, {
     attributes: {
       "browser.hop.id": request.hop,
       [owner._tag === "Page" ? "browser.page.id" : "browser.context.id"]: owner.behind.entry.id
     }
   }))
 }
+
+export const timing = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest.NetworkRequest
+): Effect.Effect<NetworkRequest.Timing, NetworkRequest.RequestError> =>
+  observation(target, request, "timing", (context) => context.timings, Timing.empty)
+
+export const sizes = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest.NetworkRequest
+): Effect.Effect<NetworkRequest.Sizes, NetworkRequest.RequestError> =>
+  observation(target, request, "sizes", (context) => context.sizes, Sizes.empty)
 
 /** Opt-in retention of one existing hop; no model or adapter work is installed. */
 export const response = (

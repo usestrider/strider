@@ -241,3 +241,50 @@ const lastVisit = Effect.fn("lastVisit")(function*(page: Page.Page) {
   the context's open pages were sent.
 - Cookie values are `Redacted`.
 - A set cookie stays when the scope closes.
+
+## Replacing storage in a live context
+
+A sign-in change can require clearing a context's previous login while keeping its pages. Create the context with
+`storageStateTracking: true` so replacement can also clear origins and partitions whose pages have closed.
+
+```ts
+import { Browser, StorageState } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const replaceLogin = Effect.fn("replaceLogin")(
+  function*(state: StorageState.StorageState) {
+    const context = yield* Browser.newContext({ storageStateTracking: true })
+    const page = yield* context.newPage
+    yield* page.goto("https://example.com")
+    yield* context.setStorageState(state)
+    return page
+  }
+)
+```
+
+Replacement clears all cookies and the localStorage, IndexedDB databases and available origin-private files of
+incoming and previously visited origins and partitions, then restores the supplied cookies, localStorage and
+IndexedDB. Omitted data is cleared. Pages keep their identity and URLs; reload a page yourself if its application
+needs to read the new state. Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
+
+Stop page and worker writes, including storage-writing init scripts, and release IndexedDB connections and file handles first. A blocked database deletion,
+locked file, backend error or deadline can leave partial changes. Interruption has the same risk. There is no
+rollback. Runtime failures use `UserContextError` with reason `StorageState.PartiallyApplied`, meaning changes
+may have occurred, even if the failure happened before the first deletion; deadlines remain
+`Deadline.Timeout`, and interruption remains interruption. An issued IndexedDB deletion may complete later when its connection closes. Temporary pages and
+routes are released even on failure or interruption. Temporary pages appear in [`context.pages`](/docs/api/browser/UserContext#ObservedUserContext) while replacement
+runs, and the context's routes and init scripts apply to them. A successful call confirms completed storage operations,
+not an atomic snapshot against concurrent writers.
+
+Untracked contexts and contexts with acquired virtual authenticators refuse before mutation. Close the
+authenticator's scope before replacement. Tracking is chosen at creation and cannot be added when reclaiming a
+context. Non-HTTP(S) storage and opaque ancestor partitions cannot be replayed. Those histories remain refused after their pages close: file storage persists, and complete opaque-partition
+unreachability across descendants and workers has not been established. Unreproducible incoming metadata also
+refuses before mutation, including a partition explicitly marked
+`crossSiteAncestor: false`. A top-level origin must belong to its declared site, and incoming same-site partitions
+requiring a cross-site ancestor refuse because the saved format carries no ancestor chain. Nested partition history is replayed with its ancestor origins. No storage history is
+collected for contexts that omit the option.
+
+This is **not full Playwright equivalence**: it requires opt-in, preserves cache and service-worker registrations,
+and refuses held virtual authenticators. It does not import saved OPFS files or credentials. Existing new-context
+storage import and storage export keep their existing behavior and format.

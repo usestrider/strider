@@ -600,7 +600,8 @@ export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkR
  *
  * `notRetained` includes unknown, evicted, copied or decoded request snapshots. `foreignTarget` means the
  * request belongs to another page or context. `ownerLost` means its page, context, frame, worker or browser
- * connection is gone. `timingNotEnabled` means its context did not opt into timing collection.
+ * connection is gone. `timingNotEnabled` or `sizesNotEnabled` means its context did not opt into
+ * the corresponding collection.
  * None of these proves that the network request failed.
  *
  * @stability unstable
@@ -610,7 +611,7 @@ export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkR
 export class RequestUnavailable
   extends Schema.Error<RequestUnavailable>("@usestrider/browser/NetworkRequest/RequestUnavailable")({
     _tag: Schema.tag("RequestUnavailable"),
-    why: Schema.Literals(["notRetained", "foreignTarget", "ownerLost", "timingNotEnabled"])
+    why: Schema.Literals(["notRetained", "foreignTarget", "ownerLost", "timingNotEnabled", "sizesNotEnabled"])
   })
 {
   override get message(): string {
@@ -691,7 +692,7 @@ export class RedirectUnknown
 }
 
 /**
- * Schema for the reasons reading a request body, timing, failure, response association or redirect links can fail.
+ * Schema for the reasons reading a request body, timing, sizes, failure, response association or redirect links can fail.
  *
  * @stability unstable
  * @category schemas
@@ -710,7 +711,7 @@ export const RequestErrorReason = Schema.Union([
 ])
 
 /**
- * The reasons reading a request body, timing, failure, response association or redirect links can fail.
+ * The reasons reading a request body, timing, sizes, failure, response association or redirect links can fail.
  *
  * @stability unstable
  * @category models
@@ -719,7 +720,7 @@ export const RequestErrorReason = Schema.Union([
 export type RequestErrorReason = typeof RequestErrorReason.Type
 
 /**
- * Error for a request body, timing, failure, response association or redirect links that could not be read.
+ * Error for a request body, timing, sizes, failure, response association or redirect links that could not be read.
  *
  * **Details**
  *
@@ -741,6 +742,91 @@ export class RequestError
     return this.reason.message
   }
 }
+
+/**
+ * Native byte counts for one request hop, with unavailable or ambiguous counts represented by `None`.
+ *
+ * **Details**
+ *
+ * Request fields count sent headers and body. `responseHeadersSize` counts received headers;
+ * `responseBodySize` counts transferred body bytes, including HTTP framing where reported.
+ * `responseBodyEncodedSize` counts content-encoded entity bytes without transfer framing;
+ * `responseBodyDecodedSize` counts entity bytes after content decoding. `responseTransferSize`
+ * counts the received HTTP response, excluding the request and TCP/TLS overhead. Native header
+ * accounting can differ between protocols. Zero is a known zero, never a replacement for missing data.
+ *
+ * | Field | Chromium | Firefox | Stock WebKit |
+ * | --- | --- | --- | --- |
+ * | Request headers/body | None | None | Native sent bytes |
+ * | Response headers | None | Native headers | Native headers |
+ * | Transferred response body | None | HTTP/1.1 total minus headers | Native body, including framing |
+ * | Encoded entity | None | Native encoded size | None |
+ * | Decoded entity | Native chunks on completion | None | Native decoded size |
+ * | Response total | Native total | Native total | Native headers plus body |
+ *
+ * Firefox decoded size is unavailable because the browser reports zero for nonempty bodies.
+ * Sums and differences require valid counts from the same completed network hop. Cache,
+ * revalidation, routed responses and uncollected worker requests can leave every field unavailable.
+ * Chromium returns `None` for every size field when `loadingFinished` arrives before
+ * `responseReceivedExtraInfo`, which is common for images.
+ * No sizes are estimated from header objects, Content-Length or downloaded bodies.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Sizes extends Schema.Class<Sizes>("@usestrider/browser/NetworkRequest/Sizes")({
+  requestHeadersSize: Schema.Option(Schema.Number),
+  requestBodySize: Schema.Option(Schema.Number),
+  responseHeadersSize: Schema.Option(Schema.Number),
+  responseBodySize: Schema.Option(Schema.Number),
+  responseBodyEncodedSize: Schema.Option(Schema.Number),
+  responseBodyDecodedSize: Schema.Option(Schema.Number),
+  responseTransferSize: Schema.Option(Schema.Number)
+}) {}
+
+/**
+ * Reads the native sizes observed so far for an original request, without waiting or sending browser commands.
+ *
+ * **Details**
+ *
+ * Create the context with `requestSizes: true`; the default is false and collects no size state.
+ * This setting is independent of timings and body capture. Final body and transfer totals appear
+ * only after successful completion. Failure preserves earlier evidence without inventing final totals.
+ * Missing counts prove neither failure nor completion. Redirect hops never share size observations;
+ * Chromium and stock WebKit redirect totals are unavailable. On Chromium, `loadingFinished` before
+ * `responseReceivedExtraInfo` leaves all sizes `None`; this ordering is common for images.
+ *
+ * Reads require the original request instance in the bounded 1000-hop index and live page/context,
+ * frame/worker and browser owners. Copied, decoded, evicted and foreign requests refuse with
+ * `RequestError` / `RequestUnavailable`; omitted opt-in refuses with `sizesNotEnabled`.
+ * History does not pin sizes. Save the returned immutable Schema snapshot to retain it beyond its owners.
+ * See `Sizes` for the per-browser availability table.
+ *
+ * **Example** (Opting into native sizes)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser, NetworkRequest } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const inspect = Effect.fn("inspect")(function*() {
+ *   const context = yield* Browser.newContext({ requestSizes: true })
+ *   const page = yield* context.newPage
+ *   const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com")
+ *   return yield* NetworkRequest.sizes(page, yield* sent)
+ * })
+ * ```
+ *
+ * @see Sizes
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const sizes = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<Sizes, RequestError> => NetworkRequestImpl.sizes(target, request)
 
 /**
  * A snapshot of a request hop's native timings, with unavailable phases represented by `None`.

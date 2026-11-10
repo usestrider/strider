@@ -95,6 +95,10 @@ export interface Fold {
   // Commands
   readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
+  readonly observeStorageSources: (
+    context: Model.ContextEntry,
+    observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
+  ) => Effect.Effect<void, never, Scope.Scope>
   readonly navigation: (id: PageNavigation.Id) => Effect.Effect<Model.NavigationEntry>
   readonly forget: (id: PageNavigation.Id) => Effect.Effect<void>
   readonly register: <K extends "promptHandlers" | "chooserHandlers">(
@@ -197,6 +201,7 @@ export const make = Effect.fnUntraced(function*(options: {
   const responses = NetworkIndex.bounded<NetworkRequest.HopId, NetworkResponse.NetworkResponse>(maxResponses)
   const hops = NetworkIndex.hops<Model.HopEntry, Model.HopEnd>(maxHops, { _tag: "Forgotten" }, (hop) => {
     if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
+    if (Option.isSome(hop.context)) hop.context.value.sizes?.delete(hop.request.hop)
     Deferred.doneUnsafe(hop.sentKnown, Effect.void)
   })
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
@@ -292,10 +297,14 @@ export const make = Effect.fnUntraced(function*(options: {
       const initiator = hop.request.initiator
       if (initiator._tag === "Document" && gone.has(initiator.navigable)) {
         if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
+        if (Option.isSome(hop.context)) hop.context.value.sizes?.delete(hop.request.hop)
         Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       }
     }
-    for (const frame of gone) frames.delete(frame)
+    for (const frame of gone) {
+      frames.delete(frame)
+      page.contextEntry.storageSources?.origins.delete(frame)
+    }
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
       if (gone.has(document.navigable)) yield* endDocument(document.id, new Target.FrameDetached({}))
@@ -309,6 +318,7 @@ export const make = Effect.fnUntraced(function*(options: {
       const initiator = hop.request.initiator
       if (initiator._tag === "Worker" && initiator.realm === worker.realm) {
         if (Option.isSome(hop.context)) hop.context.value.timings?.delete(hop.request.hop)
+        if (Option.isSome(hop.context)) hop.context.value.sizes?.delete(hop.request.hop)
         Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       }
     }
@@ -341,10 +351,20 @@ export const make = Effect.fnUntraced(function*(options: {
         if (Option.getOrUndefined(hop.page) === page) page.contextEntry.timings.delete(hop.request.hop)
       }
     }
+    if (page.contextEntry.sizes !== undefined) {
+      for (const hop of hops.values()) {
+        if (Option.getOrUndefined(hop.page) === page) page.contextEntry.sizes.delete(hop.request.hop)
+      }
+    }
     pages.delete(page.id)
+    page.contextEntry.storageSources?.origins.delete(page.id)
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
-    for (const [frame, owner] of frames) if (owner === page) frames.delete(frame)
+    for (const [frame, owner] of frames) {
+      if (owner !== page) continue
+      frames.delete(frame)
+      page.contextEntry.storageSources?.origins.delete(frame)
+    }
     const how = endOf(reason)
     for (const channel of Object.values(page.events)) Events.end(channel as Events.Channel<unknown>, how)
     yield* update(page.state, (state): Model.PageState => ({
@@ -410,6 +430,7 @@ export const make = Effect.fnUntraced(function*(options: {
 
   const endContext = Effect.fnUntraced(function*(entry: Model.ContextEntry, reason: Target.CloseReason) {
     entry.timings?.clear()
+    entry.sizes?.clear()
     contexts.delete(entry.id)
     for (const hop of hops.values()) {
       if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
@@ -469,6 +490,7 @@ export const make = Effect.fnUntraced(function*(options: {
         case "UserContextAdded": {
           const entry = yield* ensureContext(fact.context, fact.isDefault)
           if (fact.requestTiming) entry.timings ??= new Map()
+          if (fact.requestSizes) entry.sizes ??= new Map()
           return
         }
         case "UserContextRemoved": {
@@ -595,16 +617,24 @@ export const make = Effect.fnUntraced(function*(options: {
           })
           if (page === undefined) {
             // A frame's document: the frame's entry follows it
-            yield* update(owner!.state, (state) => ({
-              ...state,
-              frames: state.frames.map((frame) =>
-                frame.id === fact.navigable ? { ...frame, document: Option.some(fact.document), url: fact.url } : frame
-              )
-            }))
+            yield* update(owner!.state, (state) => {
+              const listener = owner!.contextEntry.storageSources
+              if (listener !== undefined) committedStorage(listener, owner!, state, fact)
+              return {
+                ...state,
+                frames: state.frames.map((frame) =>
+                  frame.id === fact.navigable
+                    ? { ...frame, document: Option.some(fact.document), url: fact.url }
+                    : frame
+                )
+              }
+            })
             return
           }
-          yield* update(page.state, (state): Model.PageState =>
-            state.status._tag === "Closed" ? state : {
+          yield* update(page.state, (state): Model.PageState => {
+            const listener = page.contextEntry.storageSources
+            if (listener !== undefined) committedStorage(listener, page, state, fact)
+            return state.status._tag === "Closed" ? state : {
               ...state,
               status: {
                 _tag: "Open",
@@ -613,7 +643,8 @@ export const make = Effect.fnUntraced(function*(options: {
                 prompt: state.status._tag === "Open" ? state.status.prompt : Option.none(),
                 undecided: state.status._tag === "Open" ? state.status.undecided : Option.none()
               }
-            })
+            }
+          })
           return
         }
         case "DocumentUrlChanged": {
@@ -728,6 +759,13 @@ export const make = Effect.fnUntraced(function*(options: {
             navigationHops.add(fact.request.hop)
           }
           const owner = ownerOfRequest(fact.request)
+          if (Option.isSome(owner.context)) {
+            const listener = owner.context.value.storageSources
+            if (listener !== undefined) {
+              const url = URL.parse(fact.request.url)
+              if (url !== null) listener.observe([url.origin], true)
+            }
+          }
           hops.keep(fact.request.hop, {
             request: fact.request,
             state: yield* cell<Model.HopState>({
@@ -757,6 +795,24 @@ export const make = Effect.fnUntraced(function*(options: {
               !Option.exists(found.value.page, (page) => Deferred.isDoneUnsafe(page.closed))
             ) {
               context.timings?.set(fact.hop, fact.timing)
+            }
+          }
+          return
+        }
+        case "HopSizes": {
+          const found = hops.get(fact.hop)
+          if (Option.isSome(found) && Option.isSome(found.value.context)) {
+            const context = found.value.context.value
+            const current = ownerOfRequest(found.value.request)
+            if (
+              Option.getOrUndefined(current.context) !== context ||
+              Option.getOrUndefined(current.page) !== Option.getOrUndefined(found.value.page)
+            ) return
+            if (
+              !Deferred.isDoneUnsafe(context.closed) &&
+              !Option.exists(found.value.page, (page) => Deferred.isDoneUnsafe(page.closed))
+            ) {
+              context.sizes?.set(fact.hop, fact.sizes)
             }
           }
           return
@@ -817,6 +873,15 @@ export const make = Effect.fnUntraced(function*(options: {
           if (Option.isNone(page)) return
           const owner = ownerOfPage(page)
           const context = page.value.contextEntry
+          const listener = context.storageSources
+          if (listener !== undefined) {
+            const url = URL.parse(fact.url)
+            if (url !== null) {
+              if (url.protocol === "ws:") url.protocol = "http:"
+              else if (url.protocol === "wss:") url.protocol = "https:"
+              if (url.protocol === "http:" || url.protocol === "https:") listener.observe([url.origin], true)
+            }
+          }
           const connection: Model.ConnectionEntry = {
             id: fact.connection,
             kind: fact.kind,
@@ -1001,8 +1066,38 @@ export const make = Effect.fnUntraced(function*(options: {
   const scoped = (add: Effect.Effect<void>, remove: Effect.Effect<void>): Effect.Effect<void, never, Scope.Scope> =>
     Effect.acquireRelease(apply(add), () => apply(remove))
 
+  const committedStorage = (
+    listener: Model.StorageSourceObserver,
+    page: Model.PageEntry,
+    state: Model.PageState,
+    fact: Extract<Adapter.Fact, { _tag: "DocumentCommitted" }>
+  ) => {
+    const origin = fact.url.startsWith("file:") ? "file://" : fact.origin
+    listener.origins.set(fact.navigable, origin)
+    const chain = [origin]
+    let current = fact.navigable
+    while (current !== page.id) {
+      const parent = state.frames.find((frame) => frame.id === current)?.parent
+      if (parent === undefined) return
+      const origin = listener.origins.get(parent)
+      if (origin === undefined) return
+      chain.unshift(origin)
+      current = parent
+    }
+    listener.observe(chain)
+  }
+
   const self: Fold = {
     sink: (fact) => apply(fold(fact)),
+    observeStorageSources: (context, observe) =>
+      scoped(
+        Effect.sync(() => {
+          context.storageSources = { observe, origins: new Map() }
+        }),
+        Effect.sync(() => {
+          delete context.storageSources
+        })
+      ),
     obligations,
     pages: pageList,
     page: (id) => Option.fromNullishOr(pages.get(id)),

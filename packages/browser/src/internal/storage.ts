@@ -171,8 +171,16 @@ const sends = (url: URL, cookie: CookieJar.Cookie, now: number) => {
 }
 
 /** A context's cookies. */
-export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): CookieJar.CookieJar => {
+export const cookieJar = (
+  runtime: Runtime.Runtime,
+  context: UserContext.Id,
+  recordCookie?: ((cookie: Adapter.Cookie) => void) | undefined
+): CookieJar.CookieJar => {
   const adapter = runtime.model.adapter
+  const setCookies = recordCookie === undefined ?
+    adapter.setCookies :
+    (context: UserContext.Id, cookies: ReadonlyArray<Adapter.Cookie>) =>
+      Effect.sync(() => cookies.forEach(recordCookie)).pipe(Effect.andThen(adapter.setCookies(context, cookies)))
   const list = (operation: string, id: Diagnostics.OperationId) =>
     adapter.cookies(context).pipe(
       Effect.map((cookies) => cookies.map(fromAdapter)),
@@ -208,7 +216,7 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       const cookie = fromInput(input)
       if (cookie instanceof Reason.InvalidInput) return yield* Effect.fail(cookieError("CookieJar.set", cookie, id))
       if (Option.isSome(cookie.partitionKey)) yield* requirePartitions(runtime, "CookieJar.set", id)
-      yield* adapter.setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
+      yield* setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
     }),
     remove: Operation.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
       const { id } = yield* Operation.record

@@ -65,6 +65,14 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "unsupported"),
+      entry("network.sizes.responseBody", "unsupported"),
+      entry("network.sizes.encoded", "unsupported"),
+      entry("network.sizes.decoded", "supported"),
       entry("network.timing.redirect", "supported"),
       entry("network.timing", "partial", [
         "context-creation opt-in; bounded original-instance observations with live owners",
@@ -108,8 +116,15 @@ export const capabilities = (
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.responseBody.terminalRedirect", "supported"),
       entry("network.requestBody.redirects", "partial", ["earlier hops require complete event-carried data"]),
       entry("network.requestBody.absence", "supported", [
         "native hasPostData reports body presence; empty fallback reports are refused"
@@ -214,6 +229,7 @@ Contexts.register(handlers)
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
+  eventScopes: Network.eventScopes(state),
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
       handlers.apply(method, params, {
