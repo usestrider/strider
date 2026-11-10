@@ -383,6 +383,12 @@ body {
   padding: 0.1em 0.35em;
 }
 
+/* Code on the band has a white wash of its own, as inline code on paper has the code ground */
+.bg-band code {
+  background: rgb(255 255 255 / 0.14);
+  padding: 0.1em 0.35em;
+}
+
 .prose :where(code):not(:where(pre *))::before,
 .prose :where(code):not(:where(pre *))::after {
   content: none;
