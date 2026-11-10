@@ -250,9 +250,9 @@ const snapshot = (state: State.State) =>
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
-  apply: (_session, method, params) =>
+  apply: (_session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, { state })
+      handlers.apply(method, params, { state, received })
       return state.buffer.flush
     }),
   lost: (session) =>
