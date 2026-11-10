@@ -9,16 +9,23 @@
  * fails, naming what it left, and the next case gets a new context, so one case's leftovers don't fail the rest.
  */
 import { assert, type Vitest } from "@effect/vitest"
-import { Browser, Deadline, type StorageState, type UserContext } from "@usestrider/browser"
+import { Browser, Deadline, type Page, type StorageState, type UserContext } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import type { TestContext } from "vitest"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as Handles from "../../../src/internal/handles.ts"
+import * as Operation from "../../../src/internal/operation.ts"
+import { connection, type Record as TraceRecord } from "../failureTrace.ts"
 
 /** A declaration in force, on a context or the whole browser. */
 interface Declared {
@@ -80,6 +87,8 @@ interface Held {
 
 export class Shared extends Context.Service<Shared, {
   readonly current: Effect.Effect<UserContext.UserContext>
+  /** The scope that lives as long as the suite: background work the harness still owns runs in it. */
+  readonly owner: Scope.Scope
   /** Records what a case's page found in the context as it closed. */
   readonly note: (found: ReadonlyArray<string>) => Effect.Effect<void>
   /** What the last case left, after which the cases get a new context if it left anything. */
@@ -134,6 +143,7 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
 
       return Shared.of({
         current: Effect.sync(() => held.context),
+        owner: outer,
         note: (found) => Effect.sync(() => void notes.push(...found)),
         settle: Effect.gen(function*() {
           const found = yield* left
@@ -147,6 +157,103 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
     })
   ).pipe(Layer.provideMerge(backend))
 
+/** How long each probe after a stalled storage read, and the closing of its page, may take. */
+const probeDeadline = "2 seconds"
+const probeDeadlineDuration = Duration.seconds(2)
+
+/** Whether a failed storage read is the page not answering before its deadline, rather than any other failure. */
+export const isStalledRead = (error: unknown): boolean =>
+  Deadline.isTimeout(error) ||
+  (error instanceof Error && error.message.includes("The page didn't answer before the deadline"))
+
+/**
+ * Runs one probe and records how it ended and how long it took; never fails. The probe is an operation under its own
+ * `probeDeadline`, and also raced against that long on the browser's clock, so a step no deadline reaches, such as
+ * a page's release, can't outlast it.
+ */
+const probed = Effect.fnUntraced(function*<A, E>(record: TraceRecord, probe: string, effect: Effect.Effect<A, E>) {
+  const started = Date.now()
+  const exit = yield* Effect.exit(
+    effect.pipe(Deadline.within(probeDeadline), BrowserClock.timeoutOption(Duration.toMillis(probeDeadlineDuration)))
+  )
+  const outcome = Exit.isSuccess(exit)
+    ? Option.isSome(exit.value) ? "answered" : "timed out"
+    : isStalledRead(Cause.squash(exit.cause))
+    ? "timed out"
+    : `failed: ${Cause.pretty(exit.cause).split("\n")[0]}`
+  record("stalled-read-probe", { probe, outcome, millis: Date.now() - started })
+})
+
+/**
+ * After a page's storage read didn't answer in time, asks the browser two more things and records the answers, with
+ * how long each took, in the failure trace (every backend runs it): whether the same page still answers a trivial
+ * script, and whether a new page in the same context, on the stalled page's origin, answers `indexedDB.databases()`.
+ * Each gets a budget of its own, whatever deadline encloses the read, and none changes the outcome. The new page's
+ * close is waited for only that long; it continues on a fiber of `owner` (the current scope if none is given).
+ */
+export const probeStalledRead = Effect.fnUntraced(
+  function*(
+    context: UserContext.UserContext,
+    page: Page.Page,
+    record: TraceRecord,
+    owner?: Scope.Scope
+  ) {
+    yield* probed(record, "same page answers a trivial script", page.evaluate(() => 1 + 1))
+    const origin = yield* page.url.pipe(
+      Effect.map((url) => new URL(String(url)).origin),
+      Effect.orElseSucceed(() => "null")
+    )
+    if (origin === "null") {
+      record("stalled-read-probe", {
+        probe: "new page on the origin answers indexedDB.databases()",
+        outcome: "skipped: no origin"
+      })
+      return
+    }
+    const scope = yield* Scope.make()
+    yield* probed(
+      record,
+      "new page on the origin answers indexedDB.databases()",
+      Effect.gen(function*() {
+        const fresh = yield* context.newPage.pipe(Scope.provide(scope))
+        yield* fresh.goto(origin)
+        return yield* fresh.evaluate(async () => (await indexedDB.databases()).length)
+      })
+    )
+    // Releasing a page isn't an operation under any deadline, so it runs on a fiber of the owner's scope, which
+    // outlives this wait and is settled when that scope closes
+    const closing = yield* Effect.forkIn(
+      Scope.close(scope, Exit.void).pipe(Operation.detached),
+      owner ?? (yield* Effect.scope)
+    )
+    yield* probed(record, "closing that page", Fiber.join(closing))
+  },
+  (effect) => Effect.ignore(effect).pipe(Operation.detached)
+)
+
+/**
+ * Reads the context's cookies and storage from a closing page and notes what it holds. A read the page doesn't answer
+ * in time is noted as unreadable, as ever, after the probes of `probeStalledRead` have recorded what they found.
+ */
+export const readStorage = (
+  note: (found: ReadonlyArray<string>) => Effect.Effect<void>,
+  context: UserContext.UserContext,
+  page: Page.Page,
+  record: TraceRecord,
+  deadline: Duration.Input = "5 seconds",
+  owner?: Scope.Scope
+) =>
+  context.exportStorageState.pipe(
+    Deadline.within(deadline),
+    Effect.flatMap((state) => note(stored(state))),
+    Effect.catchTag("TargetGone", () => Effect.void),
+    Effect.catch((error) =>
+      (isStalledRead(error) ? probeStalledRead(context, page, record, owner) : Effect.void).pipe(
+        Effect.andThen(note([`storage that couldn't be read: ${error.message}`]))
+      )
+    )
+  )
+
 /**
  * A page in the shared context, closed with the scope. Before it closes, the context's cookies and storage are read
  * from it, while its document is still there to read them from.
@@ -156,12 +263,7 @@ export const newPage = Effect.gen(function*() {
   const context = yield* shared.current
   const page = yield* context.newPage
   yield* Effect.addFinalizer(() =>
-    context.exportStorageState.pipe(
-      Deadline.within("5 seconds"),
-      Effect.flatMap((state) => shared.note(stored(state))),
-      Effect.catchTag("TargetGone", () => Effect.void),
-      Effect.catch((error) => shared.note([`storage that couldn't be read: ${error.message}`]))
-    )
+    readStorage(shared.note, context, page, connection("shared-context"), "5 seconds", shared.owner)
   )
   return page
 })
