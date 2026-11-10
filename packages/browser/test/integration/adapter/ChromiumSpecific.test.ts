@@ -588,7 +588,7 @@ describe("Chromium adapter, CDP only", () => {
       }
 
       it.effect(
-        "returns the click deadline while a cleanup reply is outstanding without a duplicate release",
+        "returns the click deadline while a cleanup reply is outstanding, then resends that unconfirmed release before the next click",
         () =>
           Effect.gen(function*() {
             const served = yield* site
@@ -645,6 +645,7 @@ describe("Chromium adapter, CDP only", () => {
               assert.deepStrictEqual(sent, [
                 "mouseMoved",
                 "mousePressed",
+                "mouseReleased",
                 "mouseReleased",
                 "mouseMoved",
                 "mousePressed",
@@ -772,9 +773,9 @@ describe("Chromium adapter, CDP only", () => {
         ] as const
       ) {
         it.effect(
-          `a click ${stop} with its ${
-            stop.startsWith("release") ? "release" : "press"
-          } reply outstanding sends one release, and the next gesture works`,
+          stop.startsWith("release")
+            ? `a click ${stop} with its release reply outstanding resends that unconfirmed release before the next gesture`
+            : `a click ${stop} with its press reply outstanding releases once, and the next gesture works`,
           () =>
             Effect.gen(function*() {
               const served = yield* site
@@ -847,21 +848,27 @@ describe("Chromium adapter, CDP only", () => {
                   if (stop.endsWith("deadline")) assert.isTrue(Deadline.isTimeout(error), String(error))
                   else assert.strictEqual(error._tag, "LocatorError")
                 }
-                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+                // A release written whose reply never came is unconfirmed, and is sent again first; a press's
+                // cleanup release the browser accepted is not
+                const resent = stop.startsWith("release")
+                assert.strictEqual(Option.isSome(target.owner.page.inputState.broken), resent)
                 yield* target.click()
                 assert.deepStrictEqual(sent, [
                   "mouseMoved",
                   "mousePressed",
                   "mouseReleased",
+                  ...(resent ? ["mouseReleased"] : []),
                   "mouseMoved",
                   "mousePressed",
                   "mouseReleased"
                 ])
+                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
                 assert.isTrue(yield* page.evaluateInMainWorld(() => (window as any).trusted))
                 assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), [
                   "mousedown",
                   "mouseup",
                   "click",
+                  ...(resent ? ["mouseup"] : []),
                   "mousedown",
                   "mouseup",
                   "click"

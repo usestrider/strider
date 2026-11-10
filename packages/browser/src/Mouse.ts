@@ -166,6 +166,10 @@ export interface Mouse {
    *
    * **Gotchas**
    *
+   * A click that fails, or is cut short, after it may have pressed a button leaves that button's release to the next
+   * gesture: when the browser didn't confirm the release, it is sent again before that gesture, which can deliver
+   * one extra `mouseup` to a page that already got the first.
+   *
    * On Chromium, a click sent before the page has rendered is lost, and it still succeeds. `page.goto` returns at
    * commit by default, so a click straight after it can be lost: wait for `load` and for something on the page
    * first, or click a locator, which checks its element before it clicks.

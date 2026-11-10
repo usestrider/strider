@@ -3,7 +3,6 @@
  * every frame, out of process too; HTML drags, which headless Chromium starts none of, caught and finished with drag
  * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
-import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -64,37 +63,27 @@ export const dispatchInput = Effect.fnUntraced(
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
       }).pipe(
-        // The release is owed until the browser is known to have taken it: the caller's accounting, which runs as
-        // the dispatch ends, records it as uncertain meanwhile, and `settled` clears that record. A release already
-        // written whose reply was only abandoned has landed, and a second would deliver another mouseup.
-        Effect.onError((cause) =>
+        // The release is owed until the browser is known to have accepted one: the caller's accounting records it
+        // as uncertain unless `settled` says so, and the next gesture sends it again first. A release already
+        // written whose reply was lost or abandoned is uncertain too, and isn't sent again here.
+        Effect.onError(() =>
           Effect.suspend(() => {
             Gestures.handOver(events)
             if (releaseWritten) {
-              if (Cause.hasInterruptsOnly(cause)) Gestures.settled(events)
               Gestures.finished(events)
               return Effect.void
             }
             // The release runs apart from the failed click, which keeps its error and its input permit: the next
-            // gesture waits for it under its own deadline. It waits for its reply on the protocol's timeout,
-            // not the passed deadline.
+            // gesture waits for it under its own deadline. It waits for its reply on the protocol's timeout, not
+            // the passed deadline.
             return release.pipe(
               Effect.tap(() => Effect.sync(() => Gestures.settled(events))),
-              // A release written whose reply never came has landed, as one whose reply was abandoned has
-              Effect.tapError((error) =>
-                Effect.sync(() => {
-                  if (
-                    releaseWritten && error.reason._tag === "Protocol" && error.reason.error.reason._tag === "NoReply"
-                  ) Gestures.settled(events)
-                })
-              ),
               Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
               Operation.detached,
               Effect.ignore,
               Effect.ensuring(Effect.sync(() => Gestures.finished(events))),
               Effect.forkDetach,
-              // Let it begin, so its write is ordered before anything the caller sends next
-              Effect.andThen(Effect.yieldNow)
+              Effect.asVoid
             )
           })
         )

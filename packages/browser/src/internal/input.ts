@@ -59,9 +59,13 @@ export const recover = <E>(
   dispatch: (events: ReadonlyArray<Adapter.InputEvent>) => Effect.Effect<void, E>
 ): Effect.Effect<Option.Option<string>> =>
   Effect.suspend(() => {
+    // Cleanups stay listed until they finish, so a waiter that is interrupted leaves the wait to the next gesture
     const flying = state.cleanups.filter((handover) => !handover.finished)
-    state.cleanups = []
-    return Effect.forEach(flying, (handover) => Deferred.await(handover.done), { discard: true })
+    return Effect.forEach(flying, (handover) => Deferred.await(handover.done), { discard: true }).pipe(
+      Effect.andThen(Effect.sync(() => {
+        state.cleanups = state.cleanups.filter((handover) => !handover.finished)
+      }))
+    )
   }).pipe(Effect.andThen(Effect.suspend(() => {
     if (Option.isNone(state.broken)) return Effect.succeed(Option.none())
     const broken = state.broken.value
@@ -110,11 +114,12 @@ export const finished = (events: ReadonlyArray<Adapter.InputEvent>): void => {
   const handover = handovers.get(events)
   if (handover === undefined || handover.finished) return
   handover.finished = true
-  Deferred.doneUnsafe(handover.done, Effect.void)
+  // What it left unsettled is recorded before a waiter on it resumes
   for (const record of handover.afterwards) record()
+  Deferred.doneUnsafe(handover.done, Effect.void)
 }
 
-/** The adapter's release of a gesture handed over is known good: accepted, or written with only its reply abandoned. */
+/** The adapter's release of a gesture handed over was accepted by the browser. */
 export const settled = (events: ReadonlyArray<Adapter.InputEvent>): void => {
   const handover = handovers.get(events)
   if (handover !== undefined) handover.settled = true
