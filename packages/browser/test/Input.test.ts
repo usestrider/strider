@@ -103,3 +103,43 @@ describe("Input.singleClick", () => {
     ) assert.isUndefined(Input.singleClick(gesture))
   })
 })
+
+describe("Input.uncertain", () => {
+  const releases = (state: Input.State) =>
+    Option.isSome(state.broken)
+      ? state.broken.value.release.map((event) =>
+        event._tag === "Mouse" || event._tag === "Key" ? event.type : event._tag
+      )
+      : []
+
+  it("releases the button a double click pressed, once, and leaves the observed state alone", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.click", Input.click(state, { x: 1, y: 2 }, "left", 2))
+    assert.deepStrictEqual(releases(state), ["up"])
+    assert.strictEqual(state.buttons.size, 0)
+  })
+
+  it("releases a drag's button and the modifiers it pressed, the button first", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.drag", Input.drag(state, { x: 1, y: 2 }, { x: 5, y: 6 }, 3, ["Shift"]))
+    assert.deepStrictEqual(releases(state), ["up", "up"])
+    const [first, second] = Option.getOrThrow(state.broken).release
+    assert.strictEqual(first?._tag, "Mouse")
+    assert.strictEqual(second?._tag, "Key")
+  })
+
+  it("releases a pressed key, and not a button or key that was already held", () => {
+    const state = Input.make()
+    state.buttons.add("left")
+    Input.uncertain(state, "Mouse.click", Input.click(state, { x: 1, y: 2 }, "left", 1))
+    assert.isTrue(Option.isNone(state.broken))
+    Input.uncertain(state, "Keyboard.press", Input.type(state, "a", "us")!)
+    assert.deepStrictEqual(releases(state), ["up"])
+  })
+
+  it("records nothing for a gesture that presses nothing", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Mouse.move", Input.move(state, { x: 3, y: 4 }, 2))
+    assert.isTrue(Option.isNone(state.broken))
+  })
+})

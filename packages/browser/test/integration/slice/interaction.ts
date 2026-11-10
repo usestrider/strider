@@ -5333,6 +5333,53 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect(
+        "a key press whose dispatch fails records the key's release, and the next gesture sends it first",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<input id="field">`)
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#field")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.dispatchInput
+            const sent: Array<ReadonlyArray<string>> = []
+            let failed = false
+            const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
+              sent.push(args[1].map((event) => event._tag === "Key" ? event.type : event._tag))
+              yield* original(...args)
+              if (!failed && args[1].some((event) => event._tag === "Key")) {
+                failed = true
+                return yield* Effect.fail(
+                  new Adapter.AdapterError({
+                    reason: new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: "test rejection" })
+                  })
+                )
+              }
+            })
+            yield* Effect.acquireUseRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+              () =>
+                page.keyboard.press("a").pipe(Effect.exit, Effect.map((exit) => assert.isTrue(Exit.isFailure(exit)))),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            const state = target.owner.page.inputState
+            assert.strictEqual(state.keys.length, 0)
+            assert.isTrue(Option.isSome(state.broken))
+            const before = sent.length
+            yield* Effect.acquireUseRelease(
+              Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+              () => page.keyboard.press("b"),
+              () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+            )
+            assert.deepStrictEqual(sent.slice(before)[0], ["up"])
+            assert.deepStrictEqual(sent.slice(before)[1], ["down", "up"])
+            assert.isTrue(Option.isNone(state.broken))
+          })),
+        timeout
+      )
+
       for (const gesture of ["locator click", "coordinate click"] as const) {
         it.effect(
           `a ${gesture} whose release fails records the release as uncertain, and the next gesture sends it first`,
