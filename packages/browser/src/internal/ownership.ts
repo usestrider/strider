@@ -50,14 +50,8 @@ export interface Ownership {
    * Closes a page its owner's scope released, unless it already closed, and waits for the page's end under the
    * default budget: a page created right after must not meet a browser still closing this one (QUIRKS.md, Q119
    * and Q135). With `by`, only while `by` still owns it: a page transferred is its new owner's to release.
-   * `owned` are the pages open now: those `by` owns have their closes sent at once, here, so a scope's pages
-   * close together, and each page's own release then waits for its end as it comes to it.
    */
-  readonly release: (
-    page: Model.PageEntry,
-    by?: Scope.Scope,
-    owned?: ReadonlyArray<Model.PageEntry>
-  ) => Effect.Effect<void>
+  readonly release: (page: Model.PageEntry, by?: Scope.Scope) => Effect.Effect<void>
   /**
    * Removes a context its creator's scope released, unless it already ended, and waits for its end, which follows
    * its pages', under the default budget.
@@ -154,8 +148,6 @@ export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const connected = yield* Deferred.make<Adapter.AdapterConnection>()
   let handoffClaims: BoundedAdapter.Bounded["claims"]
-  // The closes a release sent early for pages whose own release has not come yet, which each one then waits on
-  const early = new WeakMap<Model.PageEntry, Fiber.Fiber<void, Adapter.AdapterError>>()
   const ownership: Ownership = {
     connected,
     attach: (adapter, claims = BoundedAdapter.make(adapter).claims) =>
@@ -169,7 +161,7 @@ export const make = Effect.fnUntraced(function*() {
         (adapter) => Effect.forkIn(adapter.closePage(page, options), modelScope)
       ),
     release: Effect.fnUntraced(
-      function*(page: Model.PageEntry, by?: Scope.Scope, owned: ReadonlyArray<Model.PageEntry> = []) {
+      function*(page: Model.PageEntry, by?: Scope.Scope) {
         const state = yield* page.state.get
         if (state.status._tag === "Closed") return
         if (by !== undefined && !Option.exists(state.owner, (owner) => owner === by)) return
@@ -177,19 +169,7 @@ export const make = Effect.fnUntraced(function*() {
         if (handoffClaims !== undefined && Option.exists(state.owner, Handoff.leavesOpen)) {
           return yield* Handoff.dismiss(page, handoffClaims)
         }
-        if (by !== undefined) {
-          for (const other of owned) {
-            if (other === page || early.has(other)) continue
-            const status = other.state.getUnsafe()
-            if (status.status._tag === "Closed" || !Option.exists(status.owner, (owner) => owner === by)) continue
-            if (handoffClaims !== undefined && Handoff.leavesOpen(by)) continue
-            early.set(other, yield* Effect.forkIn(adapter.closePage(other.id, { runBeforeUnload: false }), modelScope))
-          }
-        }
-        const sent = early.get(page)
-        early.delete(page)
-        const close = sent === undefined ? adapter.closePage(page.id, { runBeforeUnload: false }) : Fiber.join(sent)
-        yield* awaitEnd(modelScope, close, page.closed, {
+        yield* awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {
           target: `Page ${page.id}`,
           annotation: ["browser.page.id", page.id],
           doing: "is still closing",
