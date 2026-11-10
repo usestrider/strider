@@ -469,7 +469,7 @@ describe("Session's digest", () => {
               navigation: Schema.decodeUnknownSync(PageNavigation.Id)(id),
               frame: page.id,
               url: navigation.url,
-              outcome: { _tag: "Committed" as const, document: navigation.document }
+              outcome: { _tag: "Committed" as const, document: navigation.document, response: Option.none() }
             })
           )
         yield* publish("own")
