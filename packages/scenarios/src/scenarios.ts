@@ -446,6 +446,21 @@ const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
 })
 // #endregion
 
+// The twenty pages again, in a context that emulates focus, where Chromium opens pages as tabs
+const manyPagesEmulatedStrider = Effect.fn("many pages emulated")(function*(origin: string) {
+  const context = yield* Browser.newContext({ focus: "emulated" })
+  const pages = []
+  for (let i = 0; i < 20; i++) {
+    const page = yield* context.newPage
+    yield* page.goto(`${origin}/benchmark`)
+    yield* page.getByRole("button", { name: "Increment" }).click()
+    pages.push(page)
+  }
+  const values = []
+  for (const page of pages) values.push(yield* page.locator("#count").readText)
+  return values.join(",")
+})
+
 // #region many-pages/strider
 const manyPagesStrider = Effect.fn("many pages")(function*(origin: string) {
   const context = yield* Browser.newContext()
@@ -556,6 +571,15 @@ export const scenarios: ReadonlyArray<Scenario> = [
       "Keeps 20 pages open, navigating and clicking once on each, then checks every counter before closing the context.",
     expected: "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
     strider: manyPagesStrider,
+    playwright: manyPagesPlaywright
+  },
+  {
+    name: "many-pages-emulated",
+    title: "20 pages in one context, emulating focus",
+    description:
+      "As 20 pages in one context, with Strider's context emulating focus, where Chromium opens its pages as tabs; Playwright is unchanged, as it always emulates focus.",
+    expected: "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+    strider: manyPagesEmulatedStrider,
     playwright: manyPagesPlaywright
   },
   {

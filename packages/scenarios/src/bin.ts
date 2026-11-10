@@ -4,7 +4,7 @@
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
- *   pnpm scenarios --only login    one scenario, and no measurements, printed: RESULTS.md keeps the full run
+ *   pnpm scenarios --only login    one scenario (several, comma-separated), and no measurements, printed: RESULTS.md keeps the full run
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
  * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
@@ -164,7 +164,7 @@ const unsupported = engine === "firefox"
   ]
   : []
 const chosen = scenarios.filter((scenario) =>
-  (only === undefined || scenario.name === only) &&
+  (only === undefined || only.split(",").includes(scenario.name)) &&
   (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined))
 )
 if (chosen.length === 0) throw new Error("No supported scenarios selected")
