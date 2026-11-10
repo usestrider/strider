@@ -347,7 +347,7 @@ export interface UserContext extends ObservedUserContext {
    *   yield* page.context.routeWebSocket(
    *     "ws://example.invalid/socket",
    *     (connection) =>
-   *       connection.open({ fromPage: (message, page) => page.send(message) }),
+   *       connection.open({ fromPage: (message, reply) => reply.send(message) }),
    *     { implementation: "script" }
    *   )
    * })

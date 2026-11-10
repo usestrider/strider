@@ -21,7 +21,7 @@ const mockChat = Effect.fn("mockChat")(function*(page: Page.Page) {
     "wss://chat.example.com/socket",
     (connection) =>
       connection.open({
-        fromPage: (message, page) => page.send(message)
+        fromPage: (message, reply) => reply.send(message)
       }),
     { implementation: "script" }
   )
@@ -67,47 +67,132 @@ server. Stream overflow fails that observer; transport overflow closes the affec
 and close events wait until the host has forwarded or deliberately dropped every preceding server message,
 including completion of a delayed `fromServer` handler. Removal cancels that wait and closes the owned sockets.
 
-## Admission and cleanup
+## What a handler decides
 
-The admission ceilings are:
+The handler decides what the socket does: call `open` for a mock, or `connectToServer` for a proxy. Until it does,
+the page's socket is connecting. If the handler returns without deciding, the page sees what an unreachable server
+gives, an `error` event and then a close with code 1006, and its slot is freed. There is no implicit auto-open.
 
-- 1 MiB per application message;
-- 256 pending messages or 4 MiB per browser direction;
-- 16 MiB of issued reservations and admitted payload per registration, across all its realms;
-- at most 14 pure mocks or 7 proxies; a mix obeys `mocks + 2 * proxies <= 14`;
-- at most 16 pending constructor requests per realm;
-- 64 early CDP envelopes per target while its realm is being announced;
-- 4096 pending host envelopes per registration, at most 7 MiB of JSON text per envelope, and 256 pending host
-  sends across the registration;
-- 8192 characters in a matched URL, 128 requested subprotocols, and 8192 bytes across those subprotocols.
+The handler has the default operation budget (`Deadline.DefaultBudget`, 30 seconds unless set) to decide. If it
+takes longer, the connection closes the same way. Once it has decided, the work it leaves running has no deadline
+and lasts until the connection closes.
 
-The JSON envelope allowance includes up to sixfold text escaping plus metadata; it does not increase the
-application-message limit.
+## Push, observe and close
 
-The first admission reserves 2 MiB for host sends inside the same 16 MiB ceiling. Each connection receives
-1 MiB of page credit; selecting a proxy reserves another 1 MiB for server messages before opening. The remaining
-14 MiB therefore holds 14 pure mocks, seven proxies, or a mix satisfying the formula above. Connecting sockets
-count as mocks until proxy selection. Unconfirmed retired reservations can lower usable capacity. The internal
-1024-slot safety ceiling does not increase these reservation limits.
+A mock can send to the page at any time after it opens. `events` watches messages, closes and errors in both
+directions without changing what is forwarded, and `status` says whether the connection is connecting, open or
+closed. A close takes an optional code, 1000 or 3000–4999, and a reason of at most 123 UTF-8 bytes; without a code
+the page sees 1005, as for a native close without one.
 
-Host sends consume the shared 2 MiB pool, with at most 256 pending sends. Completion or cancellation returns
-credit exactly once; idle browser reservations cannot consume this outbound pool. Saturation fails with Overflow
-rather than waiting indefinitely. Unused issued
-credits remain charged until acknowledged draining or confirmed realm destruction. Local credit exhaustion can
-therefore close a socket while capacity is reserved elsewhere. These ceilings do not guarantee usable queue
-capacity and do not bound encoded copies, browser-native buffers or total process memory. Idle documents receive
-no message-credit reservation. A rejected constructor retains no shim lookup entry. Pending constructors are
-counted across the routes sharing a realm. Control-envelope overload fails the affected realm closed until its
-registration is removed or that realm is destroyed; ordinary per-socket overflow closes that socket.
+```ts
+import { Page, WebSocketRoute } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
 
-An overflow closes with an error and a synthetic abnormal page close. Native failure cleanup uses application
-code 4000; normal removal uses 1000. Caller-supplied native codes must be 1000 or 3000–4999, with a reason of at
-most 123 UTF-8 bytes. Synthetic observations such as code 1006 are distinguished from native closes and never
-passed to the browser's native close operation.
+const announce = Effect.fn("announce")(
+  function*(connection: WebSocketRoute.Connection) {
+    const events = yield* connection.events
+    yield* events.pipe(
+      Stream.runForEach((event) => Effect.log(`${connection.id}: ${event._tag}`)),
+      Effect.forkScoped
+    )
+    yield* connection.open({})
+    yield* connection.page.send({ _tag: "Text", data: "welcome" })
+    yield* connection.page.close({ code: 4001, reason: "session expired" })
+  }
+)
 
-Newest matching registration wins when a socket is constructed. Later registrations do not take over existing
-sockets. Removing one closes only its sockets and leaves other registrations in force. Navigation, frame/worker
-termination and scope closure release its handlers and reservations; conversion work is drained before surrender.
+const mockSession = Effect.fn("mockSession")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket("wss://chat.example.com/socket", announce, {
+    implementation: "script"
+  })
+})
+```
+
+A proxy's `fromServer` handler sees each message the server sends before the page does, with the same choice as
+`fromPage`: send to forward or replace, or return without sending to drop.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const hideAdmin = Effect.fn("hideAdmin")(function*(page: Page.Page) {
+  yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) =>
+      connection.connectToServer({
+        fromServer: (message, endpoints) =>
+          message._tag === "Text" && message.data.startsWith("admin:")
+            ? Effect.void
+            : endpoints.page.send(message)
+      }).pipe(Effect.asVoid),
+    { implementation: "script" }
+  )
+})
+```
+
+## Removing a route early
+
+A route lasts as long as the scope it was registered in. `remove` ends it sooner: it closes the sockets that route
+owns with code 1000 and leaves other routes in force. Navigation, a closed page and the end of a frame or worker
+close the sockets they own as well.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const mockOnce = Effect.fn("mockOnce")(function*(page: Page.Page) {
+  const route = yield* page.context.routeWebSocket(
+    "wss://chat.example.com/socket",
+    (connection) => connection.open({}),
+    { implementation: "script" }
+  )
+  yield* page.goto("https://chat.example.com")
+  yield* route.remove
+})
+```
+
+## Limits and overflow
+
+- A message is at most 1 MiB.
+- A route serves at most 14 mocked connections, or 7 proxied ones, at a time; a mix of mocks and proxies counts a
+  proxy as two. A constructor past that limit fails as a socket that cannot connect.
+- Replies a handler sends share one pool of 2 MiB and 256 pending sends across the route.
+
+These are ceilings on what the route admits, not guaranteed queue sizes, and they do not bound the browser's own
+memory. Going over one never drops a message quietly: the connection closes with an `error` event and an abnormal
+close, and the operation that went over fails with `Overflow`, whose `limit` says which ceiling it was.
+
+```ts
+import { WebSocketRoute } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const sendBig = (page: WebSocketRoute.Writable, data: string) =>
+  page.send({ _tag: "Text", data }).pipe(
+    Effect.catchTag("WebSocketRouteError", (error) =>
+      error.reason._tag === "Overflow"
+        ? Effect.log(`over the ${error.reason.limit} limit`)
+        : Effect.fail(error))
+  )
+```
+
+When the real server closes a proxied socket, the page sees the close only after every message the server sent
+before it has been forwarded or dropped. Failures the library causes close with code 4000.
+
+## What still differs from a native socket
+
+A mocked socket's events are synthetic and untrusted, and native buffering, compression and wire fragments are not
+reproduced. `instanceof WebSocket`, `WebSocket.name` and `constructor` match for routed and unrouted sockets, but a
+page that patches `WebSocket.prototype` reaches only the sockets the shim creates, not native ones for URLs no
+route matches. Sockets opened before the route, constructors a page saved earlier, `WebSocketStream` and shared
+or service workers are not covered.
+
+## Page scripts can interfere
+
+The shim runs in the page's own world, so scripts on the page can see it and interfere with it. After it
+installs, a page cannot replace or delete the entry the library talks to, nor read the socket internals or the
+binding that carries messages. It can still read that entry and call it, and on a document that was already
+loaded when the route was registered, or under `timing: "bestEffort"`, a page could have claimed the entry
+first. Do not route sockets of pages you do not trust with anything a hostile script must not influence.
 
 ## Browser coverage
 
