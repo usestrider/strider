@@ -15,12 +15,14 @@ import {
   Locator,
   Page,
   Popup,
+  Route,
   Subscription,
   Target
 } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -78,6 +80,29 @@ const popupsRefused = Effect.fnUntraced(function*() {
 export const events = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} events`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      for (const rel of ["opener", "noopener"]) {
+        it.effect(`loads a routed popup from a rel="${rel}" link`, () =>
+          Effect.gen(function*() {
+            if (yield* popupsRefused()) return
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.context.route("https://opener.test/**", () =>
+                Route.fulfill(HttpServerResponse.text(
+                  `<a href="https://target.test/" target="_blank" rel="${rel}">Open</a>`,
+                  { contentType: "text/html" }
+                )))
+              yield* page.context.route("https://target.test/**", () =>
+                Route.fulfill(HttpServerResponse.text("<title>Target</title>", { contentType: "text/html" })))
+              yield* page.goto("https://opener.test/")
+              const popups = yield* Popup.next(page)
+              yield* page.getByRole("link", { name: "Open" }).click()
+              const popup = yield* popups
+              yield* popup.pipe(Expect.toHaveURL("https://target.test/"))
+              yield* popup.pipe(Expect.toHaveTitle("Target"))
+            }))
+          }), timeout)
+      }
+
       it.effect("runs call site 3: a popup, with a dialog inside it a handler accepts", () =>
         Effect.gen(function*() {
           if (yield* popupsRefused()) return
