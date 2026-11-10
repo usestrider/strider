@@ -2,4 +2,4 @@
 "@usestrider/browser": patch
 ---
 
-Re-route a Chromium engine call to a frame's new target when the frame swaps targets mid-call: a call rejected with "Execution context was destroyed." now waits for the context's destruction and reports the realm gone, as "Inspected target navigated or closed" does, instead of failing the action.
+Recover replay-safe engine rounds on Chromium when a nested frame moves to its own target mid-call: a call rejected with "Execution context was destroyed." folds the events received before the rejection, and when that ended the context, the round reports it gone and runs again on the frame's new context. Without such an event the rejection is reported at once, and actions already applied are not replayed.
