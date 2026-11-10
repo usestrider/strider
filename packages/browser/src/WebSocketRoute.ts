@@ -61,7 +61,7 @@ export type Id = typeof Id.Type
  * @category schemas
  * @since 0.1.0
  */
-export const Origin = Schema.Union([
+export const Initiator = Schema.Union([
   Schema.TaggedStruct("Frame", { page: Target.NavigableId, frame: Target.NavigableId }),
   Schema.TaggedStruct("Worker", { realm: Target.RealmId })
 ])
@@ -72,7 +72,7 @@ export const Origin = Schema.Union([
  * @category models
  * @since 0.1.0
  */
-export type Origin = typeof Origin.Type
+export type Initiator = typeof Initiator.Type
 
 /**
  * Application message data, preserving the distinction between text and binary.
@@ -103,7 +103,7 @@ export type Message = typeof Message.Type
  */
 export class Overflow extends Schema.Error<Overflow>("@usestrider/browser/WebSocketRoute/Overflow")({
   _tag: Schema.tag("Overflow"),
-  limit: Schema.String
+  limit: Schema.Literals(["1 MiB message", "2 MiB or 256 pending host sends", "14 MiB browser reservations"])
 }) {
   override get message(): string {
     return `WebSocket routing admission exceeded ${this.limit}`
@@ -118,7 +118,7 @@ export class Overflow extends Schema.Error<Overflow>("@usestrider/browser/WebSoc
  */
 export class InvalidState extends Schema.Error<InvalidState>("@usestrider/browser/WebSocketRoute/InvalidState")({
   _tag: Schema.tag("InvalidState"),
-  state: Schema.String
+  state: Schema.Literals(["connecting", "open", "closed", "already opened"])
 }) {
   override get message(): string {
     return `WebSocket connection is ${this.state}`
@@ -139,6 +139,14 @@ export const WebSocketRouteErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure
 ])
+/**
+ * The reasons a WebSocket routing operation can fail.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type WebSocketRouteErrorReason = typeof WebSocketRouteErrorReason.Type
 const ErrorTypeId = "~@usestrider/browser/WebSocketRoute/WebSocketRouteError"
 
 /**
@@ -264,7 +272,7 @@ export interface Connection {
   readonly url: Url.Url
   readonly protocols: ReadonlyArray<string>
   readonly realm: Target.RealmId
-  readonly origin: Origin
+  readonly initiator: Initiator
   readonly page: Writable
   readonly status: Watchable.Watchable<"connecting" | "open" | "closed">
   readonly events: Effect.Effect<

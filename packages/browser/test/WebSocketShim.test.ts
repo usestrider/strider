@@ -61,6 +61,24 @@ const setup = (BlobConstructor = Blob) => {
 }
 
 describe("WebSocket shim admission and conversion", () => {
+  it("gives the page code 1005 when a close names no code, as a native close does", async () => {
+    const { context, dispatch } = setup()
+    await dispatch({ type: "grant", direction: "page", bytes: 64 })
+    await dispatch({ type: "open" })
+    vm.runInContext(`globalThis.codes = []; ws.addEventListener("close", (event) => codes.push(event.code))`, context)
+    await dispatch({ type: "close", direction: "page" })
+    assert.deepStrictEqual(vm.runInContext(`codes`, context), [1005])
+  })
+
+  it("keeps unrouted sockets and the constructor native-looking", () => {
+    const { context } = setup()
+    const result = vm.runInContext(
+      `({ name: WebSocket.name, native: new WebSocket("ws://elsewhere.test/") instanceof WebSocket })`,
+      context
+    )
+    assert.deepStrictEqual({ ...result }, { name: "WebSocket", native: true })
+  })
+
   it("sends text as the browser's USVString, replacing lone surrogates", async () => {
     // WebSocket.send(string) takes a USVString: a native socket transmits U+FFFD for a lone surrogate.
     const { context, dispatch, messages, waitFor } = setup()

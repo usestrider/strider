@@ -16,7 +16,7 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { contextKey, type Event, placement, type RealmEntry, type State, type TargetEntry } from "./state.ts"
 
-const origin = (realm: RealmEntry): import("../../WebSocketRoute.ts").Origin =>
+const origin = (realm: RealmEntry): import("../../WebSocketRoute.ts").Initiator =>
   realm.frame === undefined
     ? { _tag: "Worker", realm: realm.id }
     : { _tag: "Frame", page: realm.frame.page.id, frame: realm.frame.id }

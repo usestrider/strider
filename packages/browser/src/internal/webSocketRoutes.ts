@@ -137,7 +137,7 @@ export const register = <E, R>(
     type Incoming = {
       realm: Target.RealmId
       payload: Effect.Effect<string, Adapter.AdapterError>
-      origin: WebSocketRoute.Origin
+      origin: WebSocketRoute.Initiator
       destroyed: boolean
       alive: () => boolean
       release: Effect.Effect<void>
@@ -296,7 +296,7 @@ export const register = <E, R>(
       )
     })
     const create = Effect.fnUntraced(
-      function*(realm: Target.RealmId, message: Envelope, origin: WebSocketRoute.Origin, alive: () => boolean) {
+      function*(realm: Target.RealmId, message: Envelope, origin: WebSocketRoute.Initiator, alive: () => boolean) {
         if (!alive() || !live) return
         const owner = `${realm}:${message.id}`
         if (connections.has(owner)) return
@@ -402,7 +402,7 @@ export const register = <E, R>(
         const handle: WebSocketRoute.Connection = {
           id: WebSocketRoute.Id.make(`${token}:${realm}:${message.id}`),
           realm,
-          origin,
+          initiator: origin,
           url: Url.Url.make(message.url ?? ""),
           protocols: message.protocols ?? [],
           page,
@@ -472,7 +472,7 @@ export const register = <E, R>(
       }
     )
     const process = Effect.fnUntraced(
-      function*(realm: Target.RealmId, envelope: Envelope, origin: WebSocketRoute.Origin, alive: () => boolean) {
+      function*(realm: Target.RealmId, envelope: Envelope, origin: WebSocketRoute.Initiator, alive: () => boolean) {
         if (envelope.token !== token || !live || !alive() || blocked.has(realm)) return
         if (envelope.type === "ready") {
           realms.add(realm)

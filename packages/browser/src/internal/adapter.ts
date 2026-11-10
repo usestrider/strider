@@ -542,7 +542,7 @@ export interface WebSocketBridge {
   readonly receive: (
     realm: Target.RealmId,
     payload: Effect.Effect<string, AdapterError>,
-    origin: import("../WebSocketRoute.ts").Origin,
+    origin: import("../WebSocketRoute.ts").Initiator,
     // On true, ownership of release transfers to the host, even if fetch never starts.
     // isAlive reads the originating adapter realm entry, never a replacement entry.
     ownership: { readonly isAlive: () => boolean; readonly release?: Effect.Effect<void> | undefined }
