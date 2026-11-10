@@ -209,3 +209,29 @@ it.effect("keeps an in-flight cleanup when a recovery waiter is interrupted", ()
     Input.finished(events)
     yield* Fiber.join(next)
   }))
+
+it.effect("records unfinished cleanup before waking recovery and reports the resend on its operation", () =>
+  Effect.gen(function*() {
+    const state = Input.make()
+    const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(events)
+    Input.uncertain(state, "failed click", events)
+    const sent: Array<Adapter.InputEvent> = []
+    yield* Effect.gen(function*() {
+      const operation = yield* Operation.record
+      const waiting = yield* Input.recover(state, (release) =>
+        Effect.sync(() => {
+          sent.push(...release)
+        })).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+      assert.isUndefined(waiting.pollUnsafe())
+      Input.finished(events)
+      yield* Fiber.join(waiting)
+      assert.strictEqual(sent.length, 1)
+      assert.deepStrictEqual(sent[0], { ...events[1], type: "up", buttons: 0 })
+      assert.strictEqual(operation.diagnostics().cleanup._tag, "Completed")
+      assert.isTrue(Option.isNone(state.broken))
+      assert.strictEqual(state.cleanups.length, 0)
+    }).pipe(Operation.named("Mouse.click"))
+  }))

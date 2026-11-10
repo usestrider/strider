@@ -5448,9 +5448,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const original = adapter.dispatchInput
                 const sent: Array<ReadonlyArray<string>> = []
                 let failed = false
+                let recoveryOperation: InternalOperation.Record | undefined
                 const dispatchInput: typeof original = Effect.fnUntraced(
                   function*(...args: Parameters<typeof original>) {
                     const events = args[1]
+                    if (events.length === 1 && events[0]?._tag === "Mouse" && events[0].type === "up") {
+                      recoveryOperation = yield* InternalOperation.record
+                    }
                     sent.push(events.map((event) => event._tag === "Mouse" ? event.type : event._tag))
                     yield* original(...args)
                     // The release reaches the browser, but its reply is rejected: Strider can't know it landed
@@ -5493,6 +5497,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const next = sent.slice(before)
                 assert.deepStrictEqual(next[0], ["up"], "the recovery release is sent before the next gesture")
                 assert.deepStrictEqual(next[1], ["move", "down", "up"])
+                assert.isDefined(recoveryOperation)
+                assert.strictEqual(recoveryOperation!.name, "Mouse.click")
+                assert.strictEqual(recoveryOperation!.diagnostics().cleanup._tag, "Completed")
                 assert.isTrue(Option.isNone(state.broken))
               }))
             }),
