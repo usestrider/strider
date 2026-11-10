@@ -37,6 +37,7 @@ import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Ingestion from "../src/internal/ingestion.ts"
 import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
@@ -1932,6 +1933,116 @@ describe("CdpAdapter evaluation in a context destroyed by a frame swap", () => {
         Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
       )
     ))
+  for (const outcome of ["folded", "deadline"] as const) {
+    it.effect(`drains a queued context destruction before classifying the reply (${outcome})`, () =>
+      Effect.gen(function*() {
+        const reply = yield* Deferred.make<void>()
+        const rejected = yield* Deferred.make<void>()
+        const mock = {
+          ...session,
+          send: Effect.fnUntraced(function*() {
+            yield* Deferred.await(reply)
+            yield* Deferred.succeed(rejected, undefined)
+            return yield* Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.callFunctionOn",
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "Execution context was destroyed."
+                })
+              })
+            )
+          })
+        } as unknown as ProtocolClient.Session
+        const { state, target } = yield* withPage(mock)
+        const frame = state.frames.get("T1")!
+        const document = Tree.commit(
+          state,
+          frame,
+          { loaderId: "initial", url: "about:blank", origin: "://" },
+          () => ({ _tag: "InitialBlank" }),
+          undefined,
+          "test"
+        )
+        const realm = Tree.addRealm(state, {
+          uniqueId: "swapped",
+          contextId: 4,
+          target,
+          frame,
+          world: { _tag: "Main" },
+          origin: "://"
+        })
+        document.realms.add(realm)
+        const handlers = Kit.handlers<State.Event>()
+        Evaluation.register(handlers)
+        const ingestion = yield* Ingestion.make({
+          fold: (control) => {
+            state.buffer.connect(control)
+            return {
+              events: handlers.events,
+              apply: (_session, method, params) =>
+                Effect.suspend(() => {
+                  handlers.apply(method, params, target.event)
+                  return state.buffer.flush
+                }),
+              lost: () => Effect.void,
+              ended: () => Effect.void
+            }
+          },
+          limits: { events: 100, bytes: 100_000 },
+          decoder: () => (params) => Effect.succeed(params),
+          session: () => mock,
+          end: () => {},
+          lost: () => false
+        })
+        const ingest = ingestion.track(mock, false, 0)
+        const at = yield* BrowserClock.after(100)
+        const waiting = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => 1",
+          arguments: [],
+          awaitPromise: true,
+          result: "value",
+          userActivation: false
+        }).pipe(
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("40 millis")
+        // Use the real FIFO but hold its worker: receipt must precede the reply, folding must not.
+        ingestion.event(ingest, 1, "Runtime.executionContextDestroyed", {
+          executionContextId: 4,
+          executionContextUniqueId: "swapped"
+        }, "destroy")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Deferred.await(rejected)
+        yield* TestClock.adjust("0 millis")
+        assert.isFalse(realm.ended)
+        assert.isUndefined(waiting.pollUnsafe(), "the reply must await the already-queued destroy")
+        if (outcome === "folded") {
+          yield* ingestion.worker.pipe(Effect.forkChild)
+          const result = yield* Fiber.join(waiting)
+          assert.isTrue(realm.ended)
+          assert.strictEqual(result.reason._tag, "Gone")
+        } else {
+          yield* TestClock.adjust("60 millis")
+          assert.isDefined(waiting.pollUnsafe(), "a stopped worker must not hold the evaluation past its deadline")
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          if (result.reason._tag === "Protocol") {
+            assert.strictEqual(result.reason.error.reason._tag, "NoReply")
+          }
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          BrowserClock.CurrentClock,
+          Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+        )
+      ))
+  }
+
   it.effect("preserves a prompt rejection when no lifecycle event follows", () =>
     Effect.gen(function*() {
       const reply = yield* Deferred.make<void>()
