@@ -242,7 +242,12 @@ describe("BidiAdapter state", () => {
         event?.()
       }
       const root = {
-        send: () => Effect.succeed({}),
+        send: () =>
+          Effect.flatMap(ProtocolClient.ReplyReceived, (received) =>
+            Effect.sync(() => {
+              received?.(10)
+              return {}
+            })),
         drainObserved: Effect.sync(fold)
       } as unknown as ProtocolClient.Session
       const { facts, page, state } = yield* withPage({}, {}, root)
@@ -251,7 +256,7 @@ describe("BidiAdapter state", () => {
         handlers.apply(
           "browsingContext.historyUpdated",
           { context: page.bidi, url: "about:blank#earlier", timestamp: 1 },
-          { state }
+          { state, received: 9 }
         )
       const traversal = yield* Navigation.traverse(state, page.id, -1)
       // The worker reaches the event at last, if the command did not wait for it.
@@ -280,7 +285,7 @@ describe("BidiAdapter state", () => {
               navigation: "later",
               url: "about:blank#later",
               timestamp: 1
-            }, { state, received: 11 } as State.Event)
+            }, { state, received: 11 })
           })
         } as unknown as ProtocolClient.Session
         const { facts, page, state } = yield* withPage({}, {}, root)
@@ -296,6 +301,53 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  it.effect("drains a real client observation queued before the traversal reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      let state: State.State
+      const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, {
+        fold: () => ({
+          events: handlers.events,
+          apply: Effect.fnUntraced(function*(_session, method, params, received) {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            handlers.apply(method, params, { state, received })
+          }),
+          lost: () => Effect.void,
+          ended: () => Effect.void
+        })
+      })
+      const fixture = yield* withPage({}, {}, client.root)
+      state = fixture.state
+      const fiber = yield* Effect.forkChild(Navigation.traverse(state, fixture.page.id, -1))
+      const sent = yield* browser.next
+      const reserved = fixture.page.expected.list[0]!.id
+      yield* browser.receive({
+        type: "event",
+        method: "browsingContext.historyUpdated",
+        params: {
+          context: fixture.page.bidi,
+          url: "about:blank#earlier",
+          timestamp: 1
+        }
+      })
+      yield* Deferred.await(entered)
+      yield* browser.receive({ type: "success", id: sent.id, result: {} })
+      yield* browser.delivered
+      assert.isUndefined(fiber.pollUnsafe(), "the command must wait for the queued observation")
+      yield* Deferred.succeed(release, undefined)
+      const traversal = yield* Fiber.join(fiber)
+      assert.deepStrictEqual(traversal, Option.some(reserved))
+      yield* state.buffer.flush
+      const ends = fixture.facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.lengthOf(ends, 1)
+      assert.strictEqual(ends[0]!.navigation, reserved)
+      assert.isEmpty(fixture.page.traversalCommands)
+    }))
+
   for (const completion of ["interrupted drain", "rejection", "connection failure"] as const) {
     it.effect(`releases traversal ownership on ${completion}`, () =>
       Effect.gen(function*() {
@@ -309,7 +361,8 @@ describe("BidiAdapter state", () => {
                   ? new Protocol.Rejected({
                     method: "browsingContext.traverseHistory",
                     code: "no such history entry",
-                    message: "end"
+                    reason: "Unrecognized",
+                    description: "end"
                   })
                   : new Protocol.SessionEnded({ why: "connectionLost" })
               })
@@ -317,7 +370,7 @@ describe("BidiAdapter state", () => {
           drainObserved: Effect.gen(function*() {
             drains++
             yield* Deferred.succeed(draining, undefined)
-            yield* Effect.never
+            return yield* Effect.never
           })
         } as unknown as ProtocolClient.Session
         const { page, state } = yield* withPage({}, {}, root)
