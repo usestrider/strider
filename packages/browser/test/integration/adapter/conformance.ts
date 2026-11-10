@@ -368,7 +368,7 @@ export const conformance = (backend: Backend) =>
               // A cross-document navigation replaces the page's document and ends its frames' documents with it.
               yield* goto(world, page, `${world.site.origin}/hello`)
               const replacement = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
-              const ends = yield* Effect.forEach(navigables, (navigable, index) =>
+              const ends = yield* Effect.forEach(navigables, (navigable, index): Effect.Effect<Adapter.Fact> =>
                 index === 0
                   ? Effect.succeed(replacement)
                   : world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable))
