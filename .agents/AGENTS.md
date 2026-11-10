@@ -52,8 +52,9 @@ and stock WebKit, and every member the API declares is built. One declared befor
 - `packages/cli`: published as `@usestrider/cli`, the `strider` command to install globally: a small launcher that runs
   `@usestrider/browser`'s command on Node, or on Bun where there's no Node. It exists to list that package and
   `@effect/platform-node` as real dependencies, so a global install links them.
-- `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
-  environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
+- `packages/scenarios`: private, never published: a comparison harness: paired Strider and Playwright
+  scenarios on the integration environment's Chromium or Firefox. `pnpm scenarios` prints a run's report, and
+  `pnpm scenarios:report` regenerates `RESULTS.md` from preserved measurements; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
   `test/upstream/` ports selected public Playwright suites using pinned fixtures and notices in `upstream/`.
