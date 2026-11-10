@@ -495,6 +495,31 @@ export const conformance = (backend: Backend) =>
             assert.isTrue(yield* evaluate(world, page, "() => navigator.userActivation.isActive", true))
           }), timeout)
 
+        it.effect("evaluates: a by-value argument keeps an own __proto__ key as data", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/form`)
+            const realm = yield* mainRealm(world, page)
+            // Plain JSON data: no tagged value, so nothing about it needs reconstructing.
+            const result = yield* world.adapter.evaluate(realm, {
+              functionDeclaration:
+                "(value) => [Object.prototype.hasOwnProperty.call(value, '__proto__'), Object.getPrototypeOf(value) === Object.prototype, 'polluted' in value]",
+              arguments: [{
+                _tag: "Value",
+                value: {
+                  type: "object",
+                  value: [["__proto__", { type: "object", value: [["polluted", { type: "boolean", value: true }]] }]]
+                }
+              }],
+              awaitPromise: false,
+              result: "value",
+              userActivation: false
+            })
+            assert(result._tag === "Value", `evaluation threw: ${result._tag === "Exception" ? result.text : ""}`)
+            assert.deepStrictEqual(json(result.value), [true, true, false])
+          }), timeout)
+
         it.effect("dispatches input: a click and typing", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
