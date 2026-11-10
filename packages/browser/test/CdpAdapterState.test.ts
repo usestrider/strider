@@ -1247,6 +1247,47 @@ describe("CDP restoration cleanup", () => {
       assert.deepStrictEqual(sent.sort(), ["Fetch.enable", "Page.setInterceptFileChooserDialog"])
     })))
 
+  for (const rejected of ["Browser.setDownloadBehavior", "Fetch.enable"]) {
+    it.effect(`restores independent declarations after refused disposal even when ${rejected} rejects`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent: Array<string> = []
+        const base = declarationSession(sent, true)
+        let restoring = false
+        const mock = {
+          ...base,
+          send: (command: Parameters<ProtocolClient.Session["send"]>[0]) =>
+            restoring && command.method === rejected
+              ? Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: command.method,
+                    reason: "Unrecognized",
+                    code: -32000,
+                    description: "restoration refused"
+                  })
+                })
+              )
+              : base.send(command)
+        } as ProtocolClient.Session
+        const { state, context } = yield* withContextPage(mock)
+        const scope = { _tag: "UserContext", context: context.id } as const
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, scope, { _tag: "FileChooser", retiring: () => true }).pipe(
+          Scope.provide(lifetime)
+        )
+        yield* Declare.declare(state, scope, { _tag: "Challenges", retiring: () => true }).pipe(Scope.provide(lifetime))
+        sent.length = 0
+        yield* Scope.close(lifetime, Exit.void)
+        restoring = true
+        const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+        assert.isTrue(Exit.isFailure(exit))
+        assert.include(sent, "Page.setInterceptFileChooserDialog", "file chooser retraction is independent")
+        if (rejected === "Browser.setDownloadBehavior") {
+          assert.include(sent, "Fetch.enable", "interception retraction is independent of downloads")
+        }
+      })))
+  }
+
   it.effect("restores the download behavior and leaves the context usable when its disposal is refused", () =>
     Effect.scoped(Effect.gen(function*() {
       const restored: Array<string> = []
