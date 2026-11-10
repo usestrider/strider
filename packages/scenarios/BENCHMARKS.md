@@ -782,3 +782,19 @@ query clears its caches. Original list/table outputs are recorded as incorrect a
 old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
 hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
 but does not eliminate JIT, GC, scheduling, order or thermal effects.
+
+### Hosted launch phase diagnostics
+
+Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=launch-diagnostic`,
+`browser=chromium`, `runs=20`, and base/head pinned to the same commit. This entry profiles head only;
+base is retained for provenance, not measured as a comparison role. The driver overlays its profiler,
+hooks and regression tests onto head, retaining the exact tooling and original source/dependency provenance.
+It first runs the ordinary/persistent missing-instrumentation and complete-report regressions, then collects
+20 alternating Strider/Playwright diagnostic pairs after three warmup pairs. No workflow edit is needed.
+
+The retained `launch-diagnostic/` directory contains the main report, raw phases, wire messages, spawn arguments,
+resource counts, regression child output, rejected regression reports and logs, including on failure.
+`launch-summary.md` labels the output diagnostic only. Launch availability remains the boundary; initial-page
+gate observation and cleanup are outside timing. Different default initial resources and sandbox settings remain.
+Do not sum overlapping spans or treat instrumented timings as speedup or parity evidence. A failed or partial
+report establishes no valid timing result.
