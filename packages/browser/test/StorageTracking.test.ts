@@ -27,7 +27,8 @@ it.effect("dispatches storage tracking only to its context using the existing re
     const scope = yield* Scope.make()
     const other = yield* Scope.make()
     yield* fold.observeStorageSources(entries[0]!, (origins) => calls.push(origins)).pipe(Scope.provide(scope))
-    yield* fold.observeStorageSources(entries[2]!, () => {}).pipe(Scope.provide(other))
+    let otherCalls = 0
+    yield* fold.observeStorageSources(entries[2]!, () => otherCalls++).pipe(Scope.provide(other))
     let sequence = 0
     const send = Effect.fnUntraced(function*(name: string) {
       let ownerReads = 0
@@ -79,10 +80,14 @@ it.effect("dispatches storage tracking only to its context using the existing re
     yield* send("tracked")
     assert.deepStrictEqual(calls, [["https://example.com"]])
     yield* Scope.close(scope, Exit.void)
+    yield* send("other-tracked")
+    assert.strictEqual(otherCalls, 1)
     yield* send("tracked")
     yield* send("sibling")
     assert.strictEqual(yield* commit("tracked"), siblingReads)
     assert.strictEqual(yield* commit("sibling"), siblingReads)
     assert.strictEqual(calls.length, 1)
     yield* Scope.close(other, Exit.void)
+    yield* send("other-tracked")
+    assert.strictEqual(otherCalls, 1)
   }))
