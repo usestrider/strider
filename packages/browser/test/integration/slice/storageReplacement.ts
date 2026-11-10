@@ -374,6 +374,10 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             const context = yield* tracked()
             const page = yield* context.newPage
             yield* page.goto(origin)
+            yield* page.evaluateInMainWorld(() => {
+              document.cookie = "blocker=kept; path=/"
+              localStorage.setItem("blocker", "kept")
+            })
             yield* page.evaluateInMainWorld(async () => {
               const open = indexedDB.open("held", 1)
               await new Promise<void>((resolve, reject) => {
@@ -391,7 +395,13 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             if (error.reason._tag !== "PartiallyApplied") return yield* Effect.die(error)
             assert.include(error.reason.message, "partial")
             assert.lengthOf(yield* context.pages, 1)
+            const surviving = yield* page.evaluateInMainWorld(() => ({
+              cookie: document.cookie,
+              localStorage: localStorage.getItem("blocker")
+            }))
+            // Close the blocker before asserting so a failing regression still releases the live handle.
             yield* page.evaluateInMainWorld(() => (globalThis as any).held.close())
+            assert.deepEqual(surviving, { cookie: "blocker=kept", localStorage: "kept" })
             // A subsequent request is ordered after the possibly still-pending deletion.
             const version = yield* page.evaluateInMainWorld(() =>
               new Promise<number>((resolve, reject) => {
