@@ -425,7 +425,7 @@ export const install = (name: string, token: string, pattern: string, transport:
   }
   // A page cannot replace or delete the holder after install; removing the last route only deactivates it.
   global.Object.defineProperty(global, key, {
-    value: {
+    value: global.Object.freeze({
       add: (...args: [string, string, string, string]) => {
         if (!active) {
           active = true
@@ -439,7 +439,7 @@ export const install = (name: string, token: string, pattern: string, transport:
         add(...args)
       },
       dispatch
-    },
+    }),
     configurable: false,
     writable: false,
     enumerable: false

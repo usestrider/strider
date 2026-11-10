@@ -223,7 +223,8 @@ export const register = <E, R>(
     })
     const run = (connection: Connection, effect: Effect.Effect<void, unknown>, bounded = true) =>
       effect.pipe(
-        Operation.apart("WebSocketRoute.handler", budget),
+        // The handler's own work has no deadline once it has decided: only a message handler's turn is bounded.
+        bounded ? Operation.apart("WebSocketRoute.handler", budget) : Operation.detached,
         bounded ?
           (self) =>
             self.pipe(
@@ -451,7 +452,7 @@ export const register = <E, R>(
         yield* run(
           connection,
           Effect.provideContext(
-            handler(handle).pipe(Operation.apart("WebSocketRoute.connection", budget), Scope.provide(child)),
+            handler(handle).pipe(Operation.detached, Scope.provide(child)),
             context
           ).pipe(
             Effect.andThen(
