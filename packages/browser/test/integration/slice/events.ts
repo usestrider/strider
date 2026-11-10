@@ -86,19 +86,23 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             if (yield* popupsRefused()) return
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
+              yield* page.context.addInitScript({ source: "window.__popupInit = 'initialized'" })
               yield* page.context.route("https://opener.test/**", () =>
                 Route.fulfill(HttpServerResponse.text(
                   `<a href="https://target.test/" target="_blank" rel="${rel}">Open</a>`,
                   { contentType: "text/html" }
                 )))
               yield* page.context.route("https://target.test/**", () =>
-                Route.fulfill(HttpServerResponse.text("<title>Target</title>", { contentType: "text/html" })))
+                Route.fulfill(HttpServerResponse.text(
+                  "<script>document.title = window.__popupInit ?? 'missing init script'</script>",
+                  { contentType: "text/html" }
+                )))
               yield* page.goto("https://opener.test/")
               const popups = yield* Popup.next(page)
               yield* page.getByRole("link", { name: "Open" }).click()
               const popup = yield* popups
               yield* popup.pipe(Expect.toHaveURL("https://target.test/"))
-              yield* popup.pipe(Expect.toHaveTitle("Target"))
+              yield* popup.pipe(Expect.toHaveTitle("initialized"))
             }))
           }), timeout)
       }
