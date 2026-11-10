@@ -438,6 +438,21 @@ const sinceLast = (session: ToolkitImpl.Session) =>
   )
 
 describe("Session's digest", () => {
+  it.effect("opening a page preserves another page's pending and later navigation", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      yield* page.goto("https://example.test/pending")
+      yield* TestClock.adjust("1 millis")
+      yield* session.open({ name: "other", url: "https://example.test/other" })
+      yield* TestClock.adjust("1 millis")
+      assert.include(yield* sinceLast(session), "main navigated to https://example.test/pending")
+      yield* page.goto("https://example.test/later")
+      yield* TestClock.adjust("1 millis")
+      assert.include(yield* sinceLast(session), "main navigated to https://example.test/later")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
   it.effect("names a page by its name now, after page name renamed it", () =>
     Effect.gen(function*() {
       const context = yield* Browser.newContext()
