@@ -711,6 +711,23 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       )
 
       it.effect(
+        "collects the body of a 3xx status that isn't a redirect",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/multiple-choices`,
+              status: 300,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/multiple-choices`)
+            assert.strictEqual((yield* response).body, "<title>choices</title>")
+          })),
+        timeout
+      )
+
+      it.effect(
         "ends manual redirects using the browser completion evidence",
         () =>
           Effect.scoped(Effect.gen(function*() {
