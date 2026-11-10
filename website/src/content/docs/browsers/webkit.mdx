@@ -16,7 +16,7 @@ each ships MiniBrowser, a small browser for testing it. Both protocols are gener
 tests run its MiniBrowser.
 
 - `WebKit.layer` launches a MiniBrowser and drives it.
-- `WebKit.layerAttach` attaches to a running WebKitGTK or WPE browser, to read, locate, screenshot and navigate. It
+- `WebKit.layerAttach` attaches to a running WebKitGTK or WPE browser, to read, locate, screenshot, and navigate. It
   can't click or type.
 
 Linux only. Safari on macOS and iOS isn't supported. WPE isn't tested.
@@ -73,7 +73,7 @@ inspector HTTP endpoint instead.
 ## Attaching
 
 [Attach](/docs/pages/attaching) when the browser is already running, such as a WPE browser on a device, to read,
-screenshot or navigate its pages. To click or type, launch a MiniBrowser with
+screenshot, or navigate its pages. To click or type, launch a MiniBrowser with
 `WebKit.layer` instead. Start the browser with an
 inspector server:
 
@@ -211,7 +211,7 @@ const openHelp = Effect.fn("openHelp")(function*(page: Page.Page) {
 **No [`back`](/docs/api/browser/Page#Page.back) or [`forward`](/docs/api/browser/Page#Page.forward):** WebKit
 misreports them.
 
-**Little emulation.** The viewport is the window's size. Locale, time zone, user agent, touch and throttling can't
+**Little emulation.** The viewport is the window's size. Locale, time zone, user agent, touch, and throttling can't
 be emulated.
 
 **Cookies.** [`context.cookies`](/docs/pages/contexts#cookies-and-storage) lists only the cookies its open pages are
@@ -230,7 +230,7 @@ server's `401` page.
 For WebM files, [enable PNG-polled video explicitly](/docs/browsers/webkit-video). It uses a supplied writer and
 a caller-owned directory, independently of downloads.
 
-**No downloads, file choosers, PDFs or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
+**No downloads, file choosers, PDFs, or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 
 ## The raw protocol
 

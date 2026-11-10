@@ -9,7 +9,7 @@ pages in different contexts share nothing, and its settings hold for every page 
 
 ## Pages in one context
 
-A context is like a fresh profile: its own cookies, storage, cache and permissions. `Browser.newPage()` makes a
+A context is like a fresh profile: its own cookies, storage, cache, and permissions. `Browser.newPage()` makes a
 context with one page in it. For pages that share them, such as two tabs of one signed-in user, make the context
 and open pages in it:
 
@@ -34,7 +34,7 @@ A context and its pages close with the scope that made them, popups included.
 
 ## Settings for a context's life
 
-A page reads its viewport, locale and time zone as it loads, so settings applied after it opens can miss what it
+A page reads its viewport, locale, and time zone as it loads, so settings applied after it opens can miss what it
 rendered first. Options to `newContext` or `newPage` hold for the context's life, and apply before its first page
 loads:
 
@@ -64,7 +64,7 @@ const berlinPhone = Effect.fn("berlinPhone")(function*() {
 ```
 
 `page.viewportSize` reads the configured width and height, returning `None` when no viewport is declared.
-It follows page, context and browser declaration precedence, and release restores the next setting.
+It follows page, context, and browser declaration precedence, and release restores the next setting.
 It does not measure the window or document layout, and is available with inspect access.
 
 | Option           | Sets                                                                               |
@@ -84,7 +84,7 @@ its previous map and merges over context headers; page values win when names mat
 headers while clearing page-specific ones, and removal restores the previous map.
 Names are case-insensitive, values must be strings valid as HTTP field values, and invalid input fails with
 `InvalidInput`. Request route overrides take precedence; header order is not guaranteed. This setting works on
-Chromium, Firefox and launched stock WebKit; attached stock WebKit refuses it.
+Chromium, Firefox, and launched stock WebKit; attached stock WebKit refuses it.
 
 A field the browser can't apply, such as touch on Firefox, fails with `Unsupported` naming it, before anything is
 applied. [`browser.capabilities`](/docs/browsers/choosing#capabilities) lists what a backend can do.
@@ -170,7 +170,7 @@ const signedIn = Effect.fn("signedIn")(function*() {
 
 - In memory, its secrets are `Redacted`. `StorageState.Json` writes them out in full: keep the file out of version
   control.
-- It doesn't carry `sessionStorage`, service workers or logins bound to a device. For those, use a profile
+- It doesn't carry `sessionStorage`, service workers, or logins bound to a device. For those, use a profile
   directory: `userDataDir` keeps the profile in a directory of yours instead of a temporary one, so a login made
   there once, by hand in a headed run, is there at the next launch.
 
@@ -262,13 +262,13 @@ const replaceLogin = Effect.fn("replaceLogin")(
 )
 ```
 
-Replacement clears all cookies and the localStorage, IndexedDB databases and available origin-private files of
-incoming and previously visited origins and partitions, then restores the supplied cookies, localStorage and
+Replacement clears all cookies and the localStorage, IndexedDB databases, and available origin-private files of
+incoming and previously visited origins and partitions, then restores the supplied cookies, localStorage, and
 IndexedDB. Omitted data is cleared. Pages keep their identity and URLs; reload a page yourself if its application
-needs to read the new state. Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
+needs to read the new state. Existing-page sessionStorage, HTTP cache, and service-worker registrations are unchanged.
 
 Stop page and worker writes, including storage-writing init scripts, and release IndexedDB connections and file handles first. A blocked database deletion,
-locked file, backend error or deadline can leave partial changes. Interruption has the same risk. There is no
+locked file, backend error, or deadline can leave partial changes. Interruption has the same risk. There is no
 rollback. Runtime failures use `UserContextError` with reason `StorageState.PartiallyApplied`, meaning changes
 may have occurred, even if the failure happened before the first deletion; deadlines remain
 `Deadline.Timeout`, and interruption remains interruption. An issued IndexedDB deletion may complete later when its connection closes. Temporary pages and

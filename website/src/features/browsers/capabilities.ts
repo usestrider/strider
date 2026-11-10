@@ -34,7 +34,7 @@ export const backends = (): ReadonlyArray<Backend> => {
 /** The capabilities, by group, in the order the guides show them; a label may use `code` */
 export const groups: ReadonlyArray<{ readonly label: string; readonly names: Readonly<Record<string, string>> }> = [
   {
-    label: "Contexts, pages and frames",
+    label: "Contexts, pages, and frames",
     names: {
       userContexts: "New contexts and pages",
       "userContexts.proxy": "HTTP proxies for a context",

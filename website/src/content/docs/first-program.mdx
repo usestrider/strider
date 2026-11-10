@@ -1,6 +1,6 @@
 ---
 title: First program
-description: A whole program, the page it opens, its locators, actions, expectations and reads, the layer that launches the browser, and steps as functions that run concurrently.
+description: A whole program, the page it opens, its locators and actions, expectations, reads, the layer that launches the browser, and steps as functions that run concurrently.
 order: 2
 ---
 
@@ -40,7 +40,7 @@ CHROMIUM_PATH=/usr/bin/chromium node checkout.ts
 
 `Browser.newPage()` makes a fresh [context](/docs/pages/contexts), with its own cookies and storage, and a page in
 it. Both close when
-the `Scope` from `Effect.scoped` ends: on success, failure or interruption.
+the `Scope` from `Effect.scoped` ends: on success, failure, or interruption.
 
 [`page.goto(url)`](/docs/api/browser/Page#Page.goto) returns when the navigation commits, which is when it has
 succeeded or failed. `{ waitUntil: "load" }` waits for the load too. Actions and expectations wait for their
@@ -52,7 +52,7 @@ after an expectation. A 404 still commits: `goto` returns the navigation, with i
 `page.getByRole("button", { name: "Add to cart" })` is a locator: how to find an element, not the element. It
 finds the element again each time it's used, so it survives a re-render.
 
-`click()` waits until an element matches and it's visible, enabled, still and uncovered, scrolling it into view,
+`click()` waits until an element matches and it's visible, enabled, still, and uncovered, scrolling it into view,
 then clicks once. If something covers it as the click is sent, the page never sees the click and the action checks
 again. Two or more matches fail at once, with [`StrictViolation`](/docs/errors#strictness). [Actions](/docs/pages/actions) lists each action's checks, and
 [finding elements](/docs/pages/locators) the other locators, `filter`, and locators inside locators.
@@ -110,7 +110,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-A step that takes the page works the same in a script, a [test](/docs/tools/testing) or a
+A step that takes the page works the same in a script, a [test](/docs/tools/testing), or a
 [`strider` segment](/docs/agents/cli#segments). One that only reads can take a `Page.ReadonlyPage`, and then also works on
 [pages you may only inspect](/docs/pages/attaching#access-levels).
 

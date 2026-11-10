@@ -1,6 +1,6 @@
 ---
 title: Request bodies
-description: Capture submitted text, bytes, JSON and URL-encoded forms with scoped request subscriptions.
+description: Capture submitted text, bytes, JSON, and URL-encoded forms with scoped request subscriptions.
 order: 4
 ---
 
@@ -23,7 +23,7 @@ const submittedForm = Effect.fn("submittedForm")(function*(page: Page.Page) {
 ```
 
 The decoder receives an Effect `HttpIncomingMessage`: use `text` for text, `arrayBuffer` for bytes, `json` for
-JSON or `urlParamsBody` for URL-encoded forms. URL parameters preserve repeated keys. For schema validation, use
+JSON, or `urlParamsBody` for URL-encoded forms. URL parameters preserve repeated keys. For schema validation, use
 Effect's `HttpIncomingMessage.schemaBodyJson`, as with [response bodies](/docs/events/network#decoding-bodies).
 Text honors the declared charset and defaults to UTF-8; unknown charsets fall back to UTF-8, with invalid
 sequences replaced.
