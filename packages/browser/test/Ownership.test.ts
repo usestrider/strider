@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import * as Adapter from "../src/internal/adapter.ts"
@@ -263,4 +264,98 @@ describe("Ownership.remove", () => {
         "the test))"
       ])
     }).pipe(Effect.scoped))
+})
+
+/** Lets the commands the model's scope runs on their own fibers go out. */
+const settle = Effect.forEach([1, 2, 3, 4, 5], () => Effect.yieldNow, { discard: true })
+
+const withClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.flatMap(
+    Clock.Clock,
+    (clock) => effect.pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))
+  )
+
+describe("A context removed with the scope that released its pages", () => {
+  /** A context with `count` pages in it, owned by `owner`, with `adapter`'s commands counted. */
+  const setup = Effect.fnUntraced(function*(
+    removes: () => boolean,
+    count = 2,
+    removeUserContext: Adapter.AdapterConnection["removeUserContext"] = () => Effect.void
+  ) {
+    const owner = yield* Scope.make()
+    const context = yield* openContext([])
+    const sent: Array<string> = []
+    const pages = yield* Effect.forEach(Array.from({ length: count }), (_, index) =>
+      Effect.gen(function*() {
+        const state = yield* SubscriptionRef.make({ status: { _tag: "Open" }, owner: Option.some(owner) })
+        const closed = yield* Deferred.make<Target.CloseReason>()
+        return {
+          id: `page-${index}`,
+          state: Readable.of(state),
+          closed,
+          contextEntry: context
+        } as unknown as Model.PageEntry
+      }))
+    const ownership = yield* Ownership.make()
+    yield* ownership.attach({
+      closePage: (page: string) => Effect.sync(() => void sent.push(`closePage ${page}`)),
+      removeUserContext: (...args: Parameters<Adapter.AdapterConnection["removeUserContext"]>) =>
+        Effect.sync(() => void sent.push("removeUserContext")).pipe(Effect.andThen(removeUserContext(...args)))
+    } as unknown as Adapter.AdapterConnection)
+    ownership.removedWith(context, owner, removes)
+    return { owner, context, pages, ownership, sent }
+  })
+
+  it.effect("closes no page of it, a popup included, since the removal does", () =>
+    Effect.gen(function*() {
+      const { owner, context, pages, ownership, sent } = yield* setup(() => true)
+      // The opener, and a popup it opened: both owned by the scope
+      for (const page of pages) yield* ownership.release(page, owner)
+      assert.deepStrictEqual(sent, [])
+      const removal = yield* ownership.remove(context).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* removed(context)
+      yield* Fiber.join(removal)
+      yield* settle
+      assert.deepStrictEqual(sent, ["removeUserContext"])
+    }).pipe(Effect.scoped, withClock))
+
+  it.effect("still closes a page its own scope released when another scope owns the context", () =>
+    Effect.gen(function*() {
+      const { pages, ownership, sent } = yield* setup(() => true, 1)
+      const other = yield* Scope.make()
+      const state = yield* SubscriptionRef.make({ status: { _tag: "Open" }, owner: Option.some(other) })
+      const page = { ...pages[0]!, state: Readable.of(state) } as unknown as Model.PageEntry
+      const release = yield* ownership.release(page, other).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* ends(page)
+      yield* Fiber.join(release)
+      yield* settle
+      assert.deepStrictEqual(sent, ["closePage page-0"])
+    }).pipe(Effect.scoped, withClock))
+
+  it.effect("still closes a page when the context isn't to be removed, or when nothing says which scope releases", () =>
+    Effect.gen(function*() {
+      for (const mode of ["kept", "unowned"] as const) {
+        const { owner, pages, ownership, sent } = yield* setup(() => mode !== "kept", 1)
+        const release = yield* ownership.release(pages[0]!, mode === "kept" ? owner : undefined).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* ends(pages[0]!)
+        yield* Fiber.join(release)
+        yield* settle
+        assert.deepStrictEqual(sent, ["closePage page-0"], mode)
+      }
+    }).pipe(Effect.scoped, withClock))
+
+  it.effect("closes the pages it left to the removal one by one when the browser refuses it, leaving the context usable", () =>
+    Effect.gen(function*() {
+      const { owner, context, pages, ownership, sent } = yield* setup(() => true, 2, () => Effect.fail(refusal))
+      for (const page of pages) yield* ownership.release(page, owner)
+      const removal = yield* ownership.remove(context).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* settle
+      for (const page of pages) yield* ends(page)
+      yield* Fiber.join(removal)
+      yield* settle
+      assert.deepStrictEqual(sent, ["removeUserContext", "closePage page-0", "closePage page-1"])
+      assert.isFalse(yield* Deferred.isDone(context.closed), "the context did not end")
+    }).pipe(Effect.scoped, withClock))
 })

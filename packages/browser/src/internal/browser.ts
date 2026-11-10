@@ -744,6 +744,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      // A context this scope created is removed with it, which closes the pages it released in it
+      if (mode === undefined || !("context" in mode)) {
+        model.removedWith(entry, ownerScope, () => committed() && !(reclaimable && Handoff.leavesOpen(ownerScope)))
+      }
       if (options?.storageStateTracking === true) yield* StorageStates.track(runtime, entry, options.storageState)
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers

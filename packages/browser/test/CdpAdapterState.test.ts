@@ -1169,6 +1169,46 @@ describe("CDP restoration cleanup", () => {
     )
   }
 
+  it.effect("restores the download behavior and leaves the context usable when its disposal is refused", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const restored: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+        }) =>
+          command.method === "Target.disposeBrowserContext"
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Target.disposeBrowserContext",
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "refused"
+                })
+              })
+            )
+            : Effect.sync(() => {
+              if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                restored.push(command.params.browserContextId ?? "none")
+              }
+              return {}
+            })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "kept", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("kept", context)
+      state.pages.set(page.id, { ...page, context })
+      const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.isFalse(context.removing)
+      assert.notOk(context.disposed)
+      assert.deepStrictEqual(restored, ["kept"])
+    })))
+
   it.effect("holds disposal until a download restore already sent to the context has replied", () =>
     Effect.scoped(Effect.gen(function*() {
       const restoreSent = yield* Deferred.make<void>()
