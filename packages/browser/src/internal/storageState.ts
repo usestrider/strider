@@ -753,7 +753,6 @@ const asReason = (reason: { readonly _tag: string; readonly message: string }, o
 
 /** Deletes origin data without silently leaving blocked databases behind. Evaluated in the browser. */
 export async function clearOrigin(): Promise<void> {
-  localStorage.clear()
   for (const database of await indexedDB.databases()) {
     if (database.name === undefined) continue
     await new Promise<void>((resolve, reject) => {
@@ -764,6 +763,7 @@ export async function clearOrigin(): Promise<void> {
         reject(new Error("IndexedDB deletion is blocked by an open connection; it may complete later"))
     })
   }
+  localStorage.clear()
   const storage = navigator.storage as StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> }
   if (isSecureContext && storage?.getDirectory !== undefined) {
     const directory = await storage.getDirectory()
@@ -780,7 +780,6 @@ export async function clearOrigin(): Promise<void> {
 interface History {
   readonly origins: Map<string, ReadonlyArray<string>>
   readonly cookieOrigins: Set<string>
-  replacing: boolean
   unsupportedHistory: boolean
 }
 const histories = new WeakMap<Model.ContextEntry, History>()
@@ -799,10 +798,10 @@ const remember = (history: History, chain: ReadonlyArray<string>) => {
   history.origins.set(JSON.stringify(firstParty), firstParty)
 }
 
-const rememberCookie = (history: History, domain: string, secure: boolean) => {
+const rememberCookie = (history: History, domain: string) => {
   let host = domain.replace(/^\./, "")
   while (host !== "") {
-    history.cookieOrigins.add(`${secure ? "https" : "http"}://${host}`)
+    history.cookieOrigins.add(`https://${host}`)
     // Domain cookies can be set on parent domains. IP addresses have no parent domain.
     if (/^[\d.]+$/.test(host) || host.startsWith("[")) break
     const dot = host.indexOf(".")
@@ -813,14 +812,14 @@ const rememberCookie = (history: History, domain: string, secure: boolean) => {
 const rememberCookieUrl = (history: History, origin: string) => {
   const url = URL.parse(origin)
   if (url !== null && (url.protocol === "http:" || url.protocol === "https:")) {
-    rememberCookie(history, url.hostname, url.protocol === "https:")
+    rememberCookie(history, url.hostname)
   }
 }
 
 /** Cookie domains set explicitly need no document or network request to create their cookies. */
 export const cookieRecorder = (entry: Model.ContextEntry): ((cookie: Adapter.Cookie) => void) | undefined => {
   const history = histories.get(entry)
-  return history === undefined ? undefined : (cookie) => rememberCookie(history, cookie.domain, cookie.secure)
+  return history === undefined ? undefined : (cookie) => rememberCookie(history, cookie.domain)
 }
 
 const chainOf = (origin: typeof StorageState.OriginState.Type): ReadonlyArray<string> =>
@@ -834,11 +833,10 @@ export const track = Effect.fnUntraced(
     const history: History = {
       origins: new Map(),
       cookieOrigins: new Set(),
-      replacing: false,
       unsupportedHistory: false
     }
     for (const origin of state?.origins ?? []) remember(history, chainOf(origin))
-    for (const cookie of state?.cookies ?? []) rememberCookie(history, cookie.domain, cookie.secure)
+    for (const cookie of state?.cookies ?? []) rememberCookie(history, cookie.domain)
     histories.set(entry, history)
     yield* Effect.addFinalizer(() => Effect.sync(() => histories.delete(entry)))
     yield* runtime.model.observeStorageSources(entry, (origins, cookieOnly) => {
@@ -848,14 +846,12 @@ export const track = Effect.fnUntraced(
   }
 )
 
-/** Authenticator acquisition cannot race an in-progress replacement. Checked only when acquiring one. */
-export const replacing = (entry: Model.ContextEntry): boolean => histories.get(entry)?.replacing === true
-
 export const replaceState = (
   runtime: Runtime.Runtime,
   context: UserContext.UserContext,
   entry: Model.ContextEntry,
-  state: StorageState.StorageState
+  state: StorageState.StorageState,
+  options?: { readonly recovered?: boolean | undefined }
 ) =>
   Effect.gen(function*() {
     const operation = "UserContext.setStorageState"
@@ -865,15 +861,19 @@ export const replaceState = (
     if (Option.isSome((yield* entry.state.get).closed)) {
       return yield* Effect.fail(refuse("The context is closed"))
     }
-    if (history === undefined) {
+    if (history === undefined || options?.recovered === true) {
       return yield* Effect.fail(
-        refuse("Create the context with storageStateTracking: true before replacing its storage")
+        refuse(
+          options?.recovered === true
+            ? "Recovered or reclaimed contexts cannot track prior storage history for replacement"
+            : "Create the context with storageStateTracking: true before replacing its storage"
+        )
       )
     }
     yield* Effect.acquireUseRelease(
       Effect.suspend(() => {
-        if (history.replacing) return Effect.fail(refuse("Another storage replacement is in progress"))
-        history.replacing = true
+        if (entry.storageReplacing) return Effect.fail(refuse("Another storage replacement is in progress"))
+        entry.storageReplacing = true
         return Effect.void
       }),
       () =>
@@ -957,7 +957,7 @@ export const replaceState = (
               )
             }
           }
-          for (const cookie of state.cookies) rememberCookie(history, cookie.domain, cookie.secure)
+          for (const cookie of state.cookies) rememberCookie(history, cookie.domain)
           const incoming = new Map(state.origins.map((origin) => [JSON.stringify(chainOf(origin)), origin]))
           for (const origin of state.origins) remember(history, chainOf(origin))
           const chains = [...history.origins.values()]
@@ -970,6 +970,10 @@ export const replaceState = (
             }
           )
           yield* Effect.gen(function*() {
+            yield* applyState(runtime, context, new StorageState.StorageState({ cookies: [], origins }), id, {
+              chains,
+              phase: "clear"
+            })
             const capabilities = yield* SubscriptionRef.get(runtime.model.adapter.capabilities)
             const partialCookies = capabilities.entries.some((entry) =>
               entry.name === "cookies" && entry.status === "partial"
@@ -1033,13 +1037,7 @@ export const replaceState = (
                   }
                 }
               }).pipe(Scope.provide(scope)), (scope) => Scope.close(scope, Exit.void).pipe(Operation.detached))
-            yield* Effect.gen(function*() {
-              yield* applyState(runtime, context, new StorageState.StorageState({ cookies: [], origins }), id, {
-                chains,
-                phase: "clear"
-              })
-              yield* applyState(runtime, context, state, id, { chains: state.origins.map(chainOf), phase: "write" })
-            })
+            yield* applyState(runtime, context, state, id, { chains: state.origins.map(chainOf), phase: "write" })
           }).pipe(Effect.mapError((error) =>
             Deadline.isTimeout(error)
               ? error
@@ -1048,7 +1046,7 @@ export const replaceState = (
         }),
       () =>
         Effect.sync(() => {
-          history.replacing = false
+          entry.storageReplacing = false
         })
     )
   }).pipe(Operation.named("UserContext.setStorageState", { attributes: { "browser.context.id": entry.id } }))

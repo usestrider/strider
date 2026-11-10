@@ -103,6 +103,7 @@ const objectMembers = (name: string, id: string) => ({
 interface ContextAccess {
   /** `None` for a context the connection created, controlled for its whole life. */
   readonly grant: Option.Option<Access.Grant>
+  readonly recovered?: boolean | undefined
   /** The handle of one of its pages, under this access. */
   readonly page: (entry: Model.PageEntry) => Page.Page
   /** `control`: the context itself, when it is controlled for life; otherwise a grant for the caller's scope. */
@@ -167,7 +168,8 @@ const makeContext = (
       return Option.getOrThrow(runtime.page(pageEntry.value))
     }).pipe(Operation.named("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
     cookies: Storage.cookieJar(runtime, entry.id, StorageStates.cookieRecorder(entry)),
-    setStorageState: (state) => StorageStates.replaceState(runtime, context, entry, state),
+    setStorageState: (state) =>
+      StorageStates.replaceState(runtime, context, entry, state, { recovered: access.recovered }),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
@@ -591,13 +593,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         }
         credentialOrigin = url.origin
       }
-      if (mode !== undefined && "context" in mode && options?.storageStateTracking !== undefined) {
+      if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
         return yield* Effect.fail(
           contextError(
             operation,
-            new Reason.NotPermitted({
-              required: "control",
-              hint: "storageStateTracking can only be chosen at context creation"
+            new Reason.InvalidInput({
+              input: "storageStateTracking",
+              expected: "false or omitted when reclaiming a context",
+              hint: "Tracking must be enabled when the context is first created"
             }),
             id
           )
@@ -806,6 +809,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         )
       }
       const context: UserContext.UserContext = makeContext(runtime, entry, {
+        recovered: mode !== undefined && "context" in mode,
         grant: Option.none(),
         page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)

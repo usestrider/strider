@@ -231,7 +231,8 @@ export interface UserContext extends ObservedUserContext {
    * **Details**
    *
    * Requires `storageStateTracking: true` at context creation. Untracked contexts and contexts with acquired
-   * virtual authenticators refuse before mutation. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB and available origin-private
+   * virtual authenticators refuse before mutation: their credentials are outside StorageState, and replacement does
+   * not invalidate their live scoped handles. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB and available origin-private
    * files for incoming and previously visited origins and partitions, then writes the supplied state.
    * Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
    *
@@ -239,7 +240,7 @@ export interface UserContext extends ObservedUserContext {
    *
    * Stop page and worker writers and release storage handles first. Failure or interruption after mutation starts
    * can leave partial changes (`StorageState.PartiallyApplied` for runtime failures); a blocked IndexedDB deletion can complete later when its connection closes.
-   * There is no rollback. This is not full Playwright equivalence. New-context import and export are unchanged.
+   * There is no rollback.
    *
    * **Example** (Replacing a live context's login)
    *
@@ -539,7 +540,7 @@ export interface Options {
    *
    * **Details**
    *
-   * Chosen only when creating a context; reclaiming a context refuses either explicit value.
+   * Enabled only when creating a context; reclaiming accepts false or omission and refuses true as invalid input.
    * Contexts that omit this option collect no storage-replacement history.
    *
    * @default false

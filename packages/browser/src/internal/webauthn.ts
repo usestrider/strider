@@ -13,7 +13,6 @@ import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
-import * as StorageState from "./storageState.ts"
 const held = new WeakMap<Model.PageEntry, number>()
 export const isHeld = (page: Model.PageEntry): boolean => (held.get(page) ?? 0) > 0
 
@@ -52,7 +51,7 @@ export const acquire = Effect.fnUntraced(
         Adapter.AdapterError | Deadline.Timeout | Capability.CapabilityError,
         never
       >(() => {
-        if (StorageState.replacing(page.contextEntry)) {
+        if (page.contextEntry.storageReplacing === true) {
           return Effect.fail(
             new Capability.CapabilityError({
               capability: "VirtualAuthenticator",
@@ -86,7 +85,7 @@ export const acquire = Effect.fnUntraced(
         released = true
         return adapter.releaseAuthenticator(ref).pipe(
           Operation.detached,
-          Effect.tap(() => Effect.sync(() => held.set(page, (held.get(page) ?? 1) - 1))),
+          Effect.ensuring(Effect.sync(() => held.set(page, (held.get(page) ?? 1) - 1))),
           Effect.ignore
         )
       })

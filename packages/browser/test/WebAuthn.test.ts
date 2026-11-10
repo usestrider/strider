@@ -49,7 +49,7 @@ describe("WebAuthn credential", () => {
   it.effect("allows native-supported RSA and Ed25519 credential keys to reach the adapter", () =>
     Effect.scoped(Effect.gen(function*() {
       const closed = yield* Deferred.make<Target.CloseReason>()
-      const page = { id: "page-1", closed } as unknown as Model.PageEntry
+      const page = { id: "page-1", closed, contextEntry: {} } as unknown as Model.PageEntry
       const sent: Array<Adapter.AuthenticatorUpdate> = []
       const runtime = {
         backend: "Chromium",
@@ -85,7 +85,7 @@ describe("WebAuthn credential", () => {
   it.effect("releases the storage replacement hold even when native authenticator release fails", () =>
     Effect.gen(function*() {
       const closed = yield* Deferred.make<Target.CloseReason>()
-      const page = { id: "release-failure", closed } as unknown as Model.PageEntry
+      const page = { id: "release-failure", closed, contextEntry: {} } as unknown as Model.PageEntry
       let releases = 0
       const runtime = {
         backend: "Chromium",

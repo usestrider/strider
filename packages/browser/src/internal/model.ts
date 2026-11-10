@@ -345,6 +345,7 @@ export interface StorageSourceObserver {
 }
 
 export interface ContextEntry {
+  storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
   readonly id: UserContext.Id
@@ -410,11 +411,12 @@ export interface Model {
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
-  /** The navigation's entry, created by whichever comes first: its first fact, or the caller waiting for it. */
+  /** Observes storage sources only within the requesting context's scope. */
   readonly observeStorageSources: (
     context: ContextEntry,
     observe: (origins: ReadonlyArray<string>, cookieOnly?: boolean) => void
   ) => Effect.Effect<void, never, Scope.Scope>
+  /** The navigation's entry, created by whichever comes first: its first fact, or the caller waiting for it. */
   readonly navigation: (id: PageNavigation.Id) => Effect.Effect<NavigationEntry>
   /** Forgets a navigation once its caller has its outcome. */
   readonly forget: (id: PageNavigation.Id) => Effect.Effect<void>

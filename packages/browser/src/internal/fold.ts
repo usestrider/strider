@@ -299,7 +299,10 @@ export const make = Effect.fnUntraced(function*(options: {
         Deferred.doneUnsafe(hop.sentKnown, Effect.void)
       }
     }
-    for (const frame of gone) frames.delete(frame)
+    for (const frame of gone) {
+      frames.delete(frame)
+      page.contextEntry.storageSources?.origins.delete(frame)
+    }
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
       if (gone.has(document.navigable)) yield* endDocument(document.id, new Target.FrameDetached({}))
@@ -346,9 +349,14 @@ export const make = Effect.fnUntraced(function*(options: {
       }
     }
     pages.delete(page.id)
+    page.contextEntry.storageSources?.origins.delete(page.id)
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
-    for (const [frame, owner] of frames) if (owner === page) frames.delete(frame)
+    for (const [frame, owner] of frames) {
+      if (owner !== page) continue
+      frames.delete(frame)
+      page.contextEntry.storageSources?.origins.delete(frame)
+    }
     const how = endOf(reason)
     for (const channel of Object.values(page.events)) Events.end(channel as Events.Channel<unknown>, how)
     yield* update(page.state, (state): Model.PageState => ({
