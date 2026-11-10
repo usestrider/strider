@@ -142,7 +142,7 @@ const toRemoteValue = (
   }
 }
 
-/** Whether JSON would lose data inside this value. Top-level undefined has a native CDP argument form. */
+/** Whether native CDP would lose data inside this value. Top-level undefined has a native argument form. */
 const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean => {
   switch (value.type) {
     case "undefined":
@@ -156,7 +156,9 @@ const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean =>
     case "array":
       return (value.value ?? []).some((item) => requiresDecoder(item, true))
     case "object":
-      return (value.value ?? []).some(([key, item]) => typeof key !== "string" || requiresDecoder(item, true))
+      return (value.value ?? []).some(([key, item]) =>
+        typeof key !== "string" || key === "__proto__" || requiresDecoder(item, true)
+      )
     default:
       return true
   }
