@@ -1,50 +1,12 @@
 import { assert, it } from "@effect/vitest"
 import { Browser, Deadline, Target, WebSocketRoute } from "@usestrider/browser"
-import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
-import type * as Adapter from "../src/internal/adapter.ts"
-import * as BrowserImpl from "../src/internal/browser.ts"
-import * as BrowserClock from "../src/internal/browserClock.ts"
-import * as Fake from "../src/internal/fake.ts"
-
-const harness = Effect.fnUntraced(
-  function*(
-    test: (
-      bridge: () => Adapter.WebSocketBridge
-    ) => Effect.Effect<void, unknown, Browser.Browser | import("effect/Scope").Scope>,
-    evaluate?: Adapter.AdapterConnection["evaluate"]
-  ) {
-    let bridge!: Adapter.WebSocketBridge
-    const clock = yield* Clock.clockWith(Effect.succeed)
-    const backend = BrowserImpl.layer((sink) =>
-      Fake.connect([], {
-        info: new Browser.Info(Fake.info),
-        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
-      })(sink).pipe(Effect.map((fake) => ({
-        ...fake,
-        ownership: "launched" as const,
-        ...(evaluate === undefined ? {} : { evaluate }),
-        declare: (scope, declaration) =>
-          fake.declare(scope, declaration).pipe(Effect.tap(() =>
-            Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
-              }
-            })
-          ))
-      })))
-    )
-    yield* test(() => bridge).pipe(
-      Effect.provide(backend),
-      Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
-    )
-  }
-)
+import { harness } from "./utils/WebSocketHostHarness.ts"
 
 it.effect("releases every accepted payload in a pulled batch when removal interrupts its first fetch", () =>
   harness((getBridge) =>
@@ -302,3 +264,51 @@ it.effect("discards every accepted payload when bridge teardown fails", () =>
       assert.strictEqual(releases, 1)
     })
   ))
+
+it.effect("releases a stalled payload at the route budget and proceeds to another realm", () =>
+  harness((getBridge) =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const received = yield* Deferred.make<WebSocketRoute.Connection>()
+      const registration = yield* context.routeWebSocket("**", (socket) =>
+        Deferred.succeed(received, socket).pipe(Effect.asVoid), { implementation: "script" })
+      const bridge = getBridge()
+      const stuck = Target.RealmId.make("R-stalled")
+      const next = Target.RealmId.make("R-progress")
+      const started = yield* Deferred.make<void>()
+      let released = 0
+      assert.isTrue(
+        bridge.receive(stuck, Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)), {
+          _tag: "Worker",
+          realm: stuck
+        }, {
+          isAlive: () =>
+            true,
+          release: Effect.sync(() => {
+            released++
+          })
+        })
+      )
+      yield* Deferred.await(started)
+      assert.isTrue(
+        bridge.receive(
+          next,
+          Effect.succeed(
+            JSON.stringify({ token: bridge.token, type: "create", id: "next", url: "ws://example.com/", protocols: [] })
+          ),
+          { _tag: "Worker", realm: next },
+          {
+            isAlive: () =>
+              true
+          }
+        )
+      )
+      yield* TestClock.adjust("100 millis")
+      const socket = yield* Deferred.await(received)
+      assert.strictEqual(socket.realm, next)
+      assert.strictEqual(released, 1)
+      yield* registration.remove
+      assert.strictEqual(released, 1)
+    }), () => Effect.succeed({ _tag: "Value", value: { type: "undefined" } })).pipe(
+      Effect.provideService(Deadline.DefaultBudget, Duration.millis(100))
+    ))
