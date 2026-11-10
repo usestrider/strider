@@ -794,8 +794,19 @@ Each child process records separate browser setup/cleanup, warmup and workload C
 also records page/fixture setup and page cleanup separately; lifecycle acquisition/release and verification belong
 to its five-cycle workload. Phase markers include action and profiler boundaries. Node CPU sampling uses a 1 ms
 interval; heap sampling uses 32 KiB and includes objects collected by major/minor GC. GC observer records and native
-GC logs are retained. No forced GC or browser runtime hook is installed. Imports before inspector attachment are
-outside capture; CPU windows include boundary bookkeeping and allocation windows also include inspector startup
-and shutdown. File writing falls outside each profile but can affect later GC/JIT state. These are sampled Node
-attributions, not exact accounting, browser-process profiles or new performance verdicts. An unsampled function
-may still have cost. Every attempt, including partial captures, is retained by the workflow.
+GC logs are retained. No explicit forced-GC command or browser runtime hook is installed. Imports before inspector
+attachment are outside capture; CPU windows include boundary bookkeeping and allocation windows also include
+inspector startup and shutdown.
+
+The inspector runs in the measured Node process: stopped CPU and allocation profiles arrive as JavaScript objects
+in its heap, then are serialized and written synchronously. Those objects and serialization perturb the measured
+heap and subsequent GC, even though file writing falls outside the profile windows. This is a plausible mechanism
+for the observed stop-window major GC, not an experimentally established cause. CPU and allocation sampling run
+simultaneously, so CPU samples include allocation-sampler overhead and possible code-generation effects. Each
+source/case is captured once in a fixed order; reversing source order for resources does not remove the confounding
+of source with run position within either case.
+
+These are sampled Node attributions, not exact accounting, browser-process profiles or new performance verdicts.
+Do not convert CPU sample counts into exact milliseconds or infer elapsed duration from counts; total and idle
+counts cannot establish an elapsed-time comparison between sources. An unsampled function may still have cost.
+Every attempt, including partial captures, is retained by the workflow.
