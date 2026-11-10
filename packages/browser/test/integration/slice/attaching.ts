@@ -1,6 +1,6 @@
 /**
  * The seventh slice: attaching and access, through the public API. Access on every backend, through a
- * launched browser's own first tab and its default context; call site 7 on Chromium and Firefox, against a browser
+ * launched browser's default context and a tab of its own; call site 7 on Chromium and Firefox, against a browser
  * the test starts with two tabs and a layer attaches to; and Firefox's one session.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -65,7 +65,9 @@ export const chromiumAttachable = (
     // Headless Chromium takes one URL on its command line (QUIRKS.md): the second tab is opened through its endpoint
     yield* Launch.spawn(
       chromium.executable,
-      ChromiumLauncher.argsFor({ args: [first] }, dir, "port").filter((arg) => arg !== "about:blank"),
+      ChromiumLauncher.argsFor({ args: [first] }, dir, "port").filter((arg) =>
+        arg !== "about:blank" && arg !== "--no-startup-window"
+      ),
       dir,
       {}
     )
@@ -128,8 +130,10 @@ export const attaching = (
             const ours = yield* Browser.newPage()
             const pages = yield* browser.pages
             assert.isTrue(pages.some((page) => Equal.equals(page, ours)))
-            // The launched browser's own first tab: observed, so it has no locators
-            const first = (yield* browser.defaultContext.pages)[0]!
+            // A tab of the default context the test opens through a grant, and then reads as observed, so it has no
+            // locators: a Chromium launch starts with no tab of its own
+            const opened = yield* (yield* browser.defaultContext.control).newPage
+            const first = (yield* browser.defaultContext.pages).find((page) => Equal.equals(page, opened))!
             assert.isFalse("getByRole" in first)
             assert.isTrue(pages.some((page) => Equal.equals(page, first)))
             let kept: Page.Page | undefined

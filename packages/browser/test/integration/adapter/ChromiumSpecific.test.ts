@@ -91,6 +91,33 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      for (const persistent of [false, true]) {
+        it.effect(
+          `${persistent ? "opens" : "doesn't open"} a page in the default context on a launch with${
+            persistent ? "" : "out"
+          } a supplied profile`,
+          () =>
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              const userDataDir = persistent
+                ? yield* fs.makeTempDirectoryScoped({ prefix: "strider-persistent-test-" })
+                : undefined
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable, userDataDir })
+                return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const pages = yield* browser.defaultContext.pages
+                assert.lengthOf(pages, persistent ? 1 : 0)
+                assert.lengthOf(yield* browser.pages, persistent ? 1 : 0)
+                if (persistent) assert.strictEqual(String(yield* pages[0]!.url), "about:blank")
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
       for (const debugging of ["pipe", "port"] as const) {
         for (const headless of [true, false]) {
           for (const createPage of [false, true]) {

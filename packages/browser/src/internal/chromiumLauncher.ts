@@ -44,15 +44,26 @@ export interface Options extends Settings {
   readonly executablePath: string
 }
 
-/** The arguments a launch passes, in order: the profile's, the caller's, then ours. */
-export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
-  ...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]),
-  ...(options.headless ?? true ? ["--headless"] : []),
-  ...(options.args ?? []),
-  debugging === "pipe" ? "--remote-debugging-pipe" : "--remote-debugging-port=0",
-  `--user-data-dir=${userDataDir}`,
-  "about:blank"
-]
+/**
+ * The arguments a launch passes, in order: the profile's, the caller's, then ours. A launch on a temporary profile
+ * starts with no window, so the default context has no page until one is opened; one on a profile the caller
+ * supplies opens `about:blank`.
+ */
+export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => {
+  const args = options.args ?? []
+  return [
+    ...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]),
+    ...(options.headless ?? true ? ["--headless"] : []),
+    ...args,
+    debugging === "pipe" ? "--remote-debugging-pipe" : "--remote-debugging-port=0",
+    `--user-data-dir=${userDataDir}`,
+    ...(options.userDataDir !== undefined
+      ? ["about:blank"]
+      : args.includes("--no-startup-window")
+      ? []
+      : ["--no-startup-window"])
+  ]
+}
 
 /** Launches over the pipe. */
 export const launch: (

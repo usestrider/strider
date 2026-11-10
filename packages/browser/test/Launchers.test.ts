@@ -242,11 +242,28 @@ describe("Chromium launcher", () => {
         const args = ChromiumLauncher.argsFor({ profile: "concurrent", args: ["--lang=de"] }, "/profile", "pipe")
         assert.include(args, "--disable-renderer-backgrounding")
         assert.isBelow(args.indexOf("--no-first-run"), args.indexOf("--lang=de"))
-        assert.deepStrictEqual(args.slice(-3), ["--remote-debugging-pipe", "--user-data-dir=/profile", "about:blank"])
+        assert.deepStrictEqual(args.slice(-3), [
+          "--remote-debugging-pipe",
+          "--user-data-dir=/profile",
+          "--no-startup-window"
+        ])
         assert.notInclude(
           ChromiumLauncher.argsFor({ profile: "stock", headless: false }, "/p", "pipe"),
           "--no-first-run"
         )
+      }))
+
+    it.effect("starts without a window, except on a profile the caller supplies, which opens about:blank", () =>
+      Effect.sync(() => {
+        const plain = ChromiumLauncher.argsFor({}, "/temporary", "pipe")
+        assert.include(plain, "--no-startup-window")
+        assert.notInclude(plain, "about:blank")
+        const persistent = ChromiumLauncher.argsFor({ userDataDir: "/mine" }, "/mine", "port")
+        assert.notInclude(persistent, "--no-startup-window")
+        assert.strictEqual(persistent.at(-1), "about:blank")
+        // A caller who already passes the flag doesn't get it twice
+        const given = ChromiumLauncher.argsFor({ args: ["--no-startup-window"] }, "/temporary", "pipe")
+        assert.strictEqual(given.filter((arg) => arg === "--no-startup-window").length, 1)
       }))
 
     it.effect("waits for the complete DevToolsActivePort endpoint before connecting", () =>
