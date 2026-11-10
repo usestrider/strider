@@ -1934,6 +1934,78 @@ describe("CdpAdapter evaluation in a context destroyed by a frame swap", () => {
         Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
       )
     ))
+  it.effect("preserves a prompt rejection when no lifecycle event follows", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<void>()
+      const rejected = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: Effect.fnUntraced(function*() {
+          yield* Deferred.await(reply)
+          yield* Deferred.succeed(rejected, undefined)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Runtime.callFunctionOn",
+                reason: "Unrecognized",
+                code: -32000,
+                description: "Execution context was destroyed."
+              })
+            })
+          )
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const realm = Tree.addRealm(state, {
+        uniqueId: "swapped",
+        contextId: 4,
+        target,
+        frame,
+        world: { _tag: "Main" },
+        origin: "://"
+      })
+      document.realms.add(realm)
+      const at = yield* BrowserClock.after(100)
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => 1",
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      }).pipe(
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* TestClock.adjust("40 millis")
+      yield* Deferred.succeed(reply, undefined)
+      yield* Deferred.await(rejected)
+      yield* TestClock.adjust("0 millis")
+      const beforeDeadline = waiting.pollUnsafe()
+      // Advance the test clock so a broken implementation settles without hanging the test.
+      yield* TestClock.adjust("60 millis")
+      const result = yield* Fiber.join(waiting)
+      assert.isDefined(beforeDeadline, "a rejection without lifecycle evidence must not wait for the deadline")
+      assert.strictEqual(result.reason._tag, "Protocol")
+      if (result.reason._tag === "Protocol") {
+        assert.strictEqual(result.reason.error.reason._tag, "Rejected")
+      }
+    }).pipe(
+      Effect.scoped,
+      Effect.provideServiceEffect(
+        BrowserClock.CurrentClock,
+        Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+      )
+    ))
 })
 
 describe("CdpAdapter transient evaluation results", () => {
