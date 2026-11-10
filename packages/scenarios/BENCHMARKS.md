@@ -798,3 +798,26 @@ resource counts, regression child output, rejected regression reports and logs, 
 gate observation and cleanup are outside timing. Different default initial resources and sandbox settings remain.
 Do not sum overlapping spans or treat instrumented timings as speedup or parity evidence. A failed or partial
 report establishes no valid timing result.
+
+### Hosted twenty-page phase diagnostic
+
+Dispatch `benchmarks.yml` from the tooling branch with `workload=scenarios`,
+`only=many-pages-diagnostic`, `browser=chromium`, `runs=32`, and identical pinned base/head commits.
+Base runs the unchanged callback; head timestamps context acquisition, each indexed creation/navigation/click,
+each final counter read, and scoped context release. The four-cell Williams schedule balances both libraries
+and instrumentation roles. Launch remains a separate, uninstrumented case.
+
+The driver transforms only the two callback regions and the head measurement runner; original library source,
+operation order, defaults, deadlines, output checks and cleanup remain unchanged. Source-boundary assertions reject
+a changed callback. Exact overlaid sources are retained under `driver/base` and `driver/head`.
+`head/phases.ndjson` contains the initial Strider/Playwright checks followed by head callbacks in scheduler order.
+Failed callbacks retain partial phases and are excluded from reconciliation. Missing/reordered/overlapping phases
+reject a successful diagnostic. File output occurs after the runner timer stops, before the sample acknowledgment.
+
+Each successful callback reports disjoint phase sum, callback elapsed and residual. Subtract callback elapsed
+from the corresponding runner sample to expose normalization, verification and diagnostic bookkeeping overhead.
+Release starts when the original callback body returns (or Playwright enters context.close) and ends after the
+scoped callback resolves; it includes return/finalizer/promise overhead, not just wire acknowledgment latency.
+Timestamp calls, record allocation, generator resumption and added promise bookkeeping perturb timings; paired
+head/base totals bound the observed instrumentation effect, not an independent universal correction. Supported
+navigation defaults still differ. These measurements attribute this workload, and establish no optimization.

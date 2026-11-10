@@ -5,6 +5,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { parseArgs } from "node:util"
 import { comparisonDeadline, type Message, workerMessages } from "./lifecycle.ts"
+import { instrument, instrumentRunner } from "./many-pages-phases.ts"
 import { pairedInterval, rotation } from "./paired.ts"
 
 const { values } = parseArgs({
@@ -30,6 +31,8 @@ if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
 if (values.workload === "scenarios" && !values.only) throw new Error("Scenario comparisons require --only NAME")
+const manyPagesMode = values.workload === "scenarios" && values.only === "many-pages-diagnostic"
+if (manyPagesMode) values.only = "many-pages"
 const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
 const output = path.resolve(values.output)
@@ -42,6 +45,14 @@ const report = {
   status: "running",
   error: null as string | null,
   config: values,
+  diagnostic: manyPagesMode
+    ? {
+      kind: "many-pages-phases",
+      base: "uninstrumented",
+      head: "instrumented",
+      phaseOrder: "initial Strider, initial Playwright, then head samples in scheduler order"
+    }
+    : null,
   provenance: {} as Record<string, unknown>,
   environment: {
     node: process.version,
@@ -69,7 +80,7 @@ const deadline = comparisonDeadline((error) => {
 save()
 try {
   fs.mkdirSync(path.join(output, "driver/benchmarks"), { recursive: true })
-  for (const file of ["compare-bin.ts", "paired.ts", "lifecycle.ts"]) {
+  for (const file of ["compare-bin.ts", "paired.ts", "lifecycle.ts", "many-pages-phases.ts"]) {
     fs.copyFileSync(path.join(import.meta.dirname, file), path.join(output, "driver/benchmarks", file))
   }
   const roots = {
@@ -148,11 +159,25 @@ try {
             "replay.ts"
           ]
         for (const file of files) {
-          const bytes = fs.readFileSync(path.join(source, file))
+          let bytes = fs.readFileSync(path.join(source, file))
+          if (manyPagesMode && role === "head") {
+            if (file === "scenarios.ts") {
+              bytes = Buffer.from(
+                "import { phaseStart, phaseEnd } from \"./benchmarks/many-pages-phases.ts\"\n" +
+                  instrument(instrument(bytes.toString(), "strider"), "playwright")
+              )
+            }
+            if (file === "runner.ts") bytes = Buffer.from(instrumentRunner(bytes.toString()))
+          }
           fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true })
           fs.writeFileSync(path.join(target, file), bytes)
-          fs.mkdirSync(path.dirname(path.join(output, "driver", file)), { recursive: true })
-          fs.writeFileSync(path.join(output, "driver", file), bytes)
+          fs.mkdirSync(path.dirname(path.join(output, "driver", manyPagesMode ? role : "", file)), { recursive: true })
+          fs.writeFileSync(path.join(output, "driver", manyPagesMode ? role : "", file), bytes)
+        }
+        if (manyPagesMode && role === "head") {
+          const file = "benchmarks/many-pages-phases.ts"
+          fs.copyFileSync(path.join(source, file), path.join(target, file))
+          fs.copyFileSync(path.join(source, file), path.join(output, "driver/benchmarks/many-pages-phases.ts"))
         }
         const entry = values.workload === "bench" ? "benchmarks/bin.ts" : "bin.ts"
         const args = [
@@ -165,7 +190,11 @@ try {
         const log = fs.openSync(path.join(output, role, "worker.log"), "w")
         const child = fork(path.join(target, entry), args, {
           cwd: root,
-          env: { ...process.env, STRIDER_PAIRED: "1" },
+          env: {
+            ...process.env,
+            STRIDER_PAIRED: "1",
+            STRIDER_PHASE_OUTPUT: path.join(output, role, "phases.ndjson")
+          },
           stdio: ["ignore", log, log, "ipc"]
         })
         fs.closeSync(log)
@@ -238,6 +267,11 @@ try {
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
       : [
         `Comparison status: **${report.status}**`,
+        ...(manyPagesMode
+          ? [
+            "Diagnostic only: head is instrumented; base is the unchanged control. Both refs must be pinned identically. Ratios are instrumentation controls, not speedups."
+          ]
+          : []),
         "",
         ...(report.status === "complete" ?
           [
