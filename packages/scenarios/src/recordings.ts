@@ -140,7 +140,7 @@ export const ensure = async (
       // fetched over or uploaded here. `pnpm scenarios --record` uploads and pins it
       unavailable.set(
         name,
-        `recording ${name} is not pinned in recordings.json; run \`pnpm scenarios --record\` to record, upload and pin it`
+        `recording ${name} is not pinned in recordings.json; run \`pnpm scenarios --upload\` to pin the existing file, or \`--record\` to record, upload and pin a new one`
       )
       continue
     }

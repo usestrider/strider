@@ -8,8 +8,10 @@
  *   pnpm scenarios --upload        upload the existing recordings and pin them, visiting no site
  *   pnpm scenarios --record        visit the public demo sites once, live, and record them for replay
  *
- * Nothing but `--record` sends a request beyond this machine: the demo sites are replayed from their recordings,
- * in `.data/scenarios/`, and a run without them fails, saying to record them. A Strider program visits its site as
+ * What leaves this machine: `--record` visits the public demo sites and uploads the recordings to the private bucket;
+ * `--upload` only uploads the existing ones; an ordinary run fetches the pinned recordings from the bucket when
+ * credentials are set. Nothing else does: the demo sites are replayed from their recordings, in `.data/scenarios/`,
+ * and a run without them skips their scenarios, saying why. A Strider program visits its site as
  * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
  * its own.
  */
