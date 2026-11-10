@@ -2,4 +2,4 @@
 "@usestrider/browser": patch
 ---
 
-Launching stock WebKit reads the child's `/proc/<pid>/fd` only once a listener exists on the inspector port, not on the first poll right after the spawn, where a `PermissionDenied` read was seen. A child that never listens now ends as a readiness timeout.
+Launching stock WebKit skips reading the child's `/proc/<pid>/fd` while no listener appears on the inspector port in the TCP table. A `PermissionDenied` read was seen on the first read after a spawn. If no listener appears, the table stays readable, and no child exit is observed before the deadline, launch ends as a readiness timeout.
