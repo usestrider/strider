@@ -264,6 +264,78 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.expected.list)
     }))
 
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`rejects a queued ${event} received after the traversal reply while draining`, () =>
+      Effect.gen(function*() {
+        const root = {
+          send: () =>
+            Effect.flatMap(ProtocolClient.ReplyReceived, (received) =>
+              Effect.sync(() => {
+                received?.(10)
+                return {}
+              })),
+          drainObserved: Effect.sync(() => {
+            handlers.apply(`browsingContext.${event}`, {
+              context: page.bidi,
+              navigation: "later",
+              url: "about:blank#later",
+              timestamp: 1
+            }, { state, received: 11 } as State.Event)
+          })
+        } as unknown as ProtocolClient.Session
+        const { facts, page, state } = yield* withPage({}, {}, root)
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const traversal = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(traversal))
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        assert.notStrictEqual(ends[0]!.navigation, traversal.value)
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.traversalCommands)
+      }))
+  }
+
+  for (const completion of ["interrupted drain", "rejection", "connection failure"] as const) {
+    it.effect(`releases traversal ownership on ${completion}`, () =>
+      Effect.gen(function*() {
+        const draining = yield* Deferred.make<void>()
+        let drains = 0
+        const root = {
+          send: () =>
+            completion === "interrupted drain" ? Effect.succeed({}) : Effect.fail(
+              new Protocol.ProtocolError({
+                reason: completion === "rejection"
+                  ? new Protocol.Rejected({
+                    method: "browsingContext.traverseHistory",
+                    code: "no such history entry",
+                    message: "end"
+                  })
+                  : new Protocol.SessionEnded({ why: "connectionLost" })
+              })
+            ),
+          drainObserved: Effect.gen(function*() {
+            drains++
+            yield* Deferred.succeed(draining, undefined)
+            yield* Effect.never
+          })
+        } as unknown as ProtocolClient.Session
+        const { page, state } = yield* withPage({}, {}, root)
+        if (completion === "interrupted drain") {
+          const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+          yield* Deferred.await(draining)
+          yield* Fiber.interrupt(fiber)
+          assert.strictEqual(drains, 1)
+        } else {
+          assert(Option.isNone(yield* Navigation.traverse(state, page.id, -1)))
+          assert.strictEqual(drains, 0)
+        }
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.traversalCommands)
+        assert.isUndefined(page.restoring)
+      }))
+  }
+
   for (const arrival of ["before", "after"] as const) {
     it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
       Effect.gen(function*() {
