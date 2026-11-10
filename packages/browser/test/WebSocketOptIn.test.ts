@@ -99,7 +99,8 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       const context = yield* Browser.newContext()
       const registration = yield* context.routeWebSocket(
         "**",
-        (socket) => Deferred.succeed(captured, socket).pipe(Effect.asVoid),
+        // The handler stays undecided while the test opens the connection itself.
+        (socket) => Deferred.succeed(captured, socket).pipe(Effect.andThen(Effect.never)),
         { implementation: "script" }
       )
       const realm = Target.RealmId.make("R-proxy")

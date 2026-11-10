@@ -220,13 +220,18 @@ export const register = <E, R>(
       if (Exit.isSuccess(drained)) yield* forget(connection, false)
       else yield* forget(connection, false, true)
     })
-    const run = (connection: Connection, effect: Effect.Effect<void, unknown>) =>
+    const run = (connection: Connection, effect: Effect.Effect<void, unknown>, bounded = true) =>
       effect.pipe(
         Operation.apart("WebSocketRoute.handler", budget),
-        BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
-        Effect.flatMap((result) =>
-          Option.isNone(result) ? terminate(connection, "routing handler deadline") : Effect.void
-        ),
+        bounded ?
+          (self) =>
+            self.pipe(
+              BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
+              Effect.flatMap((result) =>
+                Option.isNone(result) ? terminate(connection, "routing handler deadline") : Effect.void
+              )
+            ) :
+          (self) => self,
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
@@ -306,6 +311,7 @@ export const register = <E, R>(
         const events = Events.make<WebSocketRoute.Event>({ _tag: "Realm", id: realm }, () => 0)
         const opened = yield* Deferred.make<string, WebSocketRoute.WebSocketRouteError | Target.TargetGone>()
         const lock = yield* Semaphore.make(1)
+        const decided = yield* Deferred.make<void>()
         const connection: Connection = {
           id: message.id,
           realm,
@@ -347,6 +353,7 @@ export const register = <E, R>(
             }
             const services = yield* Effect.context<R2>()
             connection.mode = mode
+            Deferred.doneUnsafe(decided, Effect.void)
             if (mode === "mock") {
               const fromPage = (handlers as WebSocketRoute.MockHandlers<E2, R2>).fromPage
               connection.fromPage = fromPage === undefined
@@ -432,12 +439,35 @@ export const register = <E, R>(
         }
         connections.set(owner, connection)
         realms.add(realm)
+        // The deadline covers the decision only: until the handler opens, connects or returns. What it does
+        // afterwards runs in the connection's scope until the connection closes.
         yield* run(
           connection,
           Effect.provideContext(
             handler(handle).pipe(Operation.apart("WebSocketRoute.connection", budget), Scope.provide(child)),
             context
-          )
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                connection.mode === undefined && !connection.released
+                  ? terminate(connection, "routing handler returned without opening the connection")
+                  : Effect.void
+              )
+            ),
+            Effect.ensuring(Effect.sync(() => Deferred.doneUnsafe(decided, Effect.void)))
+          ),
+          false
+        )
+        yield* Deferred.await(decided).pipe(
+          BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
+          Effect.flatMap((result) =>
+            Option.isNone(result) && connection.mode === undefined && !connection.released
+              ? terminate(connection, "routing handler deadline")
+              : Effect.void
+          ),
+          Effect.catchCause(() => Effect.void),
+          Effect.forkIn(child),
+          Effect.asVoid
         )
       }
     )
