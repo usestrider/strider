@@ -120,3 +120,58 @@ it("rejects traces whose buffers report corrupted or rejected chunks", async () 
       expect(result.status, counter).toBe("error")
     }
   }))
+
+const calibrationEvents = [
+  ...events,
+  { at: 34, kind: "mark", name: "launch.available" },
+  { at: 35, kind: "mark", name: "initial.gate.observed" },
+  { at: 40, kind: "mark", name: "calibration.start", data: { count: 3 } },
+  ...[101, 102, 103].flatMap((id, i) => [
+    { at: 41 + i * 2, kind: "wire", name: "send", data: { id, method: "Browser.getVersion" } },
+    { at: 41.4 + i * 2, kind: "wire", name: "receive", data: { id, result: {} } }
+  ]),
+  { at: 47, kind: "mark", name: "calibration.end" }
+]
+const calibratedNative = {
+  ...native,
+  traceEvents: [
+    ...native.traceEvents,
+    ...[101, 102, 103].map((id, i) => ({
+      name: "DevToolsSession::HandleCommand in Browser",
+      ph: "X",
+      ts: 1041000 + i * 2000,
+      dur: 100,
+      args: { call_id: id, method: "Browser.getVersion" }
+    }))
+  ]
+}
+it("tightens the same sample using post-gate root calibration while preserving first-command evidence", async () =>
+  fixture(async (file) => {
+    fs.writeFileSync(file, JSON.stringify(calibratedNative))
+    const result = await retainNativeTrace(file, calibrationEvents, 1, { requireCalibration: true })
+    expect(result.status).toBe("complete")
+    expect(result.beforeCalibrationOffsetMs).toEqual([-1001, -999])
+    expect(result.offsetMs?.[0]).toBe(-1000)
+    expect(result.uncertaintyMs).toBeCloseTo(0.4)
+    expect(result.calibration).toHaveLength(3)
+    expect(result.firstCommand?.id).toBe(1)
+  }))
+it.each(["marks", "reply", "native", "early", "first"])(
+  "rejects missing or invalid calibration evidence (%s) and retains bytes",
+  async (kind) =>
+    fixture(async (file) => {
+      const trace = structuredClone(calibratedNative)
+      let observed = calibrationEvents
+      if (kind === "marks") observed = observed.filter((e) => !e.name.startsWith("calibration."))
+      if (kind === "reply") observed = observed.filter((e) => !(e.name === "receive" && e.data?.id === 103))
+      if (kind === "native") trace.traceEvents = trace.traceEvents.filter((e) => e.args.call_id !== 103)
+      if (kind === "early") observed = observed.map((e) => e.name === "initial.gate.observed" ? { ...e, at: 48 } : e)
+      if (kind === "first") trace.traceEvents = trace.traceEvents.filter((e) => e.args.call_id !== 1)
+      const bytes = JSON.stringify(trace)
+      fs.writeFileSync(file, bytes)
+      const result = await retainNativeTrace(file, observed, 1, { requireCalibration: true })
+      expect(result.status).toBe("error")
+      expect(result.error).toMatch(kind === "first" ? /first/ : /calibration/)
+      expect(fs.readFileSync(file, "utf8")).toBe(bytes)
+    })
+)
