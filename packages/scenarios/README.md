@@ -139,8 +139,25 @@ Fetch interception and automation-tell diagnostics. It never substitutes differe
   recording under it (`src/replay.ts`): every context its browser makes routes its requests to the recording. A
   Playwright twin routes its context itself, with `routeFromHAR`.
 
-  The recording is kept in `.data/scenarios/`, which git ignores: it holds the site's own files, which the
-  repository doesn't redistribute.
+  The recording is kept in a private R2 bucket, which the repository's public copy can't hold: it has the site's own
+  files, which the repository doesn't redistribute. `recordings.json` commits each recording's name, SHA-256 and size,
+  and the bucket holds each under `sha256/<hash>`. A run copies any recording that is missing from `.data/scenarios/`
+  (git-ignored) or differs from the manifest out of the bucket, checks it against the manifest, and fails naming the
+  file when it doesn't match. The bucket is read with these variables, which `pnpm scenarios` passes into the
+  integration environment:
+
+  | Variable                               | Holds                                   |
+  | -------------------------------------- | --------------------------------------- |
+  | `STRIDER_RECORDINGS_ACCOUNT_ID`        | The Cloudflare account                  |
+  | `STRIDER_RECORDINGS_BUCKET`            | The bucket's name, `strider-recordings` |
+  | `STRIDER_RECORDINGS_ACCESS_KEY_ID`     | An R2 token's access key (read-only)    |
+  | `STRIDER_RECORDINGS_SECRET_ACCESS_KEY` | That token's secret                     |
+
+  Without all four, the local-site scenarios run and each real-site scenario whose recording isn't already in
+  `.data/scenarios/` is skipped: the output and the report's unsupported comparisons say so and why.
+
+  The bucket is declared in `storage/alchemy.run.ts`, a stack of its own: `pnpm --filter @usestrider/scenarios
+  storage:deploy` deploys it with the maintainer's Cloudflare credentials.
 
 ## Refreshing recordings
 
@@ -150,8 +167,10 @@ refresh command. This checks page coverage, not the completeness of assets, resp
 Ordinary runs never fetch a missing request live. `--only controls` checks the dynamic-controls page without requiring
 the login pages used by other scenarios.
 
-`pnpm scenarios --record` visits the live sites and overwrites the ignored working recordings in `.data/scenarios/`.
-Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
+`pnpm scenarios --record` visits the live sites, overwrites the ignored working recordings in `.data/scenarios/`,
+uploads each to the bucket under its hash, and rewrites `recordings.json`: commit that file with the refresh. Uploading
+needs the same four variables with a write token; without them the recording is kept locally and the command fails
+saying it wasn't uploaded. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
 from the repository root (choose an absolute `evidence` path that does not already exist):
 
 ```sh
