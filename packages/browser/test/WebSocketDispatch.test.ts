@@ -3,8 +3,10 @@ import { assert, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
+import * as Runtime from "../src/cdp/Runtime.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
 import * as CdpState from "../src/internal/cdpAdapter/state.ts"
 import { installWebSocketGates } from "../src/internal/cdpAdapter/targets.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
@@ -110,3 +112,37 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
     sibling.target.event.handlers.apply("Console.messageAdded", ordinary, sibling.target.event)
     assert.strictEqual(facts.length, 4)
   }))
+
+it("does not probe popup-replay deduplication during ordinary CDP context dispatch", () => {
+  const ids = Kit.makeIds()
+  const facts: Array<Adapter.Fact> = []
+  const target = { kind: "page", session: { key: "ordinary" } } as CdpState.TargetEntry
+  const frame = {
+    id: ids.navigable(),
+    document: { realms: new Set() },
+    navigations: new Map()
+  } as unknown as CdpState.FrameEntry
+  const state = {
+    ids,
+    buffer: { emit: (fact: Adapter.Fact) => facts.push(fact) },
+    frames: new Map([["frame", frame]]),
+    realms: new Map(),
+    realmsByContext: new Map(),
+    realmsByUnique: new Map()
+  } as unknown as CdpState.State
+  state.realmsByUnique.has = () => {
+    throw new Error("ordinary dispatch probed popup replay")
+  }
+  const handlers = Evaluation.register(Kit.handlers<CdpState.Event>())
+  handlers.apply(Runtime.executionContextCreated.method, {
+    context: {
+      id: Runtime.ExecutionContextId.make(1),
+      uniqueId: "ordinary",
+      name: "",
+      origin: "https://example.com",
+      auxData: { frameId: "frame", isDefault: true }
+    }
+  }, { state, target })
+  assert.strictEqual(state.realmsByUnique.size, 1)
+  assert.strictEqual(facts[0]?._tag, "RealmAdded")
+})
