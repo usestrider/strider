@@ -65,6 +65,14 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "unsupported"),
+      entry("network.sizes.responseBody", "unsupported"),
+      entry("network.sizes.encoded", "unsupported"),
+      entry("network.sizes.decoded", "supported"),
       entry("network.timing.redirect", "supported"),
       entry("network.timing", "partial", [
         "context-creation opt-in; bounded original-instance observations with live owners",
@@ -214,6 +222,7 @@ Contexts.register(handlers)
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
+  eventScopes: Network.eventScopes(state),
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
       handlers.apply(method, params, {

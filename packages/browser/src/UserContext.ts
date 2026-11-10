@@ -396,6 +396,13 @@ export interface Options {
    * @default false
    */
   readonly requestTiming?: boolean | undefined
+  /**
+   * Collects native byte counts for this new context, read with `NetworkRequest.sizes`.
+   * No size state is collected when false or omitted. Cannot enable sizes on an existing context.
+   *
+   * @default false
+   */
+  readonly requestSizes?: boolean | undefined
 
   /**
    * Accepts HTTPS certificate errors in this context alone.
