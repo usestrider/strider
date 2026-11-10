@@ -325,7 +325,7 @@ export const commands = (getDaemon: () => Daemon) => {
       }
       return yield* Effect.fail(
         new CommandFailed(
-          sinceLast.length === 0
+          config.json || sinceLast.length === 0
             ? failure
             : { ...failure, output: `${failure.error}: ${failure.message}\nsince last: ${sinceLast.join(" · ")}` }
         )
