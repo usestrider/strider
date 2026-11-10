@@ -366,15 +366,67 @@ export interface Server extends Writable {
  * @since 0.1.0
  */
 export interface Connection {
-  /** Names this connection in logs and traces. */
+  /**
+   * Names this connection in logs and traces.
+   *
+   * **Example** (Reading it)
+   *
+   * ```ts import.meta.vitest
+   * import { WebSocketRoute } from "@usestrider/browser"
+   *
+   * const label = (connection: WebSocketRoute.Connection) => `socket ${connection.id}`
+   * ```
+   */
   readonly id: Id
-  /** The URL the page constructed, with `http` and `https` turned into `ws` and `wss`. */
+  /**
+   * The URL the page constructed, with `http` and `https` turned into `ws` and `wss`.
+   *
+   * **Example** (Reading it)
+   *
+   * ```ts import.meta.vitest
+   * import { WebSocketRoute } from "@usestrider/browser"
+   *
+   * const target = (connection: WebSocketRoute.Connection) => connection.url
+   * ```
+   */
   readonly url: Url.Url
-  /** The subprotocols the page asked for, in its order. */
+  /**
+   * The subprotocols the page asked for, in its order.
+   *
+   * **Example** (Reading it)
+   *
+   * ```ts import.meta.vitest
+   * import { WebSocketRoute } from "@usestrider/browser"
+   *
+   * const wantsChat = (connection: WebSocketRoute.Connection) =>
+   *   connection.protocols.includes("chat")
+   * ```
+   */
   readonly protocols: ReadonlyArray<string>
-  /** The JavaScript realm that constructed the socket. */
+  /**
+   * The JavaScript realm that constructed the socket.
+   *
+   * **Example** (Reading it)
+   *
+   * ```ts import.meta.vitest
+   * import { WebSocketRoute } from "@usestrider/browser"
+   *
+   * const where = (connection: WebSocketRoute.Connection) => connection.realm
+   * ```
+   */
   readonly realm: Target.RealmId
-  /** The frame or dedicated worker that constructed the socket. */
+  /**
+   * The frame or dedicated worker that constructed the socket.
+   *
+   * **Example** (Reading it)
+   *
+   * ```ts import.meta.vitest
+   * import { WebSocketRoute } from "@usestrider/browser"
+   *
+   * const fromWorker = (connection: WebSocketRoute.Connection) =>
+   *   connection.initiator._tag === "Worker"
+   * ```
+   */
   readonly initiator: Initiator
   /**
    * The page's side of the socket, for sending messages to it.

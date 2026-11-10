@@ -97,6 +97,8 @@ const announce = Effect.fn("announce")(
     )
     yield* connection.open({})
     yield* connection.page.send({ _tag: "Text", data: "welcome" })
+    // "open" here: the connection can be written to until it is closed.
+    yield* Effect.log(`${connection.id} is ${yield* connection.status}`)
     yield* connection.page.close({ code: 4001, reason: "session expired" })
   }
 )
@@ -176,7 +178,9 @@ const sendBig = (page: WebSocketRoute.Writable, data: string) =>
 ```
 
 When the real server closes a proxied socket, the page sees the close only after every message the server sent
-before it has been forwarded or dropped. Failures the library causes close with code 4000.
+before it has been forwarded or dropped. When something fails on the library's side, the real server of a proxied socket is closed with code 4000 and a
+short reason, and the page sees an `error` event and a synthetic close with code 1006, which is never sent to a
+server.
 
 ## What still differs from a native socket
 
@@ -188,11 +192,12 @@ or service workers are not covered.
 
 ## Page scripts can interfere
 
-The shim runs in the page's own world, so scripts on the page can see it and interfere with it. After it
-installs, a page cannot replace or delete the entry the library talks to, nor read the socket internals or the
-binding that carries messages. It can still read that entry and call it, and on a document that was already
-loaded when the route was registered, or under `timing: "bestEffort"`, a page could have claimed the entry
-first. Do not route sockets of pages you do not trust with anything a hostile script must not influence.
+The shim runs in the page's own world, so scripts on the page can see and interfere with it. It makes that
+harder, not impossible, and it is not a security boundary. After it installs, a page cannot replace or delete the
+entry the library talks to or its members, and the socket internals and the message binding are not properties
+the page can reach by name. A page can still read the entry and call it. On a document that was already loaded
+when the route was registered, or under `timing: "bestEffort"`, a page could have claimed the entry first. Do not
+route sockets of pages you do not trust with anything a hostile script must not influence.
 
 ## Browser coverage
 
