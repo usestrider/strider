@@ -134,13 +134,7 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
 
       return Shared.of({
         current: Effect.sync(() => held.context),
-        note: (found) =>
-          Effect.sync(() => {
-            if (found.some((note) => note.includes("couldn't be read"))) {
-              ;(globalThis as Record<string, (why: string) => void>)["__r475dump"]?.("STORAGE NOT READ")
-            }
-            notes.push(...found)
-          }),
+        note: (found) => Effect.sync(() => void notes.push(...found)),
         settle: Effect.gen(function*() {
           const found = yield* left
           if (found.length > 0) {
@@ -184,7 +178,6 @@ export const guard = <R>(it: { readonly effect: Vitest.Tester<R | Shared | Scope
   ) =>
     it.effect(name, (context) =>
       Effect.gen(function*() {
-        console.log("R475CASE", name)
         const exit = yield* Effect.exit(Effect.scoped(self(context)))
         const left = yield* Effect.flatMap(Effect.service(Shared), (shared) => shared.settle)
         if (Exit.isFailure(exit)) return yield* exit
