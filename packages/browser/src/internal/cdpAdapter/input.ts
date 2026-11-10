@@ -3,6 +3,7 @@
  * every frame, out of process too; HTML drags, which headless Chromium starts none of, caught and finished with drag
  * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -62,12 +63,21 @@ export const dispatchInput = Effect.fnUntraced(
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
       }).pipe(
-        // The adapter takes the release over from the first moment it is owed, so the caller's accounting, which
-        // runs as the dispatch ends, doesn't record a second one
-        Effect.onError(() =>
+        // The release is owed until the browser is known to have taken it: the caller's accounting, which runs as
+        // the dispatch ends, records it as uncertain meanwhile, and `settled` clears that record. A release already
+        // written whose reply was only abandoned has landed, and a second would deliver another mouseup.
+        Effect.onError((cause) =>
           Effect.suspend(() => {
-            Gestures.released.add(events)
-            return releaseWritten ? Effect.void : release.pipe(Operation.detached, Effect.ignore)
+            Gestures.handOver(events)
+            if (releaseWritten) {
+              if (Cause.hasInterruptsOnly(cause)) Gestures.settled(events)
+              return Effect.void
+            }
+            return release.pipe(
+              Effect.tap(() => Effect.sync(() => Gestures.settled(events))),
+              Operation.detached,
+              Effect.ignore
+            )
           })
         )
       )

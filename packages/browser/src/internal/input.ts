@@ -70,12 +70,30 @@ export const recover = <E>(
       ))
   })
 
+interface Handover {
+  settled: boolean
+  readonly waiting: Array<() => void>
+}
+
+const handovers = new WeakMap<ReadonlyArray<Adapter.InputEvent>, Handover>()
+
 /**
- * Gestures whose pressed input an adapter has taken over: it released it itself when the dispatch failed or was cut
- * short, or had written the release before that. The page holds nothing from them, so none is recorded as
- * uncertain. An adapter adds the events array it was given.
+ * An adapter that owes the release of what a gesture's events pressed, because the dispatch failed or was cut short,
+ * says so with the events array it was given, until it knows the outcome. Until `settled`, the release is
+ * uncertain: the caller's accounting records it, and `settled` clears that record. This way a release that
+ * finishes after the caller has accounted for the gesture is neither lost nor sent twice.
  */
-export const released: WeakSet<ReadonlyArray<Adapter.InputEvent>> = new WeakSet()
+export const handOver = (events: ReadonlyArray<Adapter.InputEvent>): void => {
+  handovers.set(events, { settled: false, waiting: [] })
+}
+
+/** The adapter's release of a gesture handed over is known good: accepted, or written with only its reply abandoned. */
+export const settled = (events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const handover = handovers.get(events)
+  if (handover === undefined || handover.settled) return
+  handover.settled = true
+  for (const clear of handover.waiting) clear()
+}
 
 /**
  * After a gesture's dispatch failed: records the release of what it may have left pressed, the buttons and keys
@@ -83,7 +101,8 @@ export const released: WeakSet<ReadonlyArray<Adapter.InputEvent>> = new WeakSet(
  * observed: this is protocol uncertainty, not input seen held. Keeps an earlier failure's release, which comes first.
  */
 export const uncertain = (state: State, description: string, events: ReadonlyArray<Adapter.InputEvent>): void => {
-  if (released.has(events)) return
+  const handover = handovers.get(events)
+  if (handover?.settled === true) return
   const release: Array<Adapter.InputEvent> = []
   const held: ReadonlySet<string> = state.buttons
   const buttonsSeen = new Set<string>()
@@ -111,6 +130,17 @@ export const uncertain = (state: State, description: string, events: ReadonlyArr
     description: Option.isSome(state.broken) ? state.broken.value.description : description,
     release: [...earlier, ...release.reverse()]
   })
+  // The adapter's own release, when it gets through, answers for this gesture's
+  if (handover !== undefined) {
+    const mine = new Set(release)
+    handover.waiting.push(() => {
+      if (Option.isNone(state.broken)) return
+      const left = state.broken.value.release.filter((event) => !mine.has(event))
+      state.broken = left.length === 0
+        ? Option.none()
+        : Option.some({ description: state.broken.value.description, release: left })
+    })
+  }
 }
 
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
