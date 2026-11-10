@@ -186,7 +186,7 @@ describe("BidiAdapter state", () => {
         assert.lengthOf(ends, 1)
         const end = ends[0]!
         assert(end._tag === "NavigationEnded")
-        if (boundary === "event-before-reply" || boundary === "reply-before-event") {
+        if (boundary === "event-before-reply") {
           assert.strictEqual(end.navigation, traversal)
         } else {
           assert.notStrictEqual(end.navigation, traversal)
@@ -204,29 +204,32 @@ describe("BidiAdapter state", () => {
       }))
   }
 
-  it.effect("leaves a later page-initiated history update to the page once a traversal has replied", () =>
-    Effect.gen(function*() {
-      const { facts, page, state } = yield* withPage({ "browsingContext.traverseHistory": {} })
-      const handlers = Navigation.register(Kit.handlers<State.Event>())
-      // The reply is the traversal's end: Firefox has moved through history by then. Here it reported no
-      // same-document event for it, as when the entry it reached has the same URL.
-      const traversal = yield* Navigation.traverse(state, page.id, -1)
-      assert(Option.isSome(traversal))
-      // Later, the page itself calls history.pushState.
-      handlers.apply(
-        "browsingContext.historyUpdated",
-        { context: page.bidi, url: "about:blank#later", timestamp: 1 },
-        { state }
-      )
-      yield* state.buffer.flush
-      const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
-      assert.lengthOf(ends, 1)
-      assert.notStrictEqual(ends[0]!.navigation, traversal.value)
-      const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
-      assert.lengthOf(starts, 1)
-      assert(starts[0]!._tag === "NavigationStarted")
-      assert.notStrictEqual(starts[0]!.initiatedAs, "traversal")
-    }))
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`leaves a later page-initiated ${event} to the page once a traversal has replied`, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage({ "browsingContext.traverseHistory": {} })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        // Synthetic ownership boundary, not captured Firefox traffic: the traversal replies without
+        // a same-document event or a new realm. An unrelated later event cannot identify that traversal.
+        const traversal = yield* Navigation.traverse(state, page.id, -1)
+        assert(Option.isSome(traversal))
+        handlers.apply(
+          `browsingContext.${event}`,
+          { context: page.bidi, navigation: "later", url: "about:blank#later", timestamp: 1 },
+          { state }
+        )
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        assert.notStrictEqual(ends[0]!.navigation, traversal.value)
+        const starts = facts.filter((fact) => fact._tag === "NavigationStarted")
+        assert.lengthOf(starts, 1)
+        assert(starts[0]!._tag === "NavigationStarted")
+        assert.notStrictEqual(starts[0]!.initiatedAs, "traversal")
+        assert.isEmpty(page.expected.list)
+        assert.isUndefined(page.restoring)
+      }))
+  }
 
   for (const arrival of ["before", "after"] as const) {
     it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
