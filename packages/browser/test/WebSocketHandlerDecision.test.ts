@@ -87,3 +87,31 @@ it.effect("applies the handler deadline only to the decision", () => {
       yield* registration.remove
     }), seen.evaluate)
 })
+
+it.effect("rechecks the route pattern on the host before admitting a constructor", () => {
+  const seen = recording()
+  return harness((getBridge) =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      let handled = 0
+      const registration = yield* context.routeWebSocket("ws://allowed.test/**", () =>
+        Effect.sync(() => {
+          handled++
+        }).pipe(Effect.andThen(Effect.never)), { implementation: "script" })
+      const bridge = getBridge()
+      const realm = Target.RealmId.make("R-pattern")
+      const envelope = JSON.stringify({
+        token: bridge.token,
+        type: "create",
+        id: "1",
+        url: "ws://other.test/",
+        protocols: []
+      })
+      assert.isTrue(
+        bridge.receive(realm, Effect.succeed(envelope), { _tag: "Worker", realm }, { isAlive: () => true })
+      )
+      yield* Deferred.await(seen.failed)
+      assert.strictEqual(handled, 0, "a page-forged url outside the route's pattern must not reach the handler")
+      yield* registration.remove
+    }), seen.evaluate)
+})

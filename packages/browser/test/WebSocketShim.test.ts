@@ -61,6 +61,43 @@ const setup = (BlobConstructor = Blob) => {
 }
 
 describe("WebSocket shim admission and conversion", () => {
+  it("keeps host commands and envelopes out of the page's reach after install", async () => {
+    const { context, dispatch, messages, waitFor } = setup()
+    // A page that replaces the dispatch global, JSON.stringify and console.debug after install.
+    vm.runInContext(
+      `JSON.stringify = () => "bogus"; console.debug = () => {}; globalThis[Symbol.for("@usestrider/browser/webSocketRouting")] = { dispatch() {} }`,
+      context
+    )
+    await dispatch({ type: "grant", direction: "page", bytes: 64 })
+    await dispatch({ type: "open" })
+    vm.runInContext(`ws.send("hi")`, context)
+    await waitFor(1)
+    assert.deepStrictEqual(messages.filter((message) => message.type === "message").map((m) => m.message?.data), ["hi"])
+    assert.strictEqual(
+      vm.runInContext(`typeof ws.native + typeof ws.route + typeof ws.queues`, context),
+      "undefinedundefinedundefined"
+    )
+  })
+
+  it("removes the page-visible binding once the shim has captured it", () => {
+    const calls: Array<string> = []
+    const context = vm.createContext({
+      URL,
+      EventTarget,
+      Event,
+      WebSocket: class Native {},
+      Blob,
+      location: { href: "http://example.com/" },
+      console: { debug() {} },
+      queueMicrotask,
+      __binding: (payload: string) => calls.push(payload)
+    })
+    vm.runInContext(`globalThis.sealed = globalThis.__binding`, context)
+    vm.runInContext(`(${install.toString()})("__binding", "token", "ws://example.com/socket", "binding")`, context)
+    assert.strictEqual(vm.runInContext(`typeof globalThis.__binding`, context), "undefined")
+    assert.strictEqual(calls.length, 1, "the ready envelope used the captured binding")
+  })
+
   it("gives the page code 1005 when a close names no code, as a native close does", async () => {
     const { context, dispatch } = setup()
     await dispatch({ type: "grant", direction: "page", bytes: 64 })
