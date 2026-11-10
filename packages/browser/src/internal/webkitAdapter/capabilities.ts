@@ -108,6 +108,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
+      entry("network.responseBody.terminalRedirect", "supported"),
       entry("network.requestBody.redirects", "supported", []),
       entry("network.requestBody.absence", "unsupported", [
         "empty or missing native text cannot establish absence or completeness"

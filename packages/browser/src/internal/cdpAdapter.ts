@@ -110,6 +110,7 @@ export const capabilities = (
       entry("screenshot.format", "supported"),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.responseBody.terminalRedirect", "supported"),
       entry("network.requestBody.redirects", "partial", ["earlier hops require complete event-carried data"]),
       entry("network.requestBody.absence", "supported", [
         "native hasPostData reports body presence; empty fallback reports are refused"

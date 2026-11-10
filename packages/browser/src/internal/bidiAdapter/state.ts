@@ -110,6 +110,7 @@ export interface NavigationEntry extends Kit.NavigationNode {
 
 export interface RequestEntry {
   credentialsAttempted?: boolean | undefined
+  terminalRedirect: boolean
   readonly id: NetworkRequest.Id
   readonly bidi: Network.Request
   redirects: number
