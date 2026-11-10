@@ -100,6 +100,19 @@ export const cases: ReadonlyArray<Case> = [
     verify: equals("Shop")
   },
   {
+    name: "navigate-title-locator",
+    description: "Navigate through load, read the title, then resolve and read a heading",
+    strider: Effect.fnUntraced(function*(page, origin) {
+      yield* page.goto(`${origin}/`, { waitUntil: "load" })
+      return [yield* page.title, yield* page.getByRole("heading").readText]
+    }),
+    playwright: async (page, origin) => {
+      await page.goto(`${origin}/`, { waitUntil: "load" })
+      return [await page.title(), await page.getByRole("heading").textContent()]
+    },
+    verify: equals(["Shop", "Shop"])
+  },
+  {
     name: "resources",
     description: "Navigate to a document with 100 uncached images, wait for load, then count loaded images",
     strider: Effect.fnUntraced(function*(page, origin) {

@@ -123,7 +123,10 @@ try {
     throw new Error(`Browser version mismatch: expected Chromium ${pins.chromium.version}, got ${version}`)
   }
   save()
-  if (launchMode) {
+  if (values.workload === "bench" && values.only === "navigation-diagnostic") {
+    const { navigationDiagnostic } = await import("./navigation-diagnostic.ts")
+    navigationDiagnostic({ roots, output, runs })
+  } else if (launchMode) {
     const { launchDiagnostic } = await import("./launch-diagnostic.ts")
     launchDiagnostic({ roots, output, runs })
   } else if (roleMode) {
@@ -232,7 +235,9 @@ try {
     `${c.ratio.toFixed(3)} [${c.low.toFixed(3)}, ${c.high.toFixed(3)}]`
   fs.writeFileSync(
     path.join(output, "summary.md"),
-    launchMode && fs.existsSync(path.join(output, "launch-summary.md"))
+    values.only === "navigation-diagnostic" && fs.existsSync(path.join(output, "navigation-summary.md"))
+      ? fs.readFileSync(path.join(output, "navigation-summary.md"), "utf8")
+      : launchMode && fs.existsSync(path.join(output, "launch-summary.md"))
       ? fs.readFileSync(path.join(output, "launch-summary.md"), "utf8")
       : roleMode && fs.existsSync(path.join(output, "role-summary.md"))
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
