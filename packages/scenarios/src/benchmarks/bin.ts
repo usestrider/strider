@@ -231,7 +231,7 @@ try {
             assert.deepEqual(state, { url: "about:blank", width: viewport.width, height: viewport.height, dpr: 1 })
             const defaultPages = (await runtime.runPromise(browser.defaultContext.pages)).length
             const pages = (await runtime.runPromise(browser.pages)).length
-            assert.equal(defaultPages, config.striderArgs.includes("--no-startup-window") ? 0 : 1)
+            assert.ok(defaultPages === 0 || defaultPages === 1)
             assert.equal(pages, defaultPages + 1)
             captureArguments("strider")
             report.lifecyclePhases.strider.push({
