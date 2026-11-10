@@ -5,6 +5,7 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
@@ -274,3 +275,30 @@ it.effect("bounds removal when an accepted fetch and its release never complete"
       assert.strictEqual(releases, 1)
     })
   ).pipe(Effect.provideService(Deadline.DefaultBudget, Duration.millis(100))))
+
+it.effect("discards every accepted payload when bridge teardown fails", () =>
+  harness((getBridge) =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+      const bridge = getBridge()
+      yield* Scope.addFinalizer(bridge.scope, Effect.die("bridge teardown failed"))
+      const realm = Target.RealmId.make("R-teardown-failure")
+      const started = yield* Deferred.make<void>()
+      let releases = 0
+      assert.isTrue(
+        bridge.receive(realm, Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)), {
+          _tag: "Worker",
+          realm
+        }, {
+          isAlive: () => true,
+          release: Effect.sync(() => {
+            releases++
+          })
+        })
+      )
+      yield* Deferred.await(started)
+      yield* registration.remove.pipe(Effect.exit)
+      assert.strictEqual(releases, 1)
+    })
+  ))
