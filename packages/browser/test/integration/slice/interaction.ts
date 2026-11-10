@@ -35,6 +35,7 @@ import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as InternalOperation from "../../../src/internal/operation.ts"
+import * as Reason from "../../../src/Reason.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
 import { supports } from "./capabilities.ts"
@@ -5331,5 +5332,74 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* first.getByText("clicked", { exact: true }).pipe(Expect.toBeVisible)
           }))
         }), timeout)
+
+      for (const gesture of ["locator click", "coordinate click"] as const) {
+        it.effect(
+          `a ${gesture} whose release fails records the release as uncertain, and the next gesture sends it first`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<button id="go" style="margin:40px">Go</button>${out}${recordsClick}`
+              )
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* newPage
+                yield* page.goto(url)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const adapter = target.owner.runtime.model.adapter
+                const original = adapter.dispatchInput
+                const sent: Array<ReadonlyArray<string>> = []
+                let failed = false
+                const dispatchInput: typeof original = Effect.fnUntraced(
+                  function*(...args: Parameters<typeof original>) {
+                    const events = args[1]
+                    sent.push(events.map((event) => event._tag === "Mouse" ? event.type : event._tag))
+                    yield* original(...args)
+                    // The release reaches the browser, but its reply is rejected: Strider can't know it landed
+                    if (!failed && events.some((event) => event._tag === "Mouse" && event.type === "up")) {
+                      failed = true
+                      return yield* Effect.fail(
+                        new Adapter.AdapterError({
+                          reason: new Reason.BackendFailure({
+                            kind: "Rejected",
+                            method: "input",
+                            hint: "test rejection of the release's reply"
+                          })
+                        })
+                      )
+                    }
+                  }
+                )
+                const click = gesture === "locator click"
+                  ? target.click()
+                  : Effect.flatMap(
+                    target.boundingBox,
+                    (box) => page.mouse.click({ x: Option.getOrThrow(box).x + 5, y: Option.getOrThrow(box).y + 5 })
+                  )
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => click.pipe(Effect.exit, Effect.map((exit) => assert.isTrue(Exit.isFailure(exit)))),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                assert.isTrue(failed)
+                const state = target.owner.page.inputState
+                // The release is uncertain, which is not a button observed held
+                assert.strictEqual(state.buttons.size, 0)
+                assert.isTrue(Option.isSome(state.broken), "the failed release is recorded in inputState.broken")
+                const before = sent.length
+                yield* Effect.acquireUseRelease(
+                  Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                  () => page.mouse.click({ x: 5, y: 5 }),
+                  () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                )
+                const next = sent.slice(before)
+                assert.deepStrictEqual(next[0], ["up"], "the recovery release is sent before the next gesture")
+                assert.deepStrictEqual(next[1], ["move", "down", "up"])
+                assert.isTrue(Option.isNone(state.broken))
+              }))
+            }),
+          timeout
+        )
+      }
     })
   })
