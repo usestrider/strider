@@ -111,6 +111,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
     }).pipe(Protocol.on(state.root()))
   )
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.focusEmulated) entry.focusEmulated = true
   if (options.requestSizes) entry.requestSizes = new Map()
   if (options.requestTiming) entry.requestTiming = new Map()
   entry.proxy = Option.getOrUndefined(options.proxy)
@@ -167,14 +168,14 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
-  // Where focus is emulated every page reports it, so a page behind another still renders and a tab does
-  const emulated = state.registry.overrides({ context: id }).get("FocusEmulation")
+  // Where focus is emulated for the context's life, every page reports it, so a tab behind another still renders.
+  // A declaration that can be released or overridden later doesn't last as long as the tab, so it doesn't decide.
   const { targetId } = yield* Kit.protocol(
     Target.createTarget({
       url: "about:blank",
       // Otherwise a window of its own, so a page opened after it doesn't put it in the background, where headless
       // Chromium renders nothing
-      ...(emulated?._tag === "FocusEmulation" && emulated.enabled ? {} : { newWindow: true }),
+      ...(context.focusEmulated ? {} : { newWindow: true }),
       ...(context.isDefault || context.browserContextId === undefined
         ? {}
         : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID })

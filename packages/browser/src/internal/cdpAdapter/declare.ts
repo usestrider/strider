@@ -212,7 +212,8 @@ const applyOverride = (
       case "Touch":
         return Emulation.setTouchEmulationEnabled({ enabled: false }).pipe(on)
       case "FocusEmulation":
-        return Emulation.setFocusEmulationEnabled({ enabled: false }).pipe(on)
+        // A tab in a context that emulates focus for its life renders only with it
+        return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
         return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
     }
@@ -254,7 +255,9 @@ const applyOverride = (
         maxTouchPoints: override.maxTouchPoints
       }).pipe(on)
     case "FocusEmulation":
-      return Emulation.setFocusEmulationEnabled({ enabled: override.enabled }).pipe(on)
+      return Emulation.setFocusEmulationEnabled({
+        enabled: override.enabled || target.page?.context.focusEmulated === true
+      }).pipe(on)
     case "CacheDisabled":
       return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
   }
