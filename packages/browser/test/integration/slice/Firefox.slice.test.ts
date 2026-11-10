@@ -2,6 +2,33 @@
  * The slices against Firefox, through the public layer: the pinned Firefox (`browsers.ts`), in the Nix
  * environment `pnpm test:integration` enters.
  */
+// TEMPORARY PROBE: counts BiDi traffic by method, printed every 10th page and when a storage read fails. Revert.
+{
+  const Native = globalThis.WebSocket
+  const counts: Record<string, number> = {}
+  let creates = 0
+  const bump = (k: string) => { counts[k] = (counts[k] ?? 0) + 1 }
+  const keep = /^(cmd:(script\.(add|remove)PreloadScript|session\.(un)?subscribe|network\.(add|remove)Intercept|browsingContext\.(create|close)|browser\.(create|remove)UserContext|script\.disown)|ev:(script\.realm(Created|Destroyed)|browsingContext\.context(Created|Destroyed)))$/
+  const dump = (why: string) =>
+    console.log("R475COUNTS", why, JSON.stringify(Object.fromEntries(Object.entries(counts).filter(([k]) => keep.test(k)).sort())))
+  ;(globalThis as Record<string, unknown>)["__r475dump"] = dump
+  class Probed extends Native {
+    constructor(url: string | URL, protocols?: string | Array<string>) {
+      super(url, protocols as never)
+      this.addEventListener("message", (event) => {
+        try { const m = JSON.parse(String(event.data)); if (m.type === "event") bump("ev:" + m.method) } catch {}
+      })
+    }
+    override send(data: never) {
+      try {
+        const m = JSON.parse(String(data)); bump("cmd:" + m.method)
+        if (m.method === "browsingContext.create") { creates++; if (creates % 10 === 0) dump("page " + creates) }
+      } catch {}
+      return super.send(data)
+    }
+  }
+  ;(globalThis as { WebSocket: unknown }).WebSocket = Probed
+}
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { Firefox } from "@usestrider/browser/firefox"
