@@ -6,6 +6,7 @@ import * as vm from "node:vm"
 import { expect, it } from "vitest"
 import { recordingProblems } from "../src/replay.ts"
 import { scenarios } from "../src/scenarios.ts"
+import { selectScenarios, supportedOn } from "../src/selection.ts"
 
 it("prepares a fresh scenario working directory before constructing browser layers", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "scenario-setup-"))
@@ -49,15 +50,8 @@ it("prepares a fresh scenario working directory before constructing browser laye
 })
 
 it("excludes the Chromium-only emulated-focus scenario from a Firefox run", () => {
-  const source = fs.readFileSync(new URL("../src/bin.ts", import.meta.url), "utf8")
-  // Execute the runner's actual selection without launching either browser.
-  const selection = source.slice(source.indexOf("const chosen ="), source.indexOf("const problems ="))
-  const chosen = vm.runInNewContext(`${selection}\nchosen`, {
-    scenarios,
-    engine: "firefox",
-    only: undefined,
-    process: { env: {} }
-  }) as Array<{ name: string }>
+  // The runner's own selection, without launching either browser.
+  const chosen = supportedOn(selectScenarios(scenarios, undefined, false), "firefox")
   expect(chosen.map((scenario) => scenario.name)).toContain("many-pages")
   expect(chosen.map((scenario) => scenario.name)).not.toContain("many-pages-emulated")
 })

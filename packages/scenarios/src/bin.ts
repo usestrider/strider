@@ -35,7 +35,7 @@ import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
-import { selectScenarios } from "./selection.ts"
+import { selectScenarios, supportedOn } from "./selection.ts"
 import { start } from "./site.ts"
 
 const argv = process.argv.slice(2)
@@ -217,11 +217,7 @@ const unsupported: Array<string> = engine === "firefox"
   ]
   : []
 const paired = process.env["STRIDER_PAIRED"] === "1"
-const selected = selectScenarios(scenarios, only, paired).filter((
-  scenario
-) => (engine === "chromium" ||
-  (scenario.playwright !== undefined && scenario.browser === undefined && scenario.chromiumOnly === undefined))
-)
+const selected = supportedOn(selectScenarios(scenarios, only, paired), engine)
 if (selected.length === 0) throw new Error("No supported scenarios selected")
 // Fetch what the manifest pins and the recordings directory lacks; the real-site scenarios whose recording can't be
 // had are skipped, and say why

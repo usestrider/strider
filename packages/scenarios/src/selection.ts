@@ -20,3 +20,19 @@ export const selectScenarios = <
   if (unknown.length > 0) throw new Error(`Unknown scenarios: ${unknown.join(", ")}`)
   return scenarios.filter((scenario) => names.includes(scenario.name))
 }
+
+/**
+ * The scenarios that run on `engine`: every one on Chromium, and on Firefox those with a Playwright twin, run on
+ * Chromium's Strider program, and not marked Chromium-only.
+ */
+export const supportedOn = <
+  S extends { readonly playwright?: unknown; readonly browser?: unknown; readonly chromiumOnly?: unknown }
+>(
+  scenarios: ReadonlyArray<S>,
+  engine: "chromium" | "firefox"
+): ReadonlyArray<S> =>
+  engine === "chromium"
+    ? scenarios
+    : scenarios.filter((scenario) =>
+      scenario.playwright !== undefined && scenario.browser === undefined && scenario.chromiumOnly === undefined
+    )
