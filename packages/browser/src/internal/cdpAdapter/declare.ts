@@ -353,6 +353,16 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
   return lock.withPermits(1)(effect)
 }
 
+/**
+ * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
+ * holds it for its life, even when no declaration of it remains.
+ */
+const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+  const kinds = [...overrides.keys()]
+  if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  return kinds
+}
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -363,8 +373,8 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              overrides,
-              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              kindsFor(page, overrides),
+              (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
               }
@@ -384,8 +394,8 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            overrides,
-            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            kindsFor(page, overrides),
+            (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
             }
