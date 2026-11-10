@@ -7,6 +7,8 @@ export interface PhaseSample {
   /** Phase name to wall milliseconds, in the order they ran; they partition the sample */
   readonly phases: Readonly<Record<string, number>>
   readonly total: number
+  /** The protocol messages of the close, in a traced run only */
+  readonly events?: ReadonlyArray<WireEvent>
 }
 
 export const median = (values: ReadonlyArray<number>): number => {
@@ -21,7 +23,11 @@ export const median = (values: ReadonlyArray<number>): number => {
 
 /** Each library's phases differ in name, so the table lists every phase either one recorded. */
 export const summarize = (samples: ReadonlyArray<PhaseSample>) => {
-  const measured = samples.filter((sample) => !sample.warmup)
+  // Strider's close is its scope's release and the runPromise exit; Playwright's is one step, so both get a total
+  const measured = samples.filter((sample) => !sample.warmup).map((sample) => ({
+    ...sample,
+    phases: { ...sample.phases, closeTotal: (sample.phases["release"] ?? 0) + (sample.phases["close"] ?? 0) }
+  }))
   const rows: Array<
     { scenario: string; phase: string; strider: number | null; playwright: number | null; gap: number | null }
   > = []
@@ -69,4 +75,101 @@ export const validate = (sample: PhaseSample) => {
       `${sample.scenario} ${sample.library} ${sample.repetition}: phases sum ${sum}, total ${sample.total}`
     )
   }
+}
+
+/** One protocol message crossing the wire during a traced close, offsets in ms from the start of the window. */
+export interface WireEvent {
+  readonly at: number
+  readonly kind: "send" | "receive" | "mark"
+  readonly name?: string
+  readonly message?: Record<string, unknown>
+}
+
+export interface Step {
+  readonly at: number
+  readonly what: string
+  /** For a command: when its reply arrived, relative to the same start, and how long it waited */
+  readonly repliedAt?: number
+  readonly waited?: number
+}
+
+/** The window as a list of commands with their replies, the events between them, and the marks. */
+export const timeline = (events: ReadonlyArray<WireEvent>) => {
+  const pending = new Map<number, Step & { id: number }>()
+  const steps: Array<Step> = []
+  for (const event of events) {
+    const message = event.message
+    if (event.kind === "mark") {
+      steps.push({ at: event.at, what: `mark: ${event.name}` })
+    } else if (message !== undefined && typeof message["id"] === "number" && event.kind === "send") {
+      const step = {
+        at: event.at,
+        id: message["id"] as number,
+        what: `send ${String(message["method"])}${message["sessionId"] === undefined ? "" : " (page session)"}`
+      }
+      pending.set(step.id, step)
+      steps.push(step)
+    } else if (message !== undefined && typeof message["id"] === "number") {
+      const step = pending.get(message["id"] as number)
+      if (step !== undefined) Object.assign(step, { repliedAt: event.at, waited: event.at - step.at })
+    } else if (message !== undefined && typeof message["method"] === "string") {
+      steps.push({ at: event.at, what: `event ${message["method"]}` })
+    }
+  }
+  const commands = steps.filter((step) => step.waited !== undefined)
+  // A command starts a new round trip when no earlier one is still waiting for its reply
+  let roundTrips = 0
+  let until = Number.NEGATIVE_INFINITY
+  for (const step of commands) {
+    if (step.at >= until) roundTrips++
+    until = Math.max(until, step.repliedAt!)
+  }
+  return {
+    steps,
+    sent: steps.filter((step) => step.what.startsWith("send ")).length,
+    events: steps.filter((step) => step.what.startsWith("event ")).length,
+    roundTrips,
+    // Time between a reply and the next command: the host's, not waiting on a command
+    hostGaps: commands.slice(1).map((step, index) => Math.max(0, step.at - commands[index]!.repliedAt!))
+  }
+}
+
+/** Raw wire JSON reduced to what a timeline needs; params are cut short so a trace stays small. */
+export const compactMessage = (raw: Record<string, unknown>): Record<string, unknown> => ({
+  ...(raw["id"] === undefined ? {} : { id: raw["id"] }),
+  ...(raw["method"] === undefined ? {} : { method: raw["method"] }),
+  ...(raw["sessionId"] === undefined ? {} : { sessionId: raw["sessionId"] }),
+  ...(raw["error"] === undefined ? {} : { error: raw["error"] }),
+  ...(raw["params"] === undefined ? {} : { params: JSON.stringify(raw["params"]).slice(0, 160) })
+})
+
+/** For each scenario and library, the traced close whose duration is the median, as a step list with its counts. */
+export const closeReport = (samples: ReadonlyArray<PhaseSample>): string => {
+  const lines: Array<string> = []
+  const traced = samples.filter((sample) => !sample.warmup && sample.events !== undefined)
+  for (const scenario of [...new Set(traced.map((sample) => sample.scenario))]) {
+    for (const library of ["strider", "playwright"] as const) {
+      const group = traced.filter((sample) => sample.scenario === scenario && sample.library === library)
+      if (group.length === 0) continue
+      const closeMs = (sample: PhaseSample) => (sample.phases["release"] ?? 0) + (sample.phases["close"] ?? 0)
+      const chosen = [...group].sort((a, b) => closeMs(a) - closeMs(b))[group.length >> 1]!
+      const result = timeline(chosen.events!)
+      const counts = group.map((sample) => timeline(sample.events!)).map((t) => `${t.sent}/${t.roundTrips}`)
+      lines.push(
+        `### ${scenario}, ${library}: close ${
+          closeMs(chosen).toFixed(1)
+        } ms (median of ${group.length}), ${result.sent} commands, ${result.events} events, ${result.roundTrips} serial round trips; commands/round trips per traced sample: ${
+          [...new Set(counts)].join(", ")
+        }`,
+        "",
+        "| At ms | Step | Reply after ms |",
+        "| --- | --- | --- |",
+        ...result.steps.map((step) =>
+          `| ${step.at.toFixed(1)} | ${step.what} | ${step.waited === undefined ? "" : step.waited.toFixed(1)} |`
+        ),
+        ""
+      )
+    }
+  }
+  return lines.join("\n")
 }
