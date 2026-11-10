@@ -3,9 +3,10 @@
  * recorded, the note stays what it was, and a read that answers runs none.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, Deadline } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
+import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import { site } from "../adapter/harness.ts"
 import { probeStalledRead, readStorage } from "./sharedContext.ts"
 
@@ -79,6 +80,42 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
           yield* probeStalledRead(context, hung, (_kind: string, payload: any) => void records.push({ payload }))
           assert.strictEqual(records[0]!.payload.outcome, "timed out")
           assert.strictEqual(records.length, 3)
+        })), 60_000)
+      it.effect(
+        "gives probes a fresh budget after an enclosing deadline expires",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { context, page } = yield* setup()
+            const records: Array<{ payload: any }> = []
+            const stalled = Object.create(context, {
+              exportStorageState: { value: page.evaluate(() => new Promise<never>(() => {})) }
+            })
+            yield* readStorage(
+              () => Effect.void,
+              stalled,
+              page,
+              (_kind: string, payload: any) => void records.push({ payload })
+            ).pipe(Deadline.within("200 millis"))
+            assert.strictEqual(records[0]!.payload.outcome, "answered")
+            assert.strictEqual(records[1]!.payload.outcome, "answered")
+          })),
+        60_000
+      )
+
+      it.effect("bounds the cleanup of the probe page", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { context, page } = yield* setup()
+          const records: Array<{ payload: any }> = []
+          // Page release has its own cleanup budget. Model a release that outlasts the probe's budget.
+          const slowCleanup = Object.create(context, {
+            newPage: {
+              value: context.newPage.pipe(
+                Effect.tap(() => Effect.addFinalizer(() => BrowserClock.sleep(3_000)))
+              )
+            }
+          })
+          yield* probeStalledRead(slowCleanup, page, (_kind: string, payload: any) => void records.push({ payload }))
+          assert.strictEqual(records[2]!.payload.outcome, "timed out")
         })), 60_000)
     })
   })
