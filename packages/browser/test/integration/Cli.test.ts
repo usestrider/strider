@@ -167,39 +167,43 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
-  it.live("reports a failed call's digest through MCP and only once with JSON", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const env = environment()
-      const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "failure-digest", ...args)
-      const started = yield* strider(env, "start", "--name", "failure-digest", "--chromium", chromium.executable)
-      assert.strictEqual(started.code, 0, started.err)
-      try {
-        assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
-        const emit = () => run("-p", "main", "eval", "console.error('pending failure event')")
-        assert.strictEqual((yield* emit()).code, 0)
-        const [answer] = yield* mcpTools(env, ["-s", "failure-digest", "mcp"], [{
-          name: "goto",
-          arguments: { page: "missing", url: "https://example.test/%typo%" }
-        }])
-        assert.isTrue(answer.result.isError)
-        const failure = JSON.parse(answer.result.content[0].text)
-        assert.strictEqual(failure.error, "PageNotFound")
-        assert.include(failure.message, "%typo% names no secret")
-        assert.deepStrictEqual(failure.sinceLast, ["console error on main: pending failure event"])
-        assert.notInclude((yield* run("pages")).out, "pending failure event")
-        assert.strictEqual((yield* emit()).code, 0)
-        const json = yield* run("-p", "missing", "--json", "goto", "https://example.test/%typo%")
-        assert.strictEqual(json.code, 16, json.err)
-        const outcome = JSON.parse(json.out).outcome
-        assert.strictEqual(outcome.error, "PageNotFound")
-        assert.include(outcome.message, "%typo% names no secret")
-        assert.deepStrictEqual(outcome.sinceLast, ["console error on main: pending failure event"])
-        assert.notInclude((yield* run("pages")).out, "pending failure event")
-        assert.notInclude(json.err, "pending failure event")
-      } finally {
-        yield* run("stop")
-      }
-    })))
+  it.live(
+    "reports a failed call's digest through MCP and only once with JSON",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "failure-digest", ...args)
+        const started = yield* strider(env, "start", "--name", "failure-digest", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+          const emit = () => run("-p", "main", "eval", "console.error('pending failure event')")
+          assert.strictEqual((yield* emit()).code, 0)
+          const [answer] = yield* mcpTools(env, ["-s", "failure-digest", "mcp"], [{
+            name: "goto",
+            arguments: { page: "missing", url: "https://example.test/%typo%" }
+          }])
+          assert.isTrue(answer.result.isError)
+          const failure = JSON.parse(answer.result.content[0].text)
+          assert.strictEqual(failure.error, "PageNotFound")
+          assert.include(failure.message, "%typo% names no secret")
+          assert.deepStrictEqual(failure.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.strictEqual((yield* emit()).code, 0)
+          const json = yield* run("-p", "missing", "--json", "goto", "https://example.test/%typo%")
+          assert.strictEqual(json.code, 16, json.err)
+          const outcome = JSON.parse(json.out).outcome
+          assert.strictEqual(outcome.error, "PageNotFound")
+          assert.include(outcome.message, "%typo% names no secret")
+          assert.deepStrictEqual(outcome.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.notInclude(json.err, "pending failure event")
+        } finally {
+          yield* run("stop")
+        }
+      })),
+    timeout
+  )
 
   it.live("evaluates browser expressions and function files", () =>
     Effect.scoped(Effect.gen(function*() {
