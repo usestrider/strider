@@ -229,7 +229,9 @@ it.effect("records unfinished cleanup before waking recovery and reports the res
       Input.finished(events)
       yield* Fiber.join(waiting)
       assert.strictEqual(sent.length, 1)
-      assert.deepStrictEqual(sent[0], { ...events[1], type: "up", buttons: 0 })
+      const press = events[1]
+      assert(press?._tag === "Mouse")
+      assert.deepStrictEqual(sent[0], { ...press, type: "up", buttons: 0 })
       assert.strictEqual(operation.diagnostics().cleanup._tag, "Completed")
       assert.isTrue(Option.isNone(state.broken))
       assert.strictEqual(state.cleanups.length, 0)
