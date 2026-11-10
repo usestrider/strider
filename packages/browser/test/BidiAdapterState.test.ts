@@ -3293,13 +3293,20 @@ it.effect("retires terminal BiDi responses without evicting an active redirect s
     assert.strictEqual(state.requests.size, 1000)
   }))
 
-describe("BiDi terminal 3xx body refusal", () => {
+describe("BiDi terminal redirect body refusal", () => {
   for (
     const sample of [
       { status: 299, headers: [], refused: false },
-      { status: 300, headers: [], refused: true },
+      { status: 300, headers: [], refused: false },
+      { status: 301, headers: [], refused: true },
       { status: 302, headers: [], refused: true },
-      { status: 399, headers: [], refused: true },
+      { status: 303, headers: [], refused: true },
+      { status: 304, headers: [], refused: false },
+      { status: 306, headers: [], refused: false },
+      { status: 307, headers: [], refused: true },
+      { status: 308, headers: [], refused: true },
+      { status: 309, headers: [], refused: false },
+      { status: 399, headers: [], refused: false },
       { status: 400, headers: [], refused: false },
       { status: 302, headers: [{ name: "lOcAtIoN", value: { type: "string", value: "/next" } }], refused: false },
       { status: 302, headers: [{ name: "Location", value: { type: "string", value: "" } }], refused: false }
