@@ -4,6 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Input from "../src/internal/input.ts"
@@ -160,9 +161,15 @@ describe("Input handover settlement", () => {
       const state = broken()
       const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
       Input.handOver(events)
-      if (before) Input.settled(events)
+      if (before) {
+        Input.settled(events)
+        Input.finished(events)
+      }
       Input.uncertain(state, "new click", events)
-      if (!before) Input.settled(events)
+      if (!before) {
+        Input.settled(events)
+        Input.finished(events)
+      }
       assert.deepStrictEqual(Option.getOrThrow(state.broken), {
         description: "mouse.up: the page didn't answer",
         release
@@ -179,8 +186,26 @@ describe("Input handover settlement", () => {
     Input.uncertain(state, "second click", second)
     const later = Option.getOrThrow(state.broken).release[0]!
     Input.settled(first)
+    Input.finished(first)
     assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
     Input.settled(first)
+    Input.finished(first)
     assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
   })
 })
+
+it.effect("keeps an in-flight cleanup when a recovery waiter is interrupted", () =>
+  Effect.gen(function*() {
+    const state = Input.make()
+    const events = Input.click(state, { x: 3, y: 4 }, "left", 1)
+    Input.handOver(events)
+    Input.uncertain(state, "click", events)
+    const first = yield* Input.recover(state, () => Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+    assert.isUndefined(first.pollUnsafe())
+    yield* Fiber.interrupt(first)
+    const next = yield* Input.recover(state, () => Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+    assert.isUndefined(next.pollUnsafe(), "the next gesture must still wait for the unfinished cleanup")
+    Input.settled(events)
+    Input.finished(events)
+    yield* Fiber.join(next)
+  }))

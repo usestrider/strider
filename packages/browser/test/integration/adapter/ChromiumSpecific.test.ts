@@ -655,74 +655,110 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
-      for (const failure of ["cleanup", "normal"] as const) {
-        it.effect(`records a rejected ${failure} release before the next click`, () =>
-          Effect.gen(function*() {
-            const served = yield* site
-            let pressId: number | undefined
-            let cleanupId: number | undefined
-            let cleanupRejected = false
-            const sent: Array<string> = []
-            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
-              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
-              return yield* CdpAdapter.connect({
-                ...transport,
-                send: Effect.fnUntraced(function*(message: string) {
-                  const wire = JSON.parse(message)
-                  if (wire.method === "Input.dispatchMouseEvent") {
-                    sent.push(wire.params.type)
-                    if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
-                    if (wire.params.type === "mouseReleased" && cleanupId === undefined) {
-                      cleanupId = wire.id
-                      // Chromium rejects this command without delivering the mouse release.
-                      wire.params.type = "invalid-release-type"
-                      return yield* transport.send(JSON.stringify(wire))
+      for (const failure of ["cleanup", "normal", "unanswered cleanup", "page closed"] as const) {
+        it.effect(
+          failure === "page closed"
+            ? "ends an unanswered cleanup with its page after the next gesture deadline expires"
+            : `records a rejected ${failure} release before the next click`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const rejected = yield* Deferred.make<void>()
+              let pressId: number | undefined
+              let cleanupId: number | undefined
+              let cleanupRejected = false
+              const sent: Array<string> = []
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+                return yield* CdpAdapter.connect({
+                  ...transport,
+                  send: Effect.fnUntraced(function*(message: string) {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "Input.dispatchMouseEvent") {
+                      sent.push(wire.params.type)
+                      if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                      if (wire.params.type === "mouseReleased" && cleanupId === undefined) {
+                        cleanupId = wire.id
+                        // Chromium rejects this command without delivering the mouse release.
+                        wire.params.type = "invalid-release-type"
+                        return yield* transport.send(JSON.stringify(wire))
+                      }
                     }
-                  }
-                  yield* transport.send(message)
-                }),
-                messages: transport.messages.pipe(Stream.map((message) => {
-                  const wire = JSON.parse(message)
-                  if (wire.id === cleanupId && cleanupId !== undefined) cleanupRejected = wire.error !== undefined
-                  // The press reached the page, but its acknowledgment is replaced with a rejection.
-                  return failure === "cleanup" && wire.id === pressId && pressId !== undefined
-                    ? JSON.stringify({
-                      id: wire.id,
-                      sessionId: wire.sessionId,
-                      error: { code: -32000, message: "test rejection after press" }
-                    })
-                    : message
-                }))
-              }, { sink, ownership: "launched" })
-            }))
-            yield* Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              const html =
-                `<button id="go">Go</button><script>window.inputLog=[];for(const type of ["mousedown","mouseup"])document.addEventListener(type,e=>inputLog.push(e.type))</script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
-              const target = page.locator("#go")
-              assert(target instanceof LocatorImpl)
-              const error = yield* target.click().pipe(Effect.flip)
-              assert.strictEqual(error._tag, "LocatorError")
-              assert.isTrue(cleanupRejected, "the browser rejected the cleanup release")
-              assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).inputLog), ["mousedown"])
-              assert.isTrue(
-                Option.isSome(target.owner.page.inputState.broken),
-                "failed adapter cleanup must retain the uncertain release"
-              )
-              yield* target.click()
-              assert.deepStrictEqual(sent, [
-                "mouseMoved",
-                "mousePressed",
-                "mouseReleased",
-                "mouseReleased",
-                "mouseMoved",
-                "mousePressed",
-                "mouseReleased"
-              ])
-              assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
-            }).pipe(Effect.provide(backend))
-          }), timeout)
+                    yield* transport.send(message)
+                  }),
+                  messages: transport.messages.pipe(
+                    Stream.map((message) => {
+                      const wire = JSON.parse(message)
+                      if (wire.id === cleanupId && cleanupId !== undefined) cleanupRejected = wire.error !== undefined
+                      // The press reached the page, but its acknowledgment is replaced with a rejection.
+                      return failure !== "normal" && wire.id === pressId && pressId !== undefined
+                        ? JSON.stringify({
+                          id: wire.id,
+                          sessionId: wire.sessionId,
+                          error: { code: -32000, message: "test rejection after press" }
+                        })
+                        : message
+                    }),
+                    Stream.tap((message) => {
+                      const wire = JSON.parse(message)
+                      return wire.id === cleanupId && cleanupId !== undefined
+                        ? Deferred.succeed(rejected, undefined)
+                        : Effect.void
+                    }),
+                    Stream.filter((message) =>
+                      (failure !== "unanswered cleanup" && failure !== "page closed") || cleanupId === undefined ||
+                      JSON.parse(message).id !== cleanupId
+                    )
+                  )
+                }, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                const html =
+                  `<button id="go">Go</button><script>window.inputLog=[];for(const type of ["mousedown","mouseup"])document.addEventListener(type,e=>inputLog.push(e.type))</script>`
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const error = yield* target.click().pipe(
+                  Protocol.withCommandTimeout(failure === "page closed" ? Infinity : "300 millis"),
+                  Effect.flip
+                )
+                assert.strictEqual(error._tag, "LocatorError")
+                yield* Deferred.await(rejected).pipe(Effect.timeout("5 seconds"))
+                assert.isTrue(cleanupRejected, "the browser rejected the cleanup release")
+                assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).inputLog), ["mousedown"])
+                if (failure === "page closed") {
+                  const cleanup = target.owner.page.inputState.cleanups[0]!
+                  assert.isDefined(cleanup)
+                  const blocked = yield* target.click().pipe(Deadline.within("200 millis"), Effect.flip)
+                  assert.isTrue(Deadline.isTimeout(blocked))
+                  assert.strictEqual(sent.length, 3, "the next gesture must not overtake the cleanup")
+                  yield* page.close()
+                  yield* Deferred.await(cleanup.done).pipe(Effect.timeout("2 seconds"))
+                  assert.isTrue(cleanup.finished)
+                  return
+                }
+                if (failure !== "unanswered cleanup") {
+                  assert.isTrue(
+                    Option.isSome(target.owner.page.inputState.broken),
+                    "failed adapter cleanup must retain the uncertain release"
+                  )
+                }
+                yield* target.click()
+                assert.deepStrictEqual(sent, [
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased",
+                  "mouseReleased",
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased"
+                ])
+                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
       }
 
       for (
