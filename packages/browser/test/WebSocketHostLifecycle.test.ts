@@ -205,7 +205,9 @@ it.effect("rejects late dead-realm payloads and duplicate destruction without re
       const captured = yield* Deferred.make<WebSocketRoute.Connection>()
       const replacement = yield* Deferred.make<WebSocketRoute.Connection>()
       const registration = yield* context.routeWebSocket("**", (socket) =>
-        Deferred.succeed(captured, socket).pipe(Effect.asVoid), { implementation: "script" })
+        Deferred.succeed(socket.id.endsWith(":replacement") ? replacement : captured, socket).pipe(Effect.asVoid), {
+        implementation: "script"
+      })
       const bridge = getBridge()
       const old = Target.RealmId.make("R-old")
       const next = Target.RealmId.make("R-next")
