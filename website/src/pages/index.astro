@@ -6,12 +6,23 @@ import { Image } from "astro:assets"
 import { getCollection } from "astro:content"
 import { Code } from "astro-expressive-code/components"
 import SiteHeader from "../components/SiteHeader.astro"
-import { guideRoute, navigation } from "../features/docs/navigation.ts"
+import { guideRoute, navigation, placeOf } from "../features/docs/navigation.ts"
 import { versionLabel } from "../features/site.ts"
 import BaseLayout from "../layouts/BaseLayout.astro"
 
 const version = await versionLabel()
-const chapters = navigation(await getCollection("docs"))
+const guides = await getCollection("docs")
+const chapters = navigation(guides)
+// The guide an example points to, headed by its chapter and section as its own page is
+const guideLink = (id: string) => {
+  const guide = guides.find((entry) => entry.id === id)
+  const place = guide === undefined ? undefined : placeOf(guides, guide)
+  if (guide === undefined || place === undefined) throw new Error(`The homepage links to ${id}, which no chapter holds`)
+  return { href: guideRoute(guide), title: guide.data.title, place: `Chapter ${place.chapter} · § ${place.section}` }
+}
+const testingGuide = guideLink("tools/testing")
+const expectationsGuide = guideLink("pages/expectations")
+const cliGuide = guideLink("agents/cli")
 const counts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
 const chapterCount = `${counts[chapters.length - 1] ?? chapters.length} ${chapters.length === 1 ? "chapter" : "chapters"}`
 // The homepage's engraving, kept in src/assets
@@ -269,6 +280,10 @@ strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
             <span><code>Download.next</code> starts listening before the click, so a quick download isn't missed. <code>yield*&nbsp;receipt</code> waits for it.</span>
           </li>
         </ol>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{testingGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={testingGuide.href}>{testingGuide.title} →</a>
+        </div>
       </div>
       <Code code={orderTest} lang="ts" title="checkout.test.ts" mark={["①", "②", "③", "④", "⑤"]} />
     </div>
@@ -302,6 +317,10 @@ strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
             <span><code>NodeRuntime.runMain</code> runs the program. Ctrl-C interrupts it, and the pages and the browser close.</span>
           </li>
         </ol>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{expectationsGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={expectationsGuide.href}>{expectationsGuide.title} →</a>
+        </div>
       </div>
       <Code code={bookScript} lang="ts" title="cheapest.ts" mark={["①", "②", "③", "④", "⑤"]} />
     </div>
@@ -321,6 +340,10 @@ strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
           Once <code>dialog&nbsp;handle&nbsp;accept</code> accepts the page's dialogs, the second try passes. The site's
           analytics requests fail as well, and are reported with the rest.
         </p>
+        <div class="mt-5 border-t border-hairline pt-2">
+          <p class="label">{cliGuide.place}</p>
+          <a class="inline-block font-display text-[1.35rem] hover:text-band-text" href={cliGuide.href}>{cliGuide.title} →</a>
+        </div>
       </div>
       <Code code={session} lang="sh" title="Terminal" />
     </div>
