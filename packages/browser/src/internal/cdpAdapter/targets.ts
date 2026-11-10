@@ -5,10 +5,10 @@
  *   session auto-attaches its out-of-process frames and its workers. A launched browser pauses every new page
  *   before its scripts run; an attached one pauses only frames and workers of pages it attached to, so a user's
  *   tab is never paused (probe 22).
- * - **The gate** runs while a target is paused: enable `Page`, `Network` and lifecycle events, take the frame tree
- *   (the snapshot the session is synced with), enable `Runtime`, auto-attach the target's own frames and workers,
- *   apply the declarations in force, and resume, in a finalizer. It never waits on another target: a paused popup
- *   blocks its opener.
+ * - **The gate** writes domain enablement, the frame tree snapshot, Runtime's replay, auto-attachment and the
+ *   declarations before resuming a paused target, then collects their replies. Waiting for renderer replies
+ *   before resume deadlocks a popup in a new browsing context group. Resume also runs on failure. The gate
+ *   never waits on another target: a paused popup blocks its opener.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -25,7 +25,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { configureTarget } from "./declare.ts"
+import { configureTarget, prepareTarget, type Setup } from "./declare.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
@@ -235,26 +235,53 @@ const snapshot = Effect.fnUntraced(function*(
   target: TargetEntry,
   page: PageEntry | undefined,
   adopted: boolean,
-  configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>
+  configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>,
+  waiting = false
 ) {
   const on = Protocol.on(target.session)
-  yield* Effect.all([
-    Page.enable().pipe(on),
-    Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
-    Network.enable({}).pipe(on)
-  ], { concurrency: "unbounded", discard: true })
-  const { result, received } = yield* target.session.sendSequenced(Page.getFrameTree())
-  // Contexts it replays arrive after the snapshot, so they are folded on top of it
-  yield* Runtime.enable().pipe(on)
-  // Service and shared workers belong to the browser, whose session attaches them; attached here too, a service
-  // worker would wait for two sessions
-  yield* Target.setAutoAttach({
+  const domains = [Page.enable(), Page.setLifecycleEventsEnabled({ enabled: true }), Network.enable({})]
+  const autoAttach = Target.setAutoAttach({
     autoAttach: true,
     waitForDebuggerOnStart: true,
     flatten: true,
     filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
-  }).pipe(on)
-  const failure = yield* configure.pipe(Effect.flip, Effect.option)
+  })
+  const initialized = waiting
+    ? Effect.gen(function*() {
+      const scope = yield* Effect.scope
+      const replies: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const declarations: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const setup: Setup = {
+        send: (command, receive) => Effect.gen(function*() {
+          const reply = yield* target.session.start(command, scope)
+          declarations.push(reply.pipe(Effect.tap(({ result }) => Effect.sync(() => receive?.(result))), Effect.asVoid))
+        })
+      }
+      for (const command of domains) replies.push((yield* target.session.start(command, scope)).pipe(Effect.asVoid))
+      const tree = yield* target.session.start(Page.getFrameTree(), scope)
+      // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
+      replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
+      // Browser-owned workers must not wait on a second session here.
+      replies.push((yield* target.session.start(autoAttach, scope)).pipe(Effect.asVoid))
+      const written = page === undefined ? Effect.void : prepareTarget(state, target, page, setup)
+      const writeFailure = yield* written.pipe(Effect.flip, Effect.option)
+      yield* resume(target.session, true)
+      const [snapshot, , declarationFailure] = yield* Effect.all([
+        tree,
+        Effect.all(replies, { concurrency: "unbounded", discard: true }),
+        Effect.all(declarations, { concurrency: "unbounded", discard: true }).pipe(Effect.flip, Effect.option)
+      ], { concurrency: "unbounded" })
+      return { ...snapshot, failure: Option.orElse(writeFailure, () => declarationFailure) }
+    })
+    : Effect.gen(function*() {
+      yield* Effect.all(domains.map((command) => command.pipe(on)), { concurrency: "unbounded", discard: true })
+      const tree = yield* target.session.sendSequenced(Page.getFrameTree())
+      yield* Runtime.enable().pipe(on)
+      yield* autoAttach.pipe(on)
+      const failure = yield* configure.pipe(Effect.flip, Effect.option)
+      return { ...tree, failure }
+    })
+  const { result, received, failure } = yield* initialized
   return {
     through: received,
     apply: Effect.suspend(() => {
@@ -277,8 +304,9 @@ const snapshot = Effect.fnUntraced(function*(
 })
 
 const gate = (state: State, target: TargetEntry, page: PageEntry | undefined, waiting: boolean, adopted: boolean) =>
-  snapshot(state, target, page, adopted, page === undefined ? Effect.void : configureTarget(state, target, page)).pipe(
-    Effect.ensuring(resume(target.session, waiting))
+  snapshot(state, target, page, adopted, page === undefined ? Effect.void : configureTarget(state, target, page), waiting).pipe(
+    Effect.ensuring(resume(target.session, waiting)),
+    Effect.scoped
   )
 
 // A service worker waiting for the debugger hasn't started, and answers `Runtime.enable` only once it has

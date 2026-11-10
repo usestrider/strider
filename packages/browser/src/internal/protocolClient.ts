@@ -30,7 +30,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Protocol from "../protocol/Protocol.ts"
@@ -143,6 +143,11 @@ export interface Session extends Protocol.ProtocolSession {
   readonly sendSequenced: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
+  /** Writes one command now; its reply is awaited separately, and abandoned when the supplied scope closes. */
+  readonly start: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    scope: Scope.Scope
+  ) => Effect.Effect<Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>, Protocol.ProtocolError>
   /**
    * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
    * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
@@ -616,6 +621,14 @@ export const make: (
     return yield* traced(write.pipe(Effect.andThen(reply), Effect.onInterrupt(() => abandon)))
   })
 
+  const start = <M extends string, P, A>(state: SessionState, command: Protocol.Command<M, P, A>, scope: Scope.Scope) =>
+    Effect.uninterruptible(Effect.gen(function*() {
+      const prepared = yield* prepare(state, command)
+      yield* Scope.addFinalizer(scope, prepared.abandon)
+      yield* prepared.traced(prepared.write)
+      return prepared.traced(prepared.reply)
+    }))
+
   const sendOrdered = <M extends string, P>(
     state: SessionState,
     commands: ReadonlyArray<Protocol.Command<M, P, void>>,
@@ -709,6 +722,7 @@ export const make: (
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
+      start: (command, scope) => start(state, command, scope),
       sendOrdered: (commands, onWritten) => sendOrdered(state, commands, onWritten),
       subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
