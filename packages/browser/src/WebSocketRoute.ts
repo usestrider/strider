@@ -5,12 +5,16 @@
  * identity are not emulated. Mock traffic is separate from NetworkConnection's native observations.
  *
  * Admission ceilings are 1 MiB per message, 256 messages or 4 MiB per direction, 16 MiB of issued reservations
- * and payload per registration, and 1024 admitted connections. Credits are assigned on demand before opening.
+ * and payload per registration. A shared 2 MiB host-send reservation leaves 14 MiB for browser credits.
+ * At most 14 pure mocks or 7 proxies fit; a mix obeys mocks + 2 * proxies <= 14. Connecting sockets count as
+ * mocks until proxy selection reserves server credit. Unconfirmed retired credits can lower these limits.
  * Unused issued credit counts, so a realm can overflow while capacity is reserved elsewhere. These are not
  * guaranteed usable queue capacities or bounds on process memory, encoded copies or native browser buffers.
- * Each connection receives fixed 1 MiB credits per browser direction. A realm allows 16 pending constructors;
+ * Each connection receives 1 MiB of page credit; only proxies receive another 1 MiB of server credit.
+ * Host sends share 2 MiB and 256 pending slots across the registration, returned on completion or cancellation.
+ * A realm allows 16 pending constructors;
  * the registration allows 4096 pending host envelopes, each at most 7 MiB of JSON text. A connection allows
- * 256 concurrent host sends. CDP buffers at most 64 envelopes per target while its realm is being announced.
+ * no host reservation is added outside the combined ceiling. CDP buffers at most 64 early envelopes per target.
  * Matched URLs are at most 8192 characters; at most 128 requested subprotocols
  * have at most 8192 aggregate UTF-8 bytes. Control-envelope overload fails that realm closed; other transport
  * overflow closes the affected connection. Tokens and generations prevent stale releases from granting credit.

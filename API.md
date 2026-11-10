@@ -298,6 +298,7 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly phase: P }): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>   // asked after the page's own
+  // Script routing: shared 16 MiB; effective capacity 14 mocks or 7 proxies (mocks + 2 * proxies <= 14).
   routeWebSocket<E, R>(pattern: Url.Pattern | string, handler: (connection: WebSocketRoute.Connection) => Effect<void, E, R>, options: WebSocketRoute.Options): Effect<WebSocketRoute.Registration, WebSocketRoute.WebSocketRouteError | TargetGone | Timeout, Scope | R>
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError | TargetGone | Timeout, Scope>
   emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError | TargetGone | Timeout, Scope>

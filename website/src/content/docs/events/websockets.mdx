@@ -72,16 +72,25 @@ The admission ceilings are:
 - 1 MiB per application message;
 - 256 pending messages or 4 MiB per browser direction;
 - 16 MiB of issued reservations and admitted payload per registration, across all its realms;
-- 1024 admitted connections, with at most 16 pending constructor requests per realm;
+- at most 14 pure mocks or 7 proxies; a mix obeys `mocks + 2 * proxies <= 14`;
+- at most 16 pending constructor requests per realm;
 - 64 early CDP envelopes per target while its realm is being announced;
-- 4096 pending host envelopes per registration, at most 7 MiB of JSON text per envelope, and 256 concurrent host
-  sends per connection;
+- 4096 pending host envelopes per registration, at most 7 MiB of JSON text per envelope, and 256 pending host
+  sends across the registration;
 - 8192 characters in a matched URL, 128 requested subprotocols, and 8192 bytes across those subprotocols.
 
 The JSON envelope allowance includes up to sixfold text escaping plus metadata; it does not increase the
 application-message limit.
 
-Each admitted connection receives a fixed 1 MiB in each browser direction before its open event. Unused issued
+The first admission reserves 2 MiB for host sends inside the same 16 MiB ceiling. Each connection receives
+1 MiB of page credit; selecting a proxy reserves another 1 MiB for server messages before opening. The remaining
+14 MiB therefore holds 14 pure mocks, seven proxies, or a mix satisfying the formula above. Connecting sockets
+count as mocks until proxy selection. Unconfirmed retired reservations can lower usable capacity. The internal
+1024-slot safety ceiling does not increase these reservation limits.
+
+Host sends consume the shared 2 MiB pool, with at most 256 pending sends. Completion or cancellation returns
+credit exactly once; idle browser reservations cannot consume this outbound pool. Saturation fails with Overflow
+rather than waiting indefinitely. Unused issued
 credits remain charged until acknowledged draining or confirmed realm destruction. Local credit exhaustion can
 therefore close a socket while capacity is reserved elsewhere. These ceilings do not guarantee usable queue
 capacity and do not bound encoded copies, browser-native buffers or total process memory. Idle documents receive

@@ -544,7 +544,9 @@ Declarations are init scripts, HTTP and WebSocket routes, overrides, emulation, 
   handlers forward, installed handlers send explicitly or drop. Passive event streams never change forwarding.
   Every connection has a registration-owned child scope; handler failure closes rather than contacting a server.
   Admission includes unused issued credit, queued payload and pending Blob conversions, across realms. The
-  registration authorizes credits before open; the realm spends them synchronously before snapshotting mutable
+  registration keeps a counted 2 MiB host-send pool, leaving 14 MiB for 1 MiB page credits and an additional
+  1 MiB server credit only for proxies. Thus mocks + 2 * proxies <= 14; host completion/cancellation returns its
+  credit exactly once. The realm spends preauthorized credit synchronously before snapshotting mutable
   data. A drained surrender or confirmed realm destruction reclaims them exactly once. See `WebSocketRoute` for
   all ceilings and the guide for the conservative allocation policy. Removing a registration closes its sockets,
   drains conversion work, removes future scripts and restores only the constructor still owned by its shim.

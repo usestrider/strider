@@ -29,9 +29,10 @@ import type * as Runtime from "./runtime.ts"
 import * as UrlPattern from "./urlPattern.ts"
 import * as Watchable from "./watchable.ts"
 import * as Admission from "./webSocketAdmission.ts"
+import * as Allocation from "./webSocketAllocation.ts"
 import * as Shim from "./webSocketShim.ts"
 
-const MiB = 1024 * 1024
+const MiB = Allocation.messageBytes
 const WireMessage = Schema.Union([
   Schema.TaggedStruct("Text", { data: Schema.String }),
   Schema.TaggedStruct("Binary", { data: Schema.String })
@@ -67,7 +68,6 @@ interface Connection {
   fromPage?: ((message: WebSocketRoute.Message) => Effect.Effect<void, unknown>) | undefined
   fromServer?: ((message: WebSocketRoute.Message) => Effect.Effect<void, unknown>) | undefined
   mode?: "mock" | "proxy" | undefined
-  hostSequence: number
 }
 
 export const register = <E, R>(
@@ -127,7 +127,8 @@ export const register = <E, R>(
     const name = `__strider_ws_${token.replaceAll("-", "")}`
     const transport = adapter.info.protocol === "webkit" ? "console" : "binding"
     const source = Shim.source(name, token, pattern, transport)
-    const accounting = Admission.make({ bytes: 16 * MiB, slots: 1024 })
+    const allocation = Allocation.make()
+    const accounting = allocation.budget
     const connections = new Map<string, Connection>()
     const realms = new Set<Target.RealmId>()
     const unconfirmed = new Map<Target.RealmId, Array<Admission.Lease>>()
@@ -230,21 +231,18 @@ export const register = <E, R>(
           )
         }
         const bytes = message._tag === "Binary" ? message.data.byteLength : Admission.textBytes(message.data)
-        if (bytes > MiB || !accounting.grant(connection.lease, "host", bytes)) {
+        const sequence = allocation.reserveHost(bytes)
+        if (sequence === undefined) {
           yield* terminate(connection, "routing overflow")
           return yield* Effect.fail(
-            fail(new WebSocketRoute.Overflow({ limit: bytes > MiB ? "1 MiB message" : "16 MiB registration" }))
+            fail(
+              new WebSocketRoute.Overflow({ limit: bytes > MiB ? "1 MiB message" : "2 MiB or 256 pending host sends" })
+            )
           )
-        }
-        const sequence = ++connection.hostSequence
-        if (!accounting.consume(connection.lease, "host", sequence, bytes)) {
-          accounting.surrender(connection.lease, "host", sequence, bytes)
-          yield* terminate(connection, "routing overflow")
-          return yield* Effect.fail(fail(new WebSocketRoute.Overflow({ limit: "256 host sends" })))
         }
         yield* command(connection, { type: "send", direction, message: encode(message) }).pipe(
           Effect.ensuring(Effect.sync(() => {
-            accounting.complete(connection.lease, "host", sequence, true)
+            allocation.completeHost(sequence)
           }))
         )
       }, Operation.named("WebSocketRoute.send", { attributes: { "browser.realm.id": connection.realm } })),
@@ -276,13 +274,9 @@ export const register = <E, R>(
       function*(realm: Target.RealmId, message: Envelope, origin: WebSocketRoute.Origin) {
         const owner = `${realm}:${message.id}`
         if (connections.has(owner)) return
-        const lease = accounting.enter(owner, 1)
+        const lease = allocation.admit(owner, 1)
         const reject = () => command({ realm, id: message.id }, { type: "fail", reason: "constructor admission" })
         if (lease === undefined) return yield* reject()
-        if (!accounting.grant(lease, "page", MiB) || !accounting.grant(lease, "server", MiB)) {
-          accounting.leave(lease)
-          return yield* reject()
-        }
         const child = yield* Scope.fork(scope)
         const status = yield* SubscriptionRef.make<State>("connecting")
         const events = Events.make<WebSocketRoute.Event>({ _tag: "Realm", id: realm }, () => 0)
@@ -296,8 +290,7 @@ export const register = <E, R>(
           status,
           events,
           opened,
-          lock,
-          hostSequence: 0
+          lock
         }
         const page = writable(connection, "page"), server = writable(connection, "server")
         const choose = Effect.fnUntraced(
@@ -322,6 +315,9 @@ export const register = <E, R>(
                   })
                 )
               )
+            }
+            if (mode === "proxy" && !allocation.proxy(lease)) {
+              return yield* Effect.fail(fail(new WebSocketRoute.Overflow({ limit: "14 MiB browser reservations" })))
             }
             const services = yield* Effect.context<R2>()
             connection.mode = mode
@@ -362,7 +358,9 @@ export const register = <E, R>(
             }
             // Both grants must reach the realm before author code can see open.
             yield* command(connection, { type: "grant", direction: "page", bytes: MiB, serial: 1 })
-            yield* command(connection, { type: "grant", direction: "server", bytes: MiB, serial: 1 })
+            if (mode === "proxy") {
+              yield* command(connection, { type: "grant", direction: "server", bytes: MiB, serial: 1 })
+            }
             if (mode === "mock") yield* SubscriptionRef.set(status, "open")
             yield* command(connection, { type: mode === "mock" ? "open" : "connect", protocol })
             return mode === "mock" ? "" : yield* Deferred.await(opened)

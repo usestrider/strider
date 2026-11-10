@@ -281,10 +281,10 @@ for (const [name, backend] of backends) {
               timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
             })
             const child =
-              `<script>const sockets=[];for(let n=0;n<5;n++){const ws=new WebSocket('ws://example.invalid/socket');sockets.push(ws);let sent=false;const report=value=>{if(!sent){sent=true;parent.postMessage(value,'*')}};ws.onopen=()=>report('open');ws.onclose=()=>report('closed')}</script>`
+              `<script>const sockets=[];for(let n=0;n<8;n++){const ws=new WebSocket('ws://example.invalid/socket');sockets.push(ws);let sent=false;const report=value=>{if(!sent){sent=true;parent.postMessage(value,'*')}};ws.onopen=()=>report('open');ws.onclose=()=>report('closed')}</script>`
             const url = (origin: string) => `${origin}/fixture?html=${encodeURIComponent(child)}`
             const html =
-              `<pre id="out">pending</pre><script>const replies=[];onmessage=e=>{replies.push(e.data);if(replies.length===10)document.querySelector('#out').textContent=JSON.stringify(replies.sort())}</script><iframe src="${
+              `<pre id="out">pending</pre><script>const replies=[];onmessage=e=>{replies.push(e.data);if(replies.length===16)document.querySelector('#out').textContent=JSON.stringify(replies.sort())}</script><iframe src="${
                 url(served.origin)
               }"></iframe><iframe src="${url(served.crossSite)}"></iframe>`
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
@@ -293,7 +293,7 @@ for (const [name, backend] of backends) {
               Condition.make("all constructor admissions settled", (text: string) => text !== "pending")
             )
             const admissions = JSON.parse(yield* page.locator("#out").readText) as Array<string>
-            assert.strictEqual(admissions.filter((value) => value === "open").length, 8)
+            assert.strictEqual(admissions.filter((value) => value === "open").length, 14)
             assert.strictEqual(admissions.filter((value) => value === "closed").length, 2)
             // Navigation destroys both frame generations. All their unused credits must become usable again.
             yield* page.goto(`${served.origin}/empty`)
