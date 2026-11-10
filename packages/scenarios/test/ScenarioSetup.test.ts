@@ -47,3 +47,17 @@ it("prepares a fresh scenario working directory before constructing browser laye
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+it("excludes the Chromium-only emulated-focus scenario from a Firefox run", () => {
+  const source = fs.readFileSync(new URL("../src/bin.ts", import.meta.url), "utf8")
+  // Execute the runner's actual selection without launching either browser.
+  const selection = source.slice(source.indexOf("const chosen ="), source.indexOf("const problems ="))
+  const chosen = vm.runInNewContext(`${selection}\nchosen`, {
+    scenarios,
+    engine: "firefox",
+    only: undefined,
+    process: { env: {} }
+  }) as Array<{ name: string }>
+  expect(chosen.map((scenario) => scenario.name)).toContain("many-pages")
+  expect(chosen.map((scenario) => scenario.name)).not.toContain("many-pages-emulated")
+})
