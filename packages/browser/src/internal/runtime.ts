@@ -244,7 +244,11 @@ export interface Hop {
   readonly frame: Target.NavigableId
 }
 
-/** Where a request went: its document, and the iframes entered on the way, outermost first. */
+/**
+ * Where a request went: its document, and the iframes entered on the way, outermost first. For a lookup that
+ * returns node bindings, `document` is the bindings' document, which differs from the one first routed to when a
+ * frame commits mid-lookup.
+ */
 export interface Routed {
   readonly document: Target.DocumentId
   readonly hops: ReadonlyArray<Hop>
@@ -790,7 +794,13 @@ export const element = (
         return Effect.succeedSome({ _tag: "Response", response: stale.value, routed: route.routed })
       }
       return elementIn(runtime, route.routed.document, last, null, id).pipe(
-        Effect.map(Option.map((found): Found => ({ ...found, routed: route.routed })))
+        Effect.map(Option.map((found): Found =>
+          found._tag === "Found" && found.node.document !== route.routed.document
+            // A child document can commit while the utility realm is installed: the binding then names the
+            // new document, which is the one the node lives in. The frames' parent hops still hold.
+            ? { ...found, routed: { ...route.routed, document: found.node.document } }
+            : { ...found, routed: route.routed }
+        ))
       )
     }),
     promptBlocked(page)
@@ -856,7 +866,13 @@ export const elements = (
             }
             nodes.push(member.node)
           }
-          return Option.some({ _tag: "Found" as const, nodes, routed })
+          // As in `element`: the bindings' document is authoritative when a commit straddled the lookup.
+          const document = nodes[0]?.document ?? routed.document
+          return Option.some({
+            _tag: "Found" as const,
+            nodes,
+            routed: document === routed.document ? routed : { ...routed, document }
+          })
         }
       )
     ),
