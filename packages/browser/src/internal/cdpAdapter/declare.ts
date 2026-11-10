@@ -528,7 +528,7 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = declaration._tag === "Downloads" && false && declaration.retiring?.() === true
+      const release = declaration._tag === "Downloads" && declaration.retiring?.() === true
         // The context is removed right after: restoring its download behavior would only add a round trip
         ? Effect.void
         : declaration._tag === "Downloads"
