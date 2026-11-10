@@ -16,6 +16,7 @@ import * as Events from "../src/internal/events.ts"
 import * as Handles from "../src/internal/handles.ts"
 import * as Snapshots from "../src/internal/snapshot.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
+import { ToolFailure } from "../src/internal/tools.ts"
 import * as PageNavigation from "../src/PageNavigation.ts"
 import * as Url from "../src/Url.ts"
 
@@ -343,7 +344,7 @@ describe("Session held-tab retirement", () => {
       yield* TestClock.adjust("1 millis")
       const first = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
       const result = Option.getOrThrow(first).result
-      if (!("sinceLast" in result)) return assert.fail("pages returned no digest")
+      if (result instanceof ToolFailure || !("sinceLast" in result)) return assert.fail("pages returned no digest")
       assert.deepStrictEqual(result.sinceLast.filter((line) => line.includes("closed")).length, 1)
       assert.isTrue(result.sinceLast.some((line) => line.startsWith("renamed closed: ")))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
