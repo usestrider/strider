@@ -22,6 +22,7 @@ import {
   NetworkResponse,
   Page,
   PageNavigation,
+  Reason,
   Subscription,
   Target,
   UncaughtException,
@@ -694,12 +695,15 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               const error = yield* Effect.flip(response)
               assert.strictEqual(error._tag, "ResponseError")
               if (error._tag === "ResponseError") {
-                assert.deepStrictEqual(error.reason, {
-                  _tag: "Unsupported",
-                  capability: "network.responseBody.terminalRedirect",
-                  backend: "firefox",
-                  hint: "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
-                })
+                assert.deepStrictEqual(
+                  error.reason,
+                  new Reason.Unsupported({
+                    capability: "network.responseBody.terminalRedirect",
+                    backend: "firefox",
+                    hint:
+                      "Firefox does not answer network.getData for a terminal 3xx response without a Location header"
+                  })
+                )
               }
             }
           })),

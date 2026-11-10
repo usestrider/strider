@@ -3366,3 +3366,49 @@ describe("BiDi terminal 3xx body refusal", () => {
       }))
   }
 })
+
+it.effect("refuses a terminal BiDi response learned while a body read waits", () =>
+  Effect.gen(function*() {
+    const { state, sent } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "wrong" } } })
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    const params = {
+      context: "C1",
+      userContext: "default",
+      navigation: null,
+      timestamp: 1,
+      redirectCount: 0,
+      isBlocked: false,
+      request: {
+        request: "late-response",
+        url: "http://site.test/",
+        method: "GET",
+        headers: [],
+        destination: "",
+        bodySize: 0
+      },
+      response: {
+        url: "http://site.test/",
+        status: 302,
+        statusText: "",
+        protocol: "HTTP/1.1",
+        headers: [],
+        fromCache: false,
+        bytesReceived: 4
+      }
+    }
+    handlers.apply("network.beforeRequestSent", params, { state })
+    const entry = state.requests.get("late-response")!
+    const reading = yield* Network.responseBody(state, entry.hop).pipe(Effect.result, Effect.forkChild)
+    yield* Effect.yieldNow
+    handlers.apply("network.responseStarted", params, { state })
+    handlers.apply("network.responseCompleted", params, { state })
+    const result = yield* Fiber.join(reading)
+    assert.strictEqual(result._tag, "Failure")
+    if (result._tag === "Failure") {
+      assert.deepInclude(result.failure.reason, {
+        _tag: "Unsupported",
+        capability: "network.responseBody.terminalRedirect"
+      })
+    }
+    assert.deepStrictEqual(sent, [])
+  }))
