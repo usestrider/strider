@@ -3225,6 +3225,7 @@ describe("BiDi response body completion", () => {
         yield* Effect.yieldNow
         if (successor === "waiting") apply("network.beforeRequestSent", { redirectCount: 1 })
         complete()
+        // Isolate the in-flight identity check even on an adapter whose completion latch is broken.
         if (successor === "reading") Deferred.doneUnsafe(entry.finished, Effect.void)
         assert.isTrue(Deferred.isDoneUnsafe(entry.finished), "completed responses release body reads")
         if (successor !== "waiting") {

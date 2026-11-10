@@ -245,6 +245,9 @@ export const withBodyLimit: {
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
  *
+ * On Firefox, body retrieval for a terminal 302 without a `Location` header can remain pending after the
+ * response finishes. Collection then fails with `BodyUnavailable`, `why: "streaming"`, at the deadline.
+ *
  * On WebKit, response-body collection makes navigation and reload wait for the responded, committed main
  * document to finish loading and for document body reads already started on the page to settle. Unresponded or
  * uncommitted loads and unfinished iframe loads do not delay dispatch. This interruptible wait uses the existing

@@ -26,10 +26,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       let request = state.requests.get(data.request)
       if (request !== undefined && params.redirectCount > request.redirects) {
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
+        const previous = request.finished
+        request.finished = Deferred.makeUnsafe()
         request.redirects = params.redirectCount
         request.hop = state.ids.hop(request.id, request.redirects)
         request.bodySizes[request.redirects] = data.bodySize
         state.hops.set(request.hop, request)
+        Deferred.doneUnsafe(previous, Effect.void)
       } else if (request === undefined) {
         const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
         const id = state.ids.request()
@@ -94,10 +97,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
     .on(Network.responseCompleted, (params, { state }) => {
-      if (params.response.status < 300 || params.response.status >= 400) {
-        ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
-          ?.proxyAttempts?.delete(params.request.request)
-      }
+      ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
+        ?.proxyAttempts?.delete(params.request.request)
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
       if (request.navigable?.context.requestTiming) {
@@ -109,11 +110,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         encodedBytes: params.response.bytesReceived,
         at: Adapter.now()
       })
-      // A redirect's response completes its hop; the request goes on
-      if (params.response.status < 300 || params.response.status >= 400) {
-        Deferred.doneUnsafe(request.finished, Effect.void)
-        state.retire(params.request.request)
-      }
+      // Completion belongs to this hop, including a terminal 3xx without a followed redirect.
+      Deferred.doneUnsafe(request.finished, Effect.void)
+      state.retire(params.request.request)
     })
     .on(Network.fetchError, (params, { state }) => {
       ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
@@ -174,10 +173,19 @@ export const responseBody = Effect.fnUntraced(function*(state: State, hop: Netwo
   yield* Deferred.await(request.finished).pipe(
     Effect.mapError((error) => Kit.unsupported("body.failed", `The request failed (${error}), so it has no body`))
   )
-  const { bytes } = yield* state.send(Network.getData({ dataType: "response", request: request.bidi })).pipe(
-    Effect.mapError(notCollected)
+  if (request.hop !== hop) {
+    return yield* Effect.fail(Kit.unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
+  }
+  const result = yield* state.send(Network.getData({ dataType: "response", request: request.bidi })).pipe(
+    Effect.mapError(notCollected),
+    Effect.result
   )
-  return yield* bytesOf(bytes, "network.getData")
+  // The native request id is reused: a successor can arrive while getData is in flight.
+  if (request.hop !== hop) {
+    return yield* Effect.fail(Kit.unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
+  }
+  if (result._tag === "Failure") return yield* Effect.fail(result.failure)
+  return yield* bytesOf(result.success.bytes, "network.getData")
 })
 
 export const requestBody = Effect.fnUntraced(function*(state: State, hop: NetworkRequest.HopId) {
