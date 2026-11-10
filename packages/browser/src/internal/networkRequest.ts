@@ -12,7 +12,7 @@ import * as Reason from "../Reason.ts"
 import * as Subscription from "../Subscription.ts"
 import type * as Url from "../Url.ts"
 import * as Access from "./access.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
 import type * as Model from "./model.ts"
 import * as Redaction from "./redaction.ts"
@@ -590,3 +590,96 @@ export const failure = (
     }
   }))
 }
+
+/** Reads existing evidence only; creating access must never start background tracking. */
+export const redirects: (
+  target: Page.ObservedPage | UserContext.ObservedUserContext
+) => Effect.Effect<NetworkRequest.Redirects, never, Scope.Scope> = Effect.fnUntraced(
+  function*(target: Page.ObservedPage | UserContext.ObservedUserContext) {
+    let owner: ReturnType<typeof Handles.target> | undefined = Handles.target(target)
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        owner = undefined
+      })
+    )
+    const ids = Adapter.makeIds()
+    const read = Effect.fnUntraced(
+      function*(request: NetworkRequest.NetworkRequest, direction: -1 | 1) {
+        const fail = (why: NetworkRequest.RedirectUnavailable["why"]) =>
+          Effect.fail(
+            new NetworkRequest.RequestError({
+              hop: request.hop,
+              reason: new NetworkRequest.RedirectUnavailable({ why }),
+              diagnostics: Operation.diagnosticsNow()
+            })
+          )
+        const unknown = (why: NetworkRequest.RedirectUnknown["why"]) =>
+          Effect.fail(
+            new NetworkRequest.RequestError({
+              hop: request.hop,
+              reason: new NetworkRequest.RedirectUnknown({ why }),
+              diagnostics: Operation.diagnosticsNow()
+            })
+          )
+        const current = owner
+        if (current === undefined) return yield* fail("released")
+        const { entry, runtime } = current.behind
+        if (Deferred.isDoneUnsafe(entry.closed) || Deferred.isDoneUnsafe(runtime.model.lost)) {
+          return yield* fail("targetClosed")
+        }
+        const owned = (hop: Model.HopEntry) =>
+          current._tag === "Page"
+            ? Option.exists(hop.page, (page) => page === current.behind.entry)
+            : Option.exists(hop.context, (context) => context === current.behind.entry)
+        const source = runtime.model.hop(request.hop)
+        if (Option.isNone(source)) return yield* fail("evicted")
+        if (source.value.request !== request) return yield* fail("unavailable")
+        if (!owned(source.value)) return yield* fail("foreignTarget")
+        const separator = request.hop.lastIndexOf(".")
+        const ordinal = ids.redirectsOf(request.hop)
+        if (direction === -1 && ordinal === 0) return Option.none()
+        const adjacent = runtime.model.hop(
+          ids.hop(request.hop.slice(0, separator) as NetworkRequest.Id, ordinal + direction)
+        )
+        if (Option.isSome(adjacent)) {
+          if (!owned(adjacent.value)) return yield* fail("foreignTarget")
+          return Option.some(adjacent.value.request)
+        }
+        if (direction === -1) return yield* fail("evicted")
+        const end = yield* Deferred.poll(source.value.end)
+        if (Option.isNone(end)) return yield* unknown("inFlight")
+        const terminal = yield* end.value
+        if (terminal._tag === "Forgotten") return yield* fail("evicted")
+        if (terminal._tag === "Failed") return Option.none()
+        const response = (yield* source.value.state.get).response
+        if (Option.isNone(response)) return yield* fail("unavailable")
+        if ([301, 302, 303, 307, 308].includes(response.value.status)) {
+          const navigation = request.initiator._tag === "Document" ? request.initiator.navigation : Option.none()
+          if (Option.isSome(navigation) && Option.isSome(source.value.page)) {
+            const channel = source.value.page.value.events.navigation
+            const ended = channel.entries.find(({ value }) => value.navigation === navigation.value)
+            if (
+              ended?.value.outcome._tag === "Committed" && Option.contains(ended.value.outcome.response, request.hop)
+            ) {
+              return Option.none()
+            }
+            // Incomplete history cannot distinguish missing terminal evidence from discarded evidence.
+            if (ended === undefined && (channel.dropped > 0 || channel.cap() === 0)) return yield* fail("unavailable")
+          }
+          return yield* unknown("completedRedirect")
+        }
+        return Option.none()
+      },
+      (effect, request, direction) =>
+        effect.pipe(
+          Operation.named(direction === -1 ? "NetworkRequest.redirects.from" : "NetworkRequest.redirects.to", {
+            attributes: { "browser.hop.id": request.hop }
+          })
+        )
+    )
+    return {
+      from: (request: NetworkRequest.NetworkRequest) => read(request, -1),
+      to: (request: NetworkRequest.NetworkRequest) => read(request, 1)
+    }
+  }
+)

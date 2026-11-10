@@ -954,6 +954,116 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("preserves Map arguments in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate((value) =>
+                value instanceof Map && value.get("suffix"), new Map([["suffix", "!"]])),
+              "!"
+            )
+          }))
+        }), timeout)
+
+      it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate(
+                (set, date, regexp, nested) => {
+                  const map = nested.items[0]!
+                  const key = Array.from(map.keys())[0]!
+                  const values = map.get(key)!
+                  return set instanceof Set && set.has(3) &&
+                    date instanceof Date && date.toISOString() === "2020-01-02T00:00:00.000Z" &&
+                    regexp instanceof RegExp && regexp.source === "a+" && regexp.flags === "gi" &&
+                    map instanceof Map && key.id === 1 && values instanceof Set &&
+                    values.has(undefined) && values.has(42n) && values.has(NaN) && values.has(Infinity) &&
+                    Object.is(nested.zero, -0) && nested.absent === undefined && nested.nil === null
+                },
+                new Set([3]),
+                new Date("2020-01-02"),
+                /a+/gi,
+                {
+                  items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+                  zero: -0,
+                  absent: undefined,
+                  nil: null
+                }
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
+      it.effect("leaves the callback's free identifiers to its realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            // Names the argument wrapper might bind must resolve as they would in the callback's own realm
+            assert.deepStrictEqual(
+              yield* evaluate((value: number) => [
+                // @ts-expect-error: undeclared on purpose
+                typeof kinds,
+                // @ts-expect-error: undeclared on purpose
+                typeof args,
+                // @ts-expect-error: undeclared on purpose
+                typeof decode,
+                value
+              ], 1),
+              ["undefined", "undefined", "undefined", 1]
+            )
+          }))
+        }), timeout)
+
+      it.effect("resolves callback globals and arrow arguments in the page realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                // The arrow must not inherit adapter arguments
+                return typeof arguments
+              }),
+              "undefined"
+            )
+            yield* page.evaluateInMainWorld(() => {
+              for (const name of ["kinds", "args", "decode", "helper", "fn", "arguments"]) {
+                Object.defineProperty(globalThis, name, { value: `page:${name}`, configurable: true })
+              }
+            })
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(async (value) => [
+                // @ts-expect-error: these free names refer to page globals
+                kinds,
+                // @ts-expect-error: these free names refer to page globals
+                args,
+                // @ts-expect-error: these free names refer to page globals
+                decode,
+                // @ts-expect-error: these free names refer to page globals
+                helper,
+                // @ts-expect-error: these free names refer to page globals
+                fn,
+                // The arrow reads the page global
+                arguments,
+                value
+              ], 7),
+              ["page:kinds", "page:args", "page:decode", "page:helper", "page:fn", "page:arguments", 7]
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(function(value) {
+                return [arguments.length, arguments[0], value]
+              }, 7),
+              [1, 7, 7]
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1964,9 +2074,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
