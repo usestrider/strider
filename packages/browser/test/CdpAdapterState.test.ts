@@ -3091,3 +3091,66 @@ for (const outcome of ["success", "failure"] as const) {
       assert.strictEqual(accepts(mock), outcome !== "success")
     }).pipe(Effect.scoped))
 }
+
+it.effect("rejects an isolated realm created in a replacement document while acquisition is pending", () =>
+  Effect.gen(function*() {
+    let create: Effect.Effect<unknown> = Effect.void
+    const native = {
+      ...session,
+      drainObserved: Effect.void,
+      send: (command: { readonly method: string }) => {
+        assert.strictEqual(command.method, "Page.createIsolatedWorld")
+        return create
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(native)
+    const frame = state.frames.get("T1")!
+    const document = Tree.commit(
+      state,
+      frame,
+      {
+        loaderId: "initial",
+        url: "about:blank",
+        origin: "://"
+      },
+      () => ({ _tag: "InitialBlank" }),
+      undefined,
+      "test"
+    )
+    create = Effect.sync(() => {
+      Tree.commit(
+        state,
+        frame,
+        {
+          loaderId: "replacement",
+          url: "https://example.test/",
+          origin: "https://example.test"
+        },
+        () => ({ _tag: "Adopted" }),
+        undefined,
+        "test"
+      )
+      Evaluation.contextCreated({
+        context: {
+          id: 7 as CdpRuntime.ExecutionContextId,
+          uniqueId: "replacement-utility",
+          origin: "https://example.test",
+          name: "utility",
+          auxData: { frameId: "T1", isDefault: false, type: "isolated" }
+        }
+      }, target.event)
+      return { executionContextId: 7 }
+    })
+    const result = yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "utility" }).pipe(Effect.exit)
+    assert(
+      Exit.isFailure(result),
+      "realm acquisition must refuse the ended document instead of returning its replacement's realm"
+    )
+    if (Exit.isFailure(result)) {
+      const error = yield* Effect.failCause(result.cause).pipe(Effect.flip)
+      assert.strictEqual(error.reason._tag, "Gone")
+      if (error.reason._tag === "Gone") {
+        assert.deepStrictEqual(error.reason.target, { _tag: "Document", id: document.id })
+      }
+    }
+  }).pipe(Effect.scoped))
