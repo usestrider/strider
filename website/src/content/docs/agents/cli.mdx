@@ -1,6 +1,6 @@
 ---
 title: Strider CLI
-description: A usage guide for agent context and skills, commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions, their state and managing them, attaching, TypeScript segments, and an MCP server.
+description: A usage guide for agent context and skills, commands on a live browser, waits across commands, failures and their exit codes, exporting a session as a test, sessions and their state, managing them, attaching, TypeScript segments, and an MCP server.
 order: 3
 ---
 
@@ -9,13 +9,13 @@ pnpm add -g @usestrider/cli
 ```
 
 A program's browser closes when the program ends. `strider`, the command-line tool, keeps one open in a named session
-between commands, so a shell, a script or an agent can drive it one step at a time. It runs on Node, or on Bun where
+between commands, so a shell, a script, or an agent can drive it one step at a time. It runs on Node, or on Bun where
 there is no Node. `strider --help` lists the commands, and `strider <command> --help` each one's arguments.
 
 ## Agent usage
 
 Individual help pages describe syntax; `strider agent instructions` explains how sessions, page targets, event waits,
-results and saved logins work together, with examples an agent can use as context:
+results, and saved logins work together, with examples an agent can use as context:
 
 ```sh
 strider agent instructions
@@ -56,7 +56,7 @@ strider -s shop -p main snapshot
 (main · 16 ms)
 ```
 
-`find` gives a ref without the whole tree; then act on it, check the result and go on:
+`find` gives a ref without the whole tree; then act on it, check the result, and go on:
 
 ```sh
 strider -s shop -p main find "Add to cart" --role button
@@ -140,7 +140,7 @@ The code is the error's, not its reason's: a locator's `InvalidInput` exits with
 A session's refs mean nothing outside it, so rewriting a session as a test by hand means finding each element again.
 `export test` writes each command the session ran, expectations included, as a step of a
 [Vitest test](/docs/tools/testing), with refs turned into the locators they stood for. It leaves out reads, such as
-`snapshot` and `find`, and commands that failed; `run`, `control` and `release` become `TODO` comments, which the
+`snapshot` and `find`, and commands that failed; `run`, `control`, and `release` become `TODO` comments, which the
 command lists. For the session in [Commands](#commands) and [Waits across commands](#waits-across-commands):
 
 ```sh
@@ -216,12 +216,12 @@ A session's browser runs until the session stops, so list what's running and sto
 | Command                                        | Does                                                                         |
 | ---------------------------------------------- | ---------------------------------------------------------------------------- |
 | [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
-| `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
+| `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit`, or `--attach <endpoint>`     |
 | `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1 hour` |
-| `strider -s s stop`                            | waits for browser, directory and ledger cleanup; `--keep` keeps the directory     |
+| `strider -s s stop`                            | waits for browser, directory, and ledger cleanup; `--keep` keeps the directory    |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
-A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
+A session's profile, downloads, and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
 `<OS temp directory>/strider-<uid>/<name>/` when the runtime directory is unset, deleted when it stops. A
 session idle for an hour stops itself; `start --idle "30 minutes"` changes that. Both `start` and `sessions` print the validated idle timeout with whitespace normalized to spaces, so you can copy it into `--idle` with quotes.
 
@@ -245,7 +245,7 @@ an explicit value at startup takes precedence, and further commands reset its id
 
 For manual termination, treat the old session's `lock` as a lead, not proof of process identity. Independently
 verify that its `pid` still belongs to your account's Strider daemon for that session: inspect its owner,
-command line and session arguments, and compare its process start time with the lock's `startedAt` (Unix epoch
+command line, and session arguments, and compare its process start time with the lock's `startedAt` (Unix epoch
 milliseconds). A stale PID may now identify another process; neither a matching process name nor a live PID
 alone is enough. If identity is uncertain, use the old CLI or wait instead. Only after verifying identity,
 request termination of that daemon with your OS process tools (for example, SIGTERM) and wait for it to exit.
@@ -348,7 +348,7 @@ p1 is now card
 ```
 
 - A segment runs in its own scope: its [routes](/docs/events/routes),
-  [handlers](/docs/events/kinds#dialogs-and-file-choosers) and waits end with it.
+  [handlers](/docs/events/kinds#dialogs-and-file-choosers), and waits end with it.
 - Pages it returns are named into the session as a page opened without a name is, `p1` and on: `ran` says which
   name each returned page got, and `page name` renames one. They aren't kept: a popup of a session page stays open, since its
   opener owns it, and a page the segment opened itself closes with the segment.
@@ -408,7 +408,7 @@ strider -s shop run read.ts --arg page=main --arg count=2 --json
 
 Use `Schema.Record(Schema.String, Schema.Never)` to reject all arguments; `Schema.Struct({})` is permissive.
 A plain `Effect` default export must be wrapped in
-`Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() { return yield* effect }))`. Duplicate arguments, unknown keys and schema errors stop the
+`Segment.make(Schema.Record(Schema.String, Schema.Never), Effect.fnUntraced(function*() { return yield* effect }))`. Duplicate arguments, unknown keys, and schema errors stop the
 command before its callback runs.
 
 An argument beginning with `@` reads JSON from a file relative to your shell's working directory. For a segment
@@ -471,7 +471,7 @@ JSON failures go to stderr with `file`, `error`, optional `reason`, `message`, o
 errors `execute`. Values the browser cannot return, including cycles, also fail during `execute`
 with reason `NotSerializable`. Only refusals by the later shared result encoder have phase `serialize`.
 
-Evaluation can change the page, start requests or open popups. A later failure does not undo those effects.
+Evaluation can change the page, start requests, or open popups. A later failure does not undo those effects.
 Named secrets are concealed with local capture; strict capture masks arbitrary results and failure details.
 Strict capture masks output, not execution. Export records a marked placeholder for evaluation, including
 evaluation that throws after side effects; restore its code by hand. Source text and file paths are omitted

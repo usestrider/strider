@@ -5,7 +5,7 @@ order: 3
 ---
 
 A failure that says only that something went wrong leaves you rerunning the program to find out why. Each of
-Strider's says what happened, why and what to do, and is in the operation's type, so you can recover from the ones
+Strider's says what happened, why, and what to do, and is in the operation's type, so you can recover from the ones
 you expect.
 
 ## Three kinds of failure
@@ -66,7 +66,7 @@ A shared reason is the same class in every module, so one handler serves them al
 `LocatorError`'s `Unsupported` too.
 
 `TargetGone` has reasons of the same kind, declared in `Target`: `PageClosed`, `FrameDetached`, `DocumentReplaced`,
-`ConnectionLost` and the others. A popup that closes under a click is a `PageClosed`, which says what closed it:
+`ConnectionLost`, and the others. A popup that closes under a click is a `PageClosed`, which says what closed it:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -139,7 +139,7 @@ const expectPlaced = Effect.fn("expectPlaced")(function*(page: Page.Page) {
 An action that fails may still have reached the page, so retrying it could submit twice. Every failure carries
 `diagnostics`:
 
-- `dispatch`, for an action: whether its input reached the page, `NotSent`, `MayHaveBeenSent` or `Acknowledged`.
+- `dispatch`, for an action: whether its input reached the page, `NotSent`, `MayHaveBeenSent`, or `Acknowledged`.
 - `progress`, for an [operation with steps](/docs/deadlines#operations-of-your-own): how far each step got.
 - `operationId`: the id that links the failure to its operation's span and its entry in a
   [trace](/docs/tools/recordings#traces).
@@ -164,7 +164,7 @@ Errors are Schemas, so they encode as data; the [`strider` CLI](/docs/agents/cli
 
 ## Secrets and URLs
 
-A failure's message ends up in logs, traces and bug reports, so `Redacted` values, cookies and typed passwords are
+A failure's message ends up in logs, traces, and bug reports, so `Redacted` values, cookies, and typed passwords are
 left out of it, and of spans and logs. A diagnostics preset sets how much of a URL they show: the default,
 `strict`, keeps the origin and path and redacts query values, which can hold tokens. To see URLs whole while
 debugging on your own machine, apply `Diagnostics.withPreset("local")` where a debug run starts, not inside a step:

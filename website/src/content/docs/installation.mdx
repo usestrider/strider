@@ -25,7 +25,7 @@ pnpm add -g @usestrider/cli
 | ----------------------- | ----------------------------------------------------------------------------------- |
 | `@usestrider/browser`   | Strider, and its backends as subpaths                                               |
 | `effect`                | Effect 4, a peer dependency                                                          |
-| `@effect/platform-node` | processes, files and sockets on Node; `@effect/platform-bun` on Bun                 |
+| `@effect/platform-node` | processes, files, and sockets on Node; `@effect/platform-bun` on Bun                |
 | `@usestrider/vitest`    | the Vitest adapter, for [tests](/docs/tools/testing)                                |
 | `@usestrider/cli`       | the [`strider` command](/docs/agents/cli), installed globally                       |
 
@@ -33,7 +33,7 @@ Strider depends only on Effect. Platform services are needed only where a browse
 
 ## A browser
 
-Strider never downloads, installs or looks for a browser: a launch takes an absolute path. Install browsers as
+Strider never downloads, installs, or looks for a browser: a launch takes an absolute path. Install browsers as
 you'd install any program. To find their paths, run the `strider` command:
 
 ```sh
@@ -41,7 +41,7 @@ strider browsers
 strider browsers --json
 ```
 
-It lists browsers on your `PATH`, in Chrome's, Edge's and Firefox's install locations, and WebKit's MiniBrowser
+It lists browsers on your `PATH`, in Chrome's, Edge's, and Firefox's install locations, and WebKit's MiniBrowser
 where Linux packages and Nix profiles put it, each with the version it reports, where it reports one. `--json`
 prints the same as data.
 
@@ -53,7 +53,7 @@ by changing the layer.
 
 | Import                          | Drives                                                         | Layers                                      |
 | ------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
-| `@usestrider/browser/chromium`  | Chromium, Chrome and Edge, over the Chrome DevTools Protocol    | `layer`, `layerConfig`, `layerConnect`      |
+| `@usestrider/browser/chromium`  | Chromium, Chrome, and Edge, over the Chrome DevTools Protocol   | `layer`, `layerConfig`, `layerConnect`      |
 | `@usestrider/browser/firefox`   | Firefox, over WebDriver BiDi                                    | `layer`, `layerConfig`, `layerConnect`      |
 | `@usestrider/browser/webkit`    | WebKitGTK's and WPE's MiniBrowser, launched, or their browsers, attached | `layer`, `layerConfig`, `layerAttach` |
 | `@usestrider/browser/bidi`      | any WebDriver BiDi endpoint, such as a remote grid              | `layerConnect`                              |

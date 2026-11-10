@@ -27,7 +27,7 @@ const exportCsv = Effect.fn("exportCsv")(function*(page: Page.Page) {
 Subscribing after the click is a race. If the download came first, the wait times out with a hint: "a download
 came 12 ms before Download.next subscribed; call Download.next before the action that causes it".
 
-## Next, stream and history
+## Next, stream, and history
 
 Each kind of event is a module with three functions. Use `next` for the one event an action causes, `stream` to
 watch every event for a while, such as console errors, and `history` to read what happened before you looked.
@@ -68,7 +68,7 @@ Each module has the verbs above, and filters on fields of its own:
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
 | [`PageNavigation`](/docs/events/kinds#navigations) | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
 | [`Popup`](/docs/events/kinds#popups) | pages this page opened                                       | `url`                              |
-| [`Dialog`](/docs/events/kinds#dialogs-and-file-choosers) | alerts, confirms, prompts and `beforeunload`                 | `kind`                             |
+| [`Dialog`](/docs/events/kinds#dialogs-and-file-choosers) | alerts, confirms, prompts, and `beforeunload`                | `kind`                             |
 | [`FileChooser`](/docs/events/kinds#dialogs-and-file-choosers) | file pickers the page opened                                 | `multiple`                         |
 | [`Download`](/docs/events/kinds#downloads) | downloads                                                    | `url`                              |
 | [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
@@ -77,7 +77,7 @@ Each module has the verbs above, and filters on fields of its own:
 | `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |
 | [`BrowserWorker`](/docs/api/browser/BrowserWorker) | workers the page or context started                          | `url`, `kind`                      |
 | [`NetworkConnection`](/docs/api/browser/NetworkConnection) | WebSockets and event sources, with their frames               | `url`, `kind`                      |
-| [`AutoResolution`](/docs/api/browser/AutoResolution) | dialogs, choosers and requests decided by a default          | `subject`                          |
+| [`AutoResolution`](/docs/api/browser/AutoResolution) | dialogs, choosers, and requests decided by a default         | `subject`                          |
 
 ## Several outcomes
 

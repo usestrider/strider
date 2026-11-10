@@ -75,7 +75,7 @@ option names.
   it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
 - **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last
   one.
-- **The recording ends with its page.** Closing the scope, page or context ends it; a writer then has up to five
+- **The recording ends with its page.** Closing the scope, page, or context ends it; a writer then has up to five
   seconds on the browser's clock to finish, and a writer that fails fails `file`.
 
 Chromium and WebKit recordings show the first captured picture from time zero, while keeping each captured

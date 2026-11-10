@@ -29,7 +29,7 @@ Acquire while the request is still among the model's last 1000 retained hops, us
 observed it. Acquisition does not recover an evicted hop. The wait fails with
 [RequestError](/docs/api/browser/NetworkRequest#RequestError), whose
 [ResponseUnavailable](/docs/api/browser/NetworkRequest#ResponseUnavailable) reason distinguishes an evicted hop,
-a foreign target, a released scope and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
+a foreign target, a released scope, and a target closing before arrival. Closing the scope releases the reference and wakes pending waits.
 
 This retains response metadata only. To read a body, set up a [response-body subscription](/docs/events/network#decoding-bodies)
 before the request starts. Continue a routed request before awaiting its response, so the browser can send it.

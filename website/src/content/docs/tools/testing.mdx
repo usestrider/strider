@@ -63,7 +63,7 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
 - `excludeTestServices: true` runs tests on the real clock. Without it, an `Effect.sleep` of yours waits on a
   `TestClock` nobody moves. Strider's deadlines use the real clock either way.
 - A failed expectation fails the test with [`ExpectationFailed`](/docs/errors#failed-expectations): what was
-  expected, seen and nearest.
+  expected, seen, and nearest.
 - A step that takes a page, such as `addToCart`, runs the same in a test and a script. To sign in once per file,
   start each test's page from [saved storage state](/docs/pages/contexts#logging-in-once).
 
@@ -131,9 +131,9 @@ For automatic recording and attachment on failure, see [Traces for failed tests]
 
 A trace written to disk isn't tied to the test that made it, so finding a failed test's trace means matching file
 names by hand. `TestRun`, which `VitestBrowser.layer` provides, attaches a file to the running test as a Vitest
-artifact, kept with its result: `run.attach` takes the file's kind, `"Trace"`, `"Har"` or `"Screenshot"`, and its
+artifact, kept with its result: `run.attach` takes the file's kind (`"Trace"`, `"Har"`, or `"Screenshot"`) and its
 path, such as a [trace](/docs/tools/recordings#traces)'s. Bind the callback with
-`VitestBrowser.withTest(context)` to capture its identity, retry attempt and attachment owner, even with a shared
+`VitestBrowser.withTest(context)` to capture its identity, retry attempt, and attachment owner, even with a shared
 browser layer, or with a per-effect browser layer in either composition order. Call it again for each retry.
 Complete attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without this binding the adapter uses Vitest's global current-test
 lookup, which supports sequential tests only and can select another callback during concurrent tests:
@@ -175,7 +175,7 @@ layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })(
 ```
 
 A trace captures the test identity when recording starts, so exporting it after a retry or another test starts
-keeps the original name, file, project, attempt and repeat. Capture the filename at the same point:
+keeps the original name, file, project, attempt, and repeat. Capture the filename at the same point:
 
 ```ts
 import { Page, Trace } from "@usestrider/browser"
@@ -193,8 +193,8 @@ const recordCheckout = Effect.fn("recordCheckout")(function*(page: Page.Page) {
 ```
 
 `traceFileName` returns a safe ZIP basename with a readable prefix and a SHA-256 digest of the project, file,
-test ID, attempt and repeat. Names that produce the same prefix still get distinct digests. The same identity always
-gets the same filename; use a separate directory to keep multiple runs or recordings. The manual form keeps recording, exporting
+test ID, attempt, and repeat. Names that produce the same prefix still get distinct digests. The same identity always
+gets the same filename; use a separate directory to keep multiple runs or recordings. The manual form keeps recording, exporting,
 and attaching explicit. The trace header stores test names and file paths as written.
 Bind each concurrent callback with `VitestBrowser.withTest(context)` as shown above, so recording and filename
 capture use that callback's identity. Without binding, the adapter's global lookup supports sequential tests only.
@@ -207,7 +207,7 @@ the repeat in the filename digest and trace metadata.
 
 ## A fake browser for events
 
-A real browser decides when a response, a dialog or a crash arrives, so a test can't make one come first, or at
+A real browser decides when a response, a dialog, or a crash arrives, so a test can't make one come first, or at
 all. `Browser.layerTest` is a fake browser for code about events: waiting for a response, handling a dialog, giving up
 when a page crashes. Its first page plays a timeline on Effect's clock, so under `TestClock` it moves only when the
 test moves it:
@@ -238,7 +238,7 @@ it.effect("sees the cart's response before the page commits", () =>
 | `resp(name)`   | a 200 response to `https://example.test/name`     |
 | `commit`       | a document commits at `https://example.test/`      |
 | `load`         | the document finishes loading                      |
-| `dialog(kind)` | a dialog opens, with no message: `alert`, `confirm`, `prompt` or `beforeunload` |
+| `dialog(kind)` | a dialog opens, with no message: `alert`, `confirm`, `prompt`, or `beforeunload` |
 | `popup`        | a popup opens                                      |
 | `crash`, `\|`  | the page crashes, or its script closes it          |
 

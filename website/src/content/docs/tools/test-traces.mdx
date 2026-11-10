@@ -35,7 +35,7 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
 
 The browser is shared; recordings belong to each bound callback. Each new context gets one trace covering its
 pages and popups, including contexts created by `Browser.newPage`. Concurrent tests and retries keep separate
-identities, filenames and attachment owners. Every callback, including every retry, calls `withTest(context)`.
+identities, filenames, and attachment owners. Every callback, including every retry, calls `withTest(context)`.
 Put the whole test effect inside the binding: failures thrown afterward are outside its lifetime.
 
 Screenshots default to `"perAction"`, DOM snapshots and network to `true`, and screencast to `"off"`.
@@ -53,7 +53,7 @@ const trace: VitestBrowser.TraceOptions = {
 }
 ```
 
-A failed effect, thrown assertion, defect or interruption exports one ZIP per context and attaches it as a
+A failed effect, thrown assertion, defect, or interruption exports one ZIP per context and attaches it as a
 Vitest artifact before the binding returns. Archives go under `directory/context-N/`, using
 [`traceFileName`](/docs/tools/testing#attaching-files) for the basename. The directory is created when needed;
 use a different directory per run if earlier runs' archives must be kept.
@@ -81,13 +81,13 @@ const test = Effect.scoped(
 ```
 
 If a target's scope succeeds and closes before a later callback failure, the adapter exports that target's retained
-recording after cleanup. Recording, export and attachment failures log warnings and preserve the original test
+recording after cleanup. Recording, export, and attachment failures log warnings and preserve the original test
 result. Hard process termination cannot complete export. Vitest timeouts must leave enough time for cleanup;
 [set the test timeout](/docs/tools/testing#writing-a-test) for the operations your test runs.
 
 Automatic tracing is off when `trace` is omitted, and creates no recordings without `withTest(context)`.
 It covers contexts created through the configured layer's ordinary `Browser.newContext` and `Browser.newPage`.
-Existing, default and reclaimed contexts need explicit [`Trace.record`](/docs/tools/recordings#traces).
+Existing, default, and reclaimed contexts need explicit [`Trace.record`](/docs/tools/recordings#traces).
 
 `TestRun.TestInfo.repeat` is the zero-based repetition, separate from the retry attempt. Constructors and
 decoding default it to zero when omitted. Bind every retry and repeat with `withTest(context)` to capture

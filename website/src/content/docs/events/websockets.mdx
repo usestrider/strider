@@ -36,7 +36,7 @@ synchronously; asynchronous Blob conversion preserves send order. An absent mock
 ## Connect to the real server
 
 A proxy uses the saved native constructor in the originating browser realm, preserving browser cookies, origin,
-TLS and proxy configuration. Absent directional handlers forward unchanged. A provided handler takes ownership of
+TLS, and proxy configuration. Absent directional handlers forward unchanged. A provided handler takes ownership of
 its direction: send explicitly to forward or replace, or return without sending to drop.
 
 ```ts
@@ -77,10 +77,10 @@ The handler has the default operation budget (`Deadline.DefaultBudget`, 30 secon
 takes longer, the connection closes the same way. Once it has decided, the work it leaves running has no deadline
 and lasts until the connection closes.
 
-## Push, observe and close
+## Push, observe, and close
 
-A mock can send to the page at any time after it opens. `events` watches messages, closes and errors in both
-directions without changing what is forwarded, and `status` says whether the connection is connecting, open or
+A mock can send to the page at any time after it opens. `events` watches messages, closes, and errors in both
+directions without changing what is forwarded, and `status` says whether the connection is connecting, open, or
 closed. A close takes an optional code, 1000 or 3000–4999, and a reason of at most 123 UTF-8 bytes; without a code
 the page sees 1005, as for a native close without one.
 
@@ -135,7 +135,7 @@ const hideAdmin = Effect.fn("hideAdmin")(function*(page: Page.Page) {
 ## Removing a route early
 
 A route lasts as long as the scope it was registered in. `remove` ends it sooner: it closes the sockets that route
-owns with code 1000 and leaves other routes in force. Navigation, a closed page and the end of a frame or worker
+owns with code 1000 and leaves other routes in force. Navigation, a closed page, and the end of a frame or worker
 close the sockets they own as well.
 
 ```ts
@@ -184,10 +184,10 @@ server.
 
 ## What still differs from a native socket
 
-A mocked socket's events are synthetic and untrusted, and native buffering, compression and wire fragments are not
-reproduced. `instanceof WebSocket`, `WebSocket.name` and `constructor` match for routed and unrouted sockets, but a
+A mocked socket's events are synthetic and untrusted, and native buffering, compression, and wire fragments are not
+reproduced. `instanceof WebSocket`, `WebSocket.name`, and `constructor` match for routed and unrouted sockets, but a
 page that patches `WebSocket.prototype` reaches only the sockets the shim creates, not native ones for URLs no
-route matches. Sockets opened before the route, constructors a page saved earlier, `WebSocketStream` and shared
+route matches. Sockets opened before the route, constructors a page saved earlier, `WebSocketStream`, and shared
 or service workers are not covered.
 
 ## Page scripts can interfere
@@ -204,7 +204,7 @@ route sockets of pages you do not trust with anything a hostile script must not 
 Launched Chromium and Firefox reach existing documents and future pages/frames, including cross-origin frames.
 Only constructions after installation are captured. Chromium and stock WebKit can also cover dedicated workers
 started later when `workers: true` is explicit; Firefox refuses that option. Shared/service workers, saved
-constructors, existing sockets, WebSocketStream and custom socket clients remain outside this shim.
+constructors, existing sockets, WebSocketStream, and custom socket clients remain outside this shim.
 
 Stock WebKit and attached Chromium cannot guarantee first-script popup installation. They reject the default
 required timing before installing anything; choose `timing: "bestEffort"` explicitly to accept that limit:
@@ -223,6 +223,6 @@ const bestEffortMock = Effect.fn("bestEffortMock")(function*(page: Page.Page) {
 ```
 
 The constructor and events are synthetic. Native event trust, constructor identity, buffering, wire fragments,
-compression and security-policy fidelity of a fully mocked socket are not emulated. Native passthrough still
+compression, and security-policy fidelity of a fully mocked socket are not emulated. Native passthrough still
 obeys browser connection policy. Native [connection observations](/docs/events/network) remain distinct from
-mock traffic. Contexts without a route receive no shim, binding/channel or message state for this feature.
+mock traffic. Contexts without a route receive no shim, binding/channel, or message state for this feature.

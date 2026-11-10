@@ -1,16 +1,16 @@
 ---
 title: Chromium
-description: Chromium, Chrome and Edge over the Chrome DevTools Protocol, launching them, popups and the windows pages open in, attaching, what Chromium can't do or does differently, and the raw protocol.
+description: Chromium, Chrome, and Edge over the Chrome DevTools Protocol, launching them, popups and the windows pages open in, attaching, what Chromium can't do or does differently, and the raw protocol.
 order: 2
 ---
 
-A program written against `Browser` runs on Chromium unchanged, but Chromium's popups, launch switches and attached
+A program written against `Browser` runs on Chromium unchanged, but Chromium's popups, launch switches, and attached
 tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
 works around each, and can send CDP itself for what Strider doesn't wrap.
 
 ## Protocol and versions
 
-Strider drives Chromium, Chrome and Edge over the Chrome DevTools Protocol: through a pipe to a browser it launches,
+Strider drives Chromium, Chrome, and Edge over the Chrome DevTools Protocol: through a pipe to a browser it launches,
 and a WebSocket to one it attaches to. The protocol code is generated from Chrome 155, and the tests run Chromium
 155.0.8059.79. Nothing checks the version at launch.
 
@@ -39,12 +39,12 @@ const LikeAUser = Chromium.layer({
   `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`. Strider talks over the pipe,
   with no message size limit and no debugging port, which [the raw protocol](#the-raw-protocol) needs.
 - Don't put a URL in `args`: headless Chromium opens one page only.
-- `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates and background networking,
+- `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates, and background networking,
   and enables `CDPScreenshotNewSurface` to request repaint on a new surface for captures. Capture can drive
   rendering and is not guaranteed to be unobservable to the page.
   [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) includes those settings and also stops throttling
   background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
-  first-run pages, sync and updates included.
+  first-run pages, sync, and updates included.
 - Headless Chromium's user agent says `HeadlessChrome`. Set the context's
   [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-a-contexts-life) to change it.
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
@@ -55,7 +55,7 @@ and animation-frame callbacks while the native window stayed minimized. Both the
 this; the new path changed the duration and callback counts in this probe.
 
 Your `args` are appended verbatim after the profile's switches. Chromium uses the last `--enable-features` list:
-supplying `--enable-features=X` replaces the preset's list, omits `CDPScreenshotNewSurface` and selects the older
+supplying `--enable-features=X` replaces the preset's list, omits `CDPScreenshotNewSurface`, and selects the older
 capture path. To retain it, include both names in one list, such as
 `--enable-features=CDPScreenshotNewSurface,X`, where `X` is your feature. Chromium also replaces repeated
 `--disable-features` lists; a feature in the effective disabled list stays disabled even if enabled. Strider does
@@ -63,7 +63,7 @@ not merge these lists. A custom profile's own arguments replace the named preset
 are unchanged.
 
 This capture setting has been validated on Chromium 155.0.8059.79. Other Chrome and Edge builds remain unverified.
-Recheck capture, navigation and minimized-window behavior when changing the browser version.
+Recheck capture, navigation, and minimized-window behavior when changing the browser version.
 
 ## Pages as windows
 
@@ -147,7 +147,7 @@ include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-h
 subscription with [`body`](/docs/events/network#decoding-bodies) collects it.
 
 **Only a document's challenge is answered without a route.** A navigation to a page behind HTTP authentication gets
-the server's `401` page, as on Firefox, but a `fetch`, an image or a script behind it waits on Chromium's own prompt
+the server's `401` page, as on Firefox, but a `fetch`, an image, or a script behind it waits on Chromium's own prompt
 until it times out. An [`auth` route](/docs/events/routes#http-authentication) on its URL answers it.
 
 **[Routes](/docs/events/routes) see CORS preflights,** the `OPTIONS` requests, on Chromium only. A route that fakes a
