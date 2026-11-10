@@ -4,7 +4,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import * as vm from "node:vm"
 import { expect, it } from "vitest"
-import { recordingProblems } from "../src/replay.ts"
+import { recordingProblems } from "../src/recordings.ts"
 import { scenarios } from "../src/scenarios.ts"
 import { selectScenarios, supportedOn } from "../src/selection.ts"
 

@@ -2,7 +2,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, expect, it } from "vitest"
-import * as Replay from "../src/replay.ts"
+import * as Replay from "../src/recordings.ts"
 import { scenarios } from "../src/scenarios.ts"
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "scenario-recordings-"))

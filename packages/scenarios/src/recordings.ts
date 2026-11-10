@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema"
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import type { Scenario } from "./scenarios.ts"
 
 export const Manifest = Schema.Struct({
   recordings: Schema.Array(
@@ -196,4 +197,44 @@ export const upload = async (
     entries.set(name, { name, sha256: hash, size: bytes.byteLength })
   }
   return { recordings: [...entries.values()] }
+}
+
+// Only request identity is needed here; replay remains responsible for matching bodies and serving responses.
+const Coverage = Schema.Struct({
+  log: Schema.Struct({
+    entries: Schema.Array(Schema.Struct({ request: Schema.Struct({ method: Schema.String, url: Schema.String }) }))
+  })
+})
+
+/** Check the selected scenarios' required pages before launching any replay browser. */
+export const recordingProblems = (
+  chosen: ReadonlyArray<Scenario>,
+  file: (name: string) => string
+): Array<string> => {
+  const required = new Map<string, Set<string>>()
+  for (const scenario of chosen) {
+    if (scenario.recording === undefined) continue
+    const pages = required.get(scenario.recording) ?? new Set<string>()
+    for (const url of scenario.requiredPages) pages.add(url)
+    required.set(scenario.recording, pages)
+  }
+  const problems: Array<string> = []
+  for (const [name, pages] of required) {
+    const path = file(name)
+    if (!fs.existsSync(path)) {
+      problems.push(`No recording at ${path}; required page URLs: ${[...pages].join(", ")}`)
+      continue
+    }
+    try {
+      const har = Schema.decodeUnknownSync(Coverage)(JSON.parse(fs.readFileSync(path, "utf8")))
+      const recorded = new Set(
+        har.log.entries.filter((entry) => entry.request.method === "GET").map((entry) => entry.request.url)
+      )
+      const missing = [...pages].filter((url) => !recorded.has(url))
+      if (missing.length > 0) problems.push(`Recording ${path} is missing required page URLs: ${missing.join(", ")}`)
+    } catch (error) {
+      problems.push(`Cannot read recording ${path}: ${String(error)}`)
+    }
+  }
+  return problems
 }
