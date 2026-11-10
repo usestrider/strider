@@ -2443,6 +2443,90 @@ describe("CDP request sizes opt-in", () => {
         assert.strictEqual(page.context.requestSizes?.size ?? 0, 0)
       }).pipe(Effect.scoped))
   }
+  it.effect("invalidates decoded counts on session loss while preserving other sessions", () =>
+    Effect.gen(function*() {
+      const { state, target, page, facts } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      state.targets.set(session, target)
+      const siblingSession = { ...session, key: "S2" } as ProtocolClient.Session
+      const sibling = { ...target, session: siblingSession, kind: "iframe" as const }
+      const frame = Tree.newFrame({
+        frameId: "F2",
+        id: state.ids.navigable(),
+        page,
+        parent: state.frames.get("T1")!,
+        owner: sibling
+      })
+      Object.assign(sibling, { frame })
+      state.frames.set("F2", frame)
+      state.navigables.set(frame.id, frame)
+      state.targets.set(siblingSession, sibling)
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      for (const [owner, frameId] of [[target, "T1"], [sibling, "F2"]] as const) {
+        const event = { state, target: owner }
+        handlers.apply("Network.requestWillBeSent", { ...sent(`${origin}/landed`), frameId }, event)
+        handlers.apply("Network.responseReceived", { ...landed, frameId, hasExtraInfo: false }, event)
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 1,
+          dataLength: 10,
+          encodedDataLength: 0
+        }, event)
+      }
+      // Both queue overflow and fold schema-decode failure enter this adapter loss hook.
+      Targets.lost(state, session)
+      for (const owner of [sibling, target]) {
+        const event = { state, target: owner }
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 2,
+          dataLength: 5,
+          encodedDataLength: 0
+        }, event)
+        handlers.apply("Network.loadingFinished", {
+          requestId: "R1",
+          timestamp: 3,
+          encodedDataLength: 100
+        }, event)
+      }
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.strictEqual(observed.length, 2)
+      assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.some(15))
+      assert.deepStrictEqual(observed[1]!.responseTransferSize, Option.some(100))
+      assert.deepStrictEqual(observed[1]!.responseBodyDecodedSize, Option.none())
+    }).pipe(Effect.scoped))
+
+  it.effect("does not collect requests arriving after confirmed context disposal", () =>
+    Effect.gen(function*() {
+      const mock = { ...session, ended: Effect.never } as ProtocolClient.Session
+      const { state, page, target, facts } = yield* withPage(mock, false, true)
+      const context = { ...page.context, isDefault: false, browserContextId: "disposed" }
+      const current = { ...page, context }
+      Object.assign(target, { page: current })
+      state.pages.set(page.id, current)
+      state.contexts.set(context.id, context)
+      state.targets.set(mock, target)
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.isTrue(context.disposed)
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+      const collectorsAfterRequest = context.requestSizes!.size
+      handlers.apply("Network.responseReceived", { ...landed, hasExtraInfo: false }, event)
+      // Reader-side scope drops chunks after disposal, even if request/finish events remain queued.
+      assert.isFalse(Network.eventScopes(state).get("Network.dataReceived")!(mock))
+      handlers.apply("Network.loadingFinished", {
+        requestId: "R1",
+        timestamp: 3,
+        encodedDataLength: 100
+      }, event)
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.deepStrictEqual(observed, [], "disposed contexts must not report a known zero")
+      assert.strictEqual(collectorsAfterRequest, 0, "disposed contexts must not allocate collectors")
+    }).pipe(Effect.scoped))
+
   it.effect("bounds active collectors and clears them on frame removal", () =>
     Effect.gen(function*() {
       const { state, target, page } = yield* withPage(session, false, true)
