@@ -112,8 +112,10 @@ describe("WebSocket shim admission and conversion", () => {
     })
     await Promise.resolve()
     assert.isFalse(drained)
+    assert.strictEqual(vm.runInContext("ws.readyState", context), 3)
     release()
     await drain
+    assert.strictEqual(vm.runInContext("ws.readyState", context), 3)
     assert.lengthOf(messages.filter((message) => message.type === "message"), 0)
   })
 
