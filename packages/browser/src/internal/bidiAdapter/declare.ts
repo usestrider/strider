@@ -32,19 +32,17 @@ let scriptLocks: WeakMap<State, Semaphore.Semaphore> | undefined
 
 const removePreloads = Effect.fnUntraced(function*(state: State, scripts: State["preloads"]) {
   const retained: Array<State["preloads"][number]> = []
-  for (const script of scripts) {
-    let removed = false
-    yield* Cleanup.report(
-      Cleanup.bounded(state.send(Script.removePreloadScript({ script: script.script }))).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            removed = true
-          })
-        )
-      ),
-      "BiDi preload cleanup could not confirm removal"
-    ).pipe(Effect.catchCause((cause) => Effect.logWarning("BiDi preload cleanup failed", cause)))
-    if (!removed) retained.push(script)
+  // One budget for the whole loop: a stalled browser cannot hold an operation five seconds per preload.
+  const exits = yield* Cleanup.boundedEach(
+    scripts,
+    (script) => state.send(Script.removePreloadScript({ script: script.script }))
+  )
+  for (const [index, exit] of exits.entries()) {
+    if (Exit.isSuccess(exit)) continue
+    retained.push(scripts[index]!)
+    yield* Cleanup.report(Effect.failCause(exit.cause), "BiDi preload cleanup could not confirm removal").pipe(
+      Effect.catchCause((cause) => Effect.logWarning("BiDi preload cleanup failed", cause))
+    )
   }
   return retained
 })
