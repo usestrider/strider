@@ -61,7 +61,17 @@ export const dispatchInput = Effect.fnUntraced(
       yield* Effect.gen(function*() {
         yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
         yield* release
-      }).pipe(Effect.onError(() => releaseWritten ? Effect.void : release.pipe(Operation.detached, Effect.ignore)))
+      }).pipe(
+        Effect.onError(() =>
+          releaseWritten
+            ? Effect.sync(() => Gestures.released.add(events))
+            : release.pipe(
+              Effect.tap(() => Effect.sync(() => Gestures.released.add(events))),
+              Operation.detached,
+              Effect.ignore
+            )
+        )
+      )
       return
     }
     for (const event of events) {

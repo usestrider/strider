@@ -71,11 +71,19 @@ export const recover = <E>(
   })
 
 /**
+ * Gestures whose events an adapter has already released after its own dispatch failed or was cut short, or whose
+ * release it had written before that: the page holds nothing from them, so none is recorded as uncertain. An adapter
+ * adds the events array it was given.
+ */
+export const released: WeakSet<ReadonlyArray<Adapter.InputEvent>> = new WeakSet()
+
+/**
  * After a gesture's dispatch failed: records the release of what it may have left pressed, the buttons and keys
  * its events press that weren't already held, so the next gesture sends it first. `buttons` and `keys` stay as
  * observed: this is protocol uncertainty, not input seen held. Keeps an earlier failure's release, which comes first.
  */
 export const uncertain = (state: State, description: string, events: ReadonlyArray<Adapter.InputEvent>): void => {
+  if (released.has(events)) return
   const release: Array<Adapter.InputEvent> = []
   const held: ReadonlySet<string> = state.buttons
   const buttonsSeen = new Set<string>()
