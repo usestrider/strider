@@ -98,6 +98,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "network.requestBody.redirects": "Reading bodies by redirect hop",
       "network.headersSent": "The headers a request was sent with, `headersSent`",
       "network.servedBy": "What served a response, `servedBy`",
+      webSocketRouting: "Script WebSocket mocking and proxying",
       "interception.request": "Routes at the request phase",
       "interception.response": "Routes at the response phase",
       "interception.auth": "Routes at an authentication challenge",

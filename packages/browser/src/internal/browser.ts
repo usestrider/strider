@@ -41,6 +41,7 @@ import * as StorageState from "../StorageState.ts"
 import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
+import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserService from "./browserService.ts"
@@ -66,6 +67,7 @@ import * as Runtime from "./runtime.ts"
 import * as Storage from "./storage.ts"
 import * as StorageStates from "./storageState.ts"
 import * as Watchable from "./watchable.ts"
+import * as WebSocketRoutes from "./webSocketRoutes.ts"
 import * as WorkerImpl from "./worker.ts"
 
 const BrowserTypeId = "~@usestrider/browser/Browser"
@@ -199,6 +201,7 @@ const makeContext = (
         handler,
         (options?.phase ?? "request") as P
       )) as UserContext.UserContext["route"],
+    routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
@@ -344,6 +347,13 @@ const makeDeniedContext = (
         new Route.RouteError({
           pattern: Url.Pattern.make(String(pattern)),
           reason: notPermitted("UserContext.route"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
+    routeWebSocket: () =>
+      Effect.fail(
+        new WebSocketRoute.WebSocketRouteError({
+          reason: notPermitted("UserContext.routeWebSocket"),
           diagnostics: Operation.diagnostics(id())
         })
       ),

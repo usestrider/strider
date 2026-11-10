@@ -26,6 +26,8 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import { installWebSocketGates } from "./targets.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** Initial commands are written before resume; their replies and state updates finish in the gate's scope. */
 export interface Setup {
@@ -268,6 +270,7 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     }
   }
   for (const [key, bundle] of bundles) {
+    if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
@@ -509,6 +512,10 @@ export const declare = Effect.fnUntraced(function*(
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ) {
+  if (declaration._tag === "InitScript" && declaration.webSocket !== undefined && scope._tag === "UserContext") {
+    const context = state.contexts.get(scope.context)
+    if (context !== undefined) yield* installWebSocketGates(context, yield* Effect.scope, declaration.workers)
+  }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
   const registrationContext = yield* Effect.context<never>()

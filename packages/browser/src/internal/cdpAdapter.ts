@@ -102,6 +102,7 @@ export const capabilities = (
           : ["Chromium pauses popups only browser-wide, so an attached browser's popups aren't paused"]
       ),
       entry("input.native", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
@@ -234,10 +235,9 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   eventScopes: Network.eventScopes(state),
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, {
-        state,
-        target: session.key === undefined ? undefined : state.targets.get(session)
-      })
+      const target = session.key === undefined ? undefined : state.targets.get(session)
+      const event = target === undefined ? State.dispatchContext(state, undefined) : target.event
+      event.handlers.apply(method, params, event)
       for (const guard of state.captures) {
         const document = state.navigables.get(guard.page)?.document
         if (document !== undefined && document.id !== guard.document) guard.replaced(document.id, received)
@@ -274,6 +274,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          handlers,
           cleanupScope,
           connect: options,
           ids: Kit.makeIds(),
@@ -303,12 +304,11 @@ export const connect: (
       revision: version.protocolVersion
     })
     const contextIds = yield* Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)
-    const defaultEntry: State.ContextEntry = {
-      id: state.defaultContext,
-      browserContextId: Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
-      isDefault: true,
-      removing: false
-    }
+    const defaultEntry = new State.ContextEntry(
+      state.defaultContext,
+      Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
+      true
+    )
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)

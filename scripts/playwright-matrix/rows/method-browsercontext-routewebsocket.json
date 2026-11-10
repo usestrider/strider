@@ -3,13 +3,23 @@
   "upstream": [
     "method:BrowserContext.routeWebSocket"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.routeWebSocket",
+      "url": "/docs/api/browser/UserContext#UserContext.routeWebSocket"
+    }
+  ],
+  "notes": "Scoped context WebSocket script mocks and browser-native passthrough, with pre-open directional handlers. Explicit implementation: script consent; bounded admission credits can overflow before payload-only counters are full. WebKit and attached Chromium require bestEffort timing; Firefox worker coverage is refused. Existing sockets, saved constructors and shared/service workers are outside the shim.",
+  "capabilities": [
+    "webSocketRouting"
+  ],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/UserContext.ts",
+      "packages/browser/src/WebSocketRoute.ts",
+      "packages/browser/src/internal/webSocketRoutes.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

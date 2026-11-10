@@ -358,6 +358,37 @@ Adapter responsibilities:
   - Overrides take the most specific scope (page, then context, then browser), then the most recent, and releasing one in any order recomputes the effective value and applies it, or resets it.
   - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
   - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
+- **Script WebSocket routing** adds private transport metadata to an environment init script only in the
+  requesting context. CDP installs Runtime bindings and realm-event subscriptions only on covered targets.
+  Contexts share ordinary gate methods by prototype; opting in replaces only that context’s gate methods.
+  Native targets reuse a cached dispatch context with a shared ordinary table. Popup-replay deduplication is
+  installed only on opted-in target tables; ordinary context events perform no replay lookup.
+  Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
+  before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
+  binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Shared BiDi preload reconciliation is serialized: it reads the current registry under that serialization,
+  installs replacements before retiring predecessors, and rolls back staged additions on failure. Native preload
+  IDs retain their declaration owner, so failed replacement preserves old survivors without retaining a removed
+  declaration. Unconfirmed native removals remain owned for later cleanup.
+  Stock WebKit captures console.debug and sends a fresh object per envelope, carrying an exact marker and
+  payload. Its target-local classifier consumes those objects before ordinary console publication, derives the
+  realm from injectedScriptId, and releases every consumed remote object after extraction. Ordinary string and
+  object console messages are unchanged. Native WebKit events reuse a prebound dispatch context: ordinary
+  targets use the shared handler table, and only opted-in targets/page proxies/workers use a private handler/state
+  view. Realm removal reaches that view through the existing fact buffer. No ordinary console/realm event probes
+  WebSocket fields or a bridge WeakMap. Last release restores the shared dispatch. No polling supplies the bridge. Required context timing is refused
+  before installation on stock WebKit and attached Chromium. Firefox refuses dedicated-worker preloads; shared
+  and service workers are outside this feature. None of these protocols offers native message interception.
+  Native proxy error and close notifications wait on the existing server-message completion acknowledgements,
+  not only on local encoding. A captured sequence watermark covers every earlier pending message, including
+  deliberate drops; only one native error and close may wait, in native order. Removal/drain cancels those waits
+  independently of conversion chains. Native close metadata is copied unchanged and emitted once with native
+  provenance; the page close does not add a duplicate synthetic observation.
+  Accepted payloads carry a separate idempotent discard even before extraction starts. Fetch and discard waits
+  use the captured route budget on the browser clock; a stalled fetch faults its realm, releases its payload and
+  allows the serial consumer to proceed to other realms. A BiDi call rejected for a missing target realm retires
+  that exact realm through the fact buffer; routing uses its ended lifetime to reclaim leases without reporting
+  ordinary destruction as a user-handler failure.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
   - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
   - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;

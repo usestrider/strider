@@ -64,13 +64,14 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
   apply: (session, method, params) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, State.eventOf(state, session))
+      const event = State.eventOf(state, session)
+      event.handlers.apply(method, params, event)
       return state.buffer.flush
     }),
-  lost: (session) => Effect.sync(() => Targets.lost(state, session)),
+  lost: (session) => Effect.sync(() => Targets.lostEvent(State.eventOf(state, session))),
   ended: (session, reason) =>
     Effect.suspend(() => {
-      Targets.ended(state, session, reason)
+      Targets.endedEvent(State.eventOf(state, session), reason)
       return state.buffer.flush
     })
 })
@@ -138,6 +139,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          handlers,
           connect: options,
           ids: Kit.makeIds(),
           buffer,

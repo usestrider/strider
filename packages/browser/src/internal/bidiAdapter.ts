@@ -97,6 +97,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("input.native", "unsupported", ["WebDriver actions, not native input"]),
       entry("input.webdriver", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
