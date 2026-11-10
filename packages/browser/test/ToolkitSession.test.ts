@@ -16,6 +16,7 @@ import * as Events from "../src/internal/events.ts"
 import * as Handles from "../src/internal/handles.ts"
 import * as Snapshots from "../src/internal/snapshot.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
+import { ToolFailure } from "../src/internal/tools.ts"
 import * as PageNavigation from "../src/PageNavigation.ts"
 import * as Url from "../src/Url.ts"
 
@@ -343,7 +344,7 @@ describe("Session held-tab retirement", () => {
       yield* TestClock.adjust("1 millis")
       const first = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
       const result = Option.getOrThrow(first).result
-      if (!("sinceLast" in result)) return assert.fail("pages returned no digest")
+      if (result instanceof ToolFailure || !("sinceLast" in result)) return assert.fail("pages returned no digest")
       assert.deepStrictEqual(result.sinceLast.filter((line) => line.includes("closed")).length, 1)
       assert.isTrue(result.sinceLast.some((line) => line.startsWith("renamed closed: ")))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
@@ -480,6 +481,24 @@ describe("Session's digest", () => {
         assert.deepStrictEqual(yield* sinceLast(session), [`main navigated to ${navigation.url}`])
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
+
+  it.effect("a failed call reports the pending digest, and the next call doesn't repeat it", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      yield* page.goto("https://example.test/pending")
+      yield* TestClock.adjust("1 millis")
+      const last = yield* session.toolkit.handle("goto", { page: "missing", url: "https://example.test/" }).pipe(
+        Effect.flatMap(Stream.runLast),
+        Effect.map(Option.getOrThrow)
+      )
+      assert.isTrue(last.isFailure)
+      const failure = last.result as { readonly error: string; readonly sinceLast?: ReadonlyArray<string> }
+      assert.strictEqual(failure.error, "PageNotFound")
+      assert.include(failure.sinceLast ?? [], "main navigated to https://example.test/pending")
+      assert.deepStrictEqual(yield* sinceLast(session), [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("opening a page preserves another page's pending and later navigation", () =>
     Effect.gen(function*() {
