@@ -9,8 +9,10 @@
  * fails, naming what it left, and the next case gets a new context, so one case's leftovers don't fail the rest.
  */
 import { assert, type Vitest } from "@effect/vitest"
-import { Browser, Deadline, type StorageState, type UserContext } from "@usestrider/browser"
+import { Browser, Deadline, type Page, type StorageState, type UserContext } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
@@ -19,6 +21,7 @@ import type { TestContext } from "vitest"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as Handles from "../../../src/internal/handles.ts"
+import { connection, type Record as TraceRecord } from "../failureTrace.ts"
 
 /** A declaration in force, on a context or the whole browser. */
 interface Declared {
@@ -147,6 +150,83 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
     })
   ).pipe(Layer.provideMerge(backend))
 
+/** How long each probe after a stalled storage read, and the closing of its page, may take. */
+const probeDeadline = "2 seconds"
+
+/** Whether a failed storage read is the page not answering before its deadline, rather than any other failure. */
+export const isStalledRead = (error: unknown): boolean =>
+  Deadline.isTimeout(error) ||
+  (error instanceof Error && error.message.includes("The page didn't answer before the deadline"))
+
+/** Runs one probe within its own deadline and records how it ended and how long it took; never fails. */
+const probed = Effect.fnUntraced(function*<A, E>(record: TraceRecord, probe: string, effect: Effect.Effect<A, E>) {
+  const started = Date.now()
+  const exit = yield* Effect.exit(effect.pipe(Deadline.within(probeDeadline)))
+  const outcome = Exit.isSuccess(exit)
+    ? "answered"
+    : isStalledRead(Cause.squash(exit.cause))
+    ? "timed out"
+    : `failed: ${Cause.pretty(exit.cause).split("\n")[0]}`
+  record("stalled-read-probe", { probe, outcome, millis: Date.now() - started })
+})
+
+/**
+ * After a page's storage read didn't answer in time, asks Firefox two more things and records the answers, with how
+ * long each took, in the failure trace: whether the same page still answers a trivial script, and whether a new page
+ * in the same context, on the stalled page's origin, answers `indexedDB.databases()`. Each is bounded, and none changes
+ * the outcome.
+ */
+export const probeStalledRead = Effect.fnUntraced(
+  function*(context: UserContext.UserContext, page: Page.Page, record: TraceRecord) {
+    yield* probed(record, "same page answers a trivial script", page.evaluate(() => 1 + 1))
+    const origin = yield* page.url.pipe(
+      Effect.map((url) => new URL(String(url)).origin),
+      Effect.orElseSucceed(() => "null")
+    )
+    if (origin === "null") {
+      record("stalled-read-probe", {
+        probe: "new page on the origin answers indexedDB.databases()",
+        outcome: "skipped: no origin"
+      })
+      return
+    }
+    const scope = yield* Scope.make()
+    yield* probed(
+      record,
+      "new page on the origin answers indexedDB.databases()",
+      Effect.gen(function*() {
+        const fresh = yield* context.newPage.pipe(Scope.provide(scope))
+        yield* fresh.goto(origin)
+        return yield* fresh.evaluate(async () => (await indexedDB.databases()).length)
+      })
+    )
+    yield* probed(record, "closing that page", Scope.close(scope, Exit.void))
+  },
+  (effect) => Effect.ignore(effect)
+)
+
+/**
+ * Reads the context's cookies and storage from a closing page and notes what it holds. A read the page doesn't answer
+ * in time is noted as unreadable, as ever, after the probes of `probeStalledRead` have recorded what they found.
+ */
+export const readStorage = (
+  note: (found: ReadonlyArray<string>) => Effect.Effect<void>,
+  context: UserContext.UserContext,
+  page: Page.Page,
+  record: TraceRecord,
+  deadline: Duration.Input = "5 seconds"
+) =>
+  context.exportStorageState.pipe(
+    Deadline.within(deadline),
+    Effect.flatMap((state) => note(stored(state))),
+    Effect.catchTag("TargetGone", () => Effect.void),
+    Effect.catch((error) =>
+      (isStalledRead(error) ? probeStalledRead(context, page, record) : Effect.void).pipe(
+        Effect.andThen(note([`storage that couldn't be read: ${error.message}`]))
+      )
+    )
+  )
+
 /**
  * A page in the shared context, closed with the scope. Before it closes, the context's cookies and storage are read
  * from it, while its document is still there to read them from.
@@ -155,14 +235,7 @@ export const newPage = Effect.gen(function*() {
   const shared = yield* Shared
   const context = yield* shared.current
   const page = yield* context.newPage
-  yield* Effect.addFinalizer(() =>
-    context.exportStorageState.pipe(
-      Deadline.within("5 seconds"),
-      Effect.flatMap((state) => shared.note(stored(state))),
-      Effect.catchTag("TargetGone", () => Effect.void),
-      Effect.catch((error) => shared.note([`storage that couldn't be read: ${error.message}`]))
-    )
-  )
+  yield* Effect.addFinalizer(() => readStorage(shared.note, context, page, connection("shared-context")))
   return page
 })
 

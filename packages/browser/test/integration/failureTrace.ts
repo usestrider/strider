@@ -63,6 +63,16 @@
  * frame's attach, and a race can come out differently. STRIDER_POINTER_CAPTURE=0 leaves the capture out and keeps
  * `pointer-dispatch`. Firefox and WebKit have no capture.
  *
+ * The shared-context suites (`slice/sharedContext.ts`) read the context's storage from each page as it closes, with a
+ * 5 second deadline. Only when that read isn't answered in time, `stalled-read-probe` entries record, on the
+ * `shared-context` connection, two further questions, each with its own 2 second deadline: whether the same page
+ * still answers `1 + 1`, and whether a new page in the same context, on the stalled page's origin, answers
+ * `indexedDB.databases()` (then how long closing that page took). Each entry holds `probe`, `outcome` (`answered`,
+ * `timed out`, `failed: ...`, or `skipped: no origin`) and `millis`, measured on the host clock. The probes run
+ * before the case's failure is reported and never change it or its message; a read that answers, or a page that is
+ * gone, runs none. They exist to tell a page that no longer runs scripts from a context whose IndexedDB doesn't
+ * answer, and they are in the trace of the failing case only.
+ *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
  * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
  * acquisition is pending records that observation too; later records can show its eventual failure.
