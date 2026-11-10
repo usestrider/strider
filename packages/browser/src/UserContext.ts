@@ -604,9 +604,10 @@ export interface Options {
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined
   /**
    * `"emulated"` makes every page report focus, so many pages can run at once. On Chromium it also opens each
-   * page as a tab, not as a window of its own, which makes creating a page and closing a context faster: use it
-   * for suites that don't depend on real focus. `"system"` keeps each page in a window of its own, so focus and
-   * visibility are the browser's. `Unsupported` on Firefox and WebKit (`emulation.focus`).
+   * page you create as a tab, not as a window of its own, and keeps focus emulated for the context's life, which
+   * makes creating a page and closing a context faster: use it for suites that don't depend on real focus.
+   * `"system"` keeps each page you create in a window of its own, so focus and visibility are the browser's.
+   * `Unsupported` on Firefox and WebKit (`emulation.focus`).
    *
    * @default "system"
    */

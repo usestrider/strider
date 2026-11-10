@@ -63,14 +63,16 @@ happened: a fully acknowledged gesture doesn't show the application acted on it.
 (`UserContext.Options.focus` is `"system"`), because every page would then report focus and visibility it doesn't
 have. The library doesn't bring a page to the front before acting, because that changes which page is in front
 without the caller asking. A page that can't render says so (`NoRenderingOpportunity`) and names the two remedies.
-The default has a cost on Chromium: it opens each page in a window of its own, so a page in the background still
-renders, and Chromium creates a window about 33 ms slower than a tab and closes windows one at a time, about 22 ms
-each. The twenty-page scenario (one context, twenty pages created, navigated and clicked, then closed) takes about
-1.5 times Playwright's time on the default path, mostly for this. That stays: the alternative, tabs with emulated
+The default has a cost on Chromium: it opens each page it creates in a window of its own, so a page in the
+background still renders, and creating and closing windows is slower than tabs. The twenty-page scenario (one
+context, twenty pages created, navigated and clicked, then closed) takes about 1.5 times Playwright's time on the
+default path, mostly for this (the measurements are in `packages/scenarios/BENCHMARKS.md`). That stays: the alternative, tabs with emulated
 focus by default as Playwright does, changes what every page sees of focus and visibility without being asked.
-`focus: "emulated"` opens tabs on Chromium, so a suite that doesn't depend on focus takes the fast path by asking
-for it. Rejected: tabs and emulated focus by default; closing a context's pages concurrently, which saved nothing,
-since Chromium tears the windows down one at a time.
+`focus: "emulated"` opens the pages the library creates as tabs on Chromium, so a suite that doesn't depend on focus
+takes the fast path by asking for it; the context holds focus emulation for its whole life, which is what keeps a tab
+behind another rendering, and a page-level setting can't turn it off there. Popups follow Chromium's own placement.
+Rejected: tabs and emulated focus by default; choosing tabs from a focus declaration that can be released later;
+closing a context's pages concurrently, which saved nothing.
 
 **Nothing of the library's runs in a page's world unless the caller declared it, or the browser leaves no other way.**
 "Never a wrapper in the page." A page can see a wrapper, for example that `alert` isn't the browser's, and a script

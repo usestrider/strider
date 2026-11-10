@@ -89,7 +89,7 @@ const signInWithPopup = Effect.fn("signInWithPopup")(function*(page: Page.Page) 
 For a flow that goes back and forth between pages, or runs several at once, make the context with
 [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) instead: every page then behaves as if focused. Pages
 can tell, so it isn't the default. It is also the fast option for suites that don't depend on focus: Chromium opens
-its pages as tabs, where the default opens a window per page, so a context with many pages is created and closed
+the pages you create as tabs, where the default opens a window per page, so a context with many pages is created and closed
 faster.
 
 ## Attaching

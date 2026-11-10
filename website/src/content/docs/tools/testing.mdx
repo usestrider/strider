@@ -84,8 +84,8 @@ export default defineConfig({
 A browser throttles the timers and rendering of pages in the background and gives focus to one page only, so
 with several pages at once, a background page's actions can time out and `toBeFocused` fails on all but one. Use
 these when a file's tests run concurrently, or a test drives several pages. On Chromium, `focus: "emulated"` is also
-the fast option for suites that don't depend on real focus: it opens each page as a tab, where the default opens a
-window per page, which is slower to create and to close:
+the fast option for suites that don't depend on real focus: it opens each page you create as a tab, where the default
+opens a window per page, which is slower to create and to close:
 
 ```ts title="dashboards.test.ts"
 import { NodeServices } from "@effect/platform-node"
