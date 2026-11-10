@@ -49,9 +49,11 @@ export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe
   ...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]),
   ...(options.headless ?? true ? ["--headless"] : []),
   ...(options.args ?? []),
+  ...(true ? ["--no-sandbox"] : []),
+  ...(false ? ["--no-startup-window"] : []),
   debugging === "pipe" ? "--remote-debugging-pipe" : "--remote-debugging-port=0",
   `--user-data-dir=${userDataDir}`,
-  "about:blank"
+  ...(false ? [] : ["about:blank"])
 ]
 
 /** Launches over the pipe. */
