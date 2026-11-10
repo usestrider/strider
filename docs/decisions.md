@@ -94,6 +94,15 @@ once, in full, the first time a feature needs it.
 doesn't return until the popup resumes, and the opener's commands get no reply. Waiting on an opener, or on any other
 target, deadlocks until a timeout. Targets Strider doesn't control that attach paused are resumed at once.
 
+**Paused CDP pages write their declarations before resume without waiting for renderer replies.** A page in a new
+browsing context group may need its first response before Chromium creates the renderer. Its initial sync therefore
+folds network events, navigation starts and Fetch decisions while frame and realm events wait for the sequenced
+snapshot; events folded early are never replayed. Required declaration replies must finish before Ready, including
+successful script identifiers needed for cleanup when another declaration fails. Rejected: resuming before writing
+declarations, which loses first-request routing and first-script initialization; waiting for renderer replies before
+resume, or withholding Fetch decisions until the snapshot, both of which can deadlock initialization.
+
+
 **`PageAdded` comes before `PageReady`.** L1 needs a page's id while its gate runs, for declarations scoped to the
 page and for its opener's `Popup` event. So a page isn't held back until its gate finishes.
 

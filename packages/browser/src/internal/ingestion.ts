@@ -41,6 +41,8 @@ export interface Ingest {
   processed: number
   /** Events are held for the fold until a sync completes. */
   holding: boolean
+  liveDuringSync: ((method: string) => boolean) | undefined
+  lastLiveDuringSync: number
   held: Array<QueuedEvent>
   heldBytes: number
   drains: Array<{ readonly target: number; readonly done: Deferred.Deferred<void> }>
@@ -124,10 +126,12 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
     const live = new Set<Ingest>()
     const runs = new Set<Deferred.Deferred<void>>()
     const control: FoldControl = {
-      sync: (session, sync) => {
+      sync: (session, sync, live) => {
         const ingest = ingests.get(session)
         if (ingest === undefined || ingest.ending !== undefined) return
         ingest.holding = true
+        ingest.liveDuringSync = live
+        ingest.lastLiveDuringSync = 0
         run(
           sync.pipe(
             Effect.matchCause({
@@ -172,6 +176,8 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
         lastQueued: received,
         processed: received,
         holding: fold !== undefined && attached,
+        liveDuringSync: undefined,
+        lastLiveDuringSync: 0,
         held: [],
         heldBytes: 0,
         drains: []
@@ -320,6 +326,11 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
           }
           ingest.queuedEvents--
           ingest.queuedBytes -= work.bytes
+          if (ingest.holding && ingest.liveDuringSync?.(work.method)) {
+            publish(work, yield* foldEvent(work))
+            ingest.lastLiveDuringSync = work.received
+            return
+          }
           if (ingest.holding) {
             publish(work, undefined)
             ingest.held.push(work)
@@ -338,6 +349,9 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
         case "Synced": {
           yield* work.synced.apply
           ingest.holding = false
+          ingest.liveDuringSync = undefined
+          const liveThrough = ingest.lastLiveDuringSync
+          ingest.lastLiveDuringSync = 0
           const held = ingest.held
           ingest.held = []
           ingest.heldBytes = 0
@@ -354,6 +368,8 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
             }
             advance(ingest, event.received)
           }
+          // Live events after the snapshot have already folded, but drains cannot pass earlier held events.
+          advance(ingest, liveThrough)
           return
         }
         case "End":

@@ -29,6 +29,16 @@ import { type ContextEntry, type PageEntry, placement, type State, type TargetEn
 import { installWebSocketGates } from "./targets.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
 
+/** Initial commands are written before resume; their replies and state updates finish in the gate's scope. */
+export interface Setup {
+  readonly send: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    receive?: (result: A) => void
+  ) => Effect.Effect<void, Protocol.ProtocolError>
+}
+
+type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
+
 /** A URL pattern no request matches: a scheme nothing uses. */
 const nothing = "strider-intercepts-nothing:"
 
@@ -37,7 +47,8 @@ const nothing = "strider-intercepts-nothing:"
 const network = (
   session: ProtocolClient.Session,
   offline: boolean,
-  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined
+  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
+  on: Send = (command) => command.pipe(Protocol.on(session), Effect.asVoid)
 ) => {
   const state = {
     offline,
@@ -47,9 +58,9 @@ const network = (
   }
   return Effect.all([
     Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
-      Protocol.on(session)
+      on
     ),
-    Network.overrideNetworkState(state).pipe(Protocol.on(session))
+    Network.overrideNetworkState(state).pipe(on)
   ], { discard: true })
 }
 
@@ -149,10 +160,10 @@ const applyOverride = (
   state: State,
   target: TargetEntry,
   kind: Adapter.Override["_tag"],
-  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
 ): Effect.Effect<void, Protocol.ProtocolError> => {
   const session = target.session
-  const on = Protocol.on(session)
   const override = effective.get(kind)
   if (kind === "Offline" || kind === "NetworkConditions") {
     const offline = effective.get("Offline")
@@ -160,7 +171,8 @@ const applyOverride = (
     return network(
       session,
       offline?._tag === "Offline" && offline.offline,
-      conditions?._tag === "NetworkConditions" ? conditions : undefined
+      conditions?._tag === "NetworkConditions" ? conditions : undefined,
+      on
     )
   }
   if (kind === "UserAgent" || kind === "Locale") {
@@ -248,8 +260,8 @@ const applyOverride = (
   }
 }
 
-const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  const on = Protocol.on(target.session)
+const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+  const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
   for (const [key, identifier] of Array.from(target.scripts)) {
     if (!bundles.has(key)) {
@@ -263,21 +275,30 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
     }
-    const { identifier } = yield* Page.addScriptToEvaluateOnNewDocument({
+    const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
       ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-    }).pipe(on)
-    target.scripts.set(key, identifier)
+    })
+    if (setup === undefined) {
+      const { identifier } = yield* command.pipe(Protocol.on(target.session))
+      target.scripts.set(key, identifier)
+    } else {
+      yield* setup.send(command, ({ identifier }) => target.scripts.set(key, identifier))
+    }
   }
 })
 
-const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
+const applyIntercepts = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) {
   const intercepts = state.registry.intercepts(placement(page))
   const proxyAuth = page.context.proxy?.credentials !== undefined
   const challenges = state.registry.challenges(placement(page))
   const key = JSON.stringify({ intercepts, challenges, proxyAuth })
   if (key === target.intercepts) return
-  const on = Protocol.on(target.session)
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
   // the request goes on at once unless a request-phase intercept wants it. Where challenges are paused, every
   // document is, a pause a page's load hardly notices; pausing every request would cost each of them a round trip
@@ -307,14 +328,19 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
 
 // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps them in
 // the browser, past the next navigation (QUIRKS.md, Q160)
-const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
+const keepBodies = (
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) => {
   const limit = state.registry.bodyLimit(placement(page), "response")
   return Option.isNone(limit)
     ? Effect.void
     : Network.configureDurableMessages({
       maxTotalBufferSize: 10 * limit.value,
       maxResourceBufferSize: limit.value
-    }).pipe(Protocol.on(target.session))
+    }).pipe(on)
 }
 
 // Read the registry only after acquiring the target's permit, and retain it across every command.
@@ -325,35 +351,72 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 }
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
-export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  yield* Effect.all([
-    withOverrides(
-      target,
-      Effect.suspend(() => {
-        const overrides = state.registry.overrides(placement(page))
-        return Effect.forEach(
-          overrides,
-          ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
-          {
-            discard: true
+export const configureTarget = Effect.fnUntraced(
+  function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+    if (setup === undefined) {
+      yield* Effect.all([
+        withOverrides(
+          target,
+          Effect.suspend(() => {
+            const overrides = state.registry.overrides(placement(page))
+            return Effect.forEach(
+              overrides,
+              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              {
+                discard: true
+              }
+            )
+          })
+        ),
+        // Viewport has its own permit and fresh registry read. Its renderer wait must not
+        // hold up locale or other overrides, including when this target is still configuring.
+        Effect.suspend(() => {
+          const overrides = state.registry.overrides(placement(page))
+          return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
+        })
+      ], { concurrency: "unbounded", discard: true })
+    } else {
+      yield* Effect.all([
+        Effect.gen(function*() {
+          yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const overrides = state.registry.overrides(placement(page))
+          yield* Effect.forEach(
+            overrides,
+            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            {
+              discard: true
+            }
+          )
+        }),
+        Effect.gen(function*() {
+          yield* (target.viewportLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const override = state.registry.overrides(placement(page)).get("Viewport")
+          if (override?._tag !== "Viewport") {
+            return
           }
-        )
-      })
-    ),
-    // Viewport has its own permit and fresh registry read. Its renderer wait must not
-    // hold up locale or other overrides, including when this target is still configuring.
-    Effect.suspend(() => {
-      const overrides = state.registry.overrides(placement(page))
-      return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
-    })
-  ], { concurrency: "unbounded", discard: true })
-  yield* applyScripts(state, target, page)
-  yield* applyIntercepts(state, target, page)
-  yield* keepBodies(state, target, page)
-  if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
-    yield* Page.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(target.session))
+          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+          // creating an isolated world whose identifier would require a renderer reply before resume.
+          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+          })
+          yield* setup.send(Emulation.setDeviceMetricsOverride({
+            width: override.width,
+            height: override.height,
+            deviceScaleFactor: override.deviceScaleFactor,
+            mobile: override.mobile
+          }))
+        })
+      ], { concurrency: "unbounded", discard: true })
+    }
+    yield* applyScripts(state, target, page, setup)
+    yield* applyIntercepts(state, target, page, setup?.send)
+    yield* keepBodies(state, target, page, setup?.send)
+    if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
+      const command = Page.setInterceptFileChooserDialog({ enabled: true })
+      yield* setup === undefined ? command.pipe(Protocol.on(target.session)) : setup.send(command)
+    }
   }
-})
+)
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>

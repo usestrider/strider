@@ -150,7 +150,9 @@ export const capabilities = (
       entry("downloads", "supported"),
       entry("downloads.progress", "supported"),
       entry("downloads.cancel", "supported"),
-      entry("screenshot", "supported"),
+      entry("screenshot", "supported", [
+        "clips inside the current viewport preserve its layout; offscreen and full-page captures can reflow content without the scrollbar"
+      ]),
       entry(
         "pdf",
         headless ? "supported" : "unknown",

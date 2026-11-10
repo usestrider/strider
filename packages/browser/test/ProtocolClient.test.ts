@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Condition from "../src/Condition.ts"
 import * as Deadline from "../src/Deadline.ts"
@@ -315,6 +316,94 @@ describe("ProtocolClient", () => {
       assert.strictEqual(reasonOf(yield* Fiber.join(failure))._tag, "Rejected")
       assert.deepStrictEqual(receipts, [2, 4])
     }))
+
+  it.effect("folds only declared live decisions during sync and never replays them", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const sync = yield* Deferred.make<ProtocolClient.Synced>()
+      const live = yield* Deferred.make<void>()
+      const lastLive = yield* Deferred.make<void>()
+      const replayed = yield* Deferred.make<void>()
+      const seen: Array<string> = []
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold: (control) => ({
+          events: new Map<string, Protocol.EventDef<string, any>>([
+            [Target.attachedToTarget.method, Target.attachedToTarget],
+            [Page.loadEventFired.method, Page.loadEventFired],
+            [Page.domContentEventFired.method, Page.domContentEventFired]
+          ]),
+          apply: Effect.fnUntraced(function*(_, method, params) {
+            if (method === Target.attachedToTarget.method) {
+              const session = control.session(
+                (params as Target.AttachedToTargetParams).sessionId as string as Protocol.SessionKey
+              )!
+              control.sync(session, Deferred.await(sync), (method) => method === Page.loadEventFired.method)
+              return
+            }
+            const timestamp = (params as Page.LoadEventFiredParams).timestamp
+            seen.push(`${method}:${timestamp}`)
+            if (method === Page.loadEventFired.method) yield* Deferred.succeed(live, undefined)
+            if (timestamp === 4) yield* Deferred.succeed(lastLive, undefined)
+            if (timestamp === 3) yield* Deferred.succeed(replayed, undefined)
+          }),
+          lost: () => Effect.void,
+          ended: () => Effect.void
+        })
+      })
+      const session = yield* attach(browser, client, "S1")
+      yield* load(browser, 1)
+      yield* Deferred.await(live)
+      yield* browser.receive({ method: Page.domContentEventFired.method, params: { timestamp: 2 }, sessionId: "S1" })
+      yield* browser.receive({ method: Page.domContentEventFired.method, params: { timestamp: 3 }, sessionId: "S1" })
+      yield* load(browser, 4)
+      yield* Deferred.await(lastLive)
+      assert.deepStrictEqual(seen, ["Page.loadEventFired:1", "Page.loadEventFired:4"])
+      yield* Deferred.succeed(sync, {
+        through: 3,
+        apply: Effect.sync(() => {
+          seen.push("snapshot")
+        })
+      })
+      yield* Deferred.await(replayed)
+      yield* session.drainObserved
+      assert.deepStrictEqual(seen, [
+        "Page.loadEventFired:1",
+        "Page.loadEventFired:4",
+        "snapshot",
+        "Page.domContentEventFired:3"
+      ])
+    }).pipe(Effect.scoped))
+
+  it.effect("abandons a staged resource reply when its scope closes before it is awaited", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const late = yield* Deferred.make<Protocol.LateReply>()
+      const scope = yield* Scope.make()
+      const pending = yield* client.root.start(Target.createTarget({ url: "about:blank" }), scope).pipe(
+        Protocol.withLateReplyHandler((reply) => Deferred.succeed(late, reply).pipe(Effect.asVoid))
+      )
+      assert.isDefined(pending)
+      const command = yield* browser.next
+      yield* Scope.close(scope, Exit.void)
+      yield* browser.receive({ id: command.id, result: { targetId: "late-target" } })
+      assert.strictEqual((yield* Deferred.await(late)).method, "Target.createTarget")
+    }).pipe(Effect.scoped))
+
+  it.effect("writes staged commands before awaiting replies and keeps their receive sequences", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const scope = yield* Effect.scope
+      const first = yield* client.root.start(Page.enable(), scope)
+      const second = yield* client.root.start(Page.setLifecycleEventsEnabled({ enabled: true }), scope)
+      const sent = [yield* browser.next, yield* browser.next]
+      assert.deepStrictEqual(sent.map((command) => command.method), ["Page.enable", "Page.setLifecycleEventsEnabled"])
+      yield* browser.receive({ id: sent[1]!.id, result: {} })
+      yield* browser.receive({ id: sent[0]!.id, result: {} })
+      assert.strictEqual((yield* first).received, 2)
+      assert.strictEqual((yield* second).received, 1)
+    }).pipe(Effect.scoped))
 
   it.effect("orders transport sends even when one suspends, and waits for every out-of-order reply", () =>
     Effect.gen(function*() {

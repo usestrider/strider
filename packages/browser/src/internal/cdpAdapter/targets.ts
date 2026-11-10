@@ -5,10 +5,10 @@
  *   session auto-attaches its out-of-process frames and its workers. A launched browser pauses every new page
  *   before its scripts run; an attached one pauses only frames and workers of pages it attached to, so a user's
  *   tab is never paused (probe 22).
- * - **The gate** runs while a target is paused: enable `Page`, `Network` and lifecycle events, take the frame tree
- *   (the snapshot the session is synced with), enable `Runtime`, auto-attach the target's own frames and workers,
- *   apply the declarations in force, and resume, in a finalizer. It never waits on another target: a paused popup
- *   blocks its opener.
+ * - **The gate** writes domain enablement, the frame tree snapshot, Runtime's replay, auto-attachment and the
+ *   declarations before resuming a paused target, then collects their replies. Waiting for renderer replies
+ *   before resume deadlocks a popup in a new browsing context group. Resume also runs on failure. The gate
+ *   never waits on another target: a paused popup blocks its opener.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -17,6 +17,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
+import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -24,11 +25,10 @@ import * as Runtime from "../../cdp/Runtime.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
-import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { configureTarget } from "./declare.ts"
+import { configureTarget, type Setup } from "./declare.ts"
 import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
@@ -45,6 +45,13 @@ import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeR
 import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
+
+// A new browsing context group's renderer may not exist until the first response is answered. These
+// decisions and their network/navigation attribution are independent of the frame snapshot and must run
+// even while its renderer replies are pending. Network history must retain the first request too.
+const initialProgress = (method: string) =>
+  method.startsWith("Network.") || method === Page.frameStartedNavigating.method ||
+  method === Fetch.requestPaused.method || method === Fetch.authRequired.method
 
 const newTarget = (
   state: State,
@@ -113,7 +120,11 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
           : { _tag: "Opened", opener: openerId },
         url: Urls.reported(info.url)
       })
-      state.control.sync(session, context.gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect))
+      state.control.sync(
+        session,
+        context.gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect),
+        params.waitingForDebugger ? initialProgress : undefined
+      )
       return
     }
     case "iframe": {
@@ -204,7 +215,7 @@ export const lost = (state: State, session: ProtocolClient.Session) => {
   }
   const target = state.targets.get(session)
   if (target?.kind === "page" && target.page !== undefined) {
-    state.control.sync(session, snapshot(state, target, target.page, false, Effect.void))
+    state.control.sync(session, snapshot(state, target, target.page, false, false).pipe(Effect.scoped))
   } else {
     state.control.sync(session, Effect.succeed({ through: 0, apply: Effect.void }))
   }
@@ -253,31 +264,77 @@ const installTree = (state: State, target: TargetEntry, tree: Page.FrameTree, ad
   visit(tree, target.frame?.parent)
 }
 
+interface InitialSnapshot {
+  readonly result: Page.GetFrameTreeResult
+  readonly received: number
+  readonly failure: Option.Option<Protocol.ProtocolError>
+}
+
 const snapshot = Effect.fnUntraced(function*(
   state: State,
   target: TargetEntry,
   page: PageEntry | undefined,
   adopted: boolean,
-  configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>
-) {
+  configure: boolean,
+  waiting = false,
+  release = Effect.void
+): Effect.fn.Return<ProtocolClient.Synced, Protocol.ProtocolError, Scope.Scope> {
   const on = Protocol.on(target.session)
-  yield* Effect.all([
-    Page.enable().pipe(on),
-    Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
-    Network.enable({}).pipe(on)
-  ], { concurrency: "unbounded", discard: true })
-  const { result, received } = yield* target.session.sendSequenced(Page.getFrameTree())
-  // Contexts it replays arrive after the snapshot, so they are folded on top of it
-  yield* Runtime.enable().pipe(on)
-  // Service and shared workers belong to the browser, whose session attaches them; attached here too, a service
-  // worker would wait for two sessions
-  yield* Target.setAutoAttach({
+  const autoAttach = Target.setAutoAttach({
     autoAttach: true,
     waitForDebuggerOnStart: true,
     flatten: true,
     filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
-  }).pipe(on)
-  const failure = yield* configure.pipe(Effect.flip, Effect.option)
+  })
+  const initialized = waiting
+    ? Effect.gen(function*(): Effect.fn.Return<InitialSnapshot, Protocol.ProtocolError, Scope.Scope> {
+      const scope = yield* Effect.scope
+      const replies: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const declarations: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const setup: Setup = {
+        send: Effect.fnUntraced(function*(command, receive) {
+          const reply = yield* target.session.start(command, scope)
+          declarations.push(reply.pipe(Effect.tap(({ result }) => Effect.sync(() => receive?.(result))), Effect.asVoid))
+        })
+      }
+      const enable: Setup["send"] = Effect.fnUntraced(function*(command) {
+        replies.push((yield* target.session.start(command, scope)).pipe(Effect.asVoid))
+      })
+      yield* enable(Page.enable())
+      yield* enable(Page.setLifecycleEventsEnabled({ enabled: true }))
+      yield* enable(Network.enable({}))
+      const tree = yield* target.session.start(Page.getFrameTree(), scope)
+      // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
+      replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
+      // Browser-owned workers must not wait on a second session here.
+      replies.push((yield* target.session.start(autoAttach, scope)).pipe(Effect.asVoid))
+      const written = page === undefined ? Effect.void : configureTarget(state, target, page, setup)
+      const writeFailure = yield* written.pipe(Effect.flip, Effect.option)
+      yield* release
+      const [snapshot, , declarationFailure] = yield* Effect.all([
+        tree,
+        Effect.all(replies, { concurrency: "unbounded", discard: true }),
+        Effect.all(declarations.map((reply) => reply.pipe(Effect.flip, Effect.option)), { concurrency: "unbounded" })
+          .pipe(
+            Effect.map((failures) => failures.find(Option.isSome) ?? Option.none())
+          )
+      ], { concurrency: "unbounded" })
+      return { ...snapshot, failure: Option.orElse(writeFailure, () => declarationFailure) }
+    })
+    : Effect.gen(function*(): Effect.fn.Return<InitialSnapshot, Protocol.ProtocolError, Scope.Scope> {
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
+        Network.enable({}).pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      const tree = yield* target.session.sendSequenced(Page.getFrameTree())
+      yield* Runtime.enable().pipe(on)
+      yield* autoAttach.pipe(on)
+      const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)
+        .pipe(Effect.flip, Effect.option)
+      return { ...tree, failure }
+    })
+  const { result, received, failure } = yield* initialized
   return {
     through: received,
     apply: Effect.suspend(() => {
@@ -287,7 +344,7 @@ const snapshot = Effect.fnUntraced(function*(
           state.buffer.emit({ _tag: "PageInitializationFailed", page: page.id, description: failure.value.message })
           Deferred.doneUnsafe(
             page.ready,
-            Effect.fail(failure.value._tag === "AdapterError" ? failure.value : Kit.protocolError(failure.value))
+            Effect.fail(Kit.protocolError(failure.value))
           )
         } else {
           state.buffer.emit({ _tag: "PageReady", page: page.id })
@@ -299,10 +356,29 @@ const snapshot = Effect.fnUntraced(function*(
   } satisfies ProtocolClient.Synced
 })
 
-const gate = (state: State, target: TargetEntry, page: PageEntry | undefined, waiting: boolean, adopted: boolean) =>
-  snapshot(state, target, page, adopted, page === undefined ? Effect.void : configureTarget(state, target, page)).pipe(
-    Effect.ensuring(resume(target.session, waiting))
-  )
+const gate = Effect.fnUntraced(
+  function*(state: State, target: TargetEntry, page: PageEntry | undefined, waiting: boolean, adopted: boolean) {
+    let resumed = false
+    const release = resume(target.session, waiting).pipe(Effect.tap(() =>
+      Effect.sync(() => {
+        resumed = true
+      })
+    ))
+    const staged = waiting && target.kind === "page"
+    return yield* snapshot(
+      state,
+      target,
+      page,
+      adopted,
+      true,
+      staged,
+      release
+    ).pipe(
+      staged ? Effect.onError(() => resumed ? Effect.void : release) : Effect.ensuring(release),
+      Effect.scoped
+    )
+  }
+)
 
 // A service worker waiting for the debugger hasn't started, and answers `Runtime.enable` only once it has
 // (recorded): the domains are enabled and the worker resumed in one go, in that order, before any reply.
