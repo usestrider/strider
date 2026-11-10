@@ -922,7 +922,11 @@ describe("WebKit launcher", () => {
             return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close }
           })
         }
-        const start = WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux"))
+        const start = WebKitAutomation.start({
+          executablePath,
+          // The listener shows on the second poll, which the 100 ms polling interval puts after a short deadline.
+          timeout: mode === "descriptors-denied-once" ? "2 seconds" : "50 millis"
+        }).pipe(onPlatform("linux"))
           .pipe(
             Effect.scoped,
             Effect.provideService(FileSystem.FileSystem, procfs),
@@ -1667,7 +1671,7 @@ describe("WebKit launcher", () => {
 
     it.effect("keeps a child's exit when its descriptors are denied before Node reports the exit", () =>
       Effect.gen(function*() {
-        const result = yield* scriptedLaunch(() => ({ held: false, fdDeniedBeforeExitEvent: true }))
+        const result = yield* scriptedLaunch(() => ({ held: true, fdDeniedBeforeExitEvent: true }))
         assert(result.exit._tag === "Failure")
         const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
         assert.strictEqual(error.reason._tag, "ProcessExited", "the child was exiting: procfs isn't what's wrong")
