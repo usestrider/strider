@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-fling",
+  "upstream": [
+    "method:AndroidDevice.fling"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

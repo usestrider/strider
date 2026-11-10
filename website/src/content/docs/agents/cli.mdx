@@ -198,14 +198,16 @@ strider -s login -p main fill 'label=Email' "ada@example.com"
 strider -s login -p main fill 'label=Password' '%password%'
 strider -s login -p main click 'role=button[name="Sign in"]'
 strider -s login -p main expect 'text=Welcome' visible
-mkdir -p auth && strider -s login state save ./auth/shop.state
-strider start --name later --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s login state save "$HOME/.local/state/strider/shop.state"
+strider start --name later --chromium /usr/bin/chromium --state "$HOME/.local/state/strider/shop.state"
 strider start --name twin --chromium /usr/bin/chromium --fork login
 ```
 
 ```
-saved 3 cookies and 1 origin for shop.example.com to /home/ada/shop/auth/shop.state, readable by you alone
+saved 3 cookies and 1 origin for shop.example.com to /home/ada/.local/state/strider/shop.state, readable by you alone
 ```
+
+Saved state contains cookies and other credentials in plaintext. Keep it private; the examples use an explicit home-directory path. `state save` warns on stderr when Git could commit the saved file.
 
 ## Managing sessions
 
@@ -216,7 +218,7 @@ A session's browser runs until the session stops, so list what's running and sto
 | [`strider browsers`](/docs/installation#a-browser) | lists the browsers on the machine, by path                               |
 | `strider start --name s --chromium <path>`     | starts a session; also `--firefox`, `--webkit` or `--attach <endpoint>`      |
 | `strider sessions`                             | lists sessions, with their pages and idle time: `shop  chromium · pages main · idle 0 s of 1 hour` |
-| `strider -s s stop`                            | ends the session and deletes its directory; `--keep` keeps the directory     |
+| `strider -s s stop`                            | waits for browser, directory and ledger cleanup; `--keep` keeps the directory     |
 | `strider prune`                                | lists browsers and profile directories left by programs that were killed; `--yes` removes them |
 
 A session's profile, downloads and artifacts are in `$XDG_RUNTIME_DIR/strider/<name>/`, or
@@ -257,6 +259,9 @@ A client killed during startup can leave a private `.start-*` directory. Listing
 After all clients and daemons using the root have stopped, inspect and remove only identified stale startup
 directories; prune does not sweep startup entries.
 
+A successful `stop` means cleanup has finished, so you can run `prune` immediately or, unless you used `--keep`, start the same session name again. An attached browser stays running: stop disconnects from it. Cleanup failures return a nonzero exit code. Concurrent stop calls share cleanup; the first call chooses whether to keep the directory. Disconnecting a caller does not cancel shutdown.
+
+
 ## Attaching
 
 A session can [attach](/docs/pages/attaching) to a browser that's already running. `tabs` lists the tabs it didn't
@@ -279,14 +284,14 @@ tabs open on them. `--site` adds a domain and its subdomains, such as a sign-in 
 every login in the browser. With tabs in several contexts, `-p` names one:
 
 ```sh
-strider -s mine state save ./auth/mail.state
-strider -s mine state save ./auth/mail.state --site okta.com
-strider -s mine state save ./auth/browser.state --all
-strider -s mine -p mail state save ./auth/mail.state
+strider -s mine state save "$HOME/.local/state/strider/mail.state"
+strider -s mine state save "$HOME/.local/state/strider/mail.state" --site okta.com
+strider -s mine state save "$HOME/.local/state/strider/browser.state" --all
+strider -s mine -p mail state save "$HOME/.local/state/strider/mail.state"
 ```
 
 ```
-saved 14 cookies and 1 origin for mail.example.com to /home/ada/auth/mail.state, readable by you alone
+saved 14 cookies and 1 origin for mail.example.com to /home/ada/.local/state/strider/mail.state, readable by you alone
 ```
 
 Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging
@@ -424,6 +429,53 @@ done when a segment fails.
 
 Imports resolve from the segment's directory. Keep segment files in the project with the same Strider and Effect
 versions as the daemon. A file in `/tmp` cannot automatically use that project's `node_modules`.
+
+## Browser evaluation
+
+Use `eval` for a quick read or change in a named page without writing a segment.
+It awaits one JavaScript expression, including a promise.
+
+```sh
+strider -s shop -p main eval 'location.href'
+strider -s shop -p main eval 'Promise.resolve({ answer: 42 })' --json
+strider -s shop -p main eval --file fn.js
+strider -s shop -p main eval --main-world 'window.APP_VERSION'
+```
+
+Give exactly one expression or `--file`. Either input may end with one optional semicolon before trailing
+whitespace, such as `eval 'location.href;'` or a file ending in `() => document.title;`.
+It must still contain a single expression; a sequence of statements is invalid. The file is UTF-8, relative to your shell's working directory,
+and contains an ordinary or async function expression, invoked with no arguments in the browser:
+
+```js
+async () => {
+  return { title: document.title }
+}
+```
+
+Files are browser JavaScript, not Node modules: imports and default exports are invalid. Source is never
+executed in the daemon. Evaluation uses the isolated world by default, as `Page.evaluate` does.
+Backends without isolated worlds return the typed `Unsupported` reason. Choose `--main-world` explicitly
+to use `Page.evaluateInMainWorld`; the page's scripts can observe and tamper with that world.
+
+JSON success has exactly the same fields as a segment result, with the fixed label `"file": "eval"`:
+
+```json
+{ "file": "eval", "value": { "answer": 42 }, "handles": {}, "durationMs": 12 }
+```
+
+The shared value encoding preserves non-JSON values as type tags, including
+`{"type":"undefined"}` and `{"type":"bigint","value":"42"}`. Cycles and unsupported values fail.
+JSON failures go to stderr with `file`, `error`, optional `reason`, `message`, optional `hint`,
+`phase`, optional `step`, and `durationMs`. File/input errors have phase `load`, browser evaluation
+errors `execute`. Values the browser cannot return, including cycles, also fail during `execute`
+with reason `NotSerializable`. Only refusals by the later shared result encoder have phase `serialize`.
+
+Evaluation can change the page, start requests or open popups. A later failure does not undo those effects.
+Named secrets are concealed with local capture; strict capture masks arbitrary results and failure details.
+Strict capture masks output, not execution. Export records a marked placeholder for evaluation, including
+evaluation that throws after side effects; restore its code by hand. Source text and file paths are omitted
+from result and export metadata.
 
 ## MCP
 

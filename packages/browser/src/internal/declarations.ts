@@ -25,9 +25,9 @@ export interface Registered {
   readonly sequence: number
 }
 
-/** Where a target sits: its page and its context. */
+/** Where a target sits; omit the page to resolve a context's defaults for future pages. */
 export interface Placement {
-  readonly page: Target.NavigableId
+  readonly page?: Target.NavigableId | undefined
   readonly context: UserContext.Id
 }
 
@@ -79,7 +79,14 @@ export interface Registry {
   /** The init-script bundle for each world, by world key. */
   readonly bundles: (
     placement: Placement
-  ) => ReadonlyMap<string, { readonly world: Adapter.World; readonly source: string }>
+  ) => ReadonlyMap<
+    string,
+    {
+      readonly world: Adapter.World
+      readonly source: string
+      readonly webSockets?: ReadonlyArray<Adapter.WebSocketBridge> | undefined
+    }
+  >
   /** The intercept patterns in force, per phase. */
   readonly intercepts: (placement: Placement) => {
     readonly request: ReadonlyArray<string>
@@ -139,11 +146,28 @@ export const make = (): Registry => {
     },
     overrides: (placement) => {
       const effective = new Map<Adapter.Override["_tag"], Adapter.Override>()
+      let headers: Map<number, Readonly<Record<string, string>>> | undefined
       // Least specific and oldest first, so the winner is written last
       for (const entry of inScope(placement).sort(byPrecedence)) {
         if (entry.declaration._tag === "Override") {
-          effective.set(entry.declaration.override._tag, entry.declaration.override)
+          const override = entry.declaration.override
+          effective.set(override._tag, override)
+          if (override._tag === "ExtraHeaders") {
+            headers ??= new Map()
+            headers.set(specificity(entry.scope), override.headers)
+          }
         }
+      }
+      if (headers !== undefined) {
+        // Replace within each scope, then merge broader scopes before more specific ones, as BiDi does natively.
+        effective.set("ExtraHeaders", {
+          _tag: "ExtraHeaders",
+          headers: Object.fromEntries(
+            [...headers.values()].flatMap((map) =>
+              Object.entries(map).map(([name, value]) => [name.toLowerCase(), value])
+            )
+          )
+        })
       }
       return effective
     },
@@ -155,7 +179,10 @@ export const make = (): Registry => {
     },
     bundles: (placement) => {
       const scripts = scriptsOf(placement)
-      const bundles = new Map<string, { world: Adapter.World; sources: Array<string> }>()
+      const bundles = new Map<
+        string,
+        { world: Adapter.World; sources: Array<string>; webSockets?: Array<Adapter.WebSocketBridge> }
+      >()
       for (const entry of scripts) {
         const key = worldKey(entry.declaration.world)
         let bundle = bundles.get(key)
@@ -164,9 +191,16 @@ export const make = (): Registry => {
           bundles.set(key, bundle)
         }
         bundle.sources.push(wrap(entry.id, entry.declaration.source, entry.declaration.after))
+        if (entry.declaration.webSocket !== undefined) (bundle.webSockets ??= []).push(entry.declaration.webSocket)
       }
       return new Map(
-        [...bundles].map(([key, bundle]) => [key, { world: bundle.world, source: block(bundle.sources) }])
+        [...bundles].map((
+          [key, bundle]
+        ) => [key, {
+          world: bundle.world,
+          source: block(bundle.sources),
+          ...(bundle.webSockets === undefined ? {} : { webSockets: bundle.webSockets })
+        }])
       )
     },
     intercepts: (placement) => {
@@ -209,3 +243,11 @@ const wrap = (id: Adapter.RegistrationId, source: string, after: ReadonlyArray<A
 // One block, so its bookkeeping is invisible to the page, while a script's top-level `var` and functions stay
 // global, as they would be on their own.
 const block = (scripts: ReadonlyArray<string>): string => `{ const ${ran} = new Set()\n${scripts.join("\n")}\n}`
+
+/** Copies only the dimensions, keeping the registry's override private. */
+export const viewportSize = (registry: Registry, placement: Placement) => {
+  const override = registry.overrides(placement).get("Viewport")
+  return override?._tag === "Viewport"
+    ? Option.some({ width: override.width, height: override.height })
+    : Option.none<{ readonly width: number; readonly height: number }>()
+}

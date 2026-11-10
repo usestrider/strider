@@ -16,13 +16,19 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import { createServer } from "node:net"
+import type * as CommandLine from "effect/process/CommandLine"
+import * as Random from "effect/Random"
+import * as Redacted from "effect/Redacted"
+import { createServer, type Server, type Socket } from "node:net"
 import * as Launch from "../../src/internal/launch.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
 import { useXvfb } from "./stockWebKit.ts"
+
+/** A child process's argument or environment value as the test wrote it. */
+const plain = (word: CommandLine.Word): string => Redacted.isRedacted(word) ? Redacted.value(word) : word
 
 const timeout = 90_000
 
@@ -56,50 +62,175 @@ const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E
   )
 }, Effect.scoped)
 
+/** Register cleanup before binding, including failed or interrupted binds. */
+const listen = Effect.fnUntraced(function*(server: Server, port: number) {
+  yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
+  yield* Effect.callback<void, Error>((resume) => {
+    server.once("error", (error) => resume(Effect.fail(error)))
+    server.listen(port, "127.0.0.1", () => resume(Effect.void))
+  })
+})
+
+/** Acquire a fixture port before launch; only an occupied candidate permits another allocation. */
+const silentListener = Effect.fnUntraced(function*(
+  onConnection: (socket: Socket) => void,
+  firstCandidate?: number
+) {
+  let first = firstCandidate
+  return yield* Effect.suspend(() =>
+    Effect.gen(function*() {
+      const port = first ?? (yield* Random.nextIntBetween(49152, 65535))
+      first = undefined
+      const sockets = new Set<Socket>()
+      const server = createServer((socket) => {
+        sockets.add(socket)
+        socket.on("close", () => sockets.delete(socket))
+        socket.on("error", () => {})
+        onConnection(socket)
+      })
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const socket of sockets) socket.destroy()
+        })
+      )
+      yield* listen(server, port)
+      return port
+    })
+  ).pipe(Effect.retry({
+    while: (error) => "code" in error && error.code === "EADDRINUSE",
+    times: 8
+  }))
+})
+
+const silentListenerCases = [
+  { name: "sends 1 real silent listener nothing", collisions: 1, before: 0, after: 0, repeat: false },
+  { name: "sends 2 real silent listeners nothing", collisions: 2, before: 0, after: 0, repeat: false },
+  {
+    name: "sends 1 real silent listener nothing, its first fixture candidate and launch choice already taken",
+    collisions: 1,
+    before: 1,
+    after: 0,
+    repeat: false
+  },
+  {
+    name: "sends 2 real silent listeners nothing, with two other ports taken after them",
+    collisions: 2,
+    before: 0,
+    after: 2,
+    repeat: false
+  },
+  {
+    name: "sends 1 real silent listener nothing when its occupied port is chosen twice",
+    collisions: 1,
+    before: 0,
+    after: 0,
+    repeat: true
+  }
+]
+
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
     it.effect(
-      "sends a real silent listener nothing, and starts the real MiniBrowser owned on another port",
+      "keeps child snapshot text when time origin reads differ by one millisecond",
       () =>
-        Effect.gen(function*() {
-          yield* useXvfb()
-          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-          const received: Array<number> = []
-          let accepted = 0
-          const ports: Array<number> = []
-          const server = createServer((socket) => {
-            accepted++
-            socket.on("data", (data) => received.push(data.length))
-            socket.on("error", () => {})
-          })
-          yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
-          const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
-            if (command._tag === "StandardCommand") {
-              const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
-              if (endpoint !== undefined) {
-                const port = Number(endpoint.split(":")[1])
-                ports.push(port)
-                // The first port is taken, by something that accepts and never answers, before the child binds it.
-                if (ports.length === 1) {
-                  yield* Effect.callback<void>((resume) => {
-                    server.listen(port, "127.0.0.1", () => resume(Effect.void))
-                  })
-                }
-              }
-            }
-            return yield* spawner.spawn(command)
-          }))
-          yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
-            Effect.provide(socketConnector)
-          )
-          assert.strictEqual(ports.length, 2, "the child's collision moves the launch to one other port")
-          assert.notStrictEqual(ports[0], ports[1])
-          assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
-          assert.strictEqual(accepted, 0, "nor is it connected to")
-        }).pipe(Effect.scoped),
+        launched(Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          // Model the two adjacent time-origin values observed for one loaded srcdoc document.
+          // Every Automation/inspector pair differs, without a navigation or a timing dependency.
+          const child = `<h2>child heading</h2><script>
+          let reads = 0;
+          const origin = performance.timeOrigin;
+          Object.defineProperty(performance, "timeOrigin", {
+            get() { return origin + (reads++ % 2); }
+          });
+        </script>`
+          yield* page.goto(fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`))
+          const snapshot = yield* page.snapshot()
+          assert.include(snapshot.text, "child heading")
+        })),
       timeout
     )
+
+    for (const { after, before, collisions, name, repeat } of silentListenerCases) {
+      it.effect(
+        `${name}, and starts the real MiniBrowser owned on another port`,
+        () =>
+          Effect.gen(function*() {
+            yield* useXvfb()
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+            const received: Array<number> = []
+            let accepted = 0
+            const ports: Array<number> = []
+            const random = yield* Random.Random
+            const contact = (socket: Socket) => {
+              accepted++
+              socket.on("data", (data) => received.push(data.length))
+            }
+            const earlier: Array<number> = []
+            const listeners: Array<number> = []
+            const later: Array<number> = []
+            for (let i = 0; i < before; i++) earlier.push(yield* silentListener(contact))
+            for (let i = 0; i < collisions; i++) {
+              // The regression deliberately makes fixture allocation encounter an occupied candidate too.
+              listeners.push(yield* silentListener(contact, i === 0 ? earlier[0] : undefined))
+            }
+            for (let i = 0; i < after; i++) later.push(yield* silentListener(contact))
+            const held = new Set([...earlier, ...listeners, ...later])
+            assert.strictEqual(held.size, before + collisions + after, "all held ports are distinct")
+            const occupiedChoices = [...earlier, ...listeners, ...(repeat ? [listeners[0]!] : []), ...later]
+            let choice = 0
+            const observing = ChildProcessSpawner.make(Effect.fnUntraced(function*(command) {
+              if (command._tag === "StandardCommand") {
+                const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
+                if (endpoint !== undefined) {
+                  const port = Number(plain(endpoint).split(":")[1])
+                  ports.push(port)
+                }
+              }
+              return yield* spawner.spawn(command)
+            }))
+            yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+              Effect.provideService(Random.Random, {
+                nextIntUnsafe: () => random.nextIntUnsafe(),
+                nextDoubleUnsafe: () => {
+                  const port = occupiedChoices[choice++]
+                  // nextIntBetween includes both ends of 49152–65535.
+                  return port === undefined ? random.nextDoubleUnsafe() : (port - 49152 + 0.5) / 16384
+                }
+              }),
+              Effect.provide(socketConnector)
+            )
+            assert.deepStrictEqual(ports.slice(0, occupiedChoices.length), occupiedChoices)
+            assert.isAtLeast(ports.length, occupiedChoices.length + 1)
+            assert.isFalse(held.has(ports[ports.length - 1]!), "the successful child uses no held port")
+            assert.deepStrictEqual(received, [], "nothing is written to the foreign listener")
+            assert.strictEqual(accepted, 0, "nor is it connected to")
+          }).pipe(Effect.scoped),
+        timeout
+      )
+    }
+
+    it.effect("fails a listener bind error and closes its scoped listeners", () =>
+      Effect.gen(function*() {
+        const server = createServer()
+        const conflicting = createServer()
+        const exit = yield* Effect.gen(function*() {
+          yield* listen(server, 0)
+          const address = server.address()
+          assert.isNotNull(address)
+          assert.isNotString(address)
+          yield* listen(conflicting, (address as { port: number }).port)
+        }).pipe(Effect.scoped, Effect.exit)
+        assert.isTrue(Exit.isFailure(exit))
+        assert.strictEqual(
+          Option.getOrUndefined(Exit.findErrorOption(exit))?.message.includes("EADDRINUSE"),
+          true
+        )
+        assert.isFalse(server.listening)
+        assert.isFalse(conflicting.listening)
+      }))
 
     it.effect(
       "refuses a real wrapper that forks the MiniBrowser rather than execing it",
@@ -130,6 +261,9 @@ describe("Stock WebKit, launched in automation mode", () => {
         Effect.gen(function*() {
           yield* useXvfb()
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const occupiedPort = yield* silentListener(() => {})
+          const random = yield* Random.Random
+          let firstChoice = true
           const children: Array<
             {
               readonly pid: number
@@ -145,9 +279,9 @@ describe("Stock WebKit, launched in automation mode", () => {
               if (endpoint !== undefined) {
                 children.push({
                   pid: Number(handle.pid),
-                  port: Number(endpoint.split(":")[1]),
+                  port: Number(plain(endpoint).split(":")[1]),
                   executable: command.command,
-                  args: command.args
+                  args: command.args.map(plain)
                 })
               }
             }
@@ -155,10 +289,21 @@ describe("Stock WebKit, launched in automation mode", () => {
           }))
           yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provideService(Random.Random, {
+              nextIntUnsafe: () => random.nextIntUnsafe(),
+              nextDoubleUnsafe: () => {
+                if (!firstChoice) return random.nextDoubleUnsafe()
+                firstChoice = false
+                // Force the first child to collide with the scoped listener.
+                return (occupiedPort - 49152 + 0.5) / 16384
+              }
+            }),
             Effect.provide(socketConnector)
           )
-          assert.strictEqual(children.length, 1)
-          const child = children[0]!
+          assert.strictEqual(children[0]?.port, occupiedPort)
+          assert.isAtLeast(children.length, 2, "the forced collision must replace the first child")
+          // Successful startup leaves the last spawned child owning the inspector listener.
+          const child = children[children.length - 1]!
           const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
           assert.strictEqual(child.executable, executable)
           assert.deepStrictEqual(child.args, args)
@@ -195,6 +340,7 @@ describe("Stock WebKit, launched in automation mode", () => {
         launched(Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
           const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
             Effect.exit
@@ -206,6 +352,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             requested: { width: 1440, height: 1000 },
             actual: { width: 1280, height: 762 }
           })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
         })),
       timeout

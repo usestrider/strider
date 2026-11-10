@@ -1,5 +1,5 @@
 {
-  "reason": "Commands whose replies hand out something with a remote lifetime: targets, contexts, sessions, worlds, scripts, remote objects and IO streams. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the commands that release it, from the CDP spec's own pairs: closeTarget, disposeBrowserContext, detachFromTarget, removeScriptToEvaluateOnNewDocument, releaseObject and IO.close. An isolated world and a compiled script have no release command; they last as long as their document.",
+  "reason": "Commands whose replies hand out something with a remote lifetime: targets, contexts, sessions, worlds, scripts, remote objects and IO streams. A reply that arrives after its caller was interrupted, or timed out, is routed to an owner, which adopts or releases it (PROTOCOL.md, Protocol client). `release` names the commands that release it, from the CDP spec's own pairs: closeTarget, disposeBrowserContext, detachFromTarget, removeScriptToEvaluateOnNewDocument, releaseObject and IO.close. An isolated world and a compiled script have no release command; they last as long as their document. Page.startScreencast starts a session-wide stream stopped by the parameterless Page.stopScreencast; the adapter owns its late-success release.",
   "annotate": [
     {
       "target": "Target#createTarget",
@@ -196,6 +196,25 @@
             "method": "IO.close",
             "param": "handle",
             "from": "/stream"
+          }
+        ]
+      }
+    },
+    {
+      "target": "Page#startScreencast",
+      "traits": {
+        "createsResource": true
+      }
+    },
+    {
+      "target": "WebAuthn#addVirtualAuthenticator",
+      "traits": {
+        "createsResource": true,
+        "release": [
+          {
+            "method": "WebAuthn.removeVirtualAuthenticator",
+            "param": "authenticatorId",
+            "from": "/authenticatorId"
           }
         ]
       }

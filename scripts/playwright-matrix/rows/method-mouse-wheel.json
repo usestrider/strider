@@ -1,0 +1,26 @@
+{
+  "id": "method-mouse-wheel",
+  "upstream": [
+    "method:Mouse.wheel"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Mouse",
+      "symbol": "Mouse.wheel",
+      "url": "/docs/api/browser/Mouse#Mouse.wheel"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

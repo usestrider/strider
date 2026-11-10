@@ -1,0 +1,42 @@
+{
+  "id": "option-browser-newcontext-proxy",
+  "upstream": [
+    "method:Browser.newContext"
+  ],
+  "option": "proxy",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Set under emulation, permissions or proxy; see adapter limits.",
+  "capabilities": [
+    "userContexts.proxy"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ],
+  "gaps": [
+    "option-browser-newcontext-proxy-value-socks-or-https-proxy-endpoint",
+    "option-browser-newcontext-proxy-value-proxy-credentials"
+  ],
+  "valueCoverage": [
+    {
+      "value": "SOCKS or HTTPS proxy endpoint",
+      "status": "missing",
+      "gap": "option-browser-newcontext-proxy-value-socks-or-https-proxy-endpoint"
+    },
+    {
+      "value": "proxy credentials",
+      "status": "missing",
+      "gap": "option-browser-newcontext-proxy-value-proxy-credentials"
+    }
+  ]
+}

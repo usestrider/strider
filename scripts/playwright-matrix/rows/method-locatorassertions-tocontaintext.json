@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tocontaintext",
+  "upstream": [
+    "method:LocatorAssertions.toContainText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toContainText",
+      "url": "/docs/api/browser/Expect#toContainText"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

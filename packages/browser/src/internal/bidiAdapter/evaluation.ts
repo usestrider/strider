@@ -13,6 +13,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
@@ -164,7 +165,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (document === undefined || (realm.world._tag === "Main" && document.hadMainRealm)) {
           realm.pending = true
           navigable.pendingRealms.push(realm)
-          if (realm.world._tag === "Main") navigable.restoring?.(realm)
+          if (realm.world._tag === "Main") navigable.restoring?.arrived(realm)
         } else {
           addWindowRealm(state, realm, document)
         }
@@ -324,7 +325,8 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       // A shared id names a node in every realm of its document
       node: (node) => ({ sharedId: node.binding as Script.SharedId })
     }))
-  // A call cut short when its page closes is `Gone`, not the protocol's error
+  // Firefox may never answer an awaited promise in a destroyed realm. End the call
+  // through the model lifecycle; interrupting send preserves protocol late-reply cleanup.
   const reply = yield* state.send(Script.callFunction({
     functionDeclaration: call.functionDeclaration,
     awaitPromise: call.awaitPromise,
@@ -333,9 +335,31 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     resultOwnership: keep ? "root" : "none",
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
-  })).pipe(Effect.mapError(Kit.realmFailure(id, () => realm.ended)))
+  })).pipe(
+    Effect.catch((error) => {
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
+      return (missing
+        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        : Effect.void).pipe(
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(id, () => realm.ended)(error))))
+        )
+    }),
+    Effect.raceFirst(
+      state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+        Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))
+      )
+    )
+  )
   if (reply.type === "exception") {
     const details = reply.exceptionDetails
+    if (keep && "handle" in details.exception && details.exception.handle !== undefined) {
+      // The exception is returned by value: its root handle has no caller to release it.
+      state.buffer.start(Operation.detached(state.send(Script.disown({
+        handles: [details.exception.handle],
+        target: { realm: reply.realm }
+      }))))
+    }
     return {
       _tag: "Exception",
       text: details.text,

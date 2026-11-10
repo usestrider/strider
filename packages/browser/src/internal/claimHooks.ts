@@ -24,7 +24,12 @@ export const register = (browser: Browser.Browser, hooks: Hooks): void => {
   browsers.set(browser, hooks)
 }
 export const get = (browser: Browser.Browser): Hooks => {
-  const hooks = browsers.get(browser)
-  if (hooks === undefined) throw new Error("Browser has no runtime")
-  return hooks
+  // Service decorators inherit the original browser so its private runtime stays available.
+  let current: Browser.Browser | null = browser
+  while (current !== null) {
+    const hooks = browsers.get(current)
+    if (hooks !== undefined) return hooks
+    current = Object.getPrototypeOf(current)
+  }
+  throw new Error("Browser has no runtime")
 }

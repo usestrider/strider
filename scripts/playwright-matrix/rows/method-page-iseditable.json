@@ -1,0 +1,35 @@
+{
+  "id": "method-page-iseditable",
+  "upstream": [
+    "method:Page.isEditable"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isEditable",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isEditable"
+    }
+  ],
+  "notes": "Immediate strict read of the same Editable predicate as Strider actions and expectations: enabled, not read-only, and a text/settable input, textarea or contenteditable element. Unsupported kinds return false, including selects, checkboxes and ARIA-only textboxes; Playwright accepts more kinds and throws for unsupported elements. Native readOnly and the element’s exact aria-readonly=\"true\" prevent editing; aria-disabled=\"true\" on any ancestor disables it. Hidden/inert elements may read true. NoMatch and StrictViolation fail immediately; no attachment wait. Uses the existing owned read path, including frame targets, access release and operation deadlines. Contenteditable follows native isContentEditable; WebKit may report false for hidden or inert contenteditable elements.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts",
+      "packages/browser/src/internal/locator.ts",
+      "packages/browser/src/internal/engine.ts",
+      "packages/browser/test/integration/slice/interaction.ts",
+      "packages/browser/test/integration/slice/contents.ts",
+      "packages/browser/test/integration/slice/attaching.ts",
+      "packages/browser/test/integration/slice/deadlines.ts"
+    ],
+    "scope": "Shared engine predicate inspected; cross-browser rules, strictness, frame targets, released access and deadline regression coverage."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "editability-reads-share-editing-rules",
+    "quote": "Unsupported kinds return false so callers can branch on the predicate without handling a type error.",
+    "revision": "e322b9d140393b3d32a5c38dc63e52347041de1a"
+  }
+}

@@ -32,6 +32,19 @@ const media = (value: string) => value === "noPreference" ? "no-preference" : va
 export const fields = (settings: Emulation.Emulation): ReadonlyArray<Field> | Reason.InvalidInput => {
   const list: Array<Field> = []
   const invalid = (input: string, expected: string, hint: string) => new Reason.InvalidInput({ input, expected, hint })
+  if (settings.extraHTTPHeaders !== undefined) {
+    const headers: Record<string, string> = Object.create(null)
+    for (const [name, value] of Object.entries(settings.extraHTTPHeaders)) {
+      if (
+        !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || typeof value !== "string" ||
+        /[^\t\x20-\x7e\x80-\xff]/.test(value)
+      ) {
+        return invalid("extraHTTPHeaders", "HTTP header names and string field values", "Invalid header name or value")
+      }
+      headers[name.toLowerCase()] = value
+    }
+    list.push({ capability: "emulation.extraHTTPHeaders", override: { _tag: "ExtraHeaders", headers } })
+  }
   if (settings.viewport !== undefined) {
     const { height, width } = settings.viewport
     if (!(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0)) {

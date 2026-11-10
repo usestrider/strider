@@ -1,0 +1,17 @@
+{
+  "id": "property-playwright-chromium",
+  "upstream": [
+    "property:Playwright.chromium"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "chromium/Chromium",
+      "symbol": "layer",
+      "url": "/docs/api/browser/chromium/Chromium#layer"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

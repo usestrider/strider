@@ -10,6 +10,7 @@ response an action causes checks what the server said, and decoding its body giv
 ## Request and response events
 
 `NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
+Read a transfer's reported failure with [request failures](/docs/events/request-failures).
 
 - A request is reported when sent and a response when it arrives, one of each per redirect hop.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
@@ -32,6 +33,9 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
   yield* deleted
 })
 ```
+
+For a request you already observed, [retain its response association](/docs/events/request-responses) to wait for
+that exact hop rather than matching by URL.
 
 ## Decoding bodies
 
@@ -66,6 +70,11 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
   - `BodyUnavailable`: there's no body to read. Its `why` says which: a redirect, over the limit, released by the
     browser, a failed transfer, or a stream that never ends, such as server-sent events.
   - `MalformedBody`: the body isn't what it was read as.
+  - `Unsupported`: the browser cannot supply this body's bytes. On Firefox, a terminal response with status 301,
+    302, 303, 307 or 308 without a `Location` header fails immediately with capability
+    `"network.responseBody.terminalRedirect"`, because Firefox does not answer `network.getData` for it. Other
+    statuses remain readable, and Chromium and WebKit return these bodies normally. Followed redirect hops
+    still fail with `BodyUnavailable`, `why: "redirect"`; their final response's body can be collected.
 - Reading a body needs [read access](/docs/pages/attaching#access-levels) to the page.
 
 Bodies are collected up to 10 MiB; `NetworkResponse.withBodyLimit` raises it for the subscriptions inside it. A step
@@ -94,6 +103,9 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
   )
 })
 ```
+
+A request can also be captured with a decoder; see [Request bodies](/docs/events/request-bodies) for submitted
+text, JSON, forms, byte limits and browser restrictions.
 
 ## Streams and history
 
@@ -174,6 +186,16 @@ const sentCookies = Effect.fn("sentCookies")(function*(page: Page.Page) {
 })
 ```
 
+The operation's deadline bounds the wait. If the request ends, is evicted from the retained 1000 hops, or loses
+its frame, worker, context, page or browser connection, the wait returns already-attributed sent headers, or the
+immutable request event's headers when none were reported. A new lookup after eviction returns that snapshot too.
+These fallbacks can omit network additions such as `Cookie`.
+
+Inside a request-phase [route handler](/docs/events/routes), awaiting sent headers before continuing the request
+prevents it from being sent. Continue the route first and inspect sent headers outside the handler, as in the
+event subscription example above. On Chromium, the same trap applies while holding the response: attribution
+can need the response or redirect information. Read `request.headers` for an immediate snapshot inside a handler.
+
 Credential headers, such as cookies and authorization, are redacted in logs, errors and spans.
 
 ## Resending requests
@@ -204,3 +226,9 @@ const nextPageOfOrders = Effect.fn("nextPageOfOrders")(function*(page: Page.Page
 ```
 
 To change what the browser sends or receives, use a [route](/docs/events/routes).
+
+Read a request's predecessor or successor with [scoped redirect access](/docs/events/redirects).
+
+For native phase measurements, opt into [request timings](/docs/events/request-timings) when creating the context.
+
+For native byte accounting, opt into [request sizes](/docs/events/request-sizes) when creating the context.

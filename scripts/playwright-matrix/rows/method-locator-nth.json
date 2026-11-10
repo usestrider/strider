@@ -1,0 +1,33 @@
+{
+  "id": "method-locator-nth",
+  "upstream": [
+    "method:Locator.nth"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.nth",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.nth"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-locator-nth-value-negative-index"
+  ],
+  "valueCoverage": [
+    {
+      "value": "negative index",
+      "status": "missing",
+      "gap": "method-locator-nth-value-negative-index"
+    }
+  ]
+}

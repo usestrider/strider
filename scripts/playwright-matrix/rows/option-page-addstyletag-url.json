@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-page-addstyletag-url",
+  "upstream": [
+    "method:Page.addStyleTag"
+  ],
+  "option": "url",
+  "requirements": []
+}

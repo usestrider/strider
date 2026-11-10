@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-process",
+  "upstream": [
+    "method:ElectronApplication.process"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

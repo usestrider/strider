@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobevisible",
+  "upstream": [
+    "method:LocatorAssertions.toBeVisible"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

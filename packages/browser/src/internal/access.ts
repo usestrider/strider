@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import type * as Declaration from "../Declaration.ts"
 import * as Target from "../Target.ts"
+import * as ExpectSource from "./expectSource.ts"
 import * as Operation from "./operation.ts"
 
 /** A grant of access to a page or a context, for the scope that acquired it. */
@@ -74,9 +75,12 @@ export const guard = <A extends object>(handle: A, grant: Grant, members: Member
   const wrap = (value: unknown, name: string): unknown => {
     if (!Effect.isEffect(value)) return value
     const checked = Effect.andThen(check(Option.some(grant)), value)
+    const kind = ExpectSource.kind(value)
     return members.declarations.has(name)
       ? Effect.flatMap(checked, (registration) => track(Option.some(grant))(registration as Declaration.Registration))
-      : checked
+      : kind === undefined
+      ? checked
+      : ExpectSource.mark(checked, kind)
   }
   const out: Record<PropertyKey, unknown> = {}
   for (const key of Reflect.ownKeys(handle)) {

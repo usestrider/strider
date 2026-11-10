@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-press",
+  "upstream": [
+    "method:AndroidDevice.press"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

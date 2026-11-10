@@ -1,0 +1,28 @@
+{
+  "id": "option-page-getbyrole-checked",
+  "upstream": [
+    "method:Page.getByRole"
+  ],
+  "option": "checked",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": [],
+  "gaps": [
+    "option-page-getbyrole-checked-value-mixed"
+  ],
+  "valueCoverage": [
+    {
+      "value": "mixed",
+      "status": "missing",
+      "gap": "option-page-getbyrole-checked-value-mixed"
+    }
+  ]
+}

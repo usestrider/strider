@@ -21,6 +21,7 @@ import type * as Equal from "effect/Equal"
 import type * as Inspectable from "effect/Inspectable"
 import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
+import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as BrowserWorker from "./BrowserWorker.ts"
@@ -31,6 +32,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
+import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Page from "./Page.ts"
 import type * as PageClock from "./PageClock.ts"
@@ -40,6 +42,7 @@ import * as StorageState from "./StorageState.ts"
 import type * as Target from "./Target.ts"
 import type * as Url from "./Url.ts"
 import type * as Watchable from "./Watchable.ts"
+import type * as WebSocketRoute from "./WebSocketRoute.ts"
 
 /**
  * Schema for the id of a user context.
@@ -224,6 +227,40 @@ export interface UserContext extends ObservedUserContext {
    */
   readonly cookies: CookieJar.CookieJar
   /**
+   * Replaces saved storage in this context while preserving its existing pages and their URLs.
+   *
+   * **Details**
+   *
+   * Requires `storageStateTracking: true` at context creation. Untracked contexts and contexts with acquired
+   * virtual authenticators refuse before mutation: their credentials are outside StorageState, and replacement does
+   * not invalidate their live scoped handles. Non-HTTP(S) storage and opaque ancestor partitions refuse. Clears cookies, localStorage, IndexedDB and available origin-private
+   * files for incoming and previously visited origins and partitions, then writes the supplied state.
+   * Existing-page sessionStorage, HTTP cache and service-worker registrations are unchanged.
+   *
+   * **Gotchas**
+   *
+   * Stop page and worker writers and release storage handles first. Failure or interruption after mutation starts
+   * can leave partial changes (`StorageState.PartiallyApplied` for runtime failures); a blocked IndexedDB deletion can complete later when its connection closes.
+   * There is no rollback.
+   *
+   * **Example** (Replacing a live context's login)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser, StorageState } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const reset = Effect.fn("reset")(function*(state: StorageState.StorageState) {
+   *   const context = yield* Browser.newContext({ storageStateTracking: true })
+   *   const page = yield* context.newPage
+   *   yield* context.setStorageState(state)
+   *   return page
+   * })
+   * ```
+   */
+  readonly setStorageState: (
+    state: StorageState.StorageState
+  ) => Effect.Effect<void, UserContextError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Reads the context's storage, to save and start other contexts from.
    *
    * **Example** (Saving a login as JSON)
@@ -247,6 +284,16 @@ export interface UserContext extends ObservedUserContext {
    * Intercepts requests matching `pattern` from every page and worker of the context, at one phase, while the
    * registration lives. A page's own routes are asked first; otherwise it works as `Page.route` does.
    *
+   * **Details**
+   *
+   * The route is in force for requests that start after this declaration returns. On Chromium, a request
+   * already underway without response interception may miss a later response route. Existing response pauses
+   * select the current routes by precedence.
+   *
+   * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
+   * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
+   * also handle `"request"`; union phases require a handler compatible with every possible phase.
+   *
    * **Example** (Blocking analytics in every page)
    *
    * ```ts import.meta.vitest
@@ -263,9 +310,58 @@ export interface UserContext extends ObservedUserContext {
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, P>,
+    handler: Route.Handler<E, R, NoInfer<P>>,
+    options: Route.Options<P> & { readonly phase: P }
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>,
+    options?: Route.Options | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request">(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(
+    pattern: Url.Pattern | string,
+    handler: RoutePhaseDiagnostic.Handler<E, R, NoInfer<P> | "request", D>,
+    options?: Route.Options<P> | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  /**
+   * Mocks or proxies future WebSocket constructions in this context for the caller's scope.
+   *
+   * **Details**
+   *
+   * Requires explicit script consent. The shim also reaches loaded documents, but cannot capture existing sockets
+   * or constructors saved before installation. Newest matching registration wins. WebKit and attached Chromium
+   * require explicit bestEffort timing; Firefox refuses workers. Only dedicated workers started later are covered.
+   *
+   * **Example** (Echoing a mocked connection)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const mockSocket = Effect.fn("mockSocket")(function*(page: Page.Page) {
+   *   yield* page.context.routeWebSocket(
+   *     "ws://example.invalid/socket",
+   *     (connection) =>
+   *       connection.open({ fromPage: (message, reply) => reply.send(message) }),
+   *     { implementation: "script" }
+   *   )
+   * })
+   * ```
+   */
+  routeWebSocket<E, R>(
+    pattern: Url.Pattern | string,
+    handler: (connection: WebSocketRoute.Connection) => Effect.Effect<void, E, R>,
+    options: WebSocketRoute.Options
+  ): Effect.Effect<
+    WebSocketRoute.Registration,
+    WebSocketRoute.WebSocketRouteError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope | R
+  >
   /**
    * Runs a script in every new document of every page while the registration lives.
    *
@@ -363,6 +459,136 @@ export const isUserContext = (u: unknown): u is ObservedUserContext => Predicate
  */
 export interface Options {
   /**
+   * Collects native request phase timings for this new context, read with `NetworkRequest.timing`.
+   * No timing state is collected when false or omitted. Cannot enable timings on an existing context.
+   *
+   * @default false
+   */
+  readonly requestTiming?: boolean | undefined
+  /**
+   * Collects native byte counts for this new context, read with `NetworkRequest.sizes`.
+   * No size state is collected when false or omitted. Cannot enable sizes on an existing context.
+   *
+   * @default false
+   */
+  readonly requestSizes?: boolean | undefined
+
+  /**
+   * Accepts HTTPS certificate errors in this context alone.
+   *
+   * **Details**
+   *
+   * Firefox and launched stock WebKit support this when creating a context. Chromium refuses `true` with
+   * `Unsupported` because its certificate override affects the whole browser. Attached stock WebKit cannot
+   * create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
+   * be chosen at creation. Omitting it preserves the existing context's setting.
+   *
+   * **Example** (A local HTTPS test site)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const context = yield* Browser.newContext({ acceptInsecureCerts: true })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://localhost:8443")
+   * })
+   * ```
+   *
+   * @default false for new contexts
+   */
+  readonly acceptInsecureCerts?: boolean | undefined
+
+  /**
+   * Answers website authentication challenges with these credentials. User auth routes run first;
+   * falling through uses these credentials. The pair is submitted once per request, including its whole
+   * redirect chain. A later challenge in that chain is canceled, even at another origin.
+   * `origin`, when given, must be an HTTP(S) origin and matches scheme, hostname and effective port.
+   * An omitted origin permits any website. Proxy challenges never receive these credentials.
+   * Chromium and Firefox support this option; stock WebKit refuses it with `Unsupported`.
+   * Chromium enables request interception for this context, which can affect request timing.
+   *
+   * **Example** (Website credentials)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Config, Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const password = yield* Config.Redacted("HTTP_PASSWORD")
+   *   return yield* Browser.newContext({
+   *     httpCredentials: { origin: "https://example.com", username: "automation", password }
+   *   })
+   * })
+   * ```
+   *
+   * @default no automatic website credentials or additional interception
+   */
+  readonly httpCredentials?: {
+    readonly origin?: string | undefined
+    readonly username: string
+    readonly password: Redacted.Redacted<string>
+  } | undefined
+
+  /**
+   * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
+   * `host:port`, without credentials, path, query or fragment. An omitted port is 80.
+   *
+   * **Details**
+   *
+   * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards or CIDR.
+   * Host matching follows the browser's native proxy rules, which may also exclude subdomains. Loopback
+   * destinations (`localhost`, `127.0.0.1` and `::1`) remain direct on every backend.
+   * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
+   * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
+   * Firefox credentials require a freshly launched browser. Firefox shares its proxy authentication cache:
+   * each successfully created context binds its endpoint's credential pair (or no credentials) for the connection's
+   * life. Conflicting pending creations are refused. A confirmed creation rejection or unused setup
+   * rollback releases only that creation's reservation; an uncertain outcome keeps it. Conflicting settings fail
+   * with `Unsupported`, even after a successfully created context closes.
+   * SOCKS and HTTPS proxy endpoints are refused with `Unsupported`.
+   *
+   * **Example** (An authenticated proxy)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Config, Effect } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const password = yield* Config.Redacted("PROXY_PASSWORD")
+   *   return yield* Browser.newContext({
+   *     proxy: {
+   *       server: "http://proxy.example.com:8080",
+   *       credentials: { username: "automation", password }
+   *     }
+   *   })
+   * })
+   * ```
+   *
+   * @default existing browser proxy settings; bypass defaults to [], credentials to none
+   */
+  readonly proxy?: {
+    readonly server: string
+    readonly bypass?: ReadonlyArray<string> | undefined
+    readonly credentials?: {
+      readonly username: string
+      readonly password: Redacted.Redacted<string>
+    } | undefined
+  } | undefined
+
+  /**
+   * Retains visited origins and partitions so `setStorageState` can clear them after their pages close.
+   *
+   * **Details**
+   *
+   * Enabled only when creating a context; reclaiming accepts false or omission and refuses true as invalid input.
+   * Contexts that omit this option collect no storage-replacement history.
+   *
+   * @default false
+   */
+  readonly storageStateTracking?: boolean | undefined
+  /**
    * Storage to start from, such as a saved login.
    *
    * @default empty storage
@@ -437,6 +663,7 @@ export interface Options {
  */
 export const UserContextErrorReason = Schema.Union([
   StorageState.Incompatible,
+  StorageState.PartiallyApplied,
   Reason.InvalidInput,
   Reason.NotPermitted,
   Reason.Unsupported,
@@ -456,7 +683,7 @@ export type UserContextErrorReason = typeof UserContextErrorReason.Type
 const UserContextErrorTypeId = "~@usestrider/browser/UserContext/UserContextError"
 
 /**
- * Error for a context that couldn't be created or controlled, or whose storage couldn't be read.
+ * Error for a context that couldn't be created or controlled, or whose storage couldn't be read or replaced.
  *
  * **Example** (Falling back where focus can't be emulated)
  *

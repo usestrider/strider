@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -116,4 +116,43 @@ describe("benchmark command", () => {
       fs.rmSync(directory, { recursive: true, force: true })
     }
   })
+})
+
+it("rejects an existing explicit benchmark output before collecting Git or fixture metadata", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-benchmark-metadata-"))
+  const preload = path.join(directory, "observe.cjs")
+  const calls = path.join(directory, "calls.jsonl")
+  try {
+    fs.writeFileSync(calls, "")
+    fs.writeFileSync(
+      preload,
+      `
+const fs = require("node:fs")
+const childProcess = require("node:child_process")
+const append = fs.appendFileSync
+for (const [target, method] of [[childProcess, "execFileSync"], [fs, "lstatSync"]]) {
+  const original = target[method]
+  target[method] = (...args) => {
+    append(${JSON.stringify(calls)}, JSON.stringify([method, String(args[0])]) + "\\n")
+    return original(...args)
+  }
+}
+require("node:module").syncBuiltinESMExports()
+`
+    )
+    const result = spawnSync(process.execPath, [
+      "--require",
+      preload,
+      path.resolve(import.meta.dirname, "../benchmark/cli.ts"),
+      "run",
+      "--output",
+      directory
+    ], { encoding: "utf8" })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("EEXIST")
+    expect(fs.readFileSync(calls, "utf8")).toBe("")
+    expect(fs.readdirSync(directory).sort()).toEqual(["calls.jsonl", "observe.cjs"])
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
 })

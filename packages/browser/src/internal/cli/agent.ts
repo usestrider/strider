@@ -47,11 +47,19 @@ export const examples = {
     ["strider", "-s", "login", "-p", "main", "fill", "label=Password", "%password%"],
     ["strider", "-s", "login", "-p", "main", "click", "role=button[name=\"Sign in\"]"],
     ["strider", "-s", "login", "-p", "main", "expect", "text=Welcome", "visible"],
-    ["mkdir", "-p", "auth"],
-    ["strider", "-s", "login", "state", "save", "./auth/shop.state"],
+    ["strider", "-s", "login", "state", "save", "$HOME/.local/state/strider/shop.state"],
     ["strider", "-s", "login", "stop"],
     "",
-    ["strider", "start", "--name", "orders", "--chromium", "/usr/bin/chromium", "--state", "./auth/shop.state"],
+    [
+      "strider",
+      "start",
+      "--name",
+      "orders",
+      "--chromium",
+      "/usr/bin/chromium",
+      "--state",
+      "$HOME/.local/state/strider/shop.state"
+    ],
     ["strider", "-s", "orders", "page", "new", "--name", "main", "https://shop.example.com/orders"],
     ["strider", "-s", "orders", "-p", "main", "expect", "role=heading[name=\"Orders\"]", "visible"]
   ],
@@ -75,9 +83,13 @@ export const examples = {
   ]
 } as const
 
-/** Quote one shell argument without allowing expansion or command substitution. */
+/** Quote one shell argument, allowing only an explicit home-directory prefix to expand. */
 const quote = (value: string): string =>
-  /^[a-zA-Z0-9_./:=@%-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`
+  /^\$HOME\/[a-zA-Z0-9_./-]+$/.test(value)
+    ? `"${value}"`
+    : /^[a-zA-Z0-9_./:=@%-]+$/.test(value)
+    ? value
+    : `'${value.replaceAll("'", "'\"'\"'")}'`
 
 /** Render argv as a shell command; the same argv is checked against the CLI parser. */
 export const shellCommand = (argv: ReadonlyArray<string>): string => argv.map(quote).join(" ")
@@ -154,7 +166,7 @@ Named secrets are read from environment variables at startup. Tools substitute \
 
 ${example(examples.login)}
 
-A state file contains cookies, localStorage and IndexedDB, not sessionStorage or a whole browser profile. It contains authentication data and belongs outside version control. Each \`--state FILE\` start loads an independent copy, so separate agents can reuse one login without sharing tabs. The source session may already have stopped. Refresh the file when the login expires; \`stop\` never saves it automatically.
+A state file contains cookies, localStorage and IndexedDB, not sessionStorage or a whole browser profile. It contains plaintext credentials and belongs outside version control. The examples save to an explicit home-directory path. \`state save\` warns on stderr when Git could commit the file. Each \`--state FILE\` start loads an independent copy, so separate agents can reuse one login without sharing tabs. The source session may already have stopped. Refresh the file when the login expires; \`stop\` never saves it automatically.
 
 \`${
     shellCommand(examples.fork[0])
@@ -166,14 +178,14 @@ ${example(examples.attach)}
 
 \`tabs\` lists browser tabs outside the session's control. \`control ID --name NAME\` (or \`control --url PATTERN --name NAME\`) takes one; \`release\` ends that access and its routes and handlers while leaving the tab open.
 
-\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
+\`stop\` closes a launched browser, or disconnects from an attached one, and removes the session directory, including its artifacts and downloads. It returns success only after browser cleanup, directory cleanup and ledger removal finish; cleanup failure returns a nonzero exit code. \`stop --keep\` retains the directory. Concurrent stop callers share cleanup, with the first choosing directory retention; disconnecting a caller does not cancel shutdown. Copy wanted files out first. By default a session stops after one hour idle; \`start --idle "2 hours"\` changes that. \`strider prune\` lists resources left by ended programs; \`strider prune --yes\` reclaims them. \`strider prune NAME\` removes a dead session's leftovers.
 
 ## Other operations and help
 
 \`strider --help\` lists all commands, \`strider page --help\` lists a group's subcommands, and \`strider page new --help\` gives arguments and flags. Help works without a session or browser.
 
 - \`route PATTERN abort\` installs a request handler on the selected page; \`strider route --help\` describes other decisions. \`dialog handle --help\` describes dialog policies. \`remove HANDLE\` ends a registration returned by these commands.
-- \`export test FILE\` writes the session's successful actions and expectations as a Vitest test, replacing refs with locators. Segments and controlled tabs become marked placeholders to complete.
+- \`export test FILE\` writes the session's successful actions and expectations as a Vitest test, replacing refs with locators. Segments and controlled tabs become marked placeholders to complete. For a forked session, add \`--state "$HOME/.local/state/strider/fork.state"\` to write its initial snapshot with mode 0600 and have the test read it; Git warnings apply here too. Without that flag a fork exports an empty context. Profile replay is unsupported.
 - \`run FILE --arg KEY=VALUE\` runs a TypeScript segment in the live session. The file exports a Segment, not an arbitrary script; its imports resolve from its directory. The CLI does not type-check it. See https://usestrider.dev/docs/agents/cli#segments for the contract and examples.
 
 ## MCP and capture policy

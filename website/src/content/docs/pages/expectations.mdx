@@ -31,16 +31,113 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 
 | Matcher                                        | Passes when                                                      |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `toBeAttached`, `toBeDetached` | exactly one connected element, including hidden elements; or no elements |
 | `toBeVisible`, `toBeHidden`                    | exactly one element matches and is visible; or no match is visible, however many match |
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
+| `toBeInViewport(options?)` | one element intersects the viewport at the requested ratio |
 | `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
+| `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
 | `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toBeEmpty` | the field value is empty, or other element text is only whitespace |
+| `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
+| `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
+| `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+
+Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
+case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
+`generic` role; Playwright reports no role for them. Role assertions share presentation conflict resolution and
+required-child inheritance with role locators and snapshots. Tabindex focusability follows HTML integer parsing:
+ASCII whitespace, an optional sign and leading digits are accepted, with trailing text ignored. Thus `2abc` counts
+as focusable and non-ASCII leading whitespace does not, unlike pinned Playwright's number conversion.
+They include hidden elements and retry missing or
+multiple matches until the deadline, reporting the role or match count if they fail:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveRole = Effect.fn("saveRole")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveRole("button"))
+  yield* page.locator("div#container").pipe(Expect.toHaveRole("generic"))
+})
+```
+
+Attachment does not require visibility. Use detachment to wait for removal rather than hiding; multiple matches retry until the deadline and failures record their match counts.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const waitForRemoval = Effect.fn("waitForRemoval")(function*(page: Page.ReadonlyPage) {
+  yield* page.locator("#status").pipe(Expect.toBeAttached)
+  yield* page.locator("#spinner").pipe(Expect.toBeDetached)
+})
+```
+
+An element with `opacity: 0` on itself or any ancestor counts as hidden: `toBeVisible` waits for it to
+become visible, and `toBeHidden` passes. Actions can accept transparent elements; see [action checks](/docs/pages/actions#checks).
+
+Use `toBeInViewport` when an element can exist outside the visible area. It waits for an intersection without scrolling the page:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cardInView = Effect.fn("cardInView")(function*(page: Page.ReadonlyPage) {
+  const card = page.getByRole("article")
+  yield* card.pipe(Expect.toBeInViewport())
+  yield* card.pipe(Expect.toBeInViewport({ ratio: 0.5 }))
+  yield* card.pipe(Expect.toBeInViewport({ inViewport: false }))
+})
+```
+
+The default ratio is zero, which requires some positive intersection. A requested ratio includes equality with a small floating-point tolerance. Ancestor clipping counts; opacity and overlapping elements do not. `inViewport` defaults to `true`; set it to `false` to wait for the inverse, including a missing element. Multiple matches retry until the locator narrows to one (or disappears for the inverse). Failures include the observed ratio or match count. The observer is released when the expectation ends.
+
+Class strings preserve spacing and class order. Missing class attributes count as empty strings; an array also checks the number of matches. Scalar checks retry until exactly one element matches.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkClasses = Effect.fn("checkClasses")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("status").pipe(Expect.toHaveClass("status ready"))
+  yield* page.getByRole("listitem").pipe(Expect.toHaveClass(["selected", /^pending/]))
+})
+```
+
+`Expect.toBeEmpty` waits for one match with an empty input or textarea value, or only whitespace
+in another element's text. Whitespace in a field value counts as nonempty; missing or multiple
+matches retry until the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cleared = Effect.fn("cleared")(function*(page: Page.Page) {
+  yield* page.getByLabel("Search").pipe(Expect.toBeEmpty)
+})
+```
+
+
+Selected values match exactly, including whitespace, or by regular expression, in option order.
+`toHaveValues([])` waits for an empty selection; the locator must still match one `<select multiple>`.
+Labels resolve to their associated control. Other controls fail with expectation evidence at the deadline.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkColors = Effect.fn("checkColors")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByLabel("Colors").pipe(Expect.toHaveValues(["red", /^green$/]))
+})
+```
 
 A string `toHaveText` matches the whole text; a `RegExp` is tested; an array matches each match's text, in order.
 `toBeHidden` also passes when nothing matches, so it waits for something to go away:
@@ -59,6 +156,46 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
   yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
 })
 ```
+
+Use an accessible-name expectation to check what assistive technology calls a control, including names from labels
+and ARIA references. Strings match the whole name with whitespace normalized; `ignoreCase` overrides a regular
+expression's case flag. A hidden element has an empty name, while a hidden label can still name a visible control.
+Roles that prohibit naming, such as generic, paragraph and code, have an empty name even with an ARIA label.
+Their content can still name another element, and an explicit nameable role overrides the implicit role. Role
+locators use this same name computation. Missing or multiple matches retry until the deadline and report their
+count on failure.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
+  yield* page.getByTestId("save").pipe(Expect.toHaveAccessibleName("Save changes"))
+  yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
+    ignoreCase: true
+  })
+})
+```
+
+Computed CSS includes styles from stylesheets and inheritance, in the browser's serialized form.
+Strings compare exactly, including whitespace; regular expressions keep their flags:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const styled = Effect.fn("styled")(function*(page: Page.ReadonlyPage) {
+  const notice = page.getByRole("status")
+  yield* notice.pipe(Expect.toHaveCSS("display", "flex"))
+  yield* Expect.toHaveCSS(notice, "color", /^rgb\(/)
+  yield* notice.pipe(Expect.toHaveCSS("display", "none", { not: true }))
+  yield* notice.pipe(Expect.toHaveCSS("content", "\"Ready\"", { pseudo: "before" }))
+})
+```
+
+CSS expectations require exactly one match even with `not: true`. Missing or multiple matches retry until
+the deadline and report the match count; Playwright rejects multiple matches immediately.
+Use `Deadline.within` to bound the expectation. Without options, it compares the element's own computed style.
 
 A matcher without arguments is the function itself; one with arguments is dual:
 
@@ -158,9 +295,25 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 | `readValue`                           | a form control's value                                           |
 | `readAttribute(name)`                 | an attribute, as an `Option`                                     |
 | `readHtml`                            | the element's `outerHTML`                                        |
-| `isVisible`, `isEnabled`, `isChecked` | what they say, now                                               |
+| `isVisible`, `isEnabled`, `isEditable`, `isChecked` | what they say, now                                               |
 | `count`, `all`                        | how many elements match, and a locator for each                  |
 | `page.title`, `page.readHtml`         | the document's title, and its HTML                               |
+
+`isEditable` reads the same state as `toBeEditable`: a text or settable input, textarea or
+contenteditable element must be enabled and not read-only. Hidden or inert elements can still read true.
+Other kinds, including selects and ARIA-only textboxes, read false; Playwright accepts more kinds and
+throws for unsupported elements. Native read-only state and the element's `aria-readonly="true"` prevent
+editing; ARIA tokens are case-sensitive. Contenteditable follows the browser’s `isContentEditable`
+property; WebKit can report false for hidden or inert contenteditable elements.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const canRename = Effect.fn("canRename")(function*(page: Page.ReadonlyPage) {
+  return yield* page.getByRole("textbox", { name: "Name" }).isEditable
+})
+```
 
 Reads need [exactly one match](/docs/errors#strictness); one that hasn't rendered yet fails with `NoMatch`, so
 expect it first. `count` and `all` take any number, so count what may not be there:
@@ -241,3 +394,23 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 - The result comes back by value, typed as what arrives.
 - A DOM node can't come back by value: [`evaluateHandle`](/docs/api/browser/Page#Page.evaluateHandle) gives a
   handle, released with its scope.
+
+To read every locator match together, use `evaluateAll`. It passes an empty array when nothing matches:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const names = Effect.fn("names")(function*(page: Page.ReadonlyPage) {
+  return yield* page.getByRole("listitem").evaluateAll((items) =>
+    items.map((item) => item.textContent)
+  )
+})
+```
+
+Membership is resolved once before the callback is dispatched, without waiting for matches. The elements remain
+live: they may change or detach before the callback runs. Synchronous callback code runs in one JavaScript turn;
+changes can occur across an async callback's awaits. The promise is awaited within the operation's deadline, but
+a timeout cannot stop code already running in the page. Arguments and results cross by value as with `evaluate`;
+no array handle is retained. This needs inspect access and isolated-world support; stock WebKit refuses it with
+`Unsupported`.

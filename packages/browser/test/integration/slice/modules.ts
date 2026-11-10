@@ -22,11 +22,14 @@ import {
   NetworkResponse,
   Page,
   PageNavigation,
+  Reason,
   Subscription,
   Target,
   UncaughtException,
   Watchable
 } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -37,11 +40,12 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
-import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
 
 const timeout = 60_000
 
@@ -268,6 +272,49 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect(
+        "keeps ready console subscriptions across document replacement and releases their scope",
+        () =>
+          Effect.gen(function*() {
+            const { url, origin } = yield* fixture(() => `<p>Old document</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const closed = yield* Effect.scoped(Effect.gen(function*() {
+                const pending = yield* ConsoleMessage.next(page, { text: "never" }).pipe(
+                  Deadline.within("100 millis")
+                )
+                const expired = yield* pending.pipe(Effect.flip)
+                assert(Deadline.isTimeout(expired), String(expired))
+                const owned = yield* ConsoleMessage.next(page, { text: "never either" })
+                const interrupted = yield* owned.pipe(Effect.forkChild)
+                yield* Fiber.interrupt(interrupted)
+                return owned
+              }))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const waits = yield* Effect.forEach(
+                  Array.from({ length: 20 }),
+                  () => ConsoleMessage.next(page, { text: "new document ready" })
+                )
+                yield* page.goto(fixtureUrl(origin, `<script>console.log("new document ready")</script>`))
+                const messages = yield* Effect.all(waits)
+                assert.deepStrictEqual(
+                  messages.map((message) => message.text),
+                  Array.from({ length: 20 }, () => "new document ready")
+                )
+              }))
+              const fresh = yield* ConsoleMessage.next(page, { text: "after release" })
+              yield* page.evaluateInMainWorld(() => console.log("after release"))
+              assert.strictEqual((yield* fresh).text, "after release")
+              const closedResult = yield* Effect.exit(closed).pipe(Effect.timeoutOption("1 second"))
+              assert(Option.isSome(closedResult), "closing the subscription scope must complete its returned wait")
+              const closedExit = closedResult.value
+              assert(Exit.isFailure(closedExit) && closedExit.cause.reasons.some(Cause.isInterruptReason))
+            }))
+          }),
+        timeout
+      )
+
       it.effect("formats a console call's text from its arguments", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -327,6 +374,69 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       // ── PageNavigation ──
 
+      it.effect("preserves the fragment in page.url after cross-document navigation", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const requested = `${origin}/json?token=url-test#details`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(requested)
+            const href = yield* page.evaluateInMainWorld(() => location.href)
+            assert.strictEqual(href, requested)
+            assert.strictEqual(yield* page.url, href)
+          }))
+        }), timeout)
+
+      for (const direction of ["back", "forward"] as const) {
+        it.effect(`traverses ${direction} through a pushState entry`, () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("navigation.sameDocument")) || !(yield* supports("navigation.traverse"))) return
+            const { origin } = yield* site
+            const requested = fixtureUrl(origin, button("Next", "history.pushState({}, '', '/second')"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(requested)
+              const base = yield* page.url
+              yield* page.getByRole("button", { name: "Next" }).click()
+              yield* page.pipe(Expect.toHaveURL(`${origin}/second`))
+              if (direction === "forward") {
+                // Prepare forward history independently of the back operation under test.
+                yield* page.evaluateInMainWorld(() => history.back())
+                yield* page.pipe(Expect.toHaveURL(base))
+              }
+              const outcome = yield* page[direction]().pipe(Deadline.within("5 seconds"))
+              assert(Option.isSome(outcome))
+              assert.strictEqual(outcome.value._tag, "SameDocument")
+              yield* page.pipe(Expect.toHaveURL(direction === "back" ? base : `${origin}/second`))
+            }))
+          }), timeout)
+      }
+
+      it.effect("preserves page.url through same-document fragment changes and removal", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("navigation.sameDocument"))) return
+          const { origin } = yield* site
+          const base = `${origin}/json?token=url-test`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${base}#initial`)
+            for (const requested of [`${base}#changed`, base]) {
+              const next = yield* PageNavigation.next(page)
+              if (requested === base) {
+                yield* page.evaluateInMainWorld(() => history.pushState(null, "", location.pathname + location.search))
+              } else {
+                yield* page.evaluateInMainWorld(() => {
+                  location.hash = "changed"
+                })
+              }
+              assert.strictEqual((yield* next)._tag, "SameDocument")
+              const href = yield* page.evaluateInMainWorld(() => location.href)
+              assert.strictEqual(href, requested)
+              assert.strictEqual(yield* page.url, href)
+            }
+          }))
+        }), timeout)
+
       it.effect("runs call site 2: waits for the navigation a click causes", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => `<a href="/orders">Orders</a>`)
@@ -370,29 +480,20 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       )
 
       it.effect("fails a navigation's wait with the reason goto gives", () =>
-        Effect.gen(function*() {
-          // A port nothing listens on, and that browsers don't refuse outright as they do 9 or 1
-          const port = yield* Effect.promise(() =>
-            new Promise<number>((resolve) => {
-              const server = net.createServer()
-              server.listen(0, "127.0.0.1", () => {
-                const { port } = server.address() as net.AddressInfo
-                server.close(() => resolve(port))
-              })
-            })
-          )
-          const { url } = yield* fixture(() => `<a href="http://127.0.0.1:${port}/nowhere">Broken</a>`)
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* navigationFailure
+          const { url } = yield* fixture(() => `<a href="${origin}/nowhere">Broken</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const broken = yield* PageNavigation.next(page, { url: `http://127.0.0.1:${port}/*` })
+            const broken = yield* PageNavigation.next(page, { url: `${origin}/*` })
             yield* page.getByRole("link", { name: "Broken" }).click()
             const error = yield* broken.pipe(Effect.flip)
             assert(Page.isPageError(error), String(error))
             assert.strictEqual(error.reason._tag, "NavigationFailed")
             assert.strictEqual(error.operation, "PageNavigation.next")
           }))
-        }), timeout)
+        })), timeout)
 
       it.effect("reports a frame's own navigations when asked, each naming its frame", () =>
         Effect.gen(function*() {
@@ -488,6 +589,216 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             )
           }))
         }), timeout)
+
+      it.effect(
+        "keeps body decoding pending after reader interruption until its scope closes",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<p>body cancellation</p>")
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const decoding = yield* Deferred.make<void>()
+            const interrupted = yield* Deferred.make<void>()
+            const collection = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const pending = yield* NetworkResponse.next(page, {
+              url: `${origin}/cart`,
+              body: (message) =>
+                message.arrayBuffer.pipe(
+                  Effect.tap(() => Deferred.succeed(decoding, undefined)),
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+                )
+            }).pipe(Scope.provide(collection))
+            const fiber = yield* pending.pipe(Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/cart", { method: "POST" })
+            })
+            yield* Deferred.await(decoding).pipe(Deadline.within("5 seconds"))
+            yield* Fiber.interrupt(fiber)
+            assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(fiber)))
+            assert.isFalse(yield* Deferred.isDone(interrupted))
+            yield* Scope.close(collection, Exit.void)
+            assert.isTrue(yield* Deferred.isDone(interrupted))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "reads scoped redirect neighbors across repeated URLs without tracking other contexts",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const other = yield* Browser.newPage()
+            const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+            const links = yield* NetworkRequest.redirects(page).pipe(Scope.provide(scope))
+            const firstSent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-repeat` })
+            const completed = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-repeat`,
+              status: 200,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-repeat`)
+            yield* completed
+            const first = yield* firstSent
+            const second = Option.getOrThrow(yield* links.to(first))
+            const third = Option.getOrThrow(yield* links.to(second))
+            assert.strictEqual(first.url, third.url)
+            assert.notStrictEqual(first.hop, third.hop)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(third)), second)
+            assert.strictEqual(Option.getOrThrow(yield* links.from(second)), first)
+            assert.isTrue(Option.isNone(yield* links.from(first)))
+            assert.isTrue(Option.isNone(yield* links.to(third)))
+            const foreign = yield* NetworkRequest.redirects(other)
+            const redirectError1 = yield* Effect.flip(foreign.from(first))
+            assert(redirectError1.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError1.reason.why, "foreignTarget")
+            yield* other.goto(`${origin}/redirect-repeat`)
+            const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
+            assert.strictEqual(otherRequests.length, 3)
+            const redirectError2 = yield* Effect.flip(links.from(otherRequests[0]!))
+            assert(redirectError2.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError2.reason.why, "foreignTarget")
+            const streaming = yield* NetworkRequest.next(page, { url: `${origin}/events` })
+            yield* page.evaluateInMainWorld(() => {
+              void fetch("/events")
+            })
+            const redirectError3 = yield* Effect.flip(links.to(yield* streaming))
+            assert(redirectError3.reason._tag === "RedirectUnknown")
+            assert.strictEqual(redirectError3.reason.why, "inFlight")
+            yield* Scope.close(scope, Exit.void)
+            const redirectError4 = yield* Effect.flip(links.from(first))
+            assert(redirectError4.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError4.reason.why, "released")
+            const live = yield* NetworkRequest.redirects(page)
+            yield* page.close()
+            const redirectError5 = yield* Effect.flip(live.from(first))
+            assert(redirectError5.reason._tag === "RedirectUnavailable")
+            assert.strictEqual(redirectError5.reason.why, "targetClosed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "ends the redirect chain at a redirect status the browser doesn't follow",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            const request = yield* sent
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            // The model's completion signal avoids depending on response-body collection to test links.
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.head.innerHTML),
+              "<title>unfollowed</title>"
+            )
+            assert.isTrue(Option.isNone(yield* links.from(request!)))
+            assert.isTrue(Option.isNone(yield* links.to(request!)))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "collects a terminal redirect body or refuses it explicitly",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/redirect-unfollowed`,
+              status: 302,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/redirect-unfollowed`)
+            if (yield* supports("network.responseBody.terminalRedirect")) {
+              assert.strictEqual((yield* response).body, "<title>unfollowed</title>")
+            } else {
+              const error = yield* Effect.flip(response)
+              assert.strictEqual(error._tag, "ResponseError")
+              if (error._tag === "ResponseError") {
+                assert.deepStrictEqual(
+                  error.reason,
+                  new Reason.Unsupported({
+                    capability: "network.responseBody.terminalRedirect",
+                    backend: "firefox",
+                    hint:
+                      "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307 or 308 without a Location header"
+                  })
+                )
+              }
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "collects the body of a 3xx status that isn't a redirect",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* fixture(() => "")
+            const page = yield* Browser.newPage()
+            const response = yield* NetworkResponse.next(page, {
+              url: `${origin}/multiple-choices`,
+              status: 300,
+              body: (message) => message.text
+            })
+            yield* page.goto(`${origin}/multiple-choices`)
+            assert.strictEqual((yield* response).body, "<title>choices</title>")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "ends manual redirects using the browser completion evidence",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, url } = yield* fixture(() => "<title>fetch redirects</title>")
+            const page = yield* Browser.newPage()
+            const links = yield* NetworkRequest.redirects(page)
+            yield* page.goto(url)
+            const followed = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const successor = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+            yield* page.evaluateInMainWorld(async () => {
+              await (await fetch("/redirect")).text()
+            })
+            yield* successor
+            assert.isTrue(Option.isSome(yield* links.to(yield* followed)))
+            const manual = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+            const type = yield* page.evaluateInMainWorld(async () =>
+              (await fetch("/redirect", { redirect: "manual" })).type
+            )
+            assert.strictEqual(type, "opaqueredirect")
+            // Flush earlier protocol events through an explicit browser command, without a delay or retry.
+            yield* page.evaluateInMainWorld(() => undefined)
+            const request = yield* manual
+            const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
+            yield* Deferred.await(hop.end).pipe(Deadline.within("5 seconds"))
+            const outcome = yield* links.to(request).pipe(Effect.result)
+            // Nothing proves a manual fetch's chain ended: it reads as the observed attempt or as unknown, never `None`
+            if (outcome._tag === "Failure") {
+              assert(outcome.failure.reason._tag === "RedirectUnknown")
+              assert.strictEqual(outcome.failure.reason.why, "completedRedirect")
+            } else {
+              assert.isTrue(Option.isSome(outcome.success))
+            }
+            const next = yield* links.to(request).pipe(
+              Effect.catchReason("RequestError", "RedirectUnknown", () => Effect.succeedNone)
+            )
+            if (Option.isSome(next)) {
+              // Chromium reports a successor attempt, also exposed by Playwright, then cancels it.
+              const attempt = Option.getOrThrow(Handles.page(page).runtime.model.hop(next.value.hop))
+              const end = yield* Deferred.await(attempt.end).pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(end._tag, "Failed")
+              if (end._tag === "Failed") assert.isTrue(end.canceled)
+              assert.isTrue(Option.isNone(yield* links.to(next.value)))
+            }
+          })),
+        timeout
+      )
 
       it.effect("says a redirect hop has no body, and filters responses by status", () =>
         Effect.gen(function*() {

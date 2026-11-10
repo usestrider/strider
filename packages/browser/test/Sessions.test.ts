@@ -582,7 +582,26 @@ describe("strider export test", () => {
       `yield* main.goto(\`https://shop.example.com/caf%C3%A9?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)\n`
     )
     assert.include(text, `yield* main.getByLabel("Token").fill("%tokn%")\n`)
+    assert.include(text, "// %tokn% names no secret")
+    assert.include(text, "Did you mean %token%?")
+    assert.notInclude(text, "%C3% names no secret")
     assert.include(text, `yield* main.locator("#sale").pipe(Expect.toContainText("50%off%"))\n`)
+  })
+
+  it("escapes configured names in diagnostic comments and deduplicates each step", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: { "line\n// injected\u2028": "ENV_NAME" },
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: "https://example.test/?x=%typo%&y=%typo%" }
+      ]
+    })
+    assert.lengthOf(text.match(/names no secret/g) ?? [], 1)
+    assert.notInclude(text, "\n// injected")
+    assert.notInclude(text, "\u2028")
+    assert.include(text, "// %typo% names no secret")
   })
 
   it("leaves out a check of a text with a secret in it, which a failure would print, and says so", () => {
@@ -637,7 +656,7 @@ describe("strider export test", () => {
     )
     assert.include(
       exported({ userDataDir: "/home/ada/profiles/shop" }),
-      `        // The session's browser ran on the profile at /home/ada/profiles/shop (start --user-data-dir), which that browser keeps locked: this test's starts with an empty one\n${context}`
+      `        // The session's browser ran on the profile at /home/ada/profiles/shop (start --user-data-dir), which that browser keeps locked: profile replay is unsupported; this test's starts with an empty one\n${context}`
     )
     const both = exported({ fork: "login", userDataDir: "/home/ada/profiles/shop" })
     assert.match(both, /\(start --fork\).*\n.*\(start --user-data-dir\).*\n.*Browser\.newContext/)

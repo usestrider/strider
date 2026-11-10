@@ -1,6 +1,6 @@
 {
   "name": "@usestrider/browser",
-  "version": "0.2.0",
+  "version": "0.8.1",
   "type": "module",
   "license": "MIT",
   "homepage": "https://usestrider.dev",
@@ -92,13 +92,14 @@
   },
   "scripts": {
     "codegen": "strider-utils barrel",
-    "build": "tsc -b tsconfig.json && pnpm babel",
+    "build": "node ../tools/docs/src/bin.mjs index --package browser && tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "prepack": "node ../tools/docs/src/bin.mjs index --package browser"
   },
   "peerDependencies": {
-    "@effect/platform-node": "^4.0.6",
-    "effect": "^4.0.6"
+    "@effect/platform-node": "^4.1.2",
+    "effect": "^4.1.2"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
@@ -106,8 +107,8 @@
     }
   },
   "devDependencies": {
-    "@effect/platform-node": "^4.0.6",
+    "@effect/platform-node": "^4.1.2",
     "@usestrider/utils": "workspace:^",
-    "effect": "^4.0.6"
+    "effect": "^4.1.2"
   }
 }

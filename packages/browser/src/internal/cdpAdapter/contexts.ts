@@ -5,6 +5,7 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as BrowserCdp from "../../cdp/Browser.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -19,7 +20,8 @@ import * as Urls from "../urls.ts"
 import { applyDownloads } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
+  contextLock,
   contextOf,
   downloadDirectory,
   type DownloadEntry,
@@ -108,10 +110,21 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
-  const entry: ContextEntry = { id: state.ids.userContext(), browserContextId, isDefault: false, removing: false }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.requestSizes) entry.requestSizes = new Map()
+  if (options.requestTiming) entry.requestTiming = new Map()
+  entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+  yield* state.buffer.run(() =>
+    state.buffer.emit({
+      _tag: "UserContextAdded",
+      context: entry.id,
+      isDefault: false,
+      ...(options.requestTiming ? { requestTiming: true } : {}),
+      ...(options.requestSizes ? { requestSizes: true } : {})
+    })
+  )
   yield* Kit.protocol(applyDownloads(state, entry))
   return entry.id
 })
@@ -123,23 +136,32 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       Kit.unsupported("removeDefaultContext", "The default context exists for the whole connection")
     )
   }
-  // A removal under way reports the context's end
-  if (context.removing) return
-  context.removing = true
-  const inContext = [...state.pages.values()].filter((page) => page.context === context)
   const browserContextId = context.browserContextId
-  yield* Kit.protocol(
-    Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
-      Protocol.on(state.root())
-    )
-  ).pipe(Effect.tapError(() => Effect.sync(() => context.removing = false)))
-  // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
-  // a budget of its own (`Model.remove`); they end with the connection at the latest
-  state.buffer.start(Effect.gen(function*() {
-    yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
-    state.contexts.delete(id)
-    state.contextsByCdp.delete(browserContextId)
-    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  yield* contextLock(context).withPermits(1)(Effect.gen(function*() {
+    // A successful disposal is final even while page-session shutdown is still pending.
+    if (context.disposed) return
+    context.removing = true
+    const inContext = [...state.pages.values()].filter((page) => page.context === context)
+    yield* Kit.protocol(
+      Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
+        Protocol.on(state.root())
+      )
+    ).pipe(Effect.onExit((exit) =>
+      Effect.sync(() => {
+        if (Exit.isFailure(exit)) context.removing = false
+      })
+    ))
+    context.disposed = true
+    context.requestSizes?.clear()
+    // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
+    // a budget of its own (`Model.remove`); they end with the connection at the latest
+    state.buffer.start(Effect.gen(function*() {
+      yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
+      context.proxy = undefined
+      state.contexts.delete(id)
+      state.contextsByCdp.delete(browserContextId)
+      yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+    }))
   }))
 })
 

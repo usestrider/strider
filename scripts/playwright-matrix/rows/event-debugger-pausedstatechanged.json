@@ -1,0 +1,11 @@
+{
+  "id": "event-debugger-pausedstatechanged",
+  "upstream": [
+    "event:Debugger.pausedStateChanged"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public debugger controller or breakpoint API.",
+  "capabilities": [],
+  "requirements": []
+}

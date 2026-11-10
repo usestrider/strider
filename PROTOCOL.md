@@ -94,7 +94,7 @@ interface ErrorMatcher {
   Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
   keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
   is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
-- **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still routed to their owner for adoption or cleanup.
+- **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still passed to the late-reply handler, which releases them by default.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.
 - **Errors are classified once, at this boundary,** by a per-backend table of `ErrorMatcher`s. The result is always one of the tags above; the tables never add tags.
@@ -134,8 +134,8 @@ interface ErrorMatcher {
 
 - **Timeouts.** A command waits for its reply for at most `Protocol.CommandTimeout`, a `Context.Reference` that is 30 seconds unless set (the same as L2's default budget), and then fails with a new reason, `NoReply`. `Protocol.withCommandTimeout` sets it for an effect, and `Duration.infinity` turns it off. Inside an L1 operation, the operation's deadline replaces it: each command the operation sends waits for its reply until that instant, and one that passes it is the operation's `Timeout` (`src/internal/boundedAdapter.ts`). It runs on the live clock, as the browser does, so `TestClock` never moves it.
 - **Late replies.** A command whose `createsResource` trait is set keeps its pending entry when its caller is interrupted or times out, and a reply that arrives but wasn't consumed counts as late too. The reply goes to the handler in `Protocol.CurrentLateReplyHandler`, read from the caller's context when it sent the command, and runs in a fiber of the connection's. A `LateReply` carries the session, the method, the parameters, the raw result and `release`.
-  - `release` sends the command's release commands, which a new overlay trait names. Each takes one parameter from the result by JSON pointer, where `*` stands for every element of a list: `createTarget` → `closeTarget`, `createBrowserContext` → `disposeBrowserContext`, `attachToTarget` → `detachFromTarget`, `addScriptToEvaluateOnNewDocument` → `removeScriptToEvaluateOnNewDocument`, the remote objects in `evaluate`, `callFunctionOn`, `getProperties`, `compileScript` and `resolveNode` → `releaseObject`, and the streams of `takeResponseBodyAsStream` and `printToPDF` → `IO.close`. Code generation checks that each release names a command, one of its parameters, and a path through the result, so a roll that moves one fails the build.
-  - The default handler releases. L1 will set one that adopts the resource into its owner, or releases it. `createIsolatedWorld` has no release command; its world lasts as long as its document.
+  - `release` sends the command's release commands, which a new overlay trait names. Each takes a resource parameter from the result by JSON pointer, with optional additional parameter pointers from the same reply (BiDi script handles need the reply realm for `script.disown`), where `*` stands for every element of a list: `createTarget` → `closeTarget`, `createBrowserContext` → `disposeBrowserContext`, `attachToTarget` → `detachFromTarget`, `addScriptToEvaluateOnNewDocument` → `removeScriptToEvaluateOnNewDocument`, the remote objects in `evaluate`, `callFunctionOn`, `getProperties`, `compileScript` and `resolveNode` → `releaseObject`, and the streams of `takeResponseBodyAsStream` and `printToPDF` → `IO.close`. Code generation checks that each release names a command, one of its parameters, and a path through the result, so a path absent from every alternative fails the build. Union paths are checked independently: this does not prove that the resource and additional parameters coexist in each alternative. Additional parameter pointers must be singular, contain no wildcard, and neither overlap each other nor the resource parameter. A release with a missing additional value is skipped; in particular, a malformed BiDi reply with a handle but no realm cannot be safely disowned and may retain that handle until realm teardown. Release parameter construction runs in the handler fiber, so a malformed hand-written definition cannot stop the reply reader.
+  - The default handler releases, and L1 uses that policy: a caller that stopped waiting cannot take ownership of a late resource. L0 callers can override the handler. `createIsolatedWorld` has no release command; its world lasts as long as its document.
 - **Validation.** `Protocol.CurrentValidation` is `"decode"` unless set; `"trust"` skips codecs that only check, and still runs those that transform, such as a sensitive member becoming `Redacted`, so trust never leaks a secret as a plain string. Whether a codec only checks is read from its schema AST once and cached. Encoding always runs.
 - **Tests:** 23 against a scripted browser now, 10 more for the pipeline with a fold, and the 7 against Chromium.
 - **Not built yet:** the backend adapter, which came next (Backend adapters, below).
@@ -172,7 +172,7 @@ interface Traits {                               // spec facts plus overlay anno
   readonly status: "stable" | "experimental" | "deprecated"
   readonly sensitive?: true                      // decodes as Redacted
   readonly compensation?: CompensationKind
-  readonly createsResource?: true                // late replies route to an owner for adoption
+  readonly createsResource?: true                // late replies go to the handler; the default releases
   readonly session?: "browser" | "target"
 }
 ```
@@ -272,7 +272,7 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 ```
 
 1. **Dispatcher.** It assigns a local receive sequence, routes replies to pending records, and routes events to their session's fold. Reply delivery never waits for consumers or enrichment.
-2. **Fold.** It decodes required events and updates authoritative state *before* publishing. It never awaits commands, user code or enrichment. Cross-session rules use identity and generations, never wire order.
+2. **Fold.** It decodes required events and updates authoritative state *before* publishing. It never awaits commands, user code or enrichment. Cross-session rules use identity and generations, never wire order. Optional per-method session scopes keep opt-in events out of unrelated sessions: an event outside its scope is dropped before queue accounting when it has no explicit protocol subscriber, and the scope is checked again before fold decoding. Explicit subscribers still receive their requested raw event and decode it in their own fiber. Chromium chunk accounting uses the owning live page-attributed session's context opt-in, never a browser-wide switch.
 3. **Integrity.** A required event that won't decode, or a full core queue, marks the session `ModelUnavailable` and wakes its waiters. The session resumes only after a backend snapshot is reconciled with the buffered events; if that isn't possible, the session ends. Envelope corruption ends the connection.
 4. **Buffering.** Core queues have item and byte limits, and hitting one is an integrity failure, never a silent drop. Subscribers have their own bounded buffers: lossless consumers fail with `EventOverflow`, sliding consumers get a gap marker. Traffic excluded by a declarative prefilter never consumes a subscriber's buffer. Terminal signals never need free buffer space.
 5. **Enrichment** (cookies for a paused request, node descriptions) is lazy or published separately with correlation ids. It never delays obligations or the fold.
@@ -282,14 +282,16 @@ transport ─► dispatcher ─► per-session ordered fold ─► publisher ─
 **Built** (2026-10-20), in the client every backend shares (`src/internal/protocolClient.ts`, with its worker in `ingestion.ts` and its subscriber buffers in `subscriberBuffer.ts`):
 
 - **Dispatcher and worker.** The reader numbers every message it receives, replies included, resolves replies, applies the session lifecycle, and queues events. One worker per connection takes them in that order: it decodes and folds the events the fold names, then publishes to subscribers. One worker rather than one per session, because decoding is synchronous work on one thread either way, and per-session order follows from the global order.
-- **The fold** is a backend adapter's, given when the client is made: the events it needs, `apply`, `lost`, `resync` and `ended`. Every hook runs in the worker and must not wait. `CdpConnection` has none, so its worker only publishes. A fold that fails is a bug, and ends the connection with that description rather than leaving everything waiting on a worker that's gone.
+- **The fold** is a backend adapter's, given when the client is made: the events it needs, `apply`, `lost`, `resync` and `ended`. State-changing hooks run in the worker and must not wait. Optional `eventScopes` predicates are read-only: they run synchronously on the reader before queueing and again in the worker before parameter decoding. `CdpConnection` has none, so its worker only publishes. A fold that fails is a bug, and ends the connection with that description rather than leaving everything waiting on a worker that's gone.
 - **Integrity.** A session may have 10,000 events or 256 MiB (UTF-8 bytes of message text) queued for the worker. Going past either discards everything it has queued; a folded event that won't decode is skipped. Either way the fold's `lost` wakes the model's waiters, and its `resync` rebuilds the model in a fiber of its own and returns the receive sequence its snapshot accounts for. Events that arrive meanwhile are published, and held, within the same limits; once the snapshot is in, those after its sequence number are folded on top. A resync that fails, or that is overrun, ends the session with a new `SessionEnded` reason, `modelUnavailable`. Without a fold, an overrun only discards.
+- **Initialization syncs** may select events their snapshot does not represent to fold immediately. CDP paused pages use this for Network events, navigation starts and Fetch pause/auth decisions: the first response can be needed before the renderer exists to answer the frame snapshot. These events are published once and never replayed; frame and realm events remain buffered behind the snapshot. Drains wait for both paths. Resync after integrity loss does not select live events.
 - **Subscriber buffers** are bounded. `{ lossless: n }` (default 10,000) fails with a new reason, `EventOverflow`, after delivering what it kept; `{ sliding: n }` drops its oldest event and leaves a `Protocol.Gap` with the count where it was, so a sliding stream is typed `Stream<A | Gap>`. Events discarded upstream count against both. Gaps and terminal signals take no space.
 - **Prefilters** are a typed deep-partial of the event's parameters (`{ frame: { id } }`), matched against the raw parameters before buffering, so excluded events take no space and no user code runs on the worker.
 - **Live means from now.** A subscription sees only events received after `subscribe` returns, even ones the worker hasn't published yet.
 - **Ends in order.** A session that ends fails its pending commands at once, but its subscriptions end with `SessionEnded` only after the events received before the end; the fold hears of the end first, then subscribers, then `ended`.
 - **`drainObserved`** is on every `ProtocolSession`: it waits until every event the session received before the call has been folded and published. Combine sessions with `Effect.all`.
 - **`sendSequenced`**, on the internal session, returns a reply's receive sequence alongside its result, so a resync can say which events its snapshot covers.
+- **`start`**, on the internal session, writes a command and returns the separate sequenced reply wait. Its scope abandons an unconsumed reply. CDP uses it to write initialization commands in order before resuming a paused page, without waiting for renderer replies.
 - **Not built yet:** enrichment (step 5), which belongs to the adapter.
 
 ## Backend adapters
@@ -311,14 +313,27 @@ interface AdapterConnection {
 }
 ```
 
+Element geometry is a readonly adapter request naming a node binding and returning its coordinate document.
+Targets use their browser `getBoundingClientRect`, not reconstructed corners. Frame mapping composes that
+rect into the top-level viewport. CDP native frame box-model points can already include same-process frame
+transforms; an out-of-process session has its own root viewport. The adapter restores root CSS units using
+the child/root device-pixel-ratio ratio. Stock WebKit converts renderer-local frame points to document
+coordinates, normalizing CSS zoom, device-pixel-snapped borders and scroll, and validating against native bounds.
+Only the remaining frame boundaries are mapped. BiDi uses frame rect scale/origin for positive axis-aligned
+scaling and translation. Flat-tree ancestor inspection, including native serialization of closed roots, rejects
+ambiguous orientation: rotation, skew, reflection, 3D, perspective and frame motion paths are typed Unsupported
+on stock Firefox. It does not solve layout positions, recover hidden corners or reproduce CSS grouping rules.
+Top-level target rects retain the browser's own camera clipping and motion-path behavior. No preferences are
+changed or required. Geometry scripts run only for this read, outside the ordinary query engine.
+
 Adapter responsibilities:
 
 - **Correlation.** Keep L1 ids stable across protocol churn:
-  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), and prerender activation, where the main frame is re-keyed.
+  - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), while prerender activation and its document/realm transfer are not implemented.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
   - BiDi: route events to sessions client-side, because the wire carries no subscription id.
 - **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
-  - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. Configure while paused (frame-tree snapshot, events buffered until the tree is known, required declarations), then `runIfWaitingForDebugger`, always run in a finalizer.
+  - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. For paused pages, write domain enablement, the frame snapshot, Runtime replay, recursive attachment and required declarations before `runIfWaitingForDebugger`, then collect their replies. Network events, navigation starts and Fetch decisions run during this initial sync so a first routed request can produce the renderer; frame and realm events wait for the snapshot. Resume also runs on failure, without a second resume after success. Iframe targets and unpaused pages retain snapshot-first initialization.
   - **WebKit:** `Target.resume`.
   - **BiDi:** native scoped declarations.
 
@@ -343,6 +358,37 @@ Adapter responsibilities:
   - Overrides take the most specific scope (page, then context, then browser), then the most recent, and releasing one in any order recomputes the effective value and applies it, or resets it.
   - Init scripts form one bundle per world, environment phase first, broader scopes first, each script in its own `try`.
   - Intercepts are the union of patterns per phase; `Fetch` is never disabled while a request is paused.
+- **Script WebSocket routing** adds private transport metadata to an environment init script only in the
+  requesting context. CDP installs Runtime bindings and realm-event subscriptions only on covered targets.
+  Contexts share ordinary gate methods by prototype; opting in replaces only that context’s gate methods.
+  Native targets reuse a cached dispatch context with a shared ordinary table. Popup-replay deduplication is
+  installed only on opted-in target tables; ordinary context events perform no replay lookup.
+  Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings and preloads
+  before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
+  binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Shared BiDi preload reconciliation is serialized: it reads the current registry under that serialization,
+  installs replacements before retiring predecessors, and rolls back staged additions on failure. Native preload
+  IDs retain their declaration owner, so failed replacement preserves old survivors without retaining a removed
+  declaration. Unconfirmed native removals remain owned for later cleanup.
+  Stock WebKit captures console.debug and sends a fresh object per envelope, carrying an exact marker and
+  payload. Its target-local classifier consumes those objects before ordinary console publication, derives the
+  realm from injectedScriptId, and releases every consumed remote object after extraction. Ordinary string and
+  object console messages are unchanged. Native WebKit events reuse a prebound dispatch context: ordinary
+  targets use the shared handler table, and only opted-in targets/page proxies/workers use a private handler/state
+  view. Realm removal reaches that view through the existing fact buffer. No ordinary console/realm event probes
+  WebSocket fields or a bridge WeakMap. Last release restores the shared dispatch. No polling supplies the bridge. Required context timing is refused
+  before installation on stock WebKit and attached Chromium. Firefox refuses dedicated-worker preloads; shared
+  and service workers are outside this feature. None of these protocols offers native message interception.
+  Native proxy error and close notifications wait on the existing server-message completion acknowledgements,
+  not only on local encoding. A captured sequence watermark covers every earlier pending message, including
+  deliberate drops; only one native error and close may wait, in native order. Removal/drain cancels those waits
+  independently of conversion chains. Native close metadata is copied unchanged and emitted once with native
+  provenance; the page close does not add a duplicate synthetic observation.
+  Accepted payloads carry a separate idempotent discard even before extraction starts. Fetch and discard waits
+  use the captured route budget on the browser clock; a stalled fetch faults its realm, releases its payload and
+  allows the serial consumer to proceed to other realms. A BiDi call rejected for a missing target realm retires
+  that exact realm through the fact buffer; routing uses its ended lifetime to reclaim leases without reporting
+  ordinary destruction as a user-handler failure.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
   - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
   - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;
@@ -389,7 +435,7 @@ Adapter responsibilities:
   - the on-demand realm strategy (no `Runtime.enable`);
   - merging `ExtraInfo` headers into request snapshots (`servedBy` is built since: Who served a response, below);
   - enrichment;
-  - a test of prerender activation, which headless Chromium 155 doesn't produce; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
+  - prerender activation and document/realm transfer, which current adapters do not implement; back/forward-cache restores, which it didn't in the first probe, it does between plain pages, and are built and tested since (History and restores, below).
 
 **Built for BiDi** (2026-10-20), for Firefox and any BiDi endpoint (`src/internal/bidiAdapter.ts`, `src/internal/bidiWire.ts`, `src/internal/firefoxLauncher.ts`, and the public `BidiConnection`):
 
@@ -454,7 +500,7 @@ Adapter responsibilities:
 
 - **CDP's `ExtraInfo` headers**, the ones the network stack adds, such as cookies. They change a request after it is reported, so they need a fact that updates it, a change to the fact contract not designed yet. (`servedBy` is on the response instead, and built: Who served a response, below.)
 - **Enrichment and the domain `RcMap`** wait for what consumes them in L1, and the on-demand realm strategy for a measured need.
-- **A test of prerender activation**, which headless Chromium doesn't produce. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
+- **Prerender activation and document/realm transfer**, which current adapters do not implement. (The library never downloads a browser, Chrome for Testing included: Launches name their browser, below.)
 - **The rest of the CLI.** `strider browsers` is built; the session commands of CLI.md aren't.
 - **The attach-only stock WebKit profile** (Built for WebKit, above). Its endpoint is available after all: nixpkgs has WebKitGTK 2.54 and WPE (cog), whose remote inspector an environment variable turns on. What it needs is stock WebKit's own protocol, vendored as a backend of its own, a wire for it, and a smaller adapter. (Since built: Stock WebKit, attached, below, with the patched adapter's profile and a transport rather than a wire and an adapter of its own; WPE wasn't in the pinned nixpkgs after all.)
 
@@ -716,7 +762,7 @@ Adapter responsibilities:
 - **Responses** (`NetworkResponse`; every adapter). `statusText` and `httpVersion`: CDP's `statusText` and `protocol`, BiDi's likewise, WebKit's `statusText`, and its protocol from `loadingFinished.metrics`, which the `RequestFinished` fact now carries, since WebKit says it only as the response ends (Q166): `httpVersion` is `None` there, and a HAR takes it from the end. A route's paused response has the status text CDP gives it. A hop's end now records when it was reported.
 - **The headers sent** (`HopHeaders`; the CDP adapter, the model). Chromium leaves `Cookie`, `Set-Cookie` and the other headers the network adds out of `requestWillBeSent` and `responseReceived`; the adapter subscribes to their `ExtraInfo` events and reports each as the hop's own headers, an early one held until its request is sent (Q158). The model keeps them on the hop, beside the response, for recordings; the event modules keep the headers the main events give.
 - **Ids** (`Adapter.makeIds`). The counters are the process's, so no two connections mint the same id (Q162).
-- **HAR** (`src/internal/har.ts`, `recordings.ts`; `Har.record`). A recording subscribes to the target's requests with no bound (`Events.recorded`) in a child scope of the caller's, which `remove` closes; each request is an entry with the model's hop (`Model.hop`), followed until the hop ends, and then, unless `content` is `omit`, its body is read through the adapter. Bodies are collected for the target first, as BiDi needs. An export waits for the bodies of the hops that ended, and for the hops in flight only under `inFlightAtStop: "wait"` (Q161). Entries are HAR 1.2 with Playwright's extensions: the library's timings (Q163), the headers sent where the backend reports them apart, cookies parsed from `Cookie` and `Set-Cookie`, `redirectURL` from `Location`, the body embedded as text or base64 or named by `_file`, and `_webSocketMessages` from the target's WebSocket connections, on the latest handshake to their URL. Cookie values, `Authorization`, `Proxy-Authorization` and a URL's credentials are `REDACTED` unless included. `minimal` drops headers, cookies, timings and pages. `content: "attach"` zips `har.har` with the bodies (`effect/encoding`'s `Zip`); files are written with Effect's `FileSystem`, a relative path resolved with its `Path`, and nothing is created on the way.
+- **HAR** (`src/internal/har.ts`, `recordings.ts`; `Har.record`). A recording subscribes to the target's requests with no bound (`Events.recorded`) in a child scope of the caller's, which `remove` closes; each request is an entry with the model's hop (`Model.hop`), followed until the hop ends, and then, unless `content` is `omit`, its body is read through the adapter. Bodies are collected for the target first, as BiDi needs. An export waits for the bodies of the hops that ended, and for the hops in flight only under `inFlightAtStop: "wait"` (Q161). Entries are HAR 1.2 with Playwright's extensions: the library's timings (Q163), the headers sent where the backend reports them apart, cookies parsed from `Cookie` and `Set-Cookie`, `redirectURL` from `Location`, the body embedded as text or base64 or named by `_file`, and `_webSocketMessages` from the target's WebSocket connections, on the latest handshake to their URL. Cookie values, `Authorization`, `Proxy-Authorization` and a URL's credentials are `REDACTED` unless included. `minimal` drops headers, cookies, timings and pages. `content: "attach"` zips `har.har` with the bodies (`effect/encoding`'s `Zip`); files are written with Effect's `FileSystem`, a relative path resolved with its `Path`, and the directories on the way are created.
 - **Trace** (`src/internal/trace.ts`, `recorders.ts`; `Trace.record`). A recording registers with the span helper, which reports each operation whose ids it covers, with the span it runs in, and runs the recording's end before the caller sees the result. An operation is a step under its parent's: a recorded operation's, or a span of the caller's, which becomes a step spanning the operations recorded inside it (Q165). In-page expectations' spans now name their page. Console messages and uncaught exceptions are recorded from the target's channels; `screenshots: "perAction"` takes a PNG after each action and navigation; `screencast` acquires `Capability.Screencast` for each page of the target as it appears, or polls JPEG screenshots; `network` runs a HAR recording beside it. `exportTrace` writes a zip of `trace.trace` (`context-options`, then `before` and `after` per step, `screenshot`, `screencast-frame`, `console` and `pageError` events, in time order), `trace.network` (`resource-snapshot` lines) and the files they name, with times in milliseconds on the library's clock and URL params redacted under the preset in force at export.
 - **Settled while building.**
   - **`httpVersion` is an `Option`,** `None` on WebKit (Q166).
@@ -857,7 +903,7 @@ Adapter responsibilities:
 **Built** (2026-10-26): traces.
 
 - **DOM snapshots** (`Trace.Options.domSnapshots`; `internal/capture.ts`, `trace.ts`; research/playwright-trace-snapshots.md). The capture is a self-contained function installed beside the engine in each document's utility world under its own symbol, with four members: `frames` (the document's iframes whose frame isn't known yet, by value, so each has a node binding the adapter's `contentFrame` names), `mark` (each iframe and its frame's id, written as its `src`), `target` (the action's element and whether its value is a secret) and `capture`. Each recording's captures in a document are one stream, so references stay within it; a frame whose capture fails is left out and its next capture made with no references. The recorder captures every current document of the action's page, a page with a prompt open aside, before and after each action and navigation (`Recorders.begin` now runs before the operation, and is an `Effect`); a locator's actions provide their steps and whether their value is `Redacted` (`Recorders.CurrentSubject`), which resolve the target before the action and, if it wasn't there yet, after. The export writes `frame-snapshot` events with the action's `callId` and `phase`, each changed linked stylesheet once, by its text's SHA-1, as `resources/<sha1>.css`, and secret values redacted under the strict preset.
-- **Video** (`Capability.Video`; `Adapter.video`; the capability entry `capability.video`). The BiDi adapter starts `browsingContext.startScreencast` with the context's downloads directory as `destinationFolder`, stops it as the scope closes, and gives the path `stopScreencast` answers; an attached Firefox and a context without a downloads directory are refused. A trace's native screencast records it on Firefox, and the export stops it once, reads the file through the layer's `FileSystem` and adds a `video` event, its size read from the WebM's `PixelWidth` and `PixelHeight`.
+- **Video** (`Capability.Video`; `Adapter.video`; the capability entry `capability.video`). The BiDi adapter starts `browsingContext.startScreencast` with the context's downloads directory as `destinationFolder`, stops it as the scope closes, and gives the path `stopScreencast` answers; an attached Firefox and a context without a downloads directory are refused. Chromium reads the optional `VideoWriter` service when connecting, advertises video when it is present, and otherwise names the missing service in its unsupported limitation. It uses the session-owned screencast source, acknowledges only when the writer takes an image, and anchors each native stream's first browser timestamp to local monotonic receipt time, maps subsequent browser timestamp differences relative to recording start while capping each mapped time at receipt, uses receipt time for missing timestamps without changing the anchor, clamps a cached initial frame to zero and backward times to the preceding frame time, and appends the last image at stop time. The cap bounds forward clock jumps and can shorten intervals when delivery latency decreases; backward jumps can flatten frames until source time catches up. Strider fixes the initial output dimensions in `VideoWriter.Destination`; every writer must output each frame at exactly those dimensions, scaling to fit, centring and padding unused space with black. Pixel fitting belongs to the writer, whose codec can perform it; Strider owns timestamps, acknowledgements and lifetimes. The ffmpeg layer consumes timestamped Matroska JPEG or PNG through stdin with millisecond precision and timestamp passthrough, writes VP8 WebM to the context's downloads directory, and requires an explicitly named absolute executable path and `ChildProcessSpawner`. Scope closure or normal source termination stops consumption, ends input, and waits up to five seconds on the browser clock for a started writer. An empty recording fails promptly without starting a writer. Source failures retain their original errors; writer failures and unfinished files become `BackendFailure`. A trace's native screencast selects video when supported, and the export stops it once, reads the file through the layer's `FileSystem` and adds a `video` event, its size read from the WebM's `PixelWidth` and `PixelHeight`.
 - **The contract's check** (`strider-codegen trace-contract <playwright checkout>`; `packages/tools/codegen/trace-contract.json`). The four Playwright files the capture's contract was read from, at v1.64.1, by SHA-256.
 - **Settled while building.**
   - **The capture runs in the engine's world,** an isolated world of the library's, beside the engine, whose element lookups it uses for the target, rather than the caller's.
@@ -867,7 +913,7 @@ Adapter responsibilities:
   - **Snapshots are `before` and `after`,** not also `action`.
 - **Checked in the viewer.** A trace from the test below was opened in trace.playwright.dev by a CLI session, which read the rendered snapshot through a frame locator (research/playwright-trace-snapshots.md, Checked in the viewer).
 - **Also.** CDP's `capability.axTree` entry no longer says "the main frame's document", which iframes in the accessibility tree made untrue (Pages, above).
-- **Tests.** `recordings.ts` records a page with a `<style>`, an adopted sheet, an open shadow root, an iframe, a filled input and a `Redacted` password, then clicks, and expands every reference as the viewer does: the button before and after the click, the target, the values and the redaction under each preset, the shadow root, the sheets, and the iframe's own snapshot; on Firefox, a native screencast is a WebM video. `tooling.ts` records a video on Firefox, and expects `Unsupported` elsewhere. Integration tests: 508, all passing in one full run, a file at a time.
+- **Tests.** `recordings.ts` records a page with a `<style>`, an adopted sheet, an open shadow root, an iframe, a filled input and a `Redacted` password, then clicks, and expands every reference as the viewer does: the button before and after the click, the target, the values and the redaction under each preset, the shadow root, the sheets, and the iframe's own snapshot; on Firefox, a native screencast is a WebM video. `tooling.ts` reads the capability table before recording or checking `Unsupported`. `ChromiumVideo.test.ts` decodes a real WebM, checks variable-rate frame times and still duration through idle periods, checks padding after resize and odd output dimensions, accepts PNG input, verifies native trace video events, and measures shared-stream acknowledgement backpressure while renderer timers continue. Integration tests: 508, all passing in one full run, a file at a time.
 
 **Built** (2026-10-26): stock WebKit, attached.
 
@@ -939,7 +985,7 @@ Adapter responsibilities:
 - **What the suites found, built** (`webkitAdapter.ts`, launched profile, unless said):
   - an override stock WebKit can't apply is refused under its capability, never ignored: a mobile or scaled viewport, the locale, the time zone, the user agent, and when attached, every one; a declared viewport's window is restored when it's released; downloads are refused under `downloads`;
   - the error page after a failed load is the failed navigation's document (`ErrorPage`), as Chromium's is (Q1, Q199);
-  - a frame locator's frame, found through Automation and matched by its document (Q228), so frames work, a file input's in a frame too;
+  - a frame locator's frame, found through Automation and confirmed by a temporary window mark (QUIRKS.md, Q228), so frames work, a file input's in a frame too. Every newly established child-frame pairing in either direction uses the mark; time-origin/URL fingerprints neither prove identity nor exclude candidates, and a failed confirmation does not stop the search. Established handle caching is retained. Confirmation rejects a removed frame or a document replaced during the check or cleanup, and removes the mark even after a failed or interrupted check. This adds protocol commands, and page scripts can briefly see the mark on unique-fingerprint lookups too;
   - one `dispatchInput` is one interaction sequence, so a double click is one, the wheel's state is cumulative, and a newline is Enter (Q223); input that opens a dialog returns once it's decided (Q224);
   - a request's body read as stock WebKit's text, not base64 (Q221);
   - Automation's results that aren't JSON, and its empty frame handle, read as none (Q227);
@@ -1026,7 +1072,17 @@ Adapter responsibilities:
   - **The recordings aren't committed:** they hold the demo sites' own files, Apache-2.0 and MIT, which the repository would redistribute with their notices; the licence work is deferred, so each machine records once.
   - **One demo site, not a list:** The Internet. TodoMVC's demo, the other at first, is hosted by Playwright, so its scenario became The Internet's dynamic controls (2026-10-27).
   - **No `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`,** which `playwright-core` doesn't need.
-- **Tests.** The scenarios are a script a person runs, not tests; `pnpm all` type-checks them. Every outcome read what it should with both libraries.
+- **Tests.** The scenarios are a script a person runs, not tests; `pnpm all` type-checks them. In the 2026-10-27 run, every outcome read what it should with both libraries; this is a historical result, not a guarantee about later runs.
+
+**Updated** (2026-11-05): scenario failure reporting.
+
+- **Initial and timed failures stay visible.** A rejection or unexpected returned text is a failed scenario attempt. The runner logs initial failures with the scenario, library and `initial outcome: failed:`, and timed failures with the scenario, library and repetition number. It retains the initial outcomes separately in the report, continues all scheduled repetitions and later scenarios without extra attempts, and lists every timed failure.
+- **Timing counts are successful/attempted repetitions.** Failed attempts are excluded from statistics; zero successful samples have no timing statistics. A failed initial attempt does not skip timed repetitions. If any scenario attempt fails, the command returns a nonzero status after publishing the report (writing `RESULTS.md`, or printing it for `--only`). This handling covers scenario attempts only: failures in the later waiting-expectation, interceptor or page probe measurements can still abort publication.
+- **The captured full run at `c732173` (2026-11-05) includes failures.** Both libraries failed The Internet's dynamic-controls navigation initially and in all ten timed repetitions because the preserved `the-internet.har` lacks `https://the-internet.herokuapp.com/dynamic_controls`, which replay therefore aborts. These are stale-recording failures, not established library or browser defects. The other nine scenarios passed their initial and ten timed attempts for both libraries. The local HAR recording/replay scenario's success in this run does not resolve its earlier intermittent failure. The dated 2026-10-27 findings above describe that earlier run.
+
+### Native WebAuthn resources
+
+CDP's `WebAuthn` domain is enabled on a page session, not the browser session. `addVirtualAuthenticator` creates a remote resource released by `removeVirtualAuthenticator`; its generated resource traits release late replies. The native environment is keyed by frame-tree node and inherited by descendant frames, not by the browser context or opener. The adapter retains a per-page reservation through failed-acquisition cleanup and scope release, and disables the environment after removing its authenticator. Disable commands run outside the originating operation's command deadline. The `Credential.privateKey` sensitivity annotation wraps decoded keys as `Redacted` and unwraps only when encoding a command for the wire. No virtual WebAuthn command is available on the BiDi transport. Stock WebKit Automation declares credential commands but its implementation refuses credential management, so it does not satisfy the capability.
 
 ### Pause-on-start granularity
 
@@ -1038,7 +1094,7 @@ Before-author-script setup for *new* targets needs them paused at creation. Gran
 | BiDi | not needed: declarations are scoped natively by context or user context (built 2026-10-20) |
 | Stock WebKit | a page's targets after `Target.setPauseOnStart` start paused, the provisional targets of cross-site navigations among them, each resumed on its own (`Target.resume`); workers wait for `Worker.initialized`; new pages and popups aren't (built 2026-10-26) |
 
-The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. A declaration that needs `beforeAuthorScript` on targets the available granularity can't isolate fails with `Unsupported`. Observe-only targets are never paused.
+The capability is `pauseScope: "context" | "related" | "opener" | "browser"`. An init script requiring `beforeAuthorScript` fails with `DeclarationError{TimingUnsupported}` on attached Chromium when its scope covers new pages (browser or user context): popups are not paused at creation. `bestEffort` remains available, and page-scoped scripts retain before-author timing for later documents. Launched Chromium pauses browser targets and Firefox installs native preload scripts, so these scopes support required timing there. Observe-only targets are never paused.
 
 ## Backends and order
 
@@ -1068,7 +1124,7 @@ This is a planning inventory from the research, not a conformance result. `?` me
 | body access | buffered + stream | collectors | collectors | ✓ | ✓ | ✗ |
 | console | ✓ (needs Runtime) | ✓ | ✓ | ✓ | ✓ | ✗ |
 | prompts / file chooser / downloads | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✓/✓/✓ | ✗ (a dialog blocks unreported)/✗/✗; `Unknown`/✗ (file inputs ✓)/✗ (built) | ✓/✗/✗ |
-| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | ✗/✗/✗ | ✗/✗/✗ |
+| screencast / PDF / AX tree | frames/✓/✓ | ✗/✓/✗ | file/✓/✗ | frames/✗/partial | no native stream; explicit PNG-polled video with a writer / ✗ / ✗ | ✗/✗/✗ |
 | evaluation with user activation | ✓ | ✓ (probe 20) | ✓ (probe 20) | ✓ | ? | ? |
 | page time: virtual / injected | ✓/✓ | ✗/✓ | ✗/✓ | ✗/✓ | ✗/? | ✗/? |
 | WebSocket frames | ✓ | ✗ | ✗ | ✓ | ✓ | ✗ |

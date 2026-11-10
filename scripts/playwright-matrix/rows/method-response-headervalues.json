@@ -1,0 +1,23 @@
+{
+  "id": "method-response-headervalues",
+  "upstream": [
+    "method:Response.headerValues"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "NetworkResponse",
+      "url": "/docs/api/browser/NetworkResponse#NetworkResponse"
+    }
+  ],
+  "notes": "Headers are Effect Headers; lookup is through its operations.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkResponse.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

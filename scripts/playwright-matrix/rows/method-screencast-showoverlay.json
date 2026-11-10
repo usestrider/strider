@@ -1,0 +1,20 @@
+{
+  "id": "method-screencast-showoverlay",
+  "upstream": [
+    "method:Screencast.showOverlay"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

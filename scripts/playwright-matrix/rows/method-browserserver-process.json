@@ -1,0 +1,11 @@
+{
+  "id": "method-browserserver-process",
+  "upstream": [
+    "method:BrowserServer.process"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Playwright-compatible browser server or its endpoint/process control API.",
+  "capabilities": [],
+  "requirements": []
+}

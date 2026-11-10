@@ -66,6 +66,8 @@ export type Generation = typeof Generation.Type
 
 /**
  * Schema for what made a node count as interactive when its role doesn't say so.
+ * Password inputs carry `password` evidence on an inferred `editable` role, preserving their accessible
+ * label without inferring a name or exposing their value.
  *
  * @stability unstable
  * @category schemas
@@ -76,7 +78,8 @@ export const InteractivityEvidence = Schema.Literals([
   "cursorPointer",
   "tabindex",
   "contentEditable",
-  "onclickAttribute"
+  "onclickAttribute",
+  "password"
 ])
 
 /**
@@ -122,17 +125,25 @@ export const Role: Schema.Codec<Role> = Schema.Union([
 
 /**
  * Schema for a node's name and where it came from: its accessible name (`Accessible`), one inferred from the page
- * (`Inferred`), which says what it came `from`, or none.
+ * (`Inferred`), which says what it came `from`, or none. Accessible names derived from an editable
+ * element's content carry optional `from: "text"`; explicit labels do not. Optional `fieldContent`, collected for redacted capture only, is true when
+ * the chosen accessible or inferred name contains field content, even when copied from another node.
+ * Ordinary library snapshots and full capture omit this provenance; absence is not evidence that a name is public.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const Name = Schema.Union([
-  Schema.TaggedStruct("Accessible", { value: Schema.String }),
+  Schema.TaggedStruct("Accessible", {
+    value: Schema.String,
+    from: Schema.optional(Schema.Literal("text")),
+    fieldContent: Schema.optional(Schema.Boolean)
+  }),
   Schema.TaggedStruct("Inferred", {
     value: Schema.String,
-    from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"])
+    from: Schema.Literals(["text", "title", "placeholder", "alt", "nearbyLabel"]),
+    fieldContent: Schema.optional(Schema.Boolean)
   }),
   Schema.TaggedStruct("None", {})
 ])
@@ -148,6 +159,15 @@ export type Name = typeof Name.Type
 
 /**
  * Schema for a state a node can be in.
+ *
+ * **Details**
+ *
+ * Pressed, expanded and selected appear only when their role-filter reader returns true.
+ * ARIA keywords are ASCII case-insensitive without trimming; unsupported roles contribute no marker.
+ * Native option selection and details open state take precedence over ARIA attributes.
+ * Open details carries expanded even with its ordinary group role; group expanded filters remain invalid.
+ * Summary expansion is not inferred. These markers describe Strider's query policy rather than browser
+ * accessibility-tree state, which can differ for conflicting native and ARIA values.
  *
  * @stability unstable
  * @category schemas
@@ -172,6 +192,11 @@ export type State = typeof State.Type
  * Where a role or name came from is always visible: `Aria` and `Accessible` come from the accessibility
  * tree. An `Inferred` role carries its `evidence`, and an `Inferred` name says what it came `from`.
  *
+ * Optional `editable` records native or ARIA field kinds and DOM contenteditability independently of role,
+ * including plaintext-only contenteditables. It remains true for disabled and read-only fields. Redacted capture
+ * collects it; ordinary library and full capture omit it. Older snapshot nodes without this property still decode.
+ * Text rendering does not print this signal.
+ *
  * Native controls that participate in constraint validation carry `invalid` and their browser-provided
  * `validationMessage` when invalid. Other nodes carry `None`. Inspection reads current state without
  * triggering validation events or changing focus. Invalidity does not prove a submission was attempted.
@@ -185,6 +210,8 @@ export interface Node {
   readonly role: Role
   readonly name: Name
   readonly states: ReadonlySet<State>
+  /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
+  readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<Node>
 }
@@ -201,6 +228,8 @@ export interface NodeEncoded {
   readonly role: Node["role"]
   readonly name: Node["name"]
   readonly states: Node["states"]
+  /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
+  readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
   readonly children: ReadonlyArray<NodeEncoded>
 }
@@ -217,6 +246,7 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
   role: Role,
   name: Name,
   states: Schema.ReadonlySet(State),
+  editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.Option(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))
 })

@@ -36,10 +36,13 @@ import * as Protocol from "../protocol/Protocol.ts"
 import * as SocketConnector from "../protocol/SocketConnector.ts"
 import * as Transport from "../protocol/Transport.ts"
 import * as Automation from "../webkit-automation-protocol/Automation.ts"
+import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Launch from "./launch.ts"
 import * as Link from "./link.ts"
+import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as Proxy from "./proxy.ts"
 import * as Envelope from "./webkitEnvelope.ts"
 import * as InspectorSocket from "./webkitInspectorSocket.ts"
 import * as WebKitWire from "./webkitWire.ts"
@@ -79,6 +82,7 @@ export interface Settings {
 
 /** What a context's process is started with. */
 export interface ProcessOptions {
+  readonly proxy?: Adapter.ProxyOptions | undefined
   /** The time zone, which a WebKitGTK browser takes at launch (`--time-zone`). */
   readonly timeZone?: string | undefined
   /** Whether the session accepts certificates it can't verify, a capability of the session. */
@@ -182,6 +186,77 @@ const scopeClosed = () => new Transport.ConnectionLost({ initiator: "local", des
 
 // ── The launcher ──────────────────────────────────────────────────────────────────────────────────────────
 
+const startupStages = {
+  spawned: "spawned",
+  listener: "listener verified",
+  connected: "connected",
+  inspector: "inspector established"
+} as const
+
+/** One bounded record per process; each port attempt replaces the preceding attempt's stages. */
+class Startup {
+  readonly began = BrowserClock.now()
+  attempt = 0
+  port: number | undefined
+  pid: number | undefined
+  spawned: number | undefined
+  listener: number | undefined
+  connected: number | undefined
+  inspector: number | undefined
+
+  readonly operation: Operation.Record | undefined
+
+  constructor(operation: Operation.Record | undefined) {
+    this.operation = operation
+  }
+
+  reset(port: number): void {
+    this.attempt++
+    this.port = port
+    this.pid =
+      this.spawned =
+      this.listener =
+      this.connected =
+      this.inspector =
+        undefined
+  }
+
+  /** One observation per completed stage, with immutable attribution even when another port is tried. */
+  mark(stage: keyof typeof startupStages): void {
+    if (this[stage] !== undefined) return
+    const at = this[stage] = BrowserClock.now()
+    this.operation?.observe(
+      `WebKit startup ${startupStages[stage]}: attempt ${this.attempt}, port ${this.port}, PID ${this.pid}, ${
+        ((at - this.began) / 1e6).toFixed(3)
+      }ms`
+    )
+  }
+
+  failure(error: Launch.LaunchError): Launch.LaunchError {
+    const stages = [
+      ["spawned", this.spawned],
+      ["listener verified", this.listener],
+      ["connected", this.connected],
+      ["inspector established", this.inspector]
+    ] as const
+    const reached = stages.flatMap(([name, at]) =>
+      at === undefined ? [] : [`${name} at ${((at - this.began) / 1e6).toFixed(3)}ms`]
+    )
+    const hint = `${error.reason.hint} WebKit startup (port ${this.port ?? "unselected"}, PID ${
+      this.pid ?? "unspawned"
+    }; times since startup): ${reached.length === 0 ? "no stage completed" : reached.join(", ")}.`
+    const reason = error.reason
+    switch (reason._tag) {
+      case "ConnectionFailed":
+        return new Browser.BrowserError({ ...error, reason: new Browser.ConnectionFailed({ ...reason, hint }) })
+      case "ProcessExited":
+        return new Browser.BrowserError({ ...error, reason: new Browser.ProcessExited({ ...reason, hint }) })
+      default:
+        return error
+    }
+  }
+}
+
 /**
  * Starts one browser in automation mode, on a port nothing listens on, tried until the browser starts its server
  * there: one that's taken, it says so on stderr, and keeps running without it (QUIRKS.md, Q216).
@@ -190,7 +265,8 @@ const spawnProcess = Effect.fnUntraced(function*(
   settings: Settings,
   index: number,
   options: ProcessOptions,
-  deadline: MonotonicInstant.MonotonicInstant
+  deadline: MonotonicInstant.MonotonicInstant,
+  startup: Startup
 ) {
   if (process.platform !== "linux") {
     return yield* Launch.refused(
@@ -216,17 +292,30 @@ const spawnProcess = Effect.fnUntraced(function*(
   ]
   const attempt = Effect.gen(function*() {
     const port = yield* Random.nextIntBetween(portRange[0], portRange[1])
+    startup.reset(port)
     const own = yield* Scope.fork(scope)
     return yield* Effect.gen(function*() {
       const launched = yield* Launch.spawn(path, args, directory, {
         coreDumps: settings.coreDumps,
         env: {
           WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
+          ...(options.proxy === undefined ? {} : {
+            http_proxy: `http://${options.proxy.server}`,
+            https_proxy: `http://${options.proxy.server}`,
+            HTTP_PROXY: `http://${options.proxy.server}`,
+            HTTPS_PROXY: `http://${options.proxy.server}`,
+            all_proxy: "",
+            ALL_PROXY: "",
+            no_proxy: [...Proxy.loopback, ...options.proxy.bypass].join(","),
+            NO_PROXY: [...Proxy.loopback, ...options.proxy.bypass].join(",")
+          }),
           XDG_DATA_HOME: `${directory}/data`,
           XDG_CACHE_HOME: `${directory}/cache`,
           XDG_CONFIG_HOME: `${directory}/config`
         }
       }).pipe(Scope.provide(own))
+      startup.pid = Number(launched.handle.pid)
+      startup.mark("spawned")
       let unavailable: string | undefined
       const listener = inspectorListener(Number(launched.handle.pid), port).pipe(
         Effect.tapError((error) =>
@@ -242,9 +331,11 @@ const spawnProcess = Effect.fnUntraced(function*(
         Effect.gen(function*() {
           const inode = yield* listener
           if (inode === undefined) return yield* Effect.fail(new ListenerPending())
+          startup.mark("listener")
           const connecting = yield* Scope.fork(own)
           return yield* Effect.gen(function*() {
             const connection = yield* connector.connect({ host: "127.0.0.1", port }).pipe(Scope.provide(connecting))
+            startup.mark("connected")
             const after = yield* listener
             if (after === undefined) {
               unavailable =
@@ -339,25 +430,28 @@ const startProcess = Effect.fnUntraced(function*(
   key: string,
   index: number,
   options: ProcessOptions,
-  pages: Envelope.Endpoint
+  pages: Envelope.Endpoint,
+  startup: Startup
 ) {
   // One deadline for the process to start, on the live clock: a starved machine's browser is slow at each step
   const timeout = Duration.fromInputUnsafe(settings.timeout ?? "30 seconds")
   const deadline = (BrowserClock.now() + Duration.toMillis(timeout) * 1e6) as MonotonicInstant.MonotonicInstant
   const within = `within ${Duration.format(timeout)}`
+  const { connection, launched } = yield* spawnProcess(settings, index, options, deadline, startup)
+  const socket = yield* InspectorSocket.connect(connection)
+  startup.mark("inspector")
+  const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
+  const automationReady = yield* Deferred.make<bigint>()
+  const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
+  const ended = yield* Deferred.make<Transport.ConnectionLost>()
   const waitFor = <A>(deferred: Deferred.Deferred<A>, never: string) =>
     Deferred.await(deferred).pipe(
+      Effect.raceFirst(Deferred.await(ended).pipe(Effect.flatMap((reason) => Launch.refused(reason.description)))),
       byDeadline(deadline),
       Effect.flatMap((value) =>
         Option.isSome(value) ? Effect.succeed(value.value) : Launch.refused(`${never} ${within}`)
       )
     )
-  const { connection, launched } = yield* spawnProcess(settings, index, options, deadline)
-  const socket = yield* InspectorSocket.connect(connection)
-  const started = yield* Deferred.make<{ readonly browserName: string; readonly browserVersion: string }>()
-  const automationReady = yield* Deferred.make<bigint>()
-  const firstList = yield* Deferred.make<ReadonlyArray<InspectorSocket.Target>>()
-  const ended = yield* Deferred.make<Transport.ConnectionLost>()
   const automationLink = yield* Link.make()
   let connectionId = 0n
   let automationTarget: bigint | undefined
@@ -382,6 +476,10 @@ const startProcess = Effect.fnUntraced(function*(
       yield* Deferred.succeed(firstList, pagesListed)
       return
     }
+    // The anchor is open for as long as the process runs, so a list without it isn't the process's pages: stock
+    // WebKit sends one with no targets at all as a context's page opens after another closed. Taken as the pages,
+    // it would end the new one, and the next list would announce it again after its target had already arrived
+    if (anchors.size > 0 && !pagesListed.some((listed) => anchors.has(listed.id))) return
     for (const target of pagesListed) {
       if (announced.has(target.id) || anchors.has(target.id) || initial.has(target.id)) continue
       if (holdNext !== undefined) {
@@ -533,7 +631,9 @@ export const start: (
   const launch = Effect.fnUntraced(function*(options: ProcessOptions, key?: string) {
     const index = next++
     const own = yield* Scope.fork(scope)
-    const started = yield* startProcess(settings, key ?? `context-${index}`, index, options, pages).pipe(
+    const startup = new Startup(Option.getOrUndefined(yield* Operation.current))
+    const started = yield* startProcess(settings, key ?? `context-${index}`, index, options, pages, startup).pipe(
+      Effect.mapError((error) => startup.failure(error)),
       Scope.provide(own),
       Effect.provide(context),
       Effect.onError(() => Scope.close(own, Exit.void))

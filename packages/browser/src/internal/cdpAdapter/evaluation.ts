@@ -4,7 +4,10 @@
  * by `uniqueContextId`. Values come back in WebDriver BiDi's serialization, which CDP produces with
  * `serialization: "deep"`.
  */
+import * as Cause from "effect/Cause"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as DOM from "../../cdp/DOM.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -15,8 +18,12 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as Argument from "../evaluationArgument.ts"
 import * as Groups from "../objectGroups.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
@@ -135,82 +142,88 @@ const toRemoteValue = (
   }
 }
 
-/** An argument by value, as `Runtime.callFunctionOn` takes it. */
-const callValue = (value: Adapter.RemoteValue): Runtime.CallArgument => {
+/** Whether native CDP would lose data inside this value. Top-level undefined has a native argument form. */
+const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean => {
   switch (value.type) {
     case "undefined":
-      return {}
+      return nested
     case "null":
-      return { value: null }
-    case "number":
-      return typeof value.value === "number" ? { value: value.value } : { unserializableValue: value.value }
-    case "bigint":
-      return { unserializableValue: `${value.value}n` }
     case "string":
     case "boolean":
-      return { value: value.value }
+      return false
+    case "number":
+      return typeof value.value !== "number" || !Number.isFinite(value.value) || Object.is(value.value, -0)
+    case "array":
+      return (value.value ?? []).some((item) => requiresDecoder(item, true))
+    case "object":
+      return (value.value ?? []).some(([key, item]) =>
+        typeof key !== "string" || key === "__proto__" || requiresDecoder(item, true)
+      )
     default:
-      return { value: Kit.plain(value) }
+      return true
   }
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Folds a native context; opted-in popup replay uses the same handler after installing its frame tree. */
+export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { state, target }: Event): void => {
+  if (target === undefined) return
+  const context = params.context
+  const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
+  const base = {
+    uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
+    contextId: context.id as number,
+    target,
+    origin: context.origin
+  }
+  if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
+    const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
+    target.realm = realm
+    state.buffer.emit({
+      _tag: "RealmAdded",
+      realm: realm.id,
+      origin: context.origin,
+      kind: {
+        _tag: "Worker",
+        worker: target.kind === "worker"
+          ? { _tag: "Dedicated", owner: Option.none() }
+          : target.kind === "shared_worker"
+          ? { _tag: "Shared" }
+          : { _tag: "Service", scope: Option.none() },
+        url: Urls.reported(target.url),
+        page: Option.fromUndefinedOr(target.page?.id),
+        context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
+      }
+    })
+    return
+  }
+  const frame = frameOf(state, auxData.frameId)
+  const document = frame?.document
+  if (frame === undefined || document === undefined) return
+  const realm = addRealm(state, {
+    ...base,
+    frame,
+    world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
+  })
+  // During a traversal, Chromium creates a restored document's realm before its commit
+  if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
+    realm.pending = true
+    frame.pendingRealms.push(realm)
+    return
+  }
+  document.realms.add(realm)
+  state.buffer.emit({
+    _tag: "RealmAdded",
+    realm: realm.id,
+    origin: context.origin,
+    kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
+  })
+}
+
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
-    .on(Runtime.executionContextCreated, (params, { state, target }) => {
-      if (target === undefined) return
-      const context = params.context
-      const auxData = (context.auxData ?? {}) as { frameId?: string; isDefault?: boolean; type?: string }
-      const base = {
-        uniqueId: context.uniqueId ?? contextKey(target, context.id as number),
-        contextId: context.id as number,
-        target,
-        origin: context.origin
-      }
-      if (target.kind === "worker" || target.kind === "service_worker" || target.kind === "shared_worker") {
-        const realm = addRealm(state, { ...base, frame: undefined, world: { _tag: "Main" } })
-        target.realm = realm
-        state.buffer.emit({
-          _tag: "RealmAdded",
-          realm: realm.id,
-          origin: context.origin,
-          kind: {
-            _tag: "Worker",
-            worker: target.kind === "worker"
-              ? { _tag: "Dedicated", owner: Option.none() }
-              : target.kind === "shared_worker"
-              ? { _tag: "Shared" }
-              : { _tag: "Service", scope: Option.none() },
-            url: Urls.reported(target.url),
-            page: Option.fromUndefinedOr(target.page?.id),
-            context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
-          }
-        })
-        return
-      }
-      const frame = frameOf(state, auxData.frameId)
-      const document = frame?.document
-      if (frame === undefined || document === undefined) return
-      const realm = addRealm(state, {
-        ...base,
-        frame,
-        world: auxData.isDefault === true ? { _tag: "Main" } : { _tag: "Isolated", name: context.name }
-      })
-      // During a traversal, Chromium creates a restored document's realm before its commit
-      if (realm.world._tag === "Main" && [...frame.navigations.values()].some((pending) => pending.traversal)) {
-        realm.pending = true
-        frame.pendingRealms.push(realm)
-        return
-      }
-      document.realms.add(realm)
-      state.buffer.emit({
-        _tag: "RealmAdded",
-        realm: realm.id,
-        origin: context.origin,
-        kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
-      })
-    })
+    .on(Runtime.executionContextCreated, contextCreated)
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)
@@ -318,74 +331,152 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
 export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.RealmId, call: Adapter.EvaluationCall) {
   const realm = yield* realmOf(state, id)
   const on = Protocol.on(realm.target.session)
+  const deadline = yield* ProtocolClient.CommandDeadline
+  const timeout = Option.isSome(deadline)
+    ? Duration.millis(yield* BrowserClock.left(deadline.value))
+    : yield* Protocol.CommandTimeout
+  const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
   const failed = Kit.realmFailure(id, () => realm.ended)
-  // A node crosses into this realm by its binding, from whichever world returned it
+  // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
+  // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()
-  for (const argument of call.arguments) {
-    if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
-    const { object } = yield* DOM.resolveNode({
-      backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
-      executionContextId: realm.contextId as Runtime.ExecutionContextId
-    }).pipe(on, Effect.mapError(failed))
-    if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
-  }
-  const released = Effect.forEach(
-    nodes.values(),
-    (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
-    { discard: true }
-  )
-  const reply = yield* Effect.forEach(call.arguments, (local) =>
-    Kit.argument<Runtime.CallArgument>(local, {
-      ids: state.ids,
-      realm: id,
-      value: callValue,
-      handle: (handle) => {
-        const entry = state.handles.get(handle)
-        return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
-      },
-      node: (node) => {
-        const objectId = nodes.get(node.binding)
-        return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
-      }
-    })).pipe(
-      Effect.flatMap((args) =>
-        Runtime.callFunctionOn({
-          functionDeclaration: call.functionDeclaration,
-          uniqueContextId: realm.uniqueId,
-          arguments: args,
-          awaitPromise: call.awaitPromise,
-          userGesture: call.userActivation,
-          ...(call.group === undefined ? {} : { objectGroup: call.group }),
-          returnByValue: false,
-          serializationOptions: call.result === "value"
-            ? { serialization: "deep", maxDepth: 64 }
-            : { serialization: "idOnly" }
-        }).pipe(on, Effect.mapError(failed))
+  const resultIds = new Set<string>()
+  let cleanup: Fiber.Fiber<void> | undefined
+  const handoff = Effect.suspend(() => {
+    const ids = new Set([...nodes.values(), ...resultIds])
+    // A closing connection owns teardown of its realms; never start unowned work or wait here.
+    if (ids.size === 0 || state.cleanupScope.state._tag === "Closed") return Effect.void
+    const work = Effect.forEach(
+      ids,
+      (objectId) => Runtime.releaseObject({ objectId: objectId as Runtime.RemoteObjectId }).pipe(on, Effect.ignore),
+      { discard: true }
+    ).pipe(
+      Operation.detached,
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logWarning("CDP evaluation object cleanup failed", cause)
       ),
-      Effect.ensuring(released)
+      Effect.interruptible
     )
-  const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
-  const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
-    const serialized = object.deepSerializedValue ??
-      { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
-    if (call.result === "handle" && object.objectId !== undefined) {
-      const handle = state.ids.handle()
-      state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
-      if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-      return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
-    }
-    return toRemoteValue(serialized, documentOf)
-  }
-  if (reply.exceptionDetails !== undefined) {
-    const details = reply.exceptionDetails
-    return {
-      _tag: "Exception",
-      text: details.exception?.description ?? details.text,
-      exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
-      stack: Option.fromUndefinedOr(details.exception?.description)
-    } satisfies Adapter.RemoteResult
-  }
-  return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+    return work.pipe(
+      Effect.forkIn(state.cleanupScope, { startImmediately: true }),
+      Effect.tap((fiber) =>
+        Effect.sync(() => {
+          cleanup = fiber
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      for (const argument of call.arguments) {
+        if (argument._tag !== "Node" || nodes.has(argument.node.binding)) continue
+        const { object } = yield* DOM.resolveNode({
+          backendNodeId: Number(argument.node.binding) as DOM.BackendNodeId,
+          executionContextId: realm.contextId as Runtime.ExecutionContextId
+        }).pipe(on, Effect.mapError(failed), restore)
+        if (object.objectId !== undefined) nodes.set(argument.node.binding, object.objectId)
+      }
+      // Decide from values, never callback source: ordinary engine requests are strings (or have no arguments).
+      const reconstruct = call.arguments.some((local) => local._tag === "Value" && requiresDecoder(local.value))
+      const reply = yield* Effect.forEach(call.arguments, (local) =>
+        Kit.argument<Runtime.CallArgument>(local, {
+          ids: state.ids,
+          realm: id,
+          value: (value) => reconstruct ? { value } : value.type === "undefined" ? {} : { value: Kit.plain(value) },
+          handle: (handle) => {
+            const entry = state.handles.get(handle)
+            return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
+          },
+          node: (node) => {
+            const objectId = nodes.get(node.binding)
+            return objectId === undefined ? undefined : { objectId: objectId as Runtime.RemoteObjectId }
+          }
+        })).pipe(
+          Effect.flatMap((args) =>
+            Runtime.callFunctionOn({
+              functionDeclaration: reconstruct ? Argument.call(call.functionDeclaration) : call.functionDeclaration,
+              uniqueContextId: realm.uniqueId,
+              arguments: reconstruct ?
+                [
+                  { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
+                  ...args
+                ] :
+                args,
+              awaitPromise: call.awaitPromise,
+              userGesture: call.userActivation,
+              ...(call.group === undefined ? {} : { objectGroup: call.group }),
+              returnByValue: false,
+              serializationOptions: call.result === "value"
+                ? { serialization: "deep", maxDepth: 64 }
+                : { serialization: "idOnly" }
+            }).pipe(
+              on,
+              Effect.catch((error) => {
+                const reason = error.reason
+                if (
+                  reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
+                  reason.code !== -32000 || reason.description !== "Inspected target navigated or closed"
+                ) return Effect.fail(error)
+                // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
+                // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
+                // Keep the command's original deadline while those lifecycle events catch up.
+                return state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+                  BrowserClock.until(at),
+                  Effect.flatMap((ended) =>
+                    Effect.fail(
+                      Option.isSome(ended) ? error : new Protocol.ProtocolError({
+                        reason: new Protocol.NoReply({ method: reason.method, timeout })
+                      })
+                    )
+                  )
+                )
+              }),
+              Effect.mapError(failed),
+              restore
+            )
+          )
+        )
+      if (call.result === "value" && call.releaseResult === true) {
+        if (reply.result.objectId !== undefined) resultIds.add(reply.result.objectId)
+        const exception = reply.exceptionDetails?.exception?.objectId
+        if (exception !== undefined) resultIds.add(exception)
+      }
+      const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
+      const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
+        const serialized = object.deepSerializedValue ??
+          { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
+        if (call.result === "handle" && object.objectId !== undefined) {
+          const handle = state.ids.handle()
+          state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
+          if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
+          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+        }
+        return toRemoteValue(serialized, documentOf)
+      }
+      if (reply.exceptionDetails !== undefined) {
+        const details = reply.exceptionDetails
+        return {
+          _tag: "Exception",
+          text: details.exception?.description ?? details.text,
+          exception: details.exception === undefined ? { type: "undefined" } : value(details.exception),
+          stack: Option.fromUndefinedOr(details.exception?.description)
+        } satisfies Adapter.RemoteResult
+      }
+      return { _tag: "Value", value: value(reply.result) } satisfies Adapter.RemoteResult
+    }).pipe(
+      // Ownership transfers while masked; the caller's finalizer never waits for the browser.
+      Effect.ensuring(handoff),
+      Effect.flatMap((result) =>
+        cleanup === undefined
+          ? Effect.succeed(result)
+          : restore(Fiber.await(cleanup)).pipe(Effect.as(result))
+      )
+    )
+  )
 })
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */

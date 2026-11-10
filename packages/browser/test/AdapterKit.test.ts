@@ -8,10 +8,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { Protocol } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Base64 from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
+import { vi } from "vitest"
 import * as Network from "../src/cdp/Network.ts"
 import * as Page from "../src/cdp/Page.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -243,6 +245,63 @@ describe("AdapterKit", () => {
   })
 
   describe("values", () => {
+    it.effect("preserves exact base64 bytes, accepted padding and CR/LF with or without native support", () =>
+      Effect.gen(function*() {
+        const bytes = Uint8Array.from({ length: 1025 }, (_, i) => i % 256)
+        const inputs = ["", "AQ==", "AQI=", "AQID", "AR==", "AQJ=", "\rA\nQI=\r\n", Base64.encode(bytes)]
+        try {
+          for (const native of [true, false]) {
+            if (!native) vi.stubGlobal("Buffer", undefined)
+            for (const input of inputs) {
+              const expected = Base64.decode(input)
+              assert.strictEqual(expected._tag, "Success")
+              if (expected._tag !== "Success") continue
+              const decoded = yield* Kit.decodeBase64(input, "capture")
+              assert.instanceOf(decoded, Uint8Array)
+              assert.strictEqual(Object.getPrototypeOf(decoded), Uint8Array.prototype)
+              assert.deepStrictEqual(decoded, expected.success)
+              assert.deepStrictEqual(Kit.tryDecodeBase64(input), expected.success)
+              assert.deepStrictEqual(yield* Kit.bodyBytes(input, true, "body"), expected.success)
+            }
+          }
+        } finally {
+          vi.unstubAllGlobals()
+        }
+        assert.deepStrictEqual(yield* Kit.bodyBytes("é", false, "body"), new TextEncoder().encode("é"))
+      }))
+
+    it.effect("retains malformed alphabet, padding and whitespace failures including exact error details", () =>
+      Effect.gen(function*() {
+        for (
+          const input of [
+            "A",
+            "AAA",
+            "A===",
+            "====",
+            "AA=A",
+            "=AAA",
+            "A?==",
+            "AA-_",
+            "AA =",
+            "AA\t=",
+            "AAA\u2028",
+            "AAA\u2029",
+            "AAé=",
+            "AA\0=",
+            "\rA?==\n"
+          ]
+        ) {
+          const expected = Base64.decode(input)
+          assert.strictEqual(expected._tag, "Failure")
+          if (expected._tag !== "Failure") continue
+          const error = yield* Kit.decodeBase64(input, "capture").pipe(Effect.flip)
+          const reference = Kit.undecodable("capture", `its base64 didn't decode: ${expected.failure.message}`)
+          assert.deepStrictEqual(error.reason, reference.reason)
+          assert.strictEqual(error.message, reference.message)
+          assert.isUndefined(Kit.tryDecodeBase64(input))
+        }
+      }))
+
     it.effect("fails base64 that doesn't decode, rather than giving empty bytes", () =>
       Effect.gen(function*() {
         assert.deepStrictEqual(yield* Kit.decodeBase64("AQI=", "Page.captureScreenshot"), new Uint8Array([1, 2]))

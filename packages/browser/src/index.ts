@@ -297,4 +297,22 @@ export * as UserContext from "./UserContext.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as VideoWriter from "./VideoWriter.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Watchable from "./Watchable.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as WebAuthn from "./WebAuthn.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as WebSocketRoute from "./WebSocketRoute.ts"

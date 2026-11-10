@@ -11,13 +11,14 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as Events from "../src/internal/events.ts"
 import * as Handles from "../src/internal/handles.ts"
 import * as Toolkit from "../src/internal/toolkit.ts"
+import { ToolFailure } from "../src/internal/tools.ts"
 
 const digest = (session: Toolkit.Session) =>
   session.toolkit.handle("pages", {}).pipe(
     Effect.flatMap(Stream.runLast),
     Effect.map((last) => {
       const result = Option.getOrThrow(last).result
-      if (!("sinceLast" in result)) return assert.fail("pages returned no digest")
+      if (result instanceof ToolFailure || !("sinceLast" in result)) return assert.fail("pages returned no digest")
       return result.sinceLast
     })
   )

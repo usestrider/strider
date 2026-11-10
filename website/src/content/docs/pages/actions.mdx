@@ -17,6 +17,7 @@ import { Effect } from "effect"
 
 const editProfile = Effect.fn("editProfile")(function*(page: Page.Page) {
   yield* page.getByLabel("Name").fill("Ada Lovelace")
+  yield* page.getByLabel("Name").blur()
   yield* page.getByLabel("Country").selectOption({ label: "United Kingdom" })
   yield* page.getByLabel("Send me the newsletter").check()
   yield* page.getByRole("button", { name: "Save" }).click()
@@ -33,31 +34,123 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `click()`, [`dblclick()`](/docs/api/browser/Locator#Locator.dblclick) | moves the pointer to the element, presses and releases                     |
 | [`tap()`](/docs/api/browser/Locator#Locator.tap) | a touch start and end; on WebKit, which has no touch, fails with `Unsupported` |
 | [`hover()`](/docs/api/browser/Locator#Locator.hover) | moves the pointer over the element                                         |
-| `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkbox or radio unless it's already in that state, then confirms the change |
+| `check()`, [`uncheck()`](/docs/api/browser/Locator#Locator.uncheck) | clicks a checkable unless it's already in that state, then confirms the change |
 | `fill(value)`                 | focuses a field, selects its contents and inserts the value; `""` empties it |
+| [`selectText()`](/docs/api/browser/Locator#Locator.selectText) | selects a control value or an element’s contents and attempts to focus it |
 | `clear()`                     | empties a field                                                            |
 | `press(key)`                  | focuses the element and presses a key                                      |
 | `pressSequentially(text)`     | focuses the element and types the text key by key                         |
 | `selectOption(choice)`        | chooses a `<select>`'s option by `value`, `label` or `index`                |
+| [`dispatchEvent(type, options)`](/docs/api/browser/Locator#Locator.dispatchEvent) | dispatches an untrusted DOM event without focus or scrolling |
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
+Select text to inspect a selection or prepare it for the next key without replacing the contents:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const selectName = Effect.fn("selectName")(function*(page: Page.Page) {
+  yield* page.getByLabel("Name").selectText()
+})
+```
+
+Inputs and textareas use native selection of their value; other elements select their contents with a DOM range.
+Labels and their noninteractive descendants select the associated control. Descendants of buttons and button,
+checkbox or radio roles target that interactive ancestor. The action attempts to focus the target; unfocusable
+elements can still have a selection. Number inputs support selection, while inputs without selectable text,
+such as checkboxes, can succeed without selecting text. Strider preserves native browser behavior.
+Selection waits for exactly one visible match under the current [deadline](/docs/deadlines), checking the matched
+element's visibility before label retargeting, without requiring viewport position or checking enabled, editable,
+inert or pointer coverage. Native focus may scroll. The settings below apply: trial preserves focus and selection,
+and the visibility check can be turned off. Focus and selection handlers can change what remains selected.
+
+[`blur()`](/docs/api/browser/Locator#Locator.blur) removes focus without pressing keys or moving the pointer.
+Events follow the browser's native behavior. In stock WebKitGTK's MiniBrowser, when the page doesn't have focus
+(`document.hasFocus()` is false), the element gets `focusout` but no `blur` event.
+It waits for one match, accepts hidden, disabled and inert elements by default, and leaves an unfocused element
+unchanged.
+
+In a design-mode document, filling a paragraph blurs a previously focused input or textarea, including one
+inside open shadow roots, and checks the target again after its blur handlers. If refocusing prevents preparation
+until the deadline, the timeout's history reports the focus preparation. Firefox cannot focus inputs in top-level design-mode documents:
+filling one can insert text into the document body instead. This is a known browser limitation of
+[`fill`](/docs/api/browser/Locator#Locator.fill).
+
 An action sends its input at most once. If it fails after the input may have reached the page, the error's
 [`diagnostics.dispatch`](/docs/errors#diagnostics) says so.
 
+Unchecking a checked native radio fails with `WrongElement` before input, including with
+`uncheck({ trial: true })`. Check another radio in the group instead. An already-unchecked native
+radio is a no-op; page-managed ARIA radios can be unchecked.
+
+A text descendant of a label can check or uncheck its associated checkbox. For
+`<input id="terms" type="checkbox"><label for="terms"><span>Accept terms</span></label>`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const acceptTerms = Effect.fn("acceptTerms")(function*(page: Page.Page) {
+  yield* page.getByText("Accept terms").check()
+  yield* page.getByText("Accept terms").uncheck()
+})
+```
+
+If a label covers its control, targeting the control times out because the label receives the pointer.
+Target the label's text instead, as `getByText("Accept terms").check()` above does; Strider clicks that
+text and checks the associated control's state.
+
+The click stays on the text you selected, and a box already in the right state gets no input. If the text
+sits inside something interactive of its own, such as a link or a button, the action fails with
+`WrongElement` before sending anything. Inside a closed shadow root Strider can't see that control, so the
+click can land on it, and the action then fails with `StateUnchanged`. The full rules are in
+[`check`](/docs/api/browser/Locator#Locator.check)'s reference.
+
 ## Checks
 
-Before sending anything, an action waits, checking at each animation frame, until its element is ready:
+Before sending anything, an action checks whether its element is ready and retries at each animation frame when it is not:
 
 | Action                                                            | Checks                                                                   |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | visible, stable, enabled, not inert, in the viewport, receives the pointer |
+| `click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo`, `hover` | rendered, visible, stable, enabled, not inert, in the viewport, receives the pointer |
 | `fill`, `clear`                                                   | visible, enabled, editable, not inert                                    |
+| `blur` | none (still requires exactly one match) |
 | `focus`, `press`, `pressSequentially`                             | visible, not inert                                                       |
+| `selectText` | visible |
 | `scrollIntoView`                                                  | visible, stable                                                          |
 | `selectOption`                                                    | visible, enabled                                                         |
 | `setInputFiles`                                                   | none                                                                     |
+
+Pointer actions (`click`, `dblclick`, `tap`, `check`, `uncheck`, `dragTo` and `hover`) default to
+`checks.rendered: true`: they wait for a drawn frame because pointer routing uses what the browser last drew.
+A drag waits at both endpoints. Other actions with checks, including `clear` and `selectText`, default to `checks.rendered: false` and
+check current layout immediately. Stability still waits for its requested frames, independently of this setting.
+Actions with checks check again after acquiring the page's input permit, with the same rendering choice.
+`dispatchEvent` waits only for an attached match and has no rendering or other readiness checks.
+
+A server-rendered input can accept a fill before the framework hydrates it, then lose that value during hydration.
+Wait for an app-defined readiness condition, or enable the frame wait for one call; Playwright has the same race.
+A drawn frame alone does not guarantee hydration has finished:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const enterName = Effect.fn("enterName")(function*(page: Page.Page) {
+  yield* page.getByLabel("Name").fill("Ada", { checks: { rendered: true } })
+})
+```
+
+With `rendered: false`, an action can succeed even when the page is not drawing. If another check keeps it
+waiting, its timeout reports that readiness reason without the “page rendered no frame” hint. You can also
+set `rendered: false` on a pointer action when your application can tolerate routing against the last drawn frame.
+
+An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
+
+An action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable and not inert; `focus`, `press` and `pressSequentially` require not inert; `selectOption` requires enabled; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
   "Not inert": not under an `inert` attribute, nor outside an open modal dialog.
@@ -166,8 +259,8 @@ typed the characters before it.
 
 ## Files
 
-`setInputFiles` takes `FileInput`s. `FileInput.local` names a file on this machine; `FileInput.bytes` makes the
-file in the page, so it also works with a browser on another machine:
+`setInputFiles` chooses files without opening the operating system’s picker. `FileInput.local` names a file on
+this machine; `FileInput.bytes` supplies generated contents:
 
 ```ts
 import { FileInput, Page } from "@usestrider/browser"
@@ -186,6 +279,15 @@ const importReport = Effect.fn("importReport")(function*(page: Page.Page, csv: s
   yield* page.getByLabel("Report").setInputFiles(report)
 })
 ```
+
+A launched browser receives local paths directly. Absolute paths need no caller services; relative paths need the
+path [platform service](/docs/installation#platform-services). A launch through a container or wrapper with a
+different file system needs `FileInput.bytes` instead.
+
+Attached connections copy local contents using captured file-system and path
+[platform services](/docs/installation#platform-services), including for absolute paths. Local files can combine
+with bytes on attached connections, or with [remote paths](/docs/api/browser/FileInput#remote) on launched ones.
+A selection cannot combine native paths and transferred contents; it fails before replacing the previous files.
 
 An upload through a file chooser, not an input, is answered with
 [`FileChooser.handle`](/docs/events/kinds#dialogs-and-file-choosers).
@@ -257,3 +359,33 @@ const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
 A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
 gesture at a time, so two fibers acting on one page never interleave their presses: the second
 [waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
+
+
+## DOM events
+
+A component may listen for an application event that keyboard or pointer input cannot produce. Dispatch an
+untrusted DOM event on one attached element with `dispatchEvent`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const notifySaved = Effect.fn("notifySaved")(function*(page: Page.Page) {
+  yield* page.locator("#editor").dispatchEvent("saved", {
+    eventClass: "CustomEvent",
+    init: { detail: { revision: 3 }, bubbles: false }
+  })
+})
+```
+
+The constructor is explicit: the default is `Event`, even for a name such as `click`. Choose
+[`eventClass`](/docs/api/browser/Locator#DispatchEventOptions) for fields belonging to another native event
+class. Bubbles, cancelable and composed default to true. Initialization crosses by value using the
+[evaluation serialization rules](/docs/api/browser/JSHandle#Serialized), without nested handles or DOM nodes.
+The browser must provide the constructor: missing constructors fail with `Unsupported`, rejected initialization
+with `InvalidInput`, and values that cannot cross with `NotSerializable`.
+
+The action polls for attachment every 50 milliseconds, requires a single match and shares the operation deadline. It performs no
+readiness checks, focus or scrolling. Listener cancellation
+still succeeds. A trial resolves and checks without constructing or dispatching. After dispatch may have
+started, a failure reports its dispatch state and the action never sends the event again.

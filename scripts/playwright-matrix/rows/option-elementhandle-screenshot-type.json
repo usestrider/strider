@@ -1,0 +1,38 @@
+{
+  "id": "option-elementhandle-screenshot-type",
+  "upstream": [
+    "method:ElementHandle.screenshot"
+  ],
+  "option": "type",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "notes": "Full-page, clip and element capture use area; quality sits beside format: \"jpeg\".",
+  "capabilities": [
+    "screenshot.format"
+  ],
+  "requirements": [],
+  "gaps": [
+    "option-elementhandle-screenshot-type-value-jpeg-on-stock-webkit"
+  ],
+  "valueCoverage": [
+    {
+      "value": "png",
+      "status": "has"
+    },
+    {
+      "value": "webp",
+      "status": "has"
+    },
+    {
+      "value": "jpeg",
+      "status": "missing",
+      "gap": "option-elementhandle-screenshot-type-value-jpeg-on-stock-webkit"
+    }
+  ]
+}

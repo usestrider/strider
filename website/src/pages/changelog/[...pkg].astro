@@ -1,0 +1,52 @@
+---
+// The changelog: each published package's CHANGELOG.md, one page each, its releases in the rail. The site deploys at
+// each release, so the newest entry here is the version on npm.
+import { getCollection, render } from "astro:content"
+import Rail from "../../components/Rail.astro"
+import SideNav from "../../components/SideNav.astro"
+import { changelogPackages as packages } from "../../features/changelog.ts"
+import DocShell from "../../layouts/DocShell.astro"
+
+
+export const getStaticPaths = async () => {
+  const entries = await getCollection("changelogs")
+  return packages.flatMap((pkg) => {
+    const entry = entries.find((e) => e.id === `${pkg.id}/changelog`)
+    return entry === undefined ? [] : [{ params: { pkg: pkg.id === "browser" ? undefined : pkg.id }, props: { entry, pkg } }]
+  })
+}
+
+const { entry, pkg } = Astro.props
+const { Content, headings } = await render(entry)
+---
+
+<DocShell
+  title={`${pkg.name} changelog`}
+  description={`What changed in each release of ${pkg.name}`}
+  area="changelog"
+  crumbs={[{ label: "Changelog", href: "/changelog" }, { label: pkg.name }]}
+>
+  <div slot="sidebar" class="pt-6">
+    <SideNav
+      label="Packages"
+      mono
+      links={packages.map((p) => ({ label: p.name, href: p.route, current: p.id === pkg.id }))}
+    />
+  </div>
+  <Rail
+    slot="rail"
+    groups={headings.filter((heading) => heading.depth === 2).map((heading) => ({ label: heading.text, href: `#${heading.slug}` }))}
+  />
+  <h1 class="mt-2 font-display text-[3rem] leading-tight font-normal">Changelog</h1>
+  <p class="deck mt-3 mb-10 text-[1.3rem] leading-snug">What changed in each release of {pkg.name}.</p>
+  <article class="prose changelog">
+    <Content />
+  </article>
+</DocShell>
+
+<style>
+  /* The file's own title repeats the page's */
+  .changelog :global(h1) {
+    display: none;
+  }
+</style>

@@ -37,6 +37,8 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Contexts, pages and frames",
     names: {
       userContexts: "New contexts and pages",
+      "userContexts.proxy": "HTTP proxies for a context",
+      "userContexts.proxy.credentials": "Proxy credentials",
       isolatedWorlds: "Isolated worlds, where `page.evaluate` and Strider's engine run",
       "pauseOnStart.frames": "Declarations in place before a frame's first script",
       "pauseOnStart.workers": "Declarations in place before a worker's first script",
@@ -59,6 +61,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "input.pointerModifiers": "Modifiers on pointer actions",
       "input.dragAndDrop": "Native HTML drag and drop",
       "input.touch": "Touch input, `tap`",
+      "capability.virtualAuthenticator": "Native virtual passkeys on one page, `Capability.VirtualAuthenticator`",
       "evaluation.userActivation": "Evaluating as a user gesture, `Page.withUserGesture`"
     }
   },
@@ -86,8 +89,16 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Network",
     names: {
       bodies: "Response bodies",
+      "network.responseBody.terminalRedirect": "Bodies of terminal 301/302/303/307/308 responses without Location",
+      "network.requestBody.bytes": "Collected request bytes",
+      "network.requestBody.text": "Collected request text",
+      "network.requestBody.absence": "Reporting absent request bodies",
+      "network.requestBody.empty": "Distinguishing an empty request body",
+      "network.requestBody.multipart": "Complete multipart request bodies",
+      "network.requestBody.redirects": "Reading bodies by redirect hop",
       "network.headersSent": "The headers a request was sent with, `headersSent`",
       "network.servedBy": "What served a response, `servedBy`",
+      webSocketRouting: "Script WebSocket mocking and proxying",
       "interception.request": "Routes at the request phase",
       "interception.response": "Routes at the response phase",
       "interception.auth": "Routes at an authentication challenge",

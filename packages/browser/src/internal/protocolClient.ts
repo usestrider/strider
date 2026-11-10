@@ -30,7 +30,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Protocol from "../protocol/Protocol.ts"
@@ -143,12 +143,22 @@ export interface Session extends Protocol.ProtocolSession {
   readonly sendSequenced: <M extends string, P, A>(
     command: Protocol.Command<M, P, A>
   ) => Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>
+  /** Writes one command now; its reply is awaited separately, and abandoned when the supplied scope closes. */
+  readonly start: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    scope: Scope.Scope
+  ) => Effect.Effect<
+    Effect.Effect<{ readonly result: A; readonly received: number }, Protocol.ProtocolError>,
+    Protocol.ProtocolError
+  >
   /**
    * Writes the commands to the transport in order as one step, which interruption doesn't split, then waits for every
    * reply together. A failure or interruption then stops waiting; what was written can't be taken back.
+   * `onWritten` runs synchronously after every transport write succeeds, before restoring interruption for replies.
    */
   readonly sendOrdered: <M extends string, P>(
-    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>,
+    onWritten?: (() => void) | undefined
   ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
@@ -165,9 +175,14 @@ export interface FoldControl {
   /**
    * Syncs a session. `sync` runs in a fiber of its own while the session's events are held; once it succeeds,
    * its snapshot is applied in the worker and the held events after it are folded. A sync that fails ends the
-   * session with `modelUnavailable`.
+   * session with `modelUnavailable`. `live` selects events the snapshot does not represent, whose decisions must
+   * be folded while syncing so the browser can produce the snapshot. They are never replayed.
    */
-  readonly sync: (session: Session, sync: Effect.Effect<Synced, unknown>) => void
+  readonly sync: (
+    session: Session,
+    sync: Effect.Effect<Synced, unknown>,
+    live?: (method: string) => boolean
+  ) => void
   readonly session: (key: Protocol.SessionKey) => Session | undefined
   /**
    * Runs an effect in the worker, after every event received so far, and waits for it: for what an operation
@@ -178,12 +193,18 @@ export interface FoldControl {
 }
 
 /**
- * An adapter's model of each session, kept up to date by the worker. Every hook runs in the worker, in
- * receive order, and must never wait on a command, a subscriber or user code.
+ * An adapter's model of each session, kept up to date by the worker. State-changing hooks run in the worker,
+ * in receive order, and must never wait on a command, a subscriber or user code. Event scopes also run in the reader.
  */
 export interface Fold {
   /** The events the fold needs, by method. Each is decoded before it is folded. */
   readonly events: ReadonlyMap<string, Protocol.EventDef<string, any>>
+  /**
+   * Optional per-method session scopes, checked before queueing and before fold decoding.
+   * A scoped-out event is still published to explicitly registered protocol subscribers.
+   * Predicates run synchronously in the reader as well as the worker; they must only inspect state.
+   */
+  readonly eventScopes?: ReadonlyMap<string, (session: Session) => boolean> | undefined
   /** Folds one event, before it is published. */
   readonly apply: (session: Session, method: string, params: unknown, received: number) => Effect.Effect<void>
   /**
@@ -319,7 +340,8 @@ const decoder = <A>(
 /** The values at a JSON pointer, where `*` stands for every element of a list. */
 export const valuesAt = (value: unknown, pointer: string): ReadonlyArray<unknown> => {
   let current: ReadonlyArray<unknown> = [value]
-  for (const segment of pointer.slice(1).split("/")) {
+  for (const raw of pointer.slice(1).split("/")) {
+    const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~")
     const next: Array<unknown> = []
     for (const item of current) {
       if (segment === "*") {
@@ -343,6 +365,13 @@ export const ReplyReceived = Context.Reference<((received: number) => void) | un
   }
 )
 
+/** Synchronous command outcome, including replies whose waiter was abandoned. Resource owners use this
+ * before the waiting fiber can consume a reply or be interrupted. It does not imply result decoding succeeded. */
+export const ReplyOutcome = Context.Reference<((outcome: "success" | "failure" | "sessionEnded") => void) | undefined>(
+  "strider/internal/ReplyOutcome",
+  { defaultValue: () => undefined }
+)
+
 interface Pending {
   readonly id: number
   readonly session: SessionState
@@ -353,10 +382,18 @@ interface Pending {
   /** The receive sequence number of the reply. */
   received: number
   onReceipt?: ((received: number) => void) | undefined
+  onOutcome?: ((outcome: "success" | "failure" | "sessionEnded") => void) | undefined
   replied: boolean
   raw: unknown
   /** Set once the caller stopped waiting on a command that creates a resource. */
   late: ((reply: Protocol.LateReply) => Effect.Effect<void>) | undefined
+}
+
+/** A reply and a failing transport write can race; an owner observes only the first terminal outcome. */
+const settle = (entry: Pending, outcome: "success" | "failure" | "sessionEnded"): void => {
+  const notify = entry.onOutcome
+  entry.onOutcome = undefined
+  notify?.(outcome)
 }
 
 interface SessionState {
@@ -418,6 +455,7 @@ export const make: (
     for (const child of state.children) end(child, why)
     for (const entry of state.pending) {
       pending.delete(entry.id)
+      settle(entry, "sessionEnded")
       if (entry.late === undefined) Deferred.doneUnsafe(entry.reply, Effect.fail(failure(reason)))
     }
     state.pending.clear()
@@ -479,14 +517,27 @@ export const make: (
 
   const runLate = (entry: Pending, handler: (reply: Protocol.LateReply) => Effect.Effect<void>): void => {
     const state = entry.session
-    const release = Effect.forEach(
-      entry.release.flatMap((release) =>
-        valuesAt(entry.raw, release.from).map((value) =>
-          [release.method, { [release.param]: release.list === true ? [value] : value }] as const
-        )
-      ),
-      ([method, params]) => Effect.ignore(sendRaw(state, method, params)),
-      { discard: true }
+    const release = Effect.suspend(() =>
+      Effect.forEach(
+        entry.release.flatMap((release) =>
+          valuesAt(entry.raw, release.from).map((value) => {
+            const params: Record<string, unknown> = { [release.param]: release.list === true ? [value] : value }
+            for (const [pointer, from] of Object.entries(release.paramsFrom ?? {})) {
+              const values = valuesAt(entry.raw, from)
+              if (values.length !== 1) return undefined
+              const keys = pointer.slice(1).split("/").map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"))
+              let target = params
+              for (const key of keys.slice(0, -1)) {
+                target = (target[key] ??= {}) as Record<string, unknown>
+              }
+              target[keys[keys.length - 1]!] = values[0]
+            }
+            return [release.method, params] as const
+          })
+        ),
+        (command) => command === undefined ? Effect.void : Effect.ignore(sendRaw(state, command[0], command[1])),
+        { discard: true }
+      )
     )
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
@@ -512,7 +563,9 @@ export const make: (
     const decode = definition.Result === undefined
       ? undefined
       : decoder(definition.Result, method, yield* Protocol.CurrentValidation)
+    const onOutcome = yield* ReplyOutcome
     const entry = register(state, method, encoded, definition.traits.release ?? [])
+    entry.onOutcome = onOutcome
     entry.onReceipt = yield* ReplyReceived
     let consumed = false
     // The caller stopped waiting. A reply still to come is dropped, or handed to the late-reply handler; one
@@ -542,7 +595,10 @@ export const make: (
       write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
         Effect.catch(() =>
           Effect.andThen(
-            Effect.sync(() => unregister(entry)),
+            Effect.sync(() => {
+              unregister(entry)
+              settle(entry, "failure")
+            }),
             Effect.fail(failure(new Protocol.SessionEnded({ why: "connectionLost" })))
           )
         )
@@ -573,9 +629,18 @@ export const make: (
     return yield* traced(write.pipe(Effect.andThen(reply), Effect.onInterrupt(() => abandon)))
   })
 
+  const start = <M extends string, P, A>(state: SessionState, command: Protocol.Command<M, P, A>, scope: Scope.Scope) =>
+    Effect.uninterruptible(Effect.gen(function*() {
+      const prepared = yield* prepare(state, command)
+      yield* Scope.addFinalizer(scope, prepared.abandon)
+      yield* prepared.write
+      return prepared.traced(prepared.reply)
+    }))
+
   const sendOrdered = <M extends string, P>(
     state: SessionState,
-    commands: ReadonlyArray<Protocol.Command<M, P, void>>
+    commands: ReadonlyArray<Protocol.Command<M, P, void>>,
+    onWritten?: (() => void) | undefined
   ) =>
     Effect.uninterruptibleMask((restore) =>
       Effect.suspend(() => {
@@ -589,6 +654,7 @@ export const make: (
             started.push(prepared)
             return prepared.write
           }), { discard: true }).pipe(
+            Effect.andThen(Effect.sync(() => onWritten?.())),
             Effect.andThen(restore(
               Effect.forEach(started, ({ reply, traced }) => traced(reply), { concurrency: "unbounded", discard: true })
             )),
@@ -664,7 +730,8 @@ export const make: (
       key,
       send: (command) => Effect.map(send(state, command), ({ result }) => result),
       sendSequenced: (command) => send(state, command),
-      sendOrdered: (commands) => sendOrdered(state, commands),
+      start: (command, scope) => start(state, command, scope),
+      sendOrdered: (commands, onWritten) => sendOrdered(state, commands, onWritten),
       subscribe: subscribeTo,
       drainObserved: Effect.suspend(() => ingestion.drained(state.ingest)),
       ended: Effect.suspend(() => Deferred.await(state.ingest.ended))
@@ -722,6 +789,7 @@ export const make: (
         unregister(entry)
         entry.received = received
         entry.onReceipt?.(received)
+        settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {
           if (entry.late === undefined) {
             Deferred.doneUnsafe(entry.reply, Effect.fail(failure(classify(wire.errors, entry.method, incoming.error))))

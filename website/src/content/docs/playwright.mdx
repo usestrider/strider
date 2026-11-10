@@ -104,6 +104,7 @@ page opened a popup, so there `Popup.next` fails with `Unsupported`:
 | `page.route(url, handler)`          | [`page.route(url, handler)`](/docs/events/routes), whose handler returns a decision, such as `Route.continue`, `Route.abort()` or `Route.fulfill(response)`, instead of calling `route.continue()` |
 | `context.routeFromHAR(path)`        | [`context.route("**/*", yield* Route.fromHar(path))`](/docs/events/routes#replaying-a-recording) |
 | `context.storageState()`            | [`context.exportStorageState`](/docs/pages/contexts#logging-in-once)                              |
+| `context.setStorageState(state)` | [`context.setStorageState(state)`](/docs/pages/contexts#replacing-storage-in-a-live-context), with creation-time `storageStateTracking: true`; deliberate limits on cache, service workers, virtual authenticators and partial failure mean this is not full equivalence |
 | `browser.newContext({ recordHar })` | [`Har.record(context, { content: "embed" })`](/docs/tools/recordings#har-files), then `har.exportHar(path)`; replaying a POST matches its body, which the export keeps only with `include: ["requestBodies"]` |
 | `context.tracing.start()`           | [`Trace.record(context)`](/docs/tools/recordings#traces), then `trace.exportTrace(path)`, which Playwright's trace viewer opens |
 

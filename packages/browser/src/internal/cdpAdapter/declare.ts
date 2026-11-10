@@ -24,7 +24,20 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import { contextLock } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import { installWebSocketGates } from "./targets.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
+
+/** Initial commands are written before resume; their replies and state updates finish in the gate's scope. */
+export interface Setup {
+  readonly send: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    receive?: (result: A) => void
+  ) => Effect.Effect<void, Protocol.ProtocolError>
+}
+
+type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
 
 /** A URL pattern no request matches: a scheme nothing uses. */
 const nothing = "strider-intercepts-nothing:"
@@ -34,7 +47,8 @@ const nothing = "strider-intercepts-nothing:"
 const network = (
   session: ProtocolClient.Session,
   offline: boolean,
-  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined
+  conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
+  on: Send = (command) => command.pipe(Protocol.on(session), Effect.asVoid)
 ) => {
   const state = {
     offline,
@@ -44,9 +58,9 @@ const network = (
   }
   return Effect.all([
     Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
-      Protocol.on(session)
+      on
     ),
-    Network.overrideNetworkState(state).pipe(Protocol.on(session))
+    Network.overrideNetworkState(state).pipe(on)
   ], { discard: true })
 }
 
@@ -146,10 +160,10 @@ const applyOverride = (
   state: State,
   target: TargetEntry,
   kind: Adapter.Override["_tag"],
-  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
 ): Effect.Effect<void, Protocol.ProtocolError> => {
   const session = target.session
-  const on = Protocol.on(session)
   const override = effective.get(kind)
   if (kind === "Offline" || kind === "NetworkConditions") {
     const offline = effective.get("Offline")
@@ -157,19 +171,30 @@ const applyOverride = (
     return network(
       session,
       offline?._tag === "Offline" && offline.offline,
-      conditions?._tag === "NetworkConditions" ? conditions : undefined
+      conditions?._tag === "NetworkConditions" ? conditions : undefined,
+      on
     )
+  }
+  if (kind === "UserAgent" || kind === "Locale") {
+    const userAgent = effective.get("UserAgent")
+    const locale = effective.get("Locale")
+    const combined = Emulation.setUserAgentOverride({
+      userAgent: userAgent?._tag === "UserAgent" ? userAgent.userAgent : state.defaultUserAgent,
+      ...(userAgent?._tag === "UserAgent" && Option.isSome(userAgent.platform)
+        ? { platform: userAgent.platform.value }
+        : {}),
+      ...(locale?._tag === "Locale" ? { acceptLanguage: locale.locale } : {})
+    }).pipe(on)
+    if (kind === "UserAgent") return combined
+    const language = Emulation.setLocaleOverride(locale?._tag === "Locale" ? { locale: locale.locale } : {}).pipe(on)
+    return locale === undefined
+      ? combined.pipe(Effect.andThen(language))
+      : language.pipe(Effect.andThen(combined))
   }
   if (override === undefined) {
     switch (kind) {
       case "Viewport":
         return viewport(state, target, effective)
-      case "UserAgent":
-      case "Locale":
-        return Emulation.setUserAgentOverride({ userAgent: state.defaultUserAgent }).pipe(
-          on,
-          Effect.andThen(kind === "Locale" ? Emulation.setLocaleOverride({}).pipe(on) : Effect.void)
-        )
       case "TimeZone":
         return Emulation.setTimezoneOverride({ timezoneId: "" }).pipe(on)
       case "Geolocation":
@@ -196,19 +221,9 @@ const applyOverride = (
     case "Viewport":
       return viewport(state, target, effective)
     case "UserAgent":
-      return Emulation.setUserAgentOverride({
-        userAgent: override.userAgent,
-        ...(Option.isSome(override.platform) ? { platform: override.platform.value } : {})
-      }).pipe(on)
     case "Locale":
-      return Emulation.setLocaleOverride({ locale: override.locale }).pipe(
-        on,
-        Effect.andThen(
-          Emulation.setUserAgentOverride({ userAgent: state.defaultUserAgent, acceptLanguage: override.locale }).pipe(
-            on
-          )
-        )
-      )
+      // Applied together, above
+      return Effect.void
     case "TimeZone":
       return Emulation.setTimezoneOverride({ timezoneId: override.timeZone }).pipe(on)
     case "Geolocation":
@@ -245,8 +260,8 @@ const applyOverride = (
   }
 }
 
-const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  const on = Protocol.on(target.session)
+const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+  const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
   for (const [key, identifier] of Array.from(target.scripts)) {
     if (!bundles.has(key)) {
@@ -255,24 +270,35 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     }
   }
   for (const [key, bundle] of bundles) {
+    if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
     }
-    const { identifier } = yield* Page.addScriptToEvaluateOnNewDocument({
+    const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
       ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-    }).pipe(on)
-    target.scripts.set(key, identifier)
+    })
+    if (setup === undefined) {
+      const { identifier } = yield* command.pipe(Protocol.on(target.session))
+      target.scripts.set(key, identifier)
+    } else {
+      yield* setup.send(command, ({ identifier }) => target.scripts.set(key, identifier))
+    }
   }
 })
 
-const applyIntercepts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
+const applyIntercepts = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) {
   const intercepts = state.registry.intercepts(placement(page))
+  const proxyAuth = page.context.proxy?.credentials !== undefined
   const challenges = state.registry.challenges(placement(page))
-  const key = JSON.stringify({ intercepts, challenges })
+  const key = JSON.stringify({ intercepts, challenges, proxyAuth })
   if (key === target.intercepts) return
-  const on = Protocol.on(target.session)
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
   // the request goes on at once unless a request-phase intercept wants it. Where challenges are paused, every
   // document is, a pause a page's load hardly notices; pausing every request would cost each of them a round trip
@@ -282,6 +308,7 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
       urlPattern,
       requestStage: "Request" as const
     })),
+    ...(proxyAuth ? [{ urlPattern: "*", requestStage: "Request" as const }] : []),
     ...(challenges
       ? [{ urlPattern: "*", resourceType: "Document" as const, requestStage: "Request" as const }]
       : []),
@@ -292,36 +319,104 @@ const applyIntercepts = Effect.fnUntraced(function*(state: State, target: Target
   // past the route, about once in forty under load, apparently while the interceptor was installed again; with
   // the pattern kept, never in 160 (QUIRKS.md, Q46 and Q103). A request paused still has its decision to come.
   const effective = patterns.length > 0 ? patterns : [{ urlPattern: nothing, requestStage: "Request" as const }]
-  yield* Fetch.enable({ patterns: effective, handleAuthRequests: intercepts.auth.length > 0 || challenges }).pipe(on)
+  yield* Fetch.enable({
+    patterns: effective,
+    handleAuthRequests: intercepts.auth.length > 0 || challenges || proxyAuth
+  }).pipe(on)
   target.intercepts = key
 })
 
 // Chromium keeps a response's body on its own, until the page moves on: where bodies are collected, it keeps them in
 // the browser, past the next navigation (QUIRKS.md, Q160)
-const keepBodies = (state: State, target: TargetEntry, page: PageEntry) => {
+const keepBodies = (
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) => {
   const limit = state.registry.bodyLimit(placement(page), "response")
   return Option.isNone(limit)
     ? Effect.void
     : Network.configureDurableMessages({
       maxTotalBufferSize: 10 * limit.value,
       maxResourceBufferSize: limit.value
-    }).pipe(Protocol.on(target.session))
+    }).pipe(on)
+}
+
+// Read the registry only after acquiring the target's permit, and retain it across every command.
+// Release can then confirm restoration only after earlier configuration has finished writing.
+const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E, R>) => {
+  const lock = target.overrideLock ??= Semaphore.makeUnsafe(1)
+  return lock.withPermits(1)(effect)
 }
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
-export const configureTarget = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  const overrides = state.registry.overrides(placement(page))
-  yield* Effect.forEach(overrides, ([kind]) => applyOverride(state, target, kind, overrides), {
-    concurrency: "unbounded",
-    discard: true
-  })
-  yield* applyScripts(state, target, page)
-  yield* applyIntercepts(state, target, page)
-  yield* keepBodies(state, target, page)
-  if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
-    yield* Page.setInterceptFileChooserDialog({ enabled: true }).pipe(Protocol.on(target.session))
+export const configureTarget = Effect.fnUntraced(
+  function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+    if (setup === undefined) {
+      yield* Effect.all([
+        withOverrides(
+          target,
+          Effect.suspend(() => {
+            const overrides = state.registry.overrides(placement(page))
+            return Effect.forEach(
+              overrides,
+              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              {
+                discard: true
+              }
+            )
+          })
+        ),
+        // Viewport has its own permit and fresh registry read. Its renderer wait must not
+        // hold up locale or other overrides, including when this target is still configuring.
+        Effect.suspend(() => {
+          const overrides = state.registry.overrides(placement(page))
+          return overrides.has("Viewport") ? viewport(state, target, overrides) : Effect.void
+        })
+      ], { concurrency: "unbounded", discard: true })
+    } else {
+      yield* Effect.all([
+        Effect.gen(function*() {
+          yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const overrides = state.registry.overrides(placement(page))
+          yield* Effect.forEach(
+            overrides,
+            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            {
+              discard: true
+            }
+          )
+        }),
+        Effect.gen(function*() {
+          yield* (target.viewportLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
+          const override = state.registry.overrides(placement(page)).get("Viewport")
+          if (override?._tag !== "Viewport") {
+            return
+          }
+          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+          // creating an isolated world whose identifier would require a renderer reply before resume.
+          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+          })
+          yield* setup.send(Emulation.setDeviceMetricsOverride({
+            width: override.width,
+            height: override.height,
+            deviceScaleFactor: override.deviceScaleFactor,
+            mobile: override.mobile
+          }))
+        })
+      ], { concurrency: "unbounded", discard: true })
+    }
+    yield* applyScripts(state, target, page, setup)
+    yield* applyIntercepts(state, target, page, setup?.send)
+    yield* keepBodies(state, target, page, setup?.send)
+    if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
+      const command = Page.setInterceptFileChooserDialog({ enabled: true })
+      yield* setup === undefined ? command.pipe(Protocol.on(target.session)) : setup.send(command)
+    }
   }
-})
+)
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>
@@ -338,7 +433,15 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
-      return applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+      if (declaration.override._tag === "Viewport") {
+        return viewport(state, target, state.registry.overrides(placement(page)))
+      }
+      return withOverrides(
+        target,
+        Effect.suspend(() =>
+          applyOverride(state, target, declaration.override._tag, state.registry.overrides(placement(page)))
+        )
+      )
     case "FileChooser":
       return target.kind === "page"
         ? Page.setInterceptFileChooserDialog({ enabled: state.registry.fileChooser(placement(page)) }).pipe(
@@ -376,17 +479,19 @@ const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scop
   }, { concurrency: "unbounded", discard: true })
 
 /** A context's download behavior, as the declarations in force say. */
-export const applyDownloads = (state: State, context: ContextEntry) => {
-  const behavior = state.registry.downloads(context.id)
-  return BrowserCdp.setDownloadBehavior({
-    behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
-    ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
-    ...(context.browserContextId === undefined
-      ? {}
-      : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
-    eventsEnabled: true
-  }).pipe(Protocol.on(state.root()))
-}
+export const applyDownloads = (state: State, context: ContextEntry) =>
+  contextLock(context).withPermits(1)(Effect.suspend(() => {
+    if (context.disposed) return Effect.void
+    const behavior = state.registry.downloads(context.id)
+    return BrowserCdp.setDownloadBehavior({
+      behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
+      ...(Option.isSome(behavior) && behavior.value._tag === "Allow" ? { downloadPath: behavior.value.directory } : {}),
+      ...(context.browserContextId === undefined
+        ? {}
+        : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID }),
+      eventsEnabled: true
+    }).pipe(Protocol.on(state.root()))
+  }))
 
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
@@ -407,6 +512,10 @@ export const declare = Effect.fnUntraced(function*(
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ) {
+  if (declaration._tag === "InitScript" && declaration.webSocket !== undefined && scope._tag === "UserContext") {
+    const context = state.contexts.get(scope.context)
+    if (context !== undefined) yield* installWebSocketGates(context, yield* Effect.scope, declaration.workers)
+  }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
   const registrationContext = yield* Effect.context<never>()
@@ -421,7 +530,9 @@ export const declare = Effect.fnUntraced(function*(
       state.registry.remove(id)
       const release = declaration._tag === "Downloads"
         ? Effect.forEach(
-          [...state.contexts.values()],
+          scope._tag === "UserContext"
+            ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+            : [...state.contexts.values()],
           (context) => applyDownloads(state, context).pipe(releaseErrors),
           { discard: true }
         )

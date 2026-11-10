@@ -1,0 +1,23 @@
+{
+  "id": "method-page-waitforselector",
+  "upstream": [
+    "method:Page.waitForSelector"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    }
+  ],
+  "notes": "Use a named expectation of the required state; no returned ElementHandle.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

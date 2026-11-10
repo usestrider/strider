@@ -1,0 +1,26 @@
+{
+  "id": "method-locator-selecttext",
+  "upstream": [
+    "method:Locator.selectText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.selectText",
+      "url": "/docs/api/browser/Locator#Locator.selectText"
+    }
+  ],
+  "notes": "Owned locator action: strict matching, visibility wait, trial and individual check overrides under the current deadline. Uses native select() for every input/textarea or a DOM range for other contents, and attempts focus, including frame targets. Follows associated labels and noninteractive descendants, preserving interactive targets. Visibility checks the matched element before retargeting; trial leaves focus and selection unchanged. Native input behavior applies: number inputs select text; inputs without selectable text can succeed without selection. No blanket force: use checks.visible=false.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts",
+      "packages/browser/src/internal/locator.ts",
+      "packages/browser/src/internal/engine.ts",
+      "packages/browser/test/integration/slice/interaction.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

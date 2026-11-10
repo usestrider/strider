@@ -6,6 +6,7 @@ import * as Network from "@usestrider/browser/cdp/Network"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
 import * as Target from "@usestrider/browser/cdp/Target"
+import * as WebAuthn from "@usestrider/browser/cdp/WebAuthn"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -83,6 +84,53 @@ describe("CdpConnection", () => {
       })
       yield* browser.receive({ id: sent.id, result: {}, sessionId: "S1" })
       assert.isUndefined(yield* Fiber.join(typed))
+    }))
+
+  it.effect("redacts WebAuthn private keys on replies and sends their clear encoding only on the wire", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const authenticatorId = "A1" as WebAuthn.AuthenticatorId
+      const read = yield* WebAuthn.getCredentials({ authenticatorId }).pipe(Protocol.on(page), Effect.forkChild)
+      const sent = yield* browser.next
+      const credential = {
+        credentialId: "AQ==",
+        isResidentCredential: true,
+        rpId: "localhost",
+        privateKey: "test-secret-key",
+        userHandle: "Ag==",
+        signCount: 1
+      }
+      yield* browser.receive({ id: sent.id, result: { credentials: [credential] }, sessionId: "S1" })
+      const result = yield* Fiber.join(read)
+      assert.isTrue(Redacted.isRedacted(result.credentials[0]!.privateKey))
+      assert.notInclude(JSON.stringify(result), "test-secret-key")
+      const write = yield* WebAuthn.addCredential({ authenticatorId, credential: result.credentials[0]! }).pipe(
+        Protocol.on(page),
+        Effect.forkChild
+      )
+      const written = yield* browser.next
+      assert.deepStrictEqual(written.params, { authenticatorId, credential })
+      yield* browser.receive({ id: written.id, result: {}, sessionId: "S1" })
+      yield* Fiber.join(write)
+    }))
+
+  it.effect("removes a native authenticator whose creation reply arrives after interruption", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      const page = yield* attach(browser, cdp, "S1")
+      const create = yield* WebAuthn.addVirtualAuthenticator({ options: { protocol: "ctap2", transport: "internal" } })
+        .pipe(Protocol.on(page), Effect.forkChild)
+      const sent = yield* browser.next
+      yield* Fiber.interrupt(create)
+      yield* browser.receive({ id: sent.id, result: { authenticatorId: "late-A" }, sessionId: "S1" })
+      const cleanup = yield* browser.next
+      assert.strictEqual(cleanup.method, "WebAuthn.removeVirtualAuthenticator")
+      assert.strictEqual(cleanup.sessionId, "S1")
+      assert.deepStrictEqual(cleanup.params, { authenticatorId: "late-A" })
+      yield* browser.receive({ id: cleanup.id, result: {}, sessionId: "S1" })
     }))
 
   it.effect("classifies error replies with CDP's table", () =>

@@ -35,12 +35,15 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import type * as CdpConnection from "../protocol/CdpConnection.ts"
 import type * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import type * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as WebAuthn from "../WebAuthn.ts"
 import * as BrowserClock from "./browserClock.ts"
+import type * as Geometry from "./geometry.ts"
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -177,6 +180,7 @@ export type ObligationSubject =
     readonly request: NetworkRequest.NetworkRequest
     readonly phase: "request" | "response" | "auth"
     readonly response: Option.Option<NetworkResponse.NetworkResponse>
+    readonly authSource?: "server" | "proxy" | undefined
     readonly challenge: Option.Option<{ readonly origin: string; readonly scheme: string; readonly realm: string }>
   }
   | {
@@ -207,7 +211,13 @@ export interface NodeBinding {
  * `evidence`: the events behind them.
  */
 export type Fact =
-  | { readonly _tag: "UserContextAdded"; readonly context: UserContext.Id; readonly isDefault: boolean }
+  | {
+    readonly _tag: "UserContextAdded"
+    readonly context: UserContext.Id
+    readonly isDefault: boolean
+    readonly requestTiming?: boolean | undefined
+    readonly requestSizes?: boolean | undefined
+  }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
@@ -297,6 +307,8 @@ export type Fact =
     readonly navigation: PageNavigation.Id
   }
   | { readonly _tag: "RequestSent"; readonly request: NetworkRequest.NetworkRequest }
+  | { readonly _tag: "HopSizes"; readonly hop: NetworkRequest.HopId; readonly sizes: NetworkRequest.Sizes }
+  | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }
   | {
     readonly _tag: "RequestFinished"
@@ -451,6 +463,9 @@ export interface EvaluationCall {
   readonly awaitPromise: boolean
   /** `"value"` serializes the result; `"handle"` keeps objects as handles the caller must release. */
   readonly result: "value" | "handle"
+  /** Releases incidental protocol object ids after a by-value result is decoded; no caller owns them. */
+  readonly releaseResult?: boolean | undefined
+
   /**
    * A backend hint: the object group a handle result joins, so that `releaseHandles` given every handle of a group
    * releases them in one command (QUIRKS.md, Q132). It changes how handles are released, never what they are: a
@@ -519,10 +534,28 @@ export type Override =
   | { readonly _tag: "FocusEmulation"; readonly enabled: boolean }
   | { readonly _tag: "CacheDisabled"; readonly disabled: boolean }
 
+/** Internal host transport belonging only to a WebSocket routing declaration. */
+export interface WebSocketBridge {
+  readonly name: string
+  readonly token: string
+  readonly scope: Scope.Scope
+  readonly receive: (
+    realm: Target.RealmId,
+    payload: Effect.Effect<string, AdapterError>,
+    origin: import("../WebSocketRoute.ts").Initiator,
+    // On true, ownership of release transfers to the host, even if fetch never starts.
+    // isAlive reads the originating adapter realm entry, never a replacement entry.
+    ownership: { readonly isAlive: () => boolean; readonly release?: Effect.Effect<void> | undefined }
+  ) => boolean
+  readonly ended: (realm: Target.RealmId) => void
+  readonly failed: (realm: Target.RealmId) => void
+}
+
 /** A registration: what it declares, where, and when it was made. */
 export type Declaration =
   | {
     readonly _tag: "InitScript"
+    readonly webSocket?: WebSocketBridge | undefined
     readonly source: string
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */
@@ -559,6 +592,8 @@ export type Declaration =
     readonly bodies: ReadonlyArray<"request" | "response">
     /** Bytes kept per body, at most; larger ones aren't kept. */
     readonly maxBytes: number
+    /** Reserve native encoding overhead for decoded request-byte subscriptions; legacy collectors keep their encoded limit. */
+    readonly decodedRequestBytes?: true | undefined
   }
 
 /** A decision for an obligation. */
@@ -593,7 +628,12 @@ export type Decision =
    * (`interception.abortReason`).
    */
   | { readonly _tag: "Fail"; readonly error: Route.AbortReason }
-  | { readonly _tag: "ProvideCredentials"; readonly username: string; readonly password: string }
+  | {
+    readonly _tag: "ProvideCredentials"
+    readonly username: string
+    readonly password: string
+    readonly once?: boolean | undefined
+  }
   | { readonly _tag: "DefaultAuth" }
   | { readonly _tag: "CancelAuth" }
   | { readonly _tag: "Accept"; readonly promptText: Option.Option<string> }
@@ -713,10 +753,19 @@ export interface Cookie {
   readonly priority: Option.Option<"Low" | "Medium" | "High">
 }
 
+/** A normalized HTTP proxy endpoint; credentials stay redacted until protocol encoding. */
+export interface ProxyOptions {
+  readonly server: string
+  readonly bypass: ReadonlyArray<string>
+  readonly credentials?: { readonly username: string; readonly password: Redacted.Redacted<string> } | undefined
+}
+
 /** Settings for a new user context. */
 export interface UserContextOptions {
+  readonly requestTiming?: boolean | undefined
+  readonly requestSizes?: boolean | undefined
   readonly reclaimable?: boolean | undefined
-  readonly proxy: Option.Option<{ readonly server: string; readonly bypass: ReadonlyArray<string> }>
+  readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
 }
 
@@ -729,6 +778,20 @@ export interface AxNode {
   readonly properties: Readonly<Record<string, unknown>>
   readonly children: ReadonlyArray<AxNode>
 }
+
+/** A remote authenticator; L1 never exposes its protocol ID. */
+export interface Authenticator {
+  readonly page: Target.NavigableId
+  readonly id: string
+}
+
+/** Credential mutations, all classified as writes by the bounded adapter. */
+export type AuthenticatorUpdate =
+  | { readonly _tag: "Add"; readonly credential: WebAuthn.Credential }
+  | { readonly _tag: "Remove"; readonly credentialId: Uint8Array }
+  | { readonly _tag: "Clear" }
+  | { readonly _tag: "Verified"; readonly verified: boolean }
+  | { readonly _tag: "Presence"; readonly enabled: boolean }
 
 /** One frame of a screencast, a JPEG, with its size in device pixels and when it arrived. */
 export interface ScreencastFrame {
@@ -759,6 +822,7 @@ export type TargetDescription = Target.Description
 
 /** Why an adapter operation failed, beyond the protocol's own errors. */
 export type AdapterErrorReason =
+  | Reason.BackendFailure
   | Page.CaptureInvalidated
   | {
     readonly _tag: "ViewportMismatch"
@@ -776,6 +840,8 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
+      case "BackendFailure":
+        return reason.message
       case "CaptureInvalidated":
         return reason.message
       case "ViewportMismatch":
@@ -846,6 +912,7 @@ export interface Claims {
 }
 
 export interface AdapterConnection {
+  readonly ownership: "launched" | "attached"
   readonly claims?: Claims | undefined
   readonly info: Browser.Info
   readonly capabilities: SubscriptionRef.SubscriptionRef<Browser.CapabilitySet>
@@ -879,6 +946,8 @@ export interface AdapterConnection {
     page: Target.NavigableId,
     options: { readonly runBeforeUnload: boolean }
   ) => Effect.Effect<void, AdapterError>
+  /** Reads the viewport declaration in force, without measuring the browser window. */
+  readonly viewportSize: (page: Target.NavigableId) => Effect.Effect<Option.Option<Page.ViewportSize>, AdapterError>
   readonly activatePage: (page: Target.NavigableId) => Effect.Effect<void, AdapterError>
 
   // Navigation
@@ -910,6 +979,8 @@ export interface AdapterConnection {
    * handles of a realm on BiDi in one `script.disown`, and any other one at a time (Q132).
    */
   readonly releaseHandles: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
+  /** Releases temporary node bindings where the native protocol holds them as remote objects. */
+  readonly releaseNodes: (nodes: ReadonlyArray<NodeBinding>) => Effect.Effect<void>
 
   // Input
   /**
@@ -924,6 +995,8 @@ export interface AdapterConnection {
   ) => Effect.Effect<void, AdapterError>
   /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */
   readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
+  /** Geometry includes its coordinate document; native queries can cross same-process frame boundaries. */
+  readonly geometry: (node: NodeBinding, kind: Geometry.Kind) => Effect.Effect<Geometry.Result, AdapterError>
 
   // Obligations and declarations
   readonly resolve: (obligation: ObligationId, decision: Decision) => Effect.Effect<void, AdapterError>
@@ -967,9 +1040,18 @@ export interface AdapterConnection {
   readonly video: (
     page: Target.NavigableId
   ) => Effect.Effect<Effect.Effect<string, AdapterError>, AdapterError, Scope.Scope>
+  readonly createAuthenticator: (page: Target.NavigableId) => Effect.Effect<Authenticator, AdapterError>
+  readonly releaseAuthenticator: (ref: Authenticator) => Effect.Effect<void, AdapterError>
+  readonly authenticatorCredentials: (
+    ref: Authenticator
+  ) => Effect.Effect<ReadonlyArray<WebAuthn.Credential>, AdapterError>
+  readonly updateAuthenticator: (ref: Authenticator, update: AuthenticatorUpdate) => Effect.Effect<void, AdapterError>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
-  readonly clearCookies: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
+  readonly clearCookies: (
+    context: UserContext.Id,
+    options?: { readonly page: Target.NavigableId }
+  ) => Effect.Effect<void, AdapterError>
   readonly grantPermissions: (
     context: UserContext.Id,
     origin: Option.Option<string>,
@@ -981,6 +1063,10 @@ export interface AdapterConnection {
    * The body a hop's request sent; `None` without one (Q164). Kept only where `BodyCollection` was
    * declared before the request started; `Unsupported` (`body.notCollected`, `body.redirect`) where it wasn't kept.
    */
+  readonly captureRequestBody: (
+    request: NetworkRequest.NetworkRequest,
+    maxBytes: number
+  ) => Effect.Effect<RequestBody, AdapterError>
   readonly requestBody: (hop: NetworkRequest.HopId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
   /** The body of a paused request, as it was sent; `None` without one. */
   readonly pausedRequestBody: (obligation: ObligationId) => Effect.Effect<Option.Option<Uint8Array>, AdapterError>
@@ -1006,3 +1092,18 @@ export interface BackendAdapter {
     options: ConnectOptions
   ) => Effect.Effect<AdapterConnection, Browser.BrowserError, Scope.Scope>
 }
+
+/** PNG dimensions, or zeros for a truncated header. */
+export const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
+}
+
+/** A request's native report, without confusing missing, incomplete or text-only data with exact bytes. */
+export type RequestBody =
+  | { readonly _tag: "Absent" }
+  | { readonly _tag: "Bytes"; readonly bytes: Uint8Array }
+  | { readonly _tag: "ReportedText"; readonly text: string }
+  | { readonly _tag: "Incomplete" }
+  | { readonly _tag: "OverLimit" }
+  | { readonly _tag: "Unavailable"; readonly why: "notCollected" | "redirect" | "unavailable" }

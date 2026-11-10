@@ -1,0 +1,18 @@
+{
+  "id": "option-page-getbyrole-includehidden",
+  "upstream": [
+    "method:Page.getByRole"
+  ],
+  "option": "includeHidden",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

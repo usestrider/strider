@@ -67,6 +67,18 @@ layer(BrowserLive, { excludeTestServices: true })("checkout", (it) => {
 - A step that takes a page, such as `addToCart`, runs the same in a test and a script. To sign in once per file,
   start each test's page from [saved storage state](/docs/pages/contexts#logging-in-once).
 
+Vitest's default `testTimeout` is five seconds for the whole test, shorter than Strider's thirty-second budget
+per operation, so a slow step can end with Vitest's generic timeout before Strider reports its failure.
+Raise `testTimeout` in your Vitest config to allow time for all the test's operations:
+
+```ts title="vitest.config.ts"
+import { defineConfig } from "vitest/config"
+
+export default defineConfig({
+  test: { testTimeout: 60_000 }
+})
+```
+
 ## Concurrent pages
 
 A browser throttles the timers and rendering of pages in the background and gives focus to one page only, so
@@ -113,12 +125,18 @@ layer(BrowserLive, { concurrent: true, excludeTestServices: true })(
 - `concurrent: true` runs the file's tests at once, on its one browser.
 - Pages can tell both apart from a normal browser, so neither is a default.
 
+For automatic recording and attachment on failure, see [Traces for failed tests](/docs/tools/test-traces).
+
 ## Attaching files
 
 A trace written to disk isn't tied to the test that made it, so finding a failed test's trace means matching file
 names by hand. `TestRun`, which `VitestBrowser.layer` provides, attaches a file to the running test as a Vitest
 artifact, kept with its result: `run.attach` takes the file's kind, `"Trace"`, `"Har"` or `"Screenshot"`, and its
-path, such as a [trace](/docs/tools/recordings#traces)'s:
+path, such as a [trace](/docs/tools/recordings#traces)'s. Bind the callback with
+`VitestBrowser.withTest(context)` to capture its identity, retry attempt and attachment owner, even with a shared
+browser layer, or with a per-effect browser layer in either composition order. Call it again for each retry.
+Complete attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without this binding the adapter uses Vitest's global current-test
+lookup, which supports sequential tests only and can select another callback during concurrent tests:
 
 ```ts title="cart.test.ts"
 import { NodeServices } from "@effect/platform-node"
@@ -136,13 +154,13 @@ const ChromiumLive = Chromium.layerConfig({
 layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })(
   "cart",
   (it) => {
-    it.effect("adds a product to the cart", () =>
+    it.effect("adds a product to the cart", (context) =>
       Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const trace = yield* Trace.record(page, { screenshots: "perAction" })
         const run = yield* TestRun.TestRun
         const attachTrace = trace.exportTrace("traces/add-to-cart.zip").pipe(
-          Effect.flatMap((path) => run.attach({ _tag: "Trace", path })),
+          Effect.flatMap((path) => run.attach({ trace: path })),
           Effect.ignore
         )
         // Attached whether the steps pass or fail
@@ -151,10 +169,41 @@ layer(VitestBrowser.layer(ChromiumLive), { excludeTestServices: true })(
           yield* page.getByRole("button", { name: "Add to cart" }).click()
           yield* page.getByText("1 item").pipe(Expect.toBeVisible)
         }).pipe(Effect.ensuring(attachTrace))
-      }))
+      }).pipe(VitestBrowser.withTest(context)))
   }
 )
 ```
+
+A trace captures the test identity when recording starts, so exporting it after a retry or another test starts
+keeps the original name, file, project, attempt and repeat. Capture the filename at the same point:
+
+```ts
+import { Page, Trace } from "@usestrider/browser"
+import { TestRun } from "@usestrider/browser/test"
+import { VitestBrowser } from "@usestrider/vitest"
+import { Effect } from "effect"
+
+const recordCheckout = Effect.fn("recordCheckout")(function*(page: Page.Page) {
+  const { info } = yield* TestRun.TestRun
+  const name = VitestBrowser.traceFileName(info)
+  const trace = yield* Trace.record(page)
+  yield* page.getByRole("button", { name: "Pay" }).click()
+  yield* trace.exportTrace(`traces/${name}`)
+})
+```
+
+`traceFileName` returns a safe ZIP basename with a readable prefix and a SHA-256 digest of the project, file,
+test ID, attempt and repeat. Names that produce the same prefix still get distinct digests. The same identity always
+gets the same filename; use a separate directory to keep multiple runs or recordings. The manual form keeps recording, exporting
+and attaching explicit. The trace header stores test names and file paths as written.
+Bind each concurrent callback with `VitestBrowser.withTest(context)` as shown above, so recording and filename
+capture use that callback's identity. Without binding, the adapter's global lookup supports sequential tests only.
+Concurrent pages within one test keep that test's identity.
+
+`TestRun.TestInfo.repeat` is the zero-based repetition, separate from the retry attempt. Constructors and
+decoding default it to zero when omitted. Bind every retry and repeat with `withTest(context)` to capture
+both counters. Repeat zero keeps the original trace filename; later repeats add `repeat-N` and include
+the repeat in the filename digest and trace metadata.
 
 ## A fake browser for events
 

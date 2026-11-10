@@ -56,6 +56,11 @@ window.tells = (async () => {
 })()
 </script>`
 
+export const responseBody = (size: number): Buffer =>
+  Buffer.from(Uint8Array.from({ length: size }, (_, i) => (i * 31 + (i >>> 8)) & 255))
+
+const bodies = new Map([4096, 4 * 1024 * 1024].map((size) => [size, responseBody(size)]))
+
 const routes: Record<
   string,
   (
@@ -63,10 +68,26 @@ const routes: Record<
     request: http.IncomingMessage
   ) => { status?: number; type?: string; headers?: Record<string, string>; body: string | Buffer; delay?: number }
 > = {
+  "/benchmark/body": (url) => ({
+    type: "application/octet-stream",
+    body: bodies.get(Number(url.searchParams.get("size"))) ?? Buffer.alloc(0)
+  }),
   "/benchmark": () => ({
     body: page(
       "Benchmark",
       `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
+    )
+  }),
+  "/benchmark-reads": (url) => ({
+    body: page(
+      "Read benchmark",
+      Array.from(
+        { length: Number(url.searchParams.get("n") ?? 100) },
+        (_, i) =>
+          `<input id="field-${i}" value="Value ${i} café"${i % 2 === 0 ? " disabled" : ""}${
+            i % 3 === 0 ? "" : ` aria-label="Field ${i}"`
+          }>`
+      ).join("")
     )
   }),
   // The README's program: a heading, and a button that shows a message
@@ -154,11 +175,11 @@ const routes: Record<
       "Heavy",
       `<div id="grid"></div><script>
 const grid = document.querySelector("#grid")
-for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; grid.append(cell) }
+for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; cell.id = "cell-" + i; grid.append(cell) }
 const cells = grid.children
 const frame = (t) => { for (let i = 0; i < 200; i++) cells[(Math.floor(t) + i * 13) % cells.length].style.opacity = String((i % 10) / 10); requestAnimationFrame(frame) }
-requestAnimationFrame(frame)
-setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
+if (new URLSearchParams(location.search).get("animation") !== "static") requestAnimationFrame(frame)
+if (!new URLSearchParams(location.search).has("armed")) setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
         Number(url.searchParams.get("after") ?? "3000")
       })
 </script>`

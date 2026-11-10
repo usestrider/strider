@@ -33,6 +33,7 @@ import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
+import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import * as Locator from "./Locator.ts"
@@ -50,6 +51,24 @@ import type * as UserContext from "./UserContext.ts"
 import type * as Watchable from "./Watchable.ts"
 
 const TypeId = "~@usestrider/browser/Page"
+
+/**
+ * Schema for configured viewport dimensions in CSS pixels.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const ViewportSize = Schema.Struct({ width: Schema.Number, height: Schema.Number })
+
+/**
+ * Configured viewport dimensions in CSS pixels.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ViewportSize = typeof ViewportSize.Type
 
 /**
  * Schema for the state of a page's current document.
@@ -166,36 +185,36 @@ export const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded> = Schema.Struc
 /**
  * Settings for `screenshot`.
  *
+ * **Details**
+ *
+ * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface ScreenshotOptions {
+export type ScreenshotOptions = ScreenshotFormat & {
   /**
-   * What to capture. An element is captured beyond the viewport if needed, never by scrolling.
+   * What to capture: `"viewport"`, `"fullPage"`, `{ clip }`, a rectangle of the page in CSS pixels, or
+   * `{ element }`, the one element a locator matches. An element is captured beyond the viewport if needed, never
+   * by scrolling.
    *
-   * @default the viewport
+   * @default "viewport"
    */
   readonly area?:
-    | { readonly _tag: "Viewport" }
-    | { readonly _tag: "FullPage" }
+    | "viewport"
+    | "fullPage"
     | {
-      readonly _tag: "Clip"
-      readonly rect: {
+      readonly clip: {
         readonly x: Pixels.Css
         readonly y: Pixels.Css
         readonly width: Pixels.Css
         readonly height: Pixels.Css
       }
+      readonly element?: never
     }
-    | { readonly _tag: "Element"; readonly locator: Locator.ReadonlyLocator }
+    | { readonly element: Locator.ReadonlyLocator; readonly clip?: never }
     | undefined
-  /**
-   * The image format.
-   *
-   * @default PNG
-   */
-  readonly format?: { readonly _tag: "Png" } | { readonly _tag: "Jpeg"; readonly quality: number } | undefined
   /**
    * One image pixel per CSS pixel, or per device pixel.
    *
@@ -209,6 +228,31 @@ export interface ScreenshotOptions {
    */
   readonly omitBackground?: boolean | undefined
 }
+
+/**
+ * A screenshot's image format: PNG, or JPEG with a quality from 0 to 100.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ScreenshotFormat =
+  | {
+    /**
+     * The image format.
+     *
+     * @default "png"
+     */
+    readonly format?: "png" | undefined
+    readonly quality?: undefined
+  }
+  | {
+    readonly format: "jpeg"
+    /**
+     * The JPEG quality, from 0 to 100.
+     */
+    readonly quality: number
+  }
 
 /**
  * A length for PDF paper sizes and margins.
@@ -504,6 +548,34 @@ export interface ObservedPage extends Pipeable.Pipeable, Equal.Equal, Inspectabl
  */
 export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLocator> {
   /**
+   * Reads the effective viewport dimensions configured through this connection, or `None` when unset.
+   *
+   * **Details**
+   *
+   * Page declarations take precedence over context and browser declarations; the most recent declaration
+   * at the same scope wins. Removing it restores the next declaration. This reads configuration without
+   * querying the browser. Window resizing, document layout and settings made by another client are not measured.
+   * It does not wait for a document to load. A closed page fails with `TargetGone`.
+   *
+   * **Example** (Read the configured viewport)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const configured = Effect.scoped(Effect.gen(function*() {
+   *   const page = yield* Browser.newPage({
+   *     emulation: { viewport: { width: 640, height: 480 } }
+   *   })
+   *   return yield* page.viewportSize
+   * }))
+   * ```
+   *
+   * @see {@link Emulation.Viewport}
+   */
+  readonly viewportSize: Effect.Effect<Option.Option<ViewportSize>, PageError | Target.TargetGone | Deadline.Timeout>
+
+  /**
    * Enters an iframe by its element.
    *
    * **Example** (Reading text inside an iframe)
@@ -600,7 +672,7 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    *
    * const captureCart = Effect.fn("captureCart")(function*(page: Page.ReadonlyPage) {
    *   const cart = page.getByRole("region", { name: "Cart" })
-   *   return yield* page.screenshot({ area: { _tag: "Element", locator: cart } })
+   *   return yield* page.screenshot({ area: { element: cart } })
    * })
    * ```
    */
@@ -638,6 +710,14 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
   readonly sessionStorage: OriginStorage.ReadonlyOriginStorage
   /**
    * Calls `fn` in the isolated world, where page globals are invisible, and returns the result by value.
+   *
+   * **Details**
+   *
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
+   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
+   * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
+   * separate from `JSHandle.Serialized`, which describes the returned value.
    *
    * **Gotchas**
    *
@@ -703,6 +783,15 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
  * @since 0.1.0
  */
 export interface Page extends ReadonlyPage {
+  /**
+   * Acquires a specialized feature for the caller's scope, including features that change native page behavior.
+   */
+  capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect<
+    H,
+    Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+
   getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator
   getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByLabel(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
@@ -743,6 +832,57 @@ export interface Page extends ReadonlyPage {
     url: Url.Url | string,
     options?: GotoOptions | undefined
   ): Effect.Effect<PageNavigation.PageNavigation, PageError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Replaces the current document's HTML using the browser's parser and waits for readiness.
+   *
+   * **Details**
+   *
+   * Uses `document.open`, `document.write` and `document.close`. The URL, history entry, document identity
+   * and main-world globals remain; the DOM and its event listeners are replaced. Scripts execute and resources
+   * load under the current document's origin, base URL and security policy. A `base` element can change resource URLs.
+   *
+   * `waitUntil` defaults to `"load"`, including child-frame and resource loading. `"domContentLoaded"` waits
+   * for parsing and deferred scripts, while `"commit"` returns after writing and closing, without waiting for
+   * readiness. This does not perform a navigation or produce a `PageNavigation`.
+   *
+   * The HTML write waits for exclusive page input access, so it cannot remove listeners protecting an
+   * in-flight native action. Resource-readiness waiting releases that access.
+   *
+   * **Gotchas**
+   *
+   * Interruption or a deadline stops waiting; it does not undo the replacement or stop scripts and requests
+   * already started. The temporary readiness listener is removed with a separate one-second cleanup budget;
+   * cleanup failures are recorded in diagnostics. Earlier resource requests can continue to delay load after
+   * another replacement; choose parsing readiness when those requests need not finish. Navigation during the
+   * call can fail with `TargetGone`. Page scripts can tamper with the main-world document methods. Avoid
+   * concurrent replacements.
+   *
+   * **Example** (Rendering an HTML fixture)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const renderReceipt = Effect.fn("renderReceipt")(function*(page: Page.Page) {
+   *   yield* page.setContent("<title>Receipt</title><h1>Order received</h1>")
+   *   return yield* page.getByRole("heading").readText
+   * })
+   * ```
+   *
+   * @see {@link Deadline.within} to bound replacement and readiness with one deadline
+   * @stability unstable
+   * @since 0.1.0
+   */
+  setContent(
+    html: string,
+    options?: {
+      /**
+       * Readiness to wait for after writing the HTML; `"commit"` skips the readiness wait.
+       * @default "load"
+       */
+      readonly waitUntil?: PageNavigation.LoadState | undefined
+    } | undefined
+  ): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Reloads the current document.
    *
@@ -801,6 +941,14 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<Option.Option<PageNavigation.PageNavigation>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` in the page's main world, where its own globals are visible, and returns the result by value.
+   *
+   * **Details**
+   *
+   * Arguments cross by value: undefined, null, strings, numbers (including NaN, -0 and infinities), booleans,
+   * bigints, Date, RegExp, Map and Set retain their types recursively inside arrays and objects. Objects copy
+   * their own enumerable string keys, except that Firefox currently drops an own `__proto__` key.
+   * Handles passed as arguments refer to their existing values in the same realm. These argument rules are
+   * separate from `JSHandle.Serialized`, which describes the returned value.
    *
    * **Gotchas**
    *
@@ -864,6 +1012,7 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
+   * - The route is in force for requests that start after this declaration returns.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"` or `"auth"`) decides what the handler is given and may decide.
@@ -872,8 +1021,15 @@ export interface Page extends ReadonlyPage {
    *
    * **Gotchas**
    *
+   * On Chromium, a request already underway without response interception may not pick up a later response
+   * route, even before its headers arrive. A response that does pause selects the current routes by precedence.
+   *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
+   *
+   * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
+   * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
+   * also handle `"request"`; union phases require a handler compatible with every possible phase.
    *
    * **Example** (Blocking analytics requests)
    *
@@ -892,7 +1048,22 @@ export interface Page extends ReadonlyPage {
    */
   route<E, R, P extends Route.Phase = "request">(
     pattern: Url.Pattern | string,
-    handler: Route.Handler<E, R, P>,
+    handler: Route.Handler<E, R, NoInfer<P>>,
+    options: Route.Options<P> & { readonly phase: P }
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R>(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R>,
+    options?: Route.Options | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request">(
+    pattern: Url.Pattern | string,
+    handler: Route.Handler<E, R, NoInfer<P> | "request">,
+    options?: Route.Options<P> | undefined
+  ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  route<E, R, P extends Route.Phase = "request", D extends Route.Phase = P | "request">(
+    pattern: Url.Pattern | string,
+    handler: RoutePhaseDiagnostic.Handler<E, R, NoInfer<P> | "request", D>,
     options?: Route.Options<P> | undefined
   ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**

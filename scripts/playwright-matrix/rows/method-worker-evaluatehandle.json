@@ -1,0 +1,17 @@
+{
+  "id": "method-worker-evaluatehandle",
+  "upstream": [
+    "method:Worker.evaluateHandle"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "BrowserWorker exposes url, kind, closed and by-value evaluate; this event/handle operation is absent.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/BrowserWorker.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,30 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-frame-goto-waituntil",
+  "upstream": [
+    "method:Frame.goto"
+  ],
+  "option": "waitUntil",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "commit",
+      "status": "missing"
+    },
+    {
+      "value": "domcontentloaded",
+      "status": "missing"
+    },
+    {
+      "value": "load",
+      "status": "missing"
+    },
+    {
+      "value": "networkidle",
+      "status": "missing"
+    }
+  ]
+}

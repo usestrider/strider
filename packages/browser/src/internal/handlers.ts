@@ -19,6 +19,7 @@ import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -43,7 +44,12 @@ export interface Options<S, P, D, E, R> {
   /** What the handler is given for an obligation. */
   readonly pending: (subject: S) => P
   /** The adapter's decision for what the handler returned about an obligation, or why it isn't one. */
-  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision | Staged, unknown>
+  readonly decision: (chosen: D, subject: S) => Effect.Effect<Adapter.Decision | Staged, unknown, Scope.Scope>
+  /**
+   * Own a temporary scope for internal preparation through staged application.
+   * @default false
+   */
+  readonly scopedDecision?: boolean | undefined
   /** What it decides, for the log: `"confirm"`, `"file chooser"`. */
   readonly noun: (subject: S) => string
   /** What a wait on `handled` reports: `"Dialog.handle.handled.waitFor"`. */
@@ -63,6 +69,12 @@ export interface Staged {
   readonly _tag: "Staged"
   readonly apply: Effect.Effect<Adapter.Decision, unknown>
 }
+
+/** The bounded work's outcome; reporting stays in the resolving fiber's context. */
+type Outcome =
+  | { readonly _tag: "Failed"; readonly phase: "handler" | "decision"; readonly cause: Cause.Cause<unknown> }
+  | { readonly _tag: "Expired" }
+  | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
 
 /** Registers a handler for the scope; removing it, or closing its scope, leaves later obligations to the one before. */
 /**
@@ -96,46 +108,80 @@ export const register = <S, P, D, E, R>(
 ): Effect.Effect<Declaration.HandlerRegistration, never, Scope.Scope | R> =>
   Effect.gen(function*() {
     const context = yield* Effect.context<R>()
+    const registrationScope = yield* Effect.scope
     const budget = yield* Effect.service(Deadline.DefaultBudget)
     const clock = yield* Effect.service(BrowserClock.CurrentClock)
     // The handler's fibers end with its scope, which leaves an undecided obligation to the policy
-    const fibers = yield* FiberSet.make<D, E>()
+    const fibers = yield* FiberSet.make<Outcome>()
     const handled = yield* SubscriptionRef.make(0)
     const id = options.page.id
     const registration: Model.Handler<S> = {
       decide: Effect.fnUntraced(function*(subject: S) {
-        // Each decision has the handler's budget from when it starts, not the deadline in force at registration
+        // The user handler, preparation and application share one deadline and one scope-owned fiber.
+        const at = (clock.now() + Duration.toMillis(budget) * 1e6) as MonotonicInstant.MonotonicInstant
+        const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`
+        const expired = () => BrowserClock.millisLeft(clock, at) === 0
+        const timedOut = report(
+          `${described} within ${Duration.format(budget)}, so ${options.fallback} decides`,
+          Cause.empty
+        )
         const fiber = yield* FiberSet.run(
           fibers,
           Effect.provideContext(
-            options.handler(options.pending(subject)).pipe(Operation.apart(options.name, budget)),
+            Effect.gen(function*() {
+              const chosen = yield* options.handler(options.pending(subject)).pipe(Effect.exit)
+              if (Exit.isFailure(chosen)) return { _tag: "Failed", phase: "handler", cause: chosen.cause } as const
+              if (expired()) return { _tag: "Expired" } as const
+              // Internal preparation owns resources through staged application; the user handler keeps its registration scope.
+              const deciding = Effect.gen(function*() {
+                const decision = yield* options.decision(chosen.value, subject).pipe(Effect.exit)
+                if (Exit.isFailure(decision)) {
+                  return { _tag: "Failed", phase: "decision", cause: decision.cause } as const
+                }
+                // A read may finish after its deadline even if its service masks interruption.
+                if (expired()) return { _tag: "Expired" } as const
+                yield* SubscriptionRef.update(handled, (count) => count + 1)
+                if (decision.value._tag !== "Staged") return { _tag: "Decided", decision: decision.value } as const
+                const applied = yield* decision.value.apply.pipe(Effect.exit)
+                return Exit.isFailure(applied)
+                  ? { _tag: "Failed", phase: "decision", cause: applied.cause } as const
+                  : { _tag: "Decided", decision: applied.value } as const
+              })
+              return yield* (options.scopedDecision
+                ? Effect.scoped(deciding)
+                : Scope.provide(deciding, registrationScope))
+            }).pipe(
+              (self) => Operation.under(self, at),
+              Operation.apart(options.name, budget)
+            ),
             context
           )
         )
-        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
-        const described = `${options.name}: the handler of ${id} didn't decide the ${options.noun(subject)}`
+        const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, BrowserClock.millisLeft(clock, at)))
         if (Option.isNone(exit)) {
           yield* Fiber.interrupt(fiber)
-          yield* report(`${described} within ${Duration.format(budget)}, so ${options.fallback} decides`, Cause.empty)
+          yield* timedOut
           return Option.none()
         }
         if (Exit.isFailure(exit.value)) {
           yield* report(`${described}: it failed, so ${options.fallback} decides`, exit.value.cause)
           return Option.none()
         }
-        const decision = yield* options.decision(exit.value.value, subject).pipe(Effect.exit)
-        if (Exit.isFailure(decision)) {
-          yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, decision.cause)
+        const outcome = exit.value.value
+        if (outcome._tag === "Expired") {
+          yield* timedOut
           return Option.none()
         }
-        yield* SubscriptionRef.update(handled, (count) => count + 1)
-        if (decision.value._tag !== "Staged") return Option.some(decision.value)
-        const applied = yield* decision.value.apply.pipe(Effect.exit)
-        if (Exit.isFailure(applied)) {
-          yield* report(`${described}: its decision couldn't be made, so ${options.fallback} decides`, applied.cause)
+        if (outcome._tag === "Failed") {
+          yield* report(
+            outcome.phase === "handler"
+              ? `${described}: it failed, so ${options.fallback} decides`
+              : `${described}: its decision couldn't be made, so ${options.fallback} decides`,
+            outcome.cause
+          )
           return Option.none()
         }
-        return Option.some(applied.value)
+        return Option.some(outcome.decision)
       })
     }
     // In force once this returns: an obligation folded after it is this handler's to decide

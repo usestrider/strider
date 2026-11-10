@@ -1169,6 +1169,105 @@ export const conformance = (backend: Backend) =>
             }
           }), timeout)
 
+        for (const scrolled of [false, true]) {
+          it.effect(`keeps wrapped text layout in viewport clips (${scrolled ? "scrolled" : "initial"})`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const clip = (yield* evaluate(
+                world,
+                page,
+                `() => {
+                document.documentElement.style.cssText = 'overflow-y:scroll';
+                document.body.style.cssText = 'margin:0;padding:40px 50px;height:3000px;box-sizing:border-box;background:white';
+                document.body.innerHTML = '<div id="wrapped" style="font:20px/24px monospace;height:120px;overflow:hidden;margin-top:${
+                  scrolled ? 700 : 0
+                }px">' + 'Wrapped text keeps the same line breaks beside a visible scrollbar. '.repeat(40) + '</div>';
+                window.scrollTo(0, ${scrolled ? 700 : 0});
+                const r = document.querySelector('#wrapped').getBoundingClientRect();
+                return { x:r.x+scrollX, y:r.y+scrollY, width:r.width, height:r.height, scrollX, scrollY };
+              }`
+              )) as { x: number; y: number; width: number; height: number; scrollX: number; scrollY: number }
+              const { scrollX, scrollY, ...region } = clip
+              const options = {
+                format: "png" as const,
+                quality: Option.none(),
+                fullPage: false,
+                scale: "device" as const,
+                omitBackground: false
+              }
+              const viewport = yield* world.adapter.screenshot(page, { ...options, clip: Option.none() })
+              const clipped = yield* world.adapter.screenshot(page, { ...options, clip: Option.some(region) })
+              const difference = yield* evaluate(
+                world,
+                page,
+                `async () => {
+                const load = async (data) => { const image = new Image(); image.src = 'data:image/png;base64,' + data; await image.decode(); return image; };
+                const viewport = await load('${Buffer.from(viewport).toString("base64")}');
+                const clipped = await load('${Buffer.from(clipped).toString("base64")}');
+                const canvas = document.createElement('canvas'); canvas.width = ${clip.width}; canvas.height = ${clip.height};
+                const ctx = canvas.getContext('2d'); ctx.drawImage(viewport, -${clip.x - scrollX}, -${
+                  clip.y - scrollY
+                });
+                const expected = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+                ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(clipped,0,0);
+                const actual = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+                let different = 0; for(let i=0;i<actual.length;i++) if(actual[i]!==expected[i]) different++;
+                return { different, width:clipped.width, height:clipped.height };
+              }`
+              )
+              assert.deepStrictEqual(difference, { different: 0, width: clip.width, height: clip.height })
+            }), timeout)
+        }
+
+        it.effect("captures distinct partly and wholly offscreen markers", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const height = (yield* evaluate(
+              world,
+              page,
+              `() => {
+              document.body.style.cssText = 'margin:0;height:3000px;background:rgb(0,128,0)';
+              return innerHeight;
+            }`
+            )) as number
+            for (const y of [height - 60, height + 40]) {
+              yield* evaluate(
+                world,
+                page,
+                `() => {
+                document.body.innerHTML = '<div style="position:absolute;left:50px;top:${y}px;width:100px;height:60px;background:red"></div><div style="position:absolute;left:50px;top:${
+                  y + 60
+                }px;width:100px;height:60px;background:blue"></div>';
+              }`
+              )
+              const png = yield* world.adapter.screenshot(page, {
+                format: "png",
+                quality: Option.none(),
+                fullPage: false,
+                scale: "device",
+                omitBackground: false,
+                clip: Option.some({ x: 50, y, width: 100, height: 120 })
+              })
+              const pixels = yield* evaluate(
+                world,
+                page,
+                `async () => {
+                const image = new Image(); image.src = 'data:image/png;base64,${
+                  Buffer.from(png).toString("base64")
+                }'; await image.decode();
+                const canvas = document.createElement('canvas'); canvas.width=100; canvas.height=120;
+                const ctx=canvas.getContext('2d'); ctx.drawImage(image,0,0);
+                return [image.width,image.height, ...ctx.getImageData(50,30,1,1).data, ...ctx.getImageData(50,90,1,1).data];
+              }`
+              )
+              assert.deepStrictEqual(pixels, [100, 120, 255, 0, 0, 255, 0, 0, 255, 255])
+            }
+          }), timeout)
+
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1262,7 +1361,8 @@ export const conformance = (backend: Backend) =>
             yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -1276,7 +1376,9 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+            const directory = (yield* Effect.promise(() =>
+              import("node:os")
+            )).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -1466,6 +1568,72 @@ export const viewportRestoration = (backend: Backend, options: { readonly nested
                 assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), [1000, 700])
               }))
               assert.deepStrictEqual(yield* evaluate(world, page, "() => [innerWidth, innerHeight]"), original)
+            }),
+          timeout
+        )
+
+        it.effect(
+          "preserves viewport precedence across broader replacements and creation",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { context, page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const measure = (target: Target.NavigableId) =>
+                evaluate(world, target, "() => [innerWidth, innerHeight, devicePixelRatio]")
+              const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
+              const viewport = capabilities.entries.find((entry) => entry.name === "emulation.viewport")
+              assert.isDefined(viewport)
+              const contextScale = viewport.status === "supported" ? 2 : 1
+              const pageScale = viewport.status === "supported" ? 3 : 1
+              if (viewport.status !== "supported") {
+                const refused = yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 640, height: 600, deviceScaleFactor: 2, mobile: false }
+                })).pipe(Effect.flip)
+                assert.strictEqual(refused.reason._tag, "Unsupported")
+              }
+              const original = yield* measure(page)
+              const browser = yield* Scope.make()
+              const userContext = yield* Scope.make()
+              const pageScope = yield* Scope.make()
+              for (const scope of [browser, userContext, pageScope]) {
+                yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+              }
+              const declare = (scope: Adapter.DeclarationScope, width: number, ratio: number, lifetime: Scope.Scope) =>
+                world.adapter.declare(scope, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width, height: 600, deviceScaleFactor: ratio, mobile: false }
+                }).pipe(Effect.provideService(Scope.Scope, lifetime))
+              yield* declare({ _tag: "Browser" }, 1100, 1, browser)
+              yield* declare({ _tag: "UserContext", context }, 1000, contextScale, userContext)
+              yield* declare({ _tag: "Page", page }, 640, pageScale, pageScope)
+              yield* Effect.scoped(Effect.gen(function*() {
+                yield* world.adapter.declare({ _tag: "UserContext", context }, {
+                  _tag: "Override",
+                  override: { _tag: "Viewport", width: 900, height: 600, deviceScaleFactor: 1, mobile: false }
+                })
+                assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+                const sibling = yield* world.adapter.createPage(context)
+                yield* goto(world, sibling, `${world.site.origin}/hello`)
+                assert.deepStrictEqual(yield* measure(sibling), [900, 600, 1])
+              }))
+              const sibling = yield* world.adapter.createPage(context)
+              yield* goto(world, sibling, `${world.site.origin}/hello`)
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              const other = yield* newPage(world)
+              yield* goto(world, other.page, `${world.site.origin}/hello`)
+              assert.deepStrictEqual(yield* measure(other.page), [1100, 600, 1])
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              yield* Scope.close(browser, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), [640, 600, pageScale])
+              assert.deepStrictEqual(yield* measure(sibling), [1000, 600, contextScale])
+              yield* Scope.close(pageScope, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), [1000, 600, contextScale])
+              yield* Scope.close(userContext, Exit.void)
+              assert.deepStrictEqual(yield* measure(page), original)
+              assert.deepStrictEqual(yield* measure(sibling), original)
             }),
           timeout
         )

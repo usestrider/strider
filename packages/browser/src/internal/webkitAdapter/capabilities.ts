@@ -13,7 +13,7 @@ import type * as Adapter from "../adapter.ts"
  * `Emulation` or `Screencast` domain, no navigate command, no worlds of its own and no `DOM.describeNode`, and no
  * events for a frame's attachment, a same-document navigation, a file chooser or a download.
  */
-export const attachedCapabilities = (info: Browser.Info) => {
+export const attachedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, attached, ${info.product} ${info.revision}`
   const noInput = "stock WebKit's inspector protocol has no Input domain"
   const noEmulation = "stock WebKit's inspector has no Emulation domain"
@@ -26,9 +26,25 @@ export const attachedCapabilities = (info: Browser.Info) => {
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "unsupported", ["size collection requires a newly created context"]),
+      entry("network.sizes.request", "unsupported"),
+      entry("network.sizes.responseHeaders", "unsupported"),
+      entry("network.sizes.responseBody", "unsupported"),
+      entry("network.sizes.encoded", "unsupported"),
+      entry("network.sizes.decoded", "unsupported"),
+      entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
+      entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
+      entry("input.topLevelDesignMode", "unsupported", [noInput]),
+      entry("webSocketRouting", "partial", [
+        "explicit script consent and bestEffort timing; admission ceilings; main-world WebSocket only"
+      ]),
       entry("userContexts", "unsupported", [
         "stock WebKit's inspector makes no contexts or pages: the browser's own are observed"
       ]),
+      entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
@@ -101,6 +117,22 @@ export const attachedCapabilities = (info: Browser.Info) => {
       entry("network.servedBy", "supported", [
         "a script or stylesheet reused from the memory cache within one document produces no request"
       ]),
+      entry("network.responseBody.terminalRedirect", "supported"),
+      entry("network.requestBody.redirects", "supported", []),
+      entry("network.requestBody.absence", "unsupported", [
+        "empty or missing native text cannot establish absence or completeness"
+      ]),
+      entry("network.requestBody.empty", "unsupported", [
+        "empty native reports can omit Blob or File payloads and are refused"
+      ]),
+      entry("network.requestBody.multipart", "unsupported", [
+        "multipart file completeness cannot be established from the native report"
+      ]),
+      entry("network.requestBody.bytes", "unsupported", ["stock WebKit exposes decoded text, not original bytes"]),
+      entry("network.requestBody.text", "partial", [
+        "nonempty protocol-reported text only; empty, missing and multipart reports cannot establish completeness and are refused"
+      ]),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "partial", [
         "without the Cookie header, which WebKitGTK's network process doesn't report"
       ]),
@@ -112,6 +144,12 @@ export const attachedCapabilities = (info: Browser.Info) => {
         "a context's list is the cookies its pages' documents and resources are sent"
       ]),
       entry("cookies.partitioned", "unsupported", ["WebKit doesn't report partitioned cookies"]),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported", [
         "stock WebKit keys a frame's storage by its top-level origin, port included: a state saved without one is restored at its site's default port"
       ]),
@@ -130,13 +168,23 @@ export const attachedCapabilities = (info: Browser.Info) => {
         "emulation.network.throttling",
         "emulation.cpuSlowdown",
         "emulation.javaScript",
+        "emulation.extraHTTPHeaders",
         "emulation.touch",
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
+      entry("capability.virtualAuthenticator", "unsupported", [
+        "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
+      ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
-      entry("capability.video", "unsupported", ["stock WebKit's inspector has no Screencast domain"])
+      entry(
+        "capability.video",
+        video ? "supported" : "unsupported",
+        video
+          ? ["Explicit PNG polling; variable-rate output can miss states between captures"]
+          : ["Stock WebKit video requires video polling options and a VideoWriter service"]
+      )
     ]
   })
 }
@@ -164,6 +212,8 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
       return "emulation.cpuSlowdown"
     case "JavaScriptEnabled":
       return "emulation.javaScript"
+    case "ExtraHeaders":
+      return "emulation.extraHTTPHeaders"
     case "Touch":
       return "emulation.touch"
     case "FocusEmulation":
@@ -178,13 +228,27 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
  * session drives: contexts as browser processes, pages, trusted input, dialogs whose kind it doesn't say, the
  * window's size as the viewport, and file inputs. History traversal stays unsupported (`navigation.traverse`).
  */
-export const launchedCapabilities = (info: Browser.Info) => {
+export const launchedCapabilities = (info: Browser.Info, video = false) => {
   const evidence = `WebKit adapter, launched, ${info.product} ${info.revision}`
   const differ: Readonly<Record<string, readonly [Browser.CapabilityEntry["status"], ReadonlyArray<string>]>> = {
+    "network.sizes": ["partial", ["context opt-in; native metrics only; cache and redirect totals unavailable"]],
+    "network.sizes.request": ["supported", []],
+    "network.sizes.responseHeaders": ["supported", []],
+    "network.sizes.responseBody": ["supported", []],
+    "network.sizes.encoded": ["unsupported", ["received body bytes include transfer framing"]],
+    "network.sizes.decoded": ["supported", []],
+    "network.timing": ["partial", [
+      "context-creation opt-in; ambiguous zero phases and TLS timing unavailable; redirect end is an observation bound"
+    ]],
+    acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
+    "userContexts.proxy": ["supported", [
+      "isolated process environment; HTTP proxy endpoints only; loopback stays direct"
+    ]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
+    "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
     "input.insertText": ["supported", []],
     "input.keyboardLayout": ["unsupported", [
@@ -205,6 +269,7 @@ export const launchedCapabilities = (info: Browser.Info) => {
     "emulation.viewport.mobile": ["unsupported", ["no mobile viewport"]],
     "emulation.javaScript": ["supported", []],
     "emulation.media": ["supported", []],
+    "emulation.extraHTTPHeaders": ["supported", []],
     "emulation.focus": ["unsupported", ["each page is a window of its own"]],
     "emulation.timezone": ["unsupported", ["taken at launch, before a context's options reach it"]],
     "emulation.locale": ["unsupported", [
@@ -217,7 +282,7 @@ export const launchedCapabilities = (info: Browser.Info) => {
       "found through Automation, by its document"
     ]]
   }
-  const base = attachedCapabilities(info).entries
+  const base = attachedCapabilities(info, video).entries
   const entries = base.map((entry) => {
     const different = differ[entry.name]
     return different === undefined

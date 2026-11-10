@@ -9,7 +9,7 @@
  * @since 0.1.0
  */
 import * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as FilePath from "../FilePath.ts"
 
@@ -28,21 +28,31 @@ export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/T
    */
   id: Schema.String,
   attempt: Schema.Int,
+  /**
+   * Zero-based repetition within the test run, separate from its retry attempt. Optional for older
+   * identity objects; construction and decoding supply zero when omitted.
+   *
+   * @default 0
+   */
+  repeat: Schema.optionalKey(Schema.Int).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0))
+  ),
   worker: Schema.String,
   shard: Schema.String
 }) {}
 
 /**
- * Schema for a file to attach to the running test.
+ * Schema for a file to attach to the running test: `{ trace }`, `{ har }` or `{ screenshot }`, each a path.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const TestArtifact = Schema.Union([
-  Schema.TaggedStruct("Trace", { path: FilePath.Local }),
-  Schema.TaggedStruct("Har", { path: FilePath.Local }),
-  Schema.TaggedStruct("Screenshot", { path: FilePath.Local })
+  Schema.Struct({ trace: FilePath.Local }),
+  Schema.Struct({ har: FilePath.Local }),
+  Schema.Struct({ screenshot: FilePath.Local })
 ])
 
 /**
@@ -63,13 +73,15 @@ export type TestArtifact = typeof TestArtifact.Type
  */
 export interface TestRun {
   /**
-   * The test running when this is read; in Vitest, `TestRunner.getCurrentTest()`. Outside a test, its fields
-   * are empty.
+   * The test identity supplied by the adapter. Explicit callback bindings retain the identity, retry attempt and
+   * repeat captured for that invocation. Vitest’s unbound layer uses a global lookup, which supports sequential tests
+   * only; without a current test its project, file and id are empty and its attempt and repeat are zero.
    */
   readonly info: TestInfo
   /**
-   * Attaches a file to the test running now; in Vitest, `recordArtifact`. Outside a test, or in a runner that
-   * keeps no artifacts, nothing is attached and a warning is logged.
+   * Attaches a file to the adapter’s test; an explicit callback binding uses its captured task. Outside a test, or in a runner that
+   * keeps no artifacts, nothing is attached and a warning is logged. Complete bound attachments during their
+   * callback; Vitest does not guarantee that artifacts attached later reach reporters.
    *
    * **Example** (Attaching a trace of a checkout)
    *
@@ -83,7 +95,7 @@ export interface TestRun {
    *   yield* page.getByRole("button", { name: "Checkout" }).click()
    *   const path = yield* trace.exportTrace("traces/checkout.zip")
    *   const run = yield* TestRun.TestRun
-   *   yield* run.attach({ _tag: "Trace", path })
+   *   yield* run.attach({ trace: path })
    * })
    * ```
    */
@@ -93,15 +105,15 @@ export interface TestRun {
 /**
  * The service tag for `TestRun`.
  *
- * **Example** (Naming a file after the running test)
+ * **Example** (Reading the running test)
  *
  * ```ts import.meta.vitest
  * import { TestRun } from "@usestrider/browser/test"
  * import { Effect } from "effect"
  *
- * const tracePath = Effect.gen(function*() {
+ * const testIdentity = Effect.gen(function*() {
  *   const { info } = yield* TestRun.TestRun
- *   return `traces/${info.id.replace(/\W+/g, "-")}-attempt-${info.attempt}.zip`
+ *   return { test: info.id, attempt: info.attempt }
  * })
  * ```
  *

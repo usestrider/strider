@@ -1,0 +1,25 @@
+{
+  "id": "method-page-pdf",
+  "upstream": [
+    "method:Page.pdf"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.pdf",
+      "url": "/docs/api/browser/Page#ReadonlyPage.pdf"
+    }
+  ],
+  "notes": "Chromium needs headless mode; PDF is not available on WebKit.",
+  "capabilities": [
+    "pdf"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

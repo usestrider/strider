@@ -1,0 +1,33 @@
+{
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Checks",
+      "url": "/docs/api/browser/Locator#Checks"
+    }
+  ],
+  "notes": "Choose named actionability checks instead of a force boolean.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Actionability checks are named, adjustable per call and reported in errors.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "id": "option-page-fill-force",
+  "upstream": [
+    "method:Page.fill"
+  ],
+  "option": "force",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

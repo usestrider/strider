@@ -1,0 +1,11 @@
+{
+  "id": "method-androidinput-swipe",
+  "upstream": [
+    "method:AndroidInput.swipe"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

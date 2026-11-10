@@ -1,0 +1,23 @@
+{
+  "id": "method-page-waitforurl",
+  "upstream": [
+    "method:Page.waitForURL"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveURL",
+      "url": "/docs/api/browser/Expect#toHaveURL"
+    }
+  ],
+  "notes": "Retries URL matching without waiting for load; strings match the full URL.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

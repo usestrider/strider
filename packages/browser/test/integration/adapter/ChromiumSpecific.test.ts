@@ -5,13 +5,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, Expect } from "@usestrider/browser"
+import { Browser, Deadline, Expect, Ledger } from "@usestrider/browser"
+import * as BrowserCdp from "@usestrider/browser/cdp/Browser"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -20,10 +22,12 @@ import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as L1Target from "../../../src/Target.ts"
 import { assertPinned, chromium } from "../browsers.ts"
-import { makeRecorder, site } from "./harness.ts"
+import { useXvfb } from "../stockWebKit.ts"
+import { json, makeRecorder, site } from "./harness.ts"
 
 const executable = chromium.executable
 const timeout = 60_000
@@ -32,7 +36,383 @@ describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
-        "click sends stay ordered across a suspended transport and do not wait for earlier acknowledgments",
+        "evaluates: a by-value argument keeps an own __proto__ key as data at every depth",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const facts = makeRecorder()
+            const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+            const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
+            const page = yield* adapter.createPage(adapter.defaultContext)
+            const navigation = yield* adapter.navigate(page, `${served.origin}/form`, { referrer: Option.none() })
+            const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            assert(ended.outcome._tag === "Committed")
+            const realm = yield* adapter.realm(ended.outcome.document, { _tag: "Main" })
+            const data: Adapter.RemoteValue = {
+              type: "object",
+              value: [["__proto__", { type: "object", value: [["polluted", { type: "boolean", value: true }]] }]]
+            }
+            // CDP parses value arguments as literals: this JSON key requires reconstruction even without tagged values.
+            for (
+              const [value, select] of [
+                [data, "value"],
+                [{ type: "object", value: [["nested", data]] }, "value.nested"],
+                [{ type: "array", value: [{ type: "object", value: [["nested", data]] }] }, "value[0].nested"]
+              ] as const
+            ) {
+              const result = yield* adapter.evaluate(realm, {
+                functionDeclaration:
+                  `(value) => { const data = ${select}; return [Object.prototype.hasOwnProperty.call(data, '__proto__'), Object.getPrototypeOf(data) === Object.prototype, 'polluted' in data] }`,
+                arguments: [{ _tag: "Value", value }],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              })
+              assert(result._tag === "Value", `evaluation threw: ${result._tag === "Exception" ? result.text : ""}`)
+              assert.deepStrictEqual(json(result.value), [true, true, false])
+            }
+          }),
+        timeout
+      )
+
+      it.effect(
+        "connects Chromium with no startup page",
+        () =>
+          Effect.gen(function*() {
+            const { transport } = yield* ChromiumLauncher.launch({
+              executablePath: executable,
+              args: ["--no-startup-window"]
+            })
+            const cdp = yield* CdpConnection.make(transport)
+            const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(cdp.browser))
+            assert.deepStrictEqual(targetInfos.filter((target) => target.type === "page"), [])
+          }),
+        timeout
+      )
+
+      for (const debugging of ["pipe", "port"] as const) {
+        for (const headless of [true, false]) {
+          for (const createPage of [false, true]) {
+            it.effect(
+              `cleans up windowless ${debugging} Chromium ${headless ? "headless" : "headed"} ${
+                createPage ? "after the last page" : "before any page"
+              }`,
+              () =>
+                Effect.gen(function*() {
+                  if (!headless && process.platform === "linux") yield* useXvfb()
+                  const fs = yield* FileSystem.FileSystem
+                  const items = new Set<string>()
+                  const result = yield* Effect.scoped(
+                    Effect.gen(function*() {
+                      const launched =
+                        yield* (debugging === "pipe" ? ChromiumLauncher.launch : ChromiumLauncher.launchWithPort)({
+                          executablePath: executable,
+                          headless,
+                          args: ["--no-startup-window"]
+                        })
+                      const cdp = yield* CdpConnection.make(launched.transport)
+                      const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(cdp.browser))
+                      assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
+                      const targets = () =>
+                        Target.getTargets({}).pipe(
+                          Protocol.on(cdp.browser),
+                          Effect.map((reply) => reply.targetInfos.filter((target) => target.type === "page"))
+                        )
+                      assert.deepStrictEqual(yield* targets(), [])
+                      if (createPage) {
+                        const { targetId } = yield* Target.createTarget({ url: "about:blank", newWindow: true }).pipe(
+                          Protocol.on(cdp.browser)
+                        )
+                        assert.lengthOf(yield* targets(), 1)
+                        yield* Target.setDiscoverTargets({ discover: true }).pipe(Protocol.on(cdp.browser))
+                        const destroyed = yield* cdp.browser.subscribe(Target.targetDestroyed)
+                        const ended = yield* destroyed.pipe(
+                          Stream.filter((event) => event.targetId === targetId),
+                          Stream.runHead,
+                          Effect.forkChild
+                        )
+                        yield* Target.closeTarget({ targetId }).pipe(Protocol.on(cdp.browser))
+                        yield* Fiber.join(ended)
+                        assert.deepStrictEqual(yield* targets(), [])
+                      }
+                      assert.isTrue(yield* launched.launched.handle.isRunning)
+                      assert.isTrue(yield* fs.exists(launched.launched.userDataDir))
+                      assert.include(launched.launched.args, "--no-startup-window")
+                      return launched
+                    }).pipe(Effect.provideService(Ledger.CurrentLedger, {
+                      add: (item) =>
+                        Effect.sync(() => {
+                          items.add(JSON.stringify(item))
+                        }),
+                      remove: (item) =>
+                        Effect.sync(() => {
+                          items.delete(JSON.stringify(item))
+                        })
+                    }))
+                  )
+                  assert.isFalse(yield* result.launched.handle.isRunning)
+                  assert.isFalse(yield* fs.exists(result.launched.userDataDir))
+                  yield* result.transport.closed
+                  assert.strictEqual(items.size, 0)
+                }),
+              timeout
+            )
+          }
+        }
+      }
+
+      for (const debugging of ["pipe", "port"] as const) {
+        it.effect(
+          `configures the first isolated page with a windowless ${debugging} browser`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } =
+                  yield* (debugging === "pipe" ? ChromiumLauncher.launch : ChromiumLauncher.launchWithPort)({
+                    executablePath: executable,
+                    args: ["--no-startup-window"]
+                  })
+                return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+                assert.deepStrictEqual(yield* browser.pages, [])
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
+                  assert.deepStrictEqual(
+                    yield* page.evaluateInMainWorld(() => [document.URL, innerWidth, innerHeight, devicePixelRatio]),
+                    ["about:blank", 640, 480, 1]
+                  )
+                  assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+                }))
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const context = yield* browser.newContext()
+                  yield* context.addInitScript(() => {
+                    Object.defineProperty(globalThis, "fromInit", { value: "ready" })
+                  })
+                  const page = yield* context.newPage
+                  yield* page.goto(`${served.origin}/init`)
+                  assert.strictEqual(
+                    yield* page.evaluateInMainWorld(() => Reflect.get(globalThis, "seenByAuthor")),
+                    "string"
+                  )
+                }))
+                assert.deepStrictEqual(yield* browser.pages, [])
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
+      for (const candidate of [false, true]) {
+        it.effect(
+          `reads persisted storage and preserves a supplied profile on ${candidate ? "windowless" : "ordinary"} launch`,
+          () =>
+            Effect.gen(function*() {
+              const fs = yield* FileSystem.FileSystem
+              const served = yield* site
+              const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-persistent-test-" })
+              yield* fs.writeFileString(`${directory}/caller-owned`, "keep")
+              for (const round of [0, 1]) {
+                let gracefulClose: Effect.Effect<unknown, unknown> = Effect.void
+                let child: import("../../../src/internal/launch.ts").Launched | undefined
+                const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                  const { launched, transport } =
+                    yield* (round === 0 ? ChromiumLauncher.launchWithPort : ChromiumLauncher.launch)({
+                      executablePath: executable,
+                      args: candidate ? ["--no-startup-window"] : [],
+                      userDataDir: directory
+                    })
+                  child = launched
+                  if (round === 0) {
+                    const { port, browserPath } = yield* DevToolsActivePort.read(directory)
+                    const peer = yield* CdpConnection.make(
+                      yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`)
+                    )
+                    gracefulClose = BrowserCdp.close().pipe(Protocol.on(peer.browser), Effect.ignore)
+                  }
+                  return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+                }))
+                yield* Effect.scoped(
+                  Effect.gen(function*() {
+                    const browser = yield* Browser.Browser
+                    assert.lengthOf(yield* browser.defaultContext.pages, candidate ? 0 : 1)
+                    const context = yield* browser.defaultContext.control
+                    const page = yield* context.newPage
+                    yield* page.goto(`${served.origin}/hello`)
+                    if (round === 0) {
+                      yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
+                      // Seed durable browser data with Chromium's graceful close. Scope shutdown is a signal,
+                      // which does not guarantee flushing newly written localStorage on either launch mode.
+                      yield* gracefulClose
+                      yield* child!.handle.exitCode
+                    } else {
+                      assert.strictEqual(
+                        yield* page.evaluateInMainWorld(() => localStorage.getItem("windowless")),
+                        "kept"
+                      )
+                    }
+                  }).pipe(Effect.provide(backend))
+                )
+                assert.isDefined(child)
+                assert.isFalse(yield* child!.handle.isRunning)
+                assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
+              }
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "keeps a supplied profile's session cookie when the default context's last opened page closes",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-session-cookie-test-" })
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({
+                executablePath: executable,
+                userDataDir: directory
+              })
+              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+            }))
+            yield* Effect.scoped(
+              Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const context = yield* browser.defaultContext.control
+                yield* context.cookies.set({
+                  name: "session",
+                  value: "1",
+                  scope: { url: served.origin }
+                })
+                const opened = yield* context.newPage
+                yield* opened.close()
+                const page = yield* context.newPage
+                yield* page.goto(`${served.origin}/hello`)
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => document.cookie), "session=1")
+              }).pipe(Effect.provide(backend))
+            )
+          }),
+        timeout
+      )
+
+      it.effect(
+        "attributes a route-fulfilled redirect to the route and its final response to the network",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const facts = makeRecorder()
+            const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+            const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
+            assertPinned("Chromium", adapter.info.version, chromium.version)
+            const page = yield* adapter.createPage(adapter.defaultContext)
+            const navigation = yield* adapter.navigate(page, `${served.origin}/hello`, { referrer: Option.none() })
+            const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+            assert(ended.outcome._tag === "Committed")
+            const realm = yield* adapter.realm(ended.outcome.document, { _tag: "Main" })
+            const start = `${served.origin}/r-start`
+            const end = `${served.origin}/json`
+            yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+              _tag: "Intercept",
+              patterns: [start],
+              phases: ["request"]
+            })
+            const fetched = yield* adapter.evaluate(realm, {
+              functionDeclaration: "() => fetch('/r-start').then((response) => response.text())",
+              arguments: [],
+              awaitPromise: true,
+              result: "value",
+              userActivation: false
+            }).pipe(Effect.forkChild)
+            const paused = yield* facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "PausedRequest" && fact.subject.request.url === start)
+            yield* adapter.resolve(paused.obligation, {
+              _tag: "Fulfill",
+              status: 302,
+              headers: { location: end },
+              body: new Uint8Array()
+            })
+            const redirected = yield* facts.when("ResponseReceived", (fact) =>
+              fact.response.url === start)
+            const landed = yield* facts.when("ResponseReceived", (fact) => fact.response.url === end)
+            assert.deepStrictEqual(
+              [redirected, landed].map(({ response }) => [response.url, response.status, response.servedBy]),
+              [[start, 302, "route"], [end, 200, "network"]]
+            )
+            assert.notStrictEqual(redirected.response.hop, landed.response.hop)
+            const result = yield* Fiber.join(fetched)
+            assert(result._tag === "Value")
+            assert.deepStrictEqual(result.value, { type: "string", value: "{\"hello\":\"world\"}" })
+            assert.isFalse(served.served.some((request) => request.path === "/r-start"))
+            assert.isTrue(served.served.some((request) => request.path === "/json"))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "finishes a click when release delivery overlaps a mousedown dialog",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const opened = yield* Deferred.make<void>()
+            const released = yield* Deferred.make<void>()
+            let pressCompleted = false
+            let pressId: number | undefined
+            let releaseQueued = false
+            let releaseId: number | undefined
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased" && !pressCompleted) {
+                      // Deliver an overlapping release only once the press handler is suspended in its dialog.
+                      releaseQueued = true
+                      releaseId = wire.id
+                      yield* Deferred.await(opened)
+                      yield* transport.send(message)
+                      return
+                    }
+                  }
+                  if (wire.method === "Page.handleJavaScriptDialog" && releaseQueued) {
+                    yield* Deferred.await(released)
+                  }
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(Stream.mapEffect((message) => {
+                  const wire = JSON.parse(message)
+                  if (wire.id === pressId && pressId !== undefined) pressCompleted = true
+                  if (wire.id === releaseId && releaseId !== undefined) {
+                    return Effect.as(Deferred.succeed(released, undefined), message)
+                  }
+                  return wire.method === "Page.javascriptDialogOpening"
+                    ? Effect.as(Deferred.succeed(opened, undefined), message)
+                    : Effect.succeed(message)
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const html =
+                `<button id="go" onmousedown="confirm('Go?');out.textContent+='down '" onmouseup="out.textContent+='up '" onclick="out.textContent+='click'">Go</button><output id="out"></output>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"))
+              assert.strictEqual(yield* page.locator("#out").readText, "down up click")
+              assert.isFalse(releaseQueued)
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "click sends stay ordered across a suspended transport and release waits for press acknowledgment",
         () =>
           Effect.gen(function*() {
             const served = yield* site
@@ -41,6 +421,8 @@ describe("Chromium adapter, CDP only", () => {
             const allSent = yield* Deferred.make<void>()
             const sent: Array<string> = []
             const ids = new Set<number>()
+            let pressId: number | undefined
+            let pressAcknowledged = false
             const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
               const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
               return yield* CdpAdapter.connect({
@@ -52,17 +434,20 @@ describe("Chromium adapter, CDP only", () => {
                       yield* Deferred.succeed(entered, undefined)
                       yield* Deferred.await(proceed)
                     }
+                    if (wire.params.type === "mousePressed") pressId = wire.id
+                    if (wire.params.type === "mouseReleased") assert.isTrue(pressAcknowledged)
                     ids.add(wire.id)
                     sent.push(wire.params.type)
                   }
                   yield* transport.send(message)
-                  if (sent.length === 3) yield* Deferred.succeed(allSent, undefined)
+                  if (sent.length === 2) yield* Deferred.succeed(allSent, undefined)
                 }),
-                messages: transport.messages.pipe(Stream.mapEffect((message) =>
-                  ids.has(JSON.parse(message).id)
-                    ? Effect.as(Deferred.await(allSent), message)
-                    : Effect.succeed(message)
-                ))
+                messages: transport.messages.pipe(Stream.mapEffect(Effect.fnUntraced(function*(message) {
+                  const wire = JSON.parse(message)
+                  if (ids.has(wire.id)) yield* Deferred.await(allSent)
+                  if (wire.id === pressId && pressId !== undefined) pressAcknowledged = true
+                  return message
+                })))
               }, { sink, ownership: "launched" })
             }))
             yield* Effect.gen(function*() {
@@ -202,14 +587,87 @@ describe("Chromium adapter, CDP only", () => {
         )
       }
 
-      for (const stop of ["interrupted", "mouse interrupted", "rejected", "deadline"] as const) {
+      it.effect(
+        "returns the click deadline while a cleanup reply is outstanding, then resends that unconfirmed release before the next click",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const cleanupSent = yield* Deferred.make<void>()
+            let pressId: number | undefined
+            let cleanupId: number | undefined
+            const sent: Array<string> = []
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Input.dispatchMouseEvent") {
+                    sent.push(wire.params.type)
+                    if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                    if (wire.params.type === "mouseReleased" && cleanupId === undefined) cleanupId = wire.id
+                  }
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(
+                  Stream.tap((message) => {
+                    const wire = JSON.parse(message)
+                    return wire.id === cleanupId && cleanupId !== undefined
+                      ? Deferred.succeed(cleanupSent, undefined)
+                      : Effect.void
+                  }),
+                  Stream.filter((message) => {
+                    const wire = JSON.parse(message)
+                    return (pressId === undefined || wire.id !== pressId) &&
+                      (cleanupId === undefined || wire.id !== cleanupId)
+                  })
+                )
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button id=\"go\">Go</button>")}`)
+              const target = page.locator("#go")
+              const click = yield* target.click().pipe(
+                Deadline.within("1 second"),
+                Protocol.withCommandTimeout("3 seconds"),
+                Effect.forkChild
+              )
+              yield* Deferred.await(cleanupSent).pipe(Effect.timeout("5 seconds"))
+              const finished = yield* Fiber.await(click).pipe(Effect.timeoutOption("500 millis"))
+              assert.isTrue(
+                Option.isSome(finished),
+                "the operation deadline must not wait for the cleanup reply timeout"
+              )
+              const error = yield* Fiber.join(click).pipe(Effect.flip)
+              assert.isTrue(Deadline.isTimeout(error))
+              yield* target.click()
+              assert.deepStrictEqual(sent, [
+                "mouseMoved",
+                "mousePressed",
+                "mouseReleased",
+                "mouseReleased",
+                "mouseMoved",
+                "mousePressed",
+                "mouseReleased"
+              ])
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      for (const failure of ["cleanup", "normal", "unanswered cleanup", "page closed"] as const) {
         it.effect(
-          `a click ${stop} with its replies outstanding has sent its release, and the next gesture works`,
+          failure === "page closed"
+            ? "ends an unanswered cleanup with its page after the next gesture deadline expires"
+            : `records a rejected ${failure} release before the next click`,
           () =>
             Effect.gen(function*() {
               const served = yield* site
-              const released = yield* Deferred.make<void>()
+              const rejected = yield* Deferred.make<void>()
               let pressId: number | undefined
+              let cleanupId: number | undefined
+              let cleanupRejected = false
               const sent: Array<string> = []
               const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
                 const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
@@ -218,22 +676,141 @@ describe("Chromium adapter, CDP only", () => {
                   send: Effect.fnUntraced(function*(message: string) {
                     const wire = JSON.parse(message)
                     if (wire.method === "Input.dispatchMouseEvent") {
+                      sent.push(wire.params.type)
                       if (wire.params.type === "mousePressed" && pressId === undefined) pressId = wire.id
+                      if (wire.params.type === "mouseReleased" && cleanupId === undefined) {
+                        cleanupId = wire.id
+                        // Chromium rejects this command without delivering the mouse release.
+                        wire.params.type = "invalid-release-type"
+                        return yield* transport.send(JSON.stringify(wire))
+                      }
+                    }
+                    yield* transport.send(message)
+                  }),
+                  messages: transport.messages.pipe(
+                    Stream.map((message) => {
+                      const wire = JSON.parse(message)
+                      if (wire.id === cleanupId && cleanupId !== undefined) cleanupRejected = wire.error !== undefined
+                      // The press reached the page, but its acknowledgment is replaced with a rejection.
+                      return failure !== "normal" && wire.id === pressId && pressId !== undefined
+                        ? JSON.stringify({
+                          id: wire.id,
+                          sessionId: wire.sessionId,
+                          error: { code: -32000, message: "test rejection after press" }
+                        })
+                        : message
+                    }),
+                    Stream.tap((message) => {
+                      const wire = JSON.parse(message)
+                      return wire.id === cleanupId && cleanupId !== undefined
+                        ? Deferred.succeed(rejected, undefined)
+                        : Effect.void
+                    }),
+                    Stream.filter((message) =>
+                      (failure !== "unanswered cleanup" && failure !== "page closed") || cleanupId === undefined ||
+                      JSON.parse(message).id !== cleanupId
+                    )
+                  )
+                }, { sink, ownership: "launched" })
+              }))
+              yield* Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                const html =
+                  `<button id="go">Go</button><script>window.inputLog=[];for(const type of ["mousedown","mouseup"])document.addEventListener(type,e=>inputLog.push(e.type))</script>`
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                const target = page.locator("#go")
+                assert(target instanceof LocatorImpl)
+                const error = yield* target.click().pipe(
+                  Protocol.withCommandTimeout(failure === "page closed" ? Infinity : "300 millis"),
+                  Effect.flip
+                )
+                assert.strictEqual(error._tag, "LocatorError")
+                yield* Deferred.await(rejected).pipe(Effect.timeout("5 seconds"))
+                assert.isTrue(cleanupRejected, "the browser rejected the cleanup release")
+                assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).inputLog), ["mousedown"])
+                if (failure === "page closed") {
+                  const cleanup = target.owner.page.inputState.cleanups[0]!
+                  assert.isDefined(cleanup)
+                  const blocked = yield* target.click().pipe(Deadline.within("200 millis"), Effect.flip)
+                  assert.isTrue(Deadline.isTimeout(blocked))
+                  assert.strictEqual(sent.length, 3, "the next gesture must not overtake the cleanup")
+                  yield* page.close()
+                  yield* Deferred.await(cleanup.done).pipe(Effect.timeout("2 seconds"))
+                  assert.isTrue(cleanup.finished)
+                  return
+                }
+                if (failure !== "unanswered cleanup") {
+                  assert.isTrue(
+                    Option.isSome(target.owner.page.inputState.broken),
+                    "failed adapter cleanup must retain the uncertain release"
+                  )
+                }
+                yield* target.click()
+                assert.deepStrictEqual(sent, [
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased",
+                  "mouseReleased",
+                  "mouseMoved",
+                  "mousePressed",
+                  "mouseReleased"
+                ])
+                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+              }).pipe(Effect.provide(backend))
+            }),
+          timeout
+        )
+      }
+
+      for (
+        const stop of [
+          "interrupted",
+          "mouse interrupted",
+          "rejected",
+          "deadline",
+          "release interrupted",
+          "release deadline"
+        ] as const
+      ) {
+        it.effect(
+          stop.startsWith("release")
+            ? `a click ${stop} with its release reply outstanding resends that unconfirmed release before the next gesture`
+            : `a click ${stop} with its press reply outstanding releases once, and the next gesture works`,
+          () =>
+            Effect.gen(function*() {
+              const served = yield* site
+              const blocked = yield* Deferred.make<void>()
+              let pendingId: number | undefined
+              const sent: Array<string> = []
+              const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+                const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+                return yield* CdpAdapter.connect({
+                  ...transport,
+                  send: Effect.fnUntraced(function*(message: string) {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "Input.dispatchMouseEvent") {
+                      if (
+                        wire.params.type === (stop.startsWith("release") ? "mouseReleased" : "mousePressed") &&
+                        pendingId === undefined
+                      ) pendingId = wire.id
                       sent.push(wire.params.type)
                     }
                     yield* transport.send(message)
-                    if (wire.method === "Input.dispatchMouseEvent" && wire.params.type === "mouseReleased") {
-                      yield* Deferred.succeed(released, undefined)
-                    }
                   }),
-                  // The first press's reply: rejected, or never answered, so its click can't finish on its own
+                  // Observe that Chromium answered before withholding the selected reply. In the release cases,
+                  // the page has already received mouseup; cancellation must not dispatch another one.
                   messages: transport.messages.pipe(
+                    Stream.tap((message) =>
+                      pendingId !== undefined && JSON.parse(message).id === pendingId
+                        ? Deferred.succeed(blocked, undefined)
+                        : Effect.void
+                    ),
                     Stream.filter((message) =>
-                      stop === "rejected" || pressId === undefined || JSON.parse(message).id !== pressId
+                      stop === "rejected" || pendingId === undefined || JSON.parse(message).id !== pendingId
                     ),
                     Stream.map((message) => {
                       const wire = JSON.parse(message)
-                      return wire.id === pressId && pressId !== undefined
+                      return wire.id === pendingId && pendingId !== undefined
                         ? JSON.stringify({
                           id: wire.id,
                           sessionId: wire.sessionId,
@@ -247,7 +824,7 @@ describe("Chromium adapter, CDP only", () => {
               yield* Effect.gen(function*() {
                 const page = yield* Browser.newPage()
                 const html =
-                  `<button id="go">Go</button><script>window.log=[];for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push(e.type));</script>`
+                  `<button id="go">Go</button><script>window.log=[];window.trusted=true;for(const type of ['mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>{log.push(e.type);window.trusted&&=e.isTrusted});</script>`
                 yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
                 // A click at a point has no checks of its own, and input before the page has rendered is lost,
                 // though the browser answers it; the test's raw click starts after two rendering updates
@@ -260,31 +837,38 @@ describe("Chromium adapter, CDP only", () => {
                   if (stop === "mouse interrupted") yield* page.mouse.click({ x: 20, y: 20 })
                   else yield* target.click()
                 }).pipe(
-                  Deadline.within(stop === "deadline" ? "2 seconds" : "10 seconds"),
+                  Deadline.within(stop.endsWith("deadline") ? "2 seconds" : "10 seconds"),
                   Effect.forkChild
                 )
-                yield* Deferred.await(released)
-                if (stop === "interrupted" || stop === "mouse interrupted") {
+                yield* Deferred.await(blocked)
+                if (stop.endsWith("interrupted")) {
                   yield* Fiber.interrupt(click)
                 } else {
                   const error = yield* Fiber.join(click).pipe(Effect.flip)
-                  if (stop === "deadline") assert.isTrue(Deadline.isTimeout(error), String(error))
+                  if (stop.endsWith("deadline")) assert.isTrue(Deadline.isTimeout(error), String(error))
                   else assert.strictEqual(error._tag, "LocatorError")
                 }
-                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+                // A release written whose reply never came is unconfirmed, and is sent again first; a press's
+                // cleanup release the browser accepted is not
+                const resent = stop.startsWith("release")
+                assert.strictEqual(Option.isSome(target.owner.page.inputState.broken), resent)
                 yield* target.click()
                 assert.deepStrictEqual(sent, [
                   "mouseMoved",
                   "mousePressed",
                   "mouseReleased",
+                  ...(resent ? ["mouseReleased"] : []),
                   "mouseMoved",
                   "mousePressed",
                   "mouseReleased"
                 ])
+                assert.isTrue(Option.isNone(target.owner.page.inputState.broken))
+                assert.isTrue(yield* page.evaluateInMainWorld(() => (window as any).trusted))
                 assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), [
                   "mousedown",
                   "mouseup",
                   "click",
+                  ...(resent ? ["mouseup"] : []),
                   "mousedown",
                   "mouseup",
                   "click"
@@ -304,19 +888,22 @@ describe("Chromium adapter, CDP only", () => {
             const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
             const adapter = yield* CdpAdapter.connect(transport, { sink: facts.sink, ownership: "launched" })
             assertPinned("Chromium", adapter.info.version, chromium.version)
+            // Probe 25: CDP takes several clients at once. Capture creation identity before navigation.
+            const { port, browserPath } = yield* DevToolsActivePort.read(launched.userDataDir)
+            const other = yield* CdpConnection.make(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`))
+            const targets = Target.getTargets({}).pipe(
+              Protocol.on(other.browser),
+              Effect.map(({ targetInfos }) => targetInfos.map((info) => ({ ...info, url: "", title: "about:blank" })))
+            )
+            const before = new Set((yield* targets).map((info) => info.targetId))
             const page = yield* adapter.createPage(adapter.defaultContext)
+            const created = (yield* targets).filter((info) => info.type === "page" && !before.has(info.targetId))
+            assert.lengthOf(created, 1)
+            const target = created[0]!
             const url = `${served.origin}/crash-me`
             const navigation = yield* adapter.navigate(page, url, { referrer: Option.none() })
             yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
-            // Probe 25: CDP takes several clients at once
-            const active = yield* Effect.promise(() =>
-              import("node:fs/promises").then((fs) => fs.readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8"))
-            )
-            const [port, browserPath] = active.split("\n")
-            const other = yield* CdpConnection.make(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`))
-            const { targetInfos } = yield* Target.getTargets({}).pipe(Protocol.on(other.browser))
-            const target = targetInfos.find((info) => info.url === url)
-            assert.isDefined(target)
+            assert.isTrue((yield* targets).some((info) => info.targetId === target.targetId))
             const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
               Protocol.on(other.browser)
             )

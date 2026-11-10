@@ -6,8 +6,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, ConsoleMessage, Dialog, Expect, Route, Target } from "@usestrider/browser"
+import { Browser, ConsoleMessage, Dialog, Expect, type Page, Route, Target } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -74,86 +75,117 @@ const byTitle = Effect.fnUntraced(function*(browser: Browser.Browser, title: str
 
 describe("Stock WebKit, attached through its remote inspector", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
-    it.effect("inspects one tab, controls another, and leaves both open (call site 7)", () =>
+    class TwoTabFixture extends Context.Service<TwoTabFixture, {
+      readonly origin: string
+      readonly endpoint: string
+    }>()("StockWebKit/TwoTabFixture") {}
+
+    const twoTabFixture = Layer.effect(
+      TwoTabFixture,
       Effect.gen(function*() {
         const { origin } = yield* site
         const { endpoint } = yield* startMiniBrowser(tabUrl(origin, "First"), tabUrl(origin, "Second"))
-        yield* Effect.gen(function*() {
-          const browser = yield* Browser.Browser
-          assert.strictEqual(browser.info.product, "WebKit (stock)")
-          // Two pages, each in a web process of its own, whose frames and requests are numbered alike (Q195)
-          const first = yield* byTitle(browser, "First")
-          const second = yield* byTitle(browser, "Second")
-          yield* Effect.scoped(Effect.gen(function*() {
-            const reader = yield* first.inspect
-            assert.strictEqual(yield* reader.getByRole("heading").readText, "First")
-            const snapshot = yield* reader.locator("body").snapshot()
-            assert.include(snapshot.text, `heading "First"`)
-            const png = yield* reader.screenshot()
-            assert.deepStrictEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47])
-            const tab = yield* second.control
-            const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
-            // No input: the button is clicked by the page's own script
-            yield* tab.evaluateInMainWorld(() => document.querySelector("button")!.click())
-            yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
-            assert.strictEqual(yield* blocked.hits, 1)
-          }))
-        }).pipe(Effect.provide(attach(endpoint)))
-        // Both tabs are there for the next client, and the route went with its grant
-        yield* Effect.gen(function*() {
-          const browser = yield* Browser.Browser
-          yield* byTitle(browser, "First")
-          const second = yield* byTitle(browser, "Second")
-          yield* Effect.scoped(Effect.gen(function*() {
-            const tab = yield* second.control
-            yield* tab.evaluateInMainWorld(() => document.querySelector("button")!.click())
-            yield* tab.locator("#out").pipe(Expect.toHaveText("sent"))
-          }))
-        }).pipe(Effect.provide(attach(endpoint)))
-      }))
+        return { origin, endpoint }
+      }).pipe(Effect.timeout("50 seconds"))
+    )
 
-    it.effect("navigates by script, and reports how each navigation ended", () =>
+    // Only the two attachment cycles and assertions share the five-second body budget.
+    it.layer(twoTabFixture, { timeout })("two tabs", (it) => {
+      it.effect("inspects one tab, controls another, and leaves both open (call site 7)", () =>
+        Effect.gen(function*() {
+          const { origin, endpoint } = yield* TwoTabFixture
+          yield* Effect.gen(function*() {
+            const browser = yield* Browser.Browser
+            assert.strictEqual(browser.info.product, "WebKit (stock)")
+            // Two pages, each in a web process of its own, whose frames and requests are numbered alike (Q195)
+            const first = yield* byTitle(browser, "First")
+            const second = yield* byTitle(browser, "Second")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const reader = yield* first.inspect
+              assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
+              assert.strictEqual(yield* reader.getByRole("heading").readText, "First")
+              const snapshot = yield* reader.locator("body").snapshot()
+              assert.include(snapshot.text, `heading "First"`)
+              const png = yield* reader.screenshot()
+              assert.deepStrictEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47])
+              const tab = yield* second.control
+              const blocked = yield* tab.route(`${origin}/analytics/**`, () => Route.abort())
+              // No input: the button is clicked by the page's own script
+              yield* tab.evaluateInMainWorld(() => document.querySelector("button")!.click())
+              yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
+              assert.strictEqual(yield* blocked.hits, 1)
+            }))
+          }).pipe(Effect.provide(attach(endpoint)))
+          // Both tabs are there for the next client, and the route went with its grant
+          yield* Effect.gen(function*() {
+            const browser = yield* Browser.Browser
+            yield* byTitle(browser, "First")
+            const second = yield* byTitle(browser, "Second")
+            yield* Effect.scoped(Effect.gen(function*() {
+              const tab = yield* second.control
+              yield* tab.evaluateInMainWorld(() => document.querySelector("button")!.click())
+              yield* tab.locator("#out").pipe(Expect.toHaveText("sent"))
+            }))
+          }).pipe(Effect.provide(attach(endpoint)))
+        }), 5_000)
+    })
+
+    class NavigationFixture extends Context.Service<NavigationFixture, {
+      readonly origin: string
+      readonly crossSite: string
+      readonly tab: Page.Page
+    }>()("StockWebKit/NavigationFixture") {}
+
+    const navigationFixture = Layer.effect(
+      NavigationFixture,
       Effect.gen(function*() {
         const { origin, crossSite } = yield* site
         const { endpoint } = yield* startMiniBrowser(tabUrl(origin, "Start"))
-        yield* Effect.gen(function*() {
-          const browser = yield* Browser.Browser
-          yield* Effect.scoped(Effect.gen(function*() {
-            const tab = yield* (yield* byTitle(browser, "Start")).control
-            // Another site's page is another web process: a provisional target the page swaps to
-            const committed = yield* tab.goto(`${crossSite}/child`)
-            assert.strictEqual(committed._tag, "Committed")
-            assert.include(yield* tab.locator("p").readText, "child of localhost")
-            const missing = yield* tab.goto(`${origin}/missing`)
-            assert(missing._tag === "Committed" && Option.isSome(missing.response))
-            assert.strictEqual(missing.response.value.status, 404)
-            const landed = yield* tab.goto(`${origin}/redirect`)
-            assert.strictEqual(landed.url, `${origin}/landed`)
-            // The ends stock WebKit reports only through the document's request (Q198)
-            const refused = reasonOf(yield* Effect.exit(tab.goto(`http://127.0.0.1:${yield* closedPort}/`)))
-            assert.strictEqual(refused?.reason?._tag, "NavigationFailed")
-            assert.include(refused?.reason?.netError, "Connection refused")
-            // The browser shows its error page, a navigation of its own (Q199), before it's asked to go on
-            yield* tab.status.waitFor((status) => status._tag === "Open" && status.url === "about:blank")
-            // A port it blocks is refused before any request: the error page is all there is
-            const blocked = reasonOf(yield* Effect.exit(tab.goto("http://127.0.0.1:1/")))
-            assert.strictEqual(blocked?.reason?._tag, "NavigationFailed")
-            assert.include(blocked?.reason?.netError, "error page")
-            yield* tab.goto(`${origin}/landed`)
-            const noContent = reasonOf(yield* Effect.exit(tab.goto(`${origin}/204`)))
-            assert.strictEqual(noContent?.reason?._tag, "NoContent")
-            const download = reasonOf(yield* Effect.exit(tab.goto(`${origin}/download`)))
-            assert.strictEqual(download?.reason?._tag, "BecameDownload")
-            assert.strictEqual(yield* tab.url, `${origin}/landed`)
-            // A fragment of the same document would be a navigation it never reports
-            const fragment = reasonOf(yield* Effect.exit(tab.goto(`${origin}/landed#later`)))
-            assert.strictEqual(fragment?.reason?._tag, "Unsupported")
-            assert.strictEqual(fragment?.reason?.capability, "navigation.sameDocument")
-            const reloaded = yield* tab.reload()
-            assert.strictEqual(reloaded.url, `${origin}/landed`)
-          }))
-        }).pipe(Effect.provide(attach(endpoint)))
-      }))
+        const context = yield* Layer.build(attach(endpoint))
+        const browser = Context.get(context, Browser.Browser)
+        const tab = yield* (yield* byTitle(browser, "Start")).control
+        return { origin, crossSite, tab }
+      }).pipe(Effect.timeout("50 seconds"))
+    )
+
+    // Acquisition and release have hook budgets; only the navigation sequence has the five-second body budget.
+    it.layer(navigationFixture, { timeout })("script navigation", (it) => {
+      it.effect("navigates by script, and reports how each navigation ended", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite, tab } = yield* NavigationFixture
+          // Another site's page is another web process: a provisional target the page swaps to
+          const committed = yield* tab.goto(`${crossSite}/child`)
+          assert.strictEqual(committed._tag, "Committed")
+          assert.include(yield* tab.locator("p").readText, "child of localhost")
+          const missing = yield* tab.goto(`${origin}/missing`)
+          assert(missing._tag === "Committed" && Option.isSome(missing.response))
+          assert.strictEqual(missing.response.value.status, 404)
+          const landed = yield* tab.goto(`${origin}/redirect`)
+          assert.strictEqual(landed.url, `${origin}/landed`)
+          // The ends stock WebKit reports only through the document's request (Q198)
+          const refused = reasonOf(yield* Effect.exit(tab.goto(`http://127.0.0.1:${yield* closedPort}/`)))
+          assert.strictEqual(refused?.reason?._tag, "NavigationFailed")
+          assert.include(refused?.reason?.netError, "Connection refused")
+          // The browser shows its error page, a navigation of its own (Q199), before it's asked to go on
+          yield* tab.status.waitFor((status) => status._tag === "Open" && status.url === "about:blank")
+          // A port it blocks is refused before any request: the error page is all there is
+          const blocked = reasonOf(yield* Effect.exit(tab.goto("http://127.0.0.1:1/")))
+          assert.strictEqual(blocked?.reason?._tag, "NavigationFailed")
+          assert.include(blocked?.reason?.netError, "error page")
+          yield* tab.goto(`${origin}/landed`)
+          const noContent = reasonOf(yield* Effect.exit(tab.goto(`${origin}/204`)))
+          assert.strictEqual(noContent?.reason?._tag, "NoContent")
+          const download = reasonOf(yield* Effect.exit(tab.goto(`${origin}/download`)))
+          assert.strictEqual(download?.reason?._tag, "BecameDownload")
+          assert.strictEqual(yield* tab.url, `${origin}/landed`)
+          // A fragment of the same document would be a navigation it never reports
+          const fragment = reasonOf(yield* Effect.exit(tab.goto(`${origin}/landed#later`)))
+          assert.strictEqual(fragment?.reason?._tag, "Unsupported")
+          assert.strictEqual(fragment?.reason?.capability, "navigation.sameDocument")
+          const reloaded = yield* tab.reload()
+          assert.strictEqual(reloaded.url, `${origin}/landed`)
+        }), 5_000)
+    })
 
     it.effect("reads the console, the network and storage, and runs init scripts in the page's world", () =>
       Effect.gen(function*() {
@@ -192,12 +224,12 @@ describe("Stock WebKit, attached through its remote inspector", () => {
               "number"
             )
             const context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             const cookies = yield* context.cookies.list
             assert.isTrue(cookies.some((cookie) => cookie.name === "who"))
             yield* tab.evaluateInMainWorld(() => localStorage.setItem("kept", "yes"))
             assert.deepStrictEqual(yield* tab.localStorage.entries, [["kept", "yes"]])
-            const full = yield* tab.screenshot({ area: { _tag: "FullPage" } })
+            const full = yield* tab.screenshot({ area: "fullPage" })
             assert.deepStrictEqual([...full.subarray(1, 4)], [0x50, 0x4e, 0x47])
           }))
         }).pipe(Effect.provide(attach(endpoint)))
@@ -219,6 +251,14 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           assert.strictEqual(opened?.reason?._tag, "Unsupported")
           yield* Effect.scoped(Effect.gen(function*() {
             const tab = yield* (yield* byTitle(browser, "Refusals")).control
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const viewport = reasonOf(yield* Effect.exit(tab.emulate({ viewport: { width: 640, height: 480 } })))
+            assert.strictEqual(viewport?.reason?.capability, "emulation.viewport")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const headers = reasonOf(yield* Effect.exit(tab.emulate({ extraHTTPHeaders: { "x-test": "value" } })))
+            assert.strictEqual(headers?.reason?._tag, "Unsupported")
+            assert.strictEqual(headers?.reason?.capability, "emulation.extraHTTPHeaders")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
             // Refused before anything was sent
             const clicked = reasonOf(yield* Effect.exit(tab.getByRole("button", { name: "Refresh" }).click()))
             assert.strictEqual(clicked?.reason?.capability, "input.native")
@@ -227,7 +267,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const evaluated = reasonOf(yield* Effect.exit(tab.evaluate(() => document.title)))
             assert.strictEqual(evaluated?.reason?.capability, "isolatedWorlds")
             assert.strictEqual(yield* tab.evaluateInMainWorld(() => document.title), "Refusals")
-            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: { _tag: "Jpeg", quality: 80 } })))
+            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: "jpeg", quality: 80 })))
             assert.strictEqual(jpeg?.reason?.capability, "screenshot.format")
             // Bringing a page forward is refused as an error, not a defect
             const activated = reasonOf(yield* Effect.exit(tab.activate))

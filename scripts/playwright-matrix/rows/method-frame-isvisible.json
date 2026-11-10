@@ -1,0 +1,23 @@
+{
+  "id": "method-frame-isvisible",
+  "upstream": [
+    "method:Frame.isVisible"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isVisible",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isVisible"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

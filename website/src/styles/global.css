@@ -336,6 +336,9 @@ body {
 /* ── Prose ──────────────────────────────────────────────────────────────────── */
 
 .prose {
+  /* A word or code span longer than the column, such as a flag list or a qualified call, breaks rather than
+     widening the page; a word that fits is never broken */
+  overflow-wrap: break-word;
   --tw-prose-body: var(--ink);
   --tw-prose-headings: var(--ink);
   --tw-prose-lead: var(--labels);
@@ -401,6 +404,13 @@ body {
   text-align: left;
   caption-side: top;
   margin-bottom: 0.75rem;
+}
+
+/* A recording in a guide: the column's width, framed by a 1px rule */
+.prose :where(video):not(:where([class~="not-prose"] *)) {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
 }
 
 /* ── Capabilities ───────────────────────────────────────────────────────────── */

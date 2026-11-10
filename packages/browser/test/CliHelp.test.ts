@@ -275,6 +275,13 @@ describe("strider help", () => {
     })
   }
 
+  it("explains the explicit fork state destination in export test help", () => {
+    const text = help("export", "test").replace(/\s+/g, " ")
+    assert.include(text, "--state")
+    assert.include(text, "initial fork snapshot")
+    assert.include(text, "--user-data-dir")
+  })
+
   it("reuses the dialog toolkit description in dialog handle help", () => {
     const text = help("dialog", "handle")
     assert.include(text.replace(/\s+/g, " "), Tools.toolkit.tools.dialog.description!.slice(0, 65), "dialog")

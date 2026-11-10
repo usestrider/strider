@@ -270,6 +270,13 @@ export const handle = <E, R>(
  * A `Single` chooser given several files fails the handler with `InvalidInput`, so the chooser is canceled
  * rather than given the first file.
  *
+ * Launched local files use native paths, with `Path` needed only for relative paths, and may combine with
+ * remote paths. Attached local files transfer through captured `FileSystem` and `Path` services and may combine
+ * with bytes. Native paths and transferred files cannot be mixed. Transfer and reads share the handler's original
+ * deadline; failures are reported and cancel the chooser. Transferred files and empty multiple selections need
+ * the browser to identify the chooser input; otherwise the decision fails with `Unsupported`. See `FileInput.local`
+ * for deployment caveats and the known stock WebKit native replacement limitation.
+ *
  * **Example** (Choosing two photos)
  *
  * ```ts import.meta.vitest

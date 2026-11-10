@@ -1,0 +1,23 @@
+{
+  "id": "method-request-isnavigationrequest",
+  "upstream": [
+    "method:Request.isNavigationRequest"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "Initiator",
+      "url": "/docs/api/browser/NetworkRequest#Initiator"
+    }
+  ],
+  "notes": "For a Document initiator, navigation is Some for a navigation request and None for a subresource. Read this snapshot directly; no resource-type guess, wait or body collection is needed.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

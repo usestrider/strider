@@ -46,7 +46,12 @@ const rules = [
       "    const cleanupScope = yield* Effect.scope",
       `    ${mark("adapter.start")}\n    const cleanupScope = yield* Effect.scope`
     ],
-    ["    root = client.root", `    ${mark("client.ready")}\n    root = client.root`],
+    [
+      "    root = client.root",
+      `    ${
+        mark("client.ready")
+      }\n    root = client.root;\n    globalThis.__launchTrace.rootCommand = () => Effect.runPromise(BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.timeout("2 seconds")));`
+    ],
     [
       "    state.defaultUserAgent = version.userAgent",
       `    ${mark("version.ready")}\n    state.defaultUserAgent = version.userAgent`
@@ -70,7 +75,7 @@ const rules = [
       "    yield* root.drainObserved",
       `    ${mark("autoattach.ack")}\n    yield* root.drainObserved\n    ${mark("targets.drained")}`
     ],
-    ["    return {\n      claims:", `    ${mark("adapter.end")}\n    return {\n      claims:`]
+    ["    return {\n      ownership:", `    ${mark("adapter.end")}\n    return {\n      ownership:`]
   ]],
   ["/internal/browser.ts", [
     [
@@ -103,6 +108,10 @@ const rules = [
     ]
   ]],
   ["/playwright-core/lib/coreBundle.js", [
+    [
+      "        this._sessions.set(\"\", this.rootSession);",
+      "        this._sessions.set(\"\", this.rootSession);\n        globalThis.__launchTrace.rootCommand = () => this.rootSession.send(\"Browser.getVersion\");"
+    ],
     [
       "          await browser._waitForAllPagesToBeInitialized();",
       `          await browser._waitForAllPagesToBeInitialized();\n          ${mark("pw.persistent.ready")}`

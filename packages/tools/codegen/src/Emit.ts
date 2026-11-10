@@ -506,7 +506,9 @@ const traitsLiteral = (traits: Traits) => {
         traits.release.map((release) =>
           `{ method: ${JSON.stringify(release.method)}, param: ${JSON.stringify(release.param)}, from: ${
             JSON.stringify(release.from)
-          }${release.list === true ? ", list: true" : ""} }`
+          }${release.list === true ? ", list: true" : ""}${
+            release.paramsFrom === undefined ? "" : `, paramsFrom: ${JSON.stringify(release.paramsFrom)}`
+          } }`
         ).join(", ")
       }]`
     )
