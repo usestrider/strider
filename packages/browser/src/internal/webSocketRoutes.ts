@@ -114,7 +114,7 @@ export const register = <E, R>(
       )
     }
     if (options.workers) yield* InitScripts.inWorkers(runtime).pipe(Effect.mapError(fail))
-    yield* Effect.try({
+    const matches = yield* Effect.try({
       try: () => UrlPattern.compile(pattern),
       catch: (error) =>
         fail(new Reason.InvalidInput({ input: "pattern", expected: "a valid URL pattern", hint: String(error) }))
@@ -126,7 +126,8 @@ export const register = <E, R>(
     const scope = yield* Scope.fork(yield* Effect.scope)
     const bridgeScope = yield* Scope.fork(scope)
     const token = crypto.randomUUID()
-    const name = `__strider_ws_${token.replaceAll("-", "")}`
+    // Unrelated to the token: the page can see the binding's name until the shim captures it.
+    const name = `__strider_ws_${crypto.randomUUID().replaceAll("-", "")}`
     const transport = adapter.info.protocol === "webkit" ? "console" : "binding"
     const source = Shim.source(name, token, pattern, transport)
     const allocation = Allocation.make()
@@ -300,6 +301,12 @@ export const register = <E, R>(
         if (!alive() || !live) return
         const owner = `${realm}:${message.id}`
         if (connections.has(owner)) return
+        // The page sends the URL: check it against this route's pattern as the shim did.
+        if (!matches(message.url ?? "")) {
+          return yield* command({ realm, id: message.id }, { type: "fail", reason: "constructor url" }).pipe(
+            Effect.andThen(command({ realm, id: message.id }, { type: "drain" }))
+          )
+        }
         const lease = allocation.admit(owner, 1)
         const reject = () =>
           command({ realm, id: message.id }, { type: "fail", reason: "constructor admission" }).pipe(

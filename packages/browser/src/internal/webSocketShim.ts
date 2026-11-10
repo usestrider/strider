@@ -9,6 +9,7 @@ export const install = (name: string, token: string, pattern: string, transport:
   }
   const Native = global.WebSocket
   const debug = global.console.debug.bind(global.console)
+  const stringify = global.JSON.stringify.bind(global.JSON)
   const microtask = global.queueMicrotask.bind(global)
   const wellFormed = global.String.prototype.toWellFormed
   const blobBytes = global.Blob.prototype.arrayBuffer
@@ -25,11 +26,12 @@ export const install = (name: string, token: string, pattern: string, transport:
   const sockets = new Map<string, Mock>()
   let next = 0
   let pendingConstructors = 0
+  let active = true
   let sequence = 0
   const emit = (route: typeof routes[number], message: any) => {
     const envelope = { token: route.token, sequence: ++sequence, ...message }
-    if (route.transport === "console") debug({ __striderWebSocket: route.token, payload: JSON.stringify(envelope) })
-    else route.binding?.(JSON.stringify(envelope))
+    if (route.transport === "console") debug({ __striderWebSocket: route.token, payload: stringify(envelope) })
+    else route.binding?.(stringify(envelope))
   }
   const add = (name: string, token: string, pattern: string, transport: string) => {
     if (routes.some((route) => route.token === token)) return
@@ -45,6 +47,8 @@ export const install = (name: string, token: string, pattern: string, transport:
       match = (url) => compiled.test(url)
     } else match = (url) => url === pattern
     const route = { name, token, match, transport, binding: transport === "binding" ? global[name] : undefined }
+    // The page must not see the binding once the shim holds it.
+    if (route.binding !== undefined && Object.getOwnPropertyDescriptor(global, name)?.configurable) delete global[name]
     routes.push(route)
     emit(route, { type: "ready", id: "" })
   }
@@ -99,6 +103,12 @@ export const install = (name: string, token: string, pattern: string, transport:
     pending: new Map<number, number>(),
     chain: Promise.resolve()
   })
+  // Socket internals live here, not on the page-visible object.
+  const privateState = new global.WeakMap()
+  const getState = global.WeakMap.prototype.get.bind(privateState)
+  const setState = global.WeakMap.prototype.set.bind(privateState)
+  const P = (socket: any): { route: typeof routes[number]; native: any; queues: { page: any; server: any } } =>
+    getState(socket)
   class Mock extends global.EventTarget {
     // Native sockets of unrouted URLs and routed sockets are both instances of the page-visible constructor.
     static [Symbol.hasInstance](value: any) {
@@ -115,8 +125,6 @@ export const install = (name: string, token: string, pattern: string, transport:
     readonly id = `${++next}`
     readonly url!: string
     readonly protocols!: Array<string>
-    readonly route!: typeof routes[number]
-    readonly queues = { page: pool(), server: pool() }
     _binaryType = "blob"
     get binaryType() {
       return this._binaryType
@@ -128,7 +136,6 @@ export const install = (name: string, token: string, pattern: string, transport:
     extensions = ""
     protocol = ""
     readyState = 0
-    native: any
     onopen: any = null
     onmessage: any = null
     onerror: any = null
@@ -142,6 +149,7 @@ export const install = (name: string, token: string, pattern: string, transport:
     terminalWait: (() => void) | undefined
     constructor(input: string | URL, protocols?: string | Array<string>) {
       super()
+      setState(this, { route: undefined, native: undefined, queues: { page: pool(), server: pool() } })
       const url = new global.URL(String(input), global.location.href)
       if (url.protocol === "http:") url.protocol = "ws:"
       if (url.protocol === "https:") url.protocol = "wss:"
@@ -167,7 +175,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       }
       this.url = url.href
       this.protocols = offered
-      this.route = route
+      P(this).route = route
       // Rejected constructors keep no entry in the shim's lookup table.
       if (route.failed || pendingConstructors >= 16) {
         this.pending = false
@@ -211,7 +219,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       if (this.terminalEnded || (notification.type === "error" ? this.nativeError : this.nativeClosed)) return
       if (notification.type === "error") this.nativeError = true
       else this.nativeClosed = true
-      const queue = this.queues.server
+      const queue = P(this).queues.server
       const watermark = queue.sequence
       const encoded = queue.chain
       // Encoding is not delivery: the host acknowledges only after forwarding or deliberately dropping.
@@ -230,10 +238,10 @@ export const install = (name: string, token: string, pattern: string, transport:
         })
         if (this.terminalEnded || this.closeNotified) return
         if (notification.type === "error") {
-          emit(this.route, { type: "error", id: this.id })
+          emit(P(this).route, { type: "error", id: this.id })
           this.fire("error", new global.Event("error"))
         } else {
-          emit(this.route, { ...notification, id: this.id, direction: "server", provenance: "native" })
+          emit(P(this).route, { ...notification, id: this.id, direction: "server", provenance: "native" })
           this.closed(notification.code, notification.reason, notification.wasClean, false)
         }
       }).catch(() => this.fail("native completion failed"))
@@ -249,7 +257,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       this.closeNotified = true
       this.fire("close", new global.CloseEvent("close", { code, reason, wasClean: clean }))
       if (notify) {
-        emit(this.route, {
+        emit(P(this).route, {
           type: "closed",
           id: this.id,
           code,
@@ -263,10 +271,10 @@ export const install = (name: string, token: string, pattern: string, transport:
     fail(reason: string) {
       if (this.readyState === 3) return
       try {
-        this.native?.close(4000, reason.slice(0, 80))
+        P(this).native?.close(4000, reason.slice(0, 80))
       } catch {}
       this.fire("error", new global.Event("error"))
-      emit(this.route, { type: "fault", id: this.id, reason })
+      emit(P(this).route, { type: "fault", id: this.id, reason })
       this.closed(1006, reason, false)
     }
     enqueue(direction: "page" | "server", value: any) {
@@ -274,7 +282,7 @@ export const install = (name: string, token: string, pattern: string, transport:
         typeof value !== "string" && !(value instanceof global.Blob) && !global.ArrayBuffer.isView(value) &&
         !(value instanceof global.ArrayBuffer)
       ) value = String(value)
-      const queue = this.queues[direction]
+      const queue = P(this).queues[direction]
       const bytes = size(value)
       if (bytes > 1048576 || queue.count >= 256 || queue.bytes + bytes > 4194304 || bytes > queue.credit) {
         this.fail("routing overflow")
@@ -296,7 +304,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       queue.chain = queue.chain.then(async () => {
         const message = await encode(snapshot)
         if (this.readyState === 3 || this.closeNotified) return
-        emit(this.route, { type: "message", id: this.id, direction, sequence, bytes, message })
+        emit(P(this).route, { type: "message", id: this.id, direction, sequence, bytes, message })
       }).catch(() => this.fail("binary conversion failed"))
     }
     send(value: any) {
@@ -308,8 +316,8 @@ export const install = (name: string, token: string, pattern: string, transport:
       validateClose(code, reason)
       if (this.readyState >= 2) return
       this.readyState = 2
-      this.queues.page.chain = this.queues.page.chain.then(() => {
-        emit(this.route, { type: "close", id: this.id, code, reason })
+      P(this).queues.page.chain = P(this).queues.page.chain.then(() => {
+        emit(P(this).route, { type: "close", id: this.id, code, reason })
       })
     }
   }
@@ -322,30 +330,30 @@ export const install = (name: string, token: string, pattern: string, transport:
         removed.binding !== undefined && global[removed.name] === removed.binding &&
         Object.getOwnPropertyDescriptor(global, removed.name)?.configurable
       ) delete global[removed.name]
-      const owned = [...sockets.values()].filter((socket) => socket.route.token === token)
+      const owned = [...sockets.values()].filter((socket) => P(socket).route.token === token)
       for (const socket of owned) {
         socket.endTerminals()
         socket.readyState = 2
-        socket.native?.close(1000, "route removed")
-        await Promise.all([socket.queues.page.chain, socket.queues.server.chain])
+        P(socket).native?.close(1000, "route removed")
+        await Promise.all([P(socket).queues.page.chain, P(socket).queues.server.chain])
         socket.closed(1000, "route removed", true, false)
         sockets.delete(socket.id)
       }
       if (routes.length === 0) {
         if (global.WebSocket === Mock) global.WebSocket = Native
-        delete global[key]
+        active = false
       }
       return
     }
     if (command.type === "faultRealm") {
       for (const route of routes) if (route.token === token) route.failed = true
-      for (const socket of sockets.values()) if (socket.route.token === token) socket.fail("bridge overflow")
+      for (const socket of sockets.values()) if (P(socket).route.token === token) socket.fail("bridge overflow")
       return
     }
     const socket = sockets.get(command.id)
-    if (socket === undefined || socket.route.token !== token) return
+    if (socket === undefined || P(socket).route.token !== token) return
     if (command.type === "grant") {
-      const queue = socket.queues[command.direction as "page" | "server"]
+      const queue = P(socket).queues[command.direction as "page" | "server"]
       const serial = command.serial ?? 1
       if (!Number.isSafeInteger(serial) || serial <= queue.grant) return
       if (
@@ -360,15 +368,15 @@ export const install = (name: string, token: string, pattern: string, transport:
     } else if (command.type === "open") {
       socket.opened(command.protocol ?? "")
     } else if (command.type === "connect") {
-      socket.native = new Native(socket.url, socket.protocols)
-      socket.native.binaryType = "arraybuffer"
-      socket.native.onopen = () => {
-        emit(socket.route, { type: "opened", id: socket.id, protocol: socket.native.protocol })
-        socket.opened(socket.native.protocol)
+      P(socket).native = new Native(socket.url, socket.protocols)
+      P(socket).native.binaryType = "arraybuffer"
+      P(socket).native.onopen = () => {
+        emit(P(socket).route, { type: "opened", id: socket.id, protocol: P(socket).native.protocol })
+        socket.opened(P(socket).native.protocol)
       }
-      socket.native.onmessage = (event: any) => socket.enqueue("server", event.data)
-      socket.native.onerror = () => socket.terminal({ type: "error" })
-      socket.native.onclose = (event: any) =>
+      P(socket).native.onmessage = (event: any) => socket.enqueue("server", event.data)
+      P(socket).native.onerror = () => socket.terminal({ type: "error" })
+      P(socket).native.onclose = (event: any) =>
         socket.terminal({
           type: "closed",
           code: event.code,
@@ -384,9 +392,9 @@ export const install = (name: string, token: string, pattern: string, transport:
             new global.MessageEvent("message", { data: value, origin: new global.URL(socket.url).origin })
           )
         }
-      } else socket.native?.send(value)
+      } else P(socket).native?.send(value)
     } else if (command.type === "ack") {
-      const queue = socket.queues[command.direction as "page" | "server"]
+      const queue = P(socket).queues[command.direction as "page" | "server"]
       const bytes = queue.pending.get(command.sequence)
       if (bytes === undefined) return
       queue.pending.delete(command.sequence)
@@ -398,21 +406,36 @@ export const install = (name: string, token: string, pattern: string, transport:
       validateClose(command.code, command.reason ?? "")
       if (command.direction === "server") {
         if (command.code === undefined) {
-          if (command.reason) socket.native?.close(1000, command.reason)
-          else socket.native?.close()
-        } else socket.native?.close(command.code, command.reason)
+          if (command.reason) P(socket).native?.close(1000, command.reason)
+          else P(socket).native?.close()
+        } else P(socket).native?.close(command.code, command.reason)
       } else socket.closed(command.code ?? 1005, command.reason ?? "", true)
     } else if (command.type === "fail") socket.fail(command.reason)
     else if (command.type === "drain") {
       socket.endTerminals()
       if (socket.readyState !== 3) socket.readyState = 2
-      socket.native?.close(1000, "route removed")
-      await Promise.all([socket.queues.page.chain, socket.queues.server.chain])
+      P(socket).native?.close(1000, "route removed")
+      await Promise.all([P(socket).queues.page.chain, P(socket).queues.server.chain])
       socket.closed(1000, "route removed", true, false)
       sockets.delete(socket.id)
     }
   }
-  global[key] = { add, dispatch }
+  // A page cannot replace or delete the holder after install; removing the last route only deactivates it.
+  global.Object.defineProperty(global, key, {
+    value: {
+      add: (...args: [string, string, string, string]) => {
+        if (!active) {
+          active = true
+          global.WebSocket = Mock
+        }
+        add(...args)
+      },
+      dispatch
+    },
+    configurable: false,
+    writable: false,
+    enumerable: false
+  })
   Object.defineProperty(Mock, "name", { value: "WebSocket", configurable: true })
   global.WebSocket = Mock
   add(name, token, pattern, transport)
