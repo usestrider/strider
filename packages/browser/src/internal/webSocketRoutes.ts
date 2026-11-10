@@ -59,6 +59,7 @@ type State = "connecting" | "open" | "closed"
 interface Connection {
   readonly id: string
   readonly realm: Target.RealmId
+  readonly alive: () => boolean
   readonly lease: Admission.Lease
   readonly scope: Scope.Closeable
   readonly status: SubscriptionRef.SubscriptionRef<State>
@@ -178,7 +179,15 @@ export const register = <E, R>(
         )
       )
     const command = (connection: Pick<Connection, "id" | "realm">, value: Record<string, unknown>) =>
-      evaluate(connection.realm, Shim.command(token, { id: connection.id, ...value }))
+      evaluate(connection.realm, Shim.command(token, { id: connection.id, ...value })).pipe(
+        Effect.tapError(() =>
+          Effect.suspend(() => {
+            const current = connections.get(`${connection.realm}:${connection.id}`)
+            if (current !== undefined && !current.alive()) bridge.ended(current.realm)
+            return Effect.void
+          })
+        )
+      )
     const forget = Effect.fnUntraced(function*(connection: Connection, destroyed: boolean, uncertain = false) {
       if (connection.released) return
       connection.released = true
@@ -222,7 +231,7 @@ export const register = <E, R>(
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
             : Option.exists(Cause.findErrorOption(cause), Target.isTargetGone)
-            ? forget(connection, false, true)
+            ? forget(connection, !connection.alive(), connection.alive())
             : Handlers.report("WebSocket routing handler failed; closing the connection", cause).pipe(
               Effect.andThen(terminate(connection, "routing handler failed"))
             )
@@ -300,6 +309,7 @@ export const register = <E, R>(
         const connection: Connection = {
           id: message.id,
           realm,
+          alive,
           lease,
           scope: child,
           status,
@@ -585,7 +595,14 @@ export const register = <E, R>(
     yield* Stream.fromQueue(incoming).pipe(
       Stream.runForEach((incoming) =>
         incoming.payload.pipe(
-          Effect.flatMap((payload) => {
+          Effect.interruptible,
+          BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
+          Effect.flatMap((result) => {
+            if (Option.isNone(result)) {
+              if (incoming.alive() && live) fault(incoming.realm)
+              return Handlers.report("WebSocket payload fetch deadline", Cause.die("payload fetch did not complete"))
+            }
+            const payload = result.value
             if (!incoming.alive() || !live) return Effect.void
             return Admission.textBytes(payload, 7 * MiB) > 7 * MiB
               ? Effect.sync(() => fault(incoming.realm))

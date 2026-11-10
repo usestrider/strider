@@ -4,8 +4,10 @@
  * What Firefox cannot do is refused before anything is declared.
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Emulation from "../../bidi-protocol/Emulation.ts"
@@ -26,11 +28,32 @@ import * as WebSocketBridge from "./webSocketBridge.ts"
 /** Where a document's preload scripts keep which of them ran. */
 const ranKey = "@usestrider/browser/initScripts/ran"
 
+let scriptLocks: WeakMap<State, Semaphore.Semaphore> | undefined
+
+const removePreloads = Effect.fnUntraced(function*(state: State, scripts: State["preloads"]) {
+  const retained: Array<State["preloads"][number]> = []
+  for (const script of scripts) {
+    let removed = false
+    yield* Cleanup.report(
+      Cleanup.bounded(state.send(Script.removePreloadScript({ script: script.script }))).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            removed = true
+          })
+        )
+      ),
+      "BiDi preload cleanup could not confirm removal"
+    ).pipe(Effect.catchCause((cause) => Effect.logWarning("BiDi preload cleanup failed", cause)))
+    if (!removed) retained.push(script)
+  }
+  return retained
+})
+
 /**
  * Registers the preload scripts for the scopes in order, environment phase first and broader scopes first. Any
  * change registers them all again, which only affects documents created after it.
  */
-const applyScripts = Effect.fnUntraced(function*(state: State) {
+const reconcileScripts = Effect.fnUntraced(function*(state: State) {
   const entries = state.registry.all()
     .filter((
       entry
@@ -51,34 +74,50 @@ const applyScripts = Effect.fnUntraced(function*(state: State) {
       a.sequence - b.sequence
     )
   const previous = state.preloads
-  const next: Array<Script.PreloadScript> = []
-  for (const entry of entries) {
-    // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
-    // after what it comes after ran without throwing
-    const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
-    const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
-      `typeof reportError === "function" ? reportError(error) : console.error(error) }`
-    const gated = entry.declaration.after.length === 0
-      ? body
-      : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
-    const { script } = yield* state.send(Script.addPreloadScript({
-      functionDeclaration: entry.declaration.webSocket === undefined ?
-        `() => { ${gated} }` :
-        `(send) => { globalThis[${JSON.stringify(entry.declaration.webSocket.name)}] = send; ${gated} }`,
-      ...(entry.declaration.webSocket === undefined
-        ? {}
-        : { arguments: [WebSocketBridge.channel(entry.declaration.webSocket)] }),
-      ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
-      ...scopeParams(state, entry.scope)
-    }))
-    next.push(script)
+  const next: Array<State["preloads"][number]> = []
+  const installed = yield* Effect.gen(function*() {
+    for (const entry of entries) {
+      // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
+      // after what it comes after ran without throwing
+      const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
+      const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
+        `typeof reportError === "function" ? reportError(error) : console.error(error) }`
+      const gated = entry.declaration.after.length === 0
+        ? body
+        : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
+      const { script } = yield* state.send(Script.addPreloadScript({
+        functionDeclaration: entry.declaration.webSocket === undefined ?
+          `() => { ${gated} }` :
+          `(send) => { globalThis[${JSON.stringify(entry.declaration.webSocket.name)}] = send; ${gated} }`,
+        ...(entry.declaration.webSocket === undefined
+          ? {}
+          : { arguments: [WebSocketBridge.channel(entry.declaration.webSocket)] }),
+        ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
+        ...scopeParams(state, entry.scope)
+      }))
+      next.push({ script, declaration: entry.id })
+    }
+  }).pipe(Effect.exit)
+  if (Exit.isFailure(installed)) {
+    // A failed addition must preserve old survivors, but never preserve a removed declaration.
+    const desired = new Set(state.registry.all().map((entry) => entry.id))
+    const retained = previous.filter((script) => desired.has(script.declaration))
+    const obsolete = previous.filter((script) => !desired.has(script.declaration))
+    state.preloads = [...retained, ...yield* removePreloads(state, [...next, ...obsolete])]
+    return yield* Effect.failCause(installed.cause)
   }
-  state.preloads = next
-  yield* Effect.forEach(
-    previous,
-    (script) => state.send(Script.removePreloadScript({ script })).pipe(Effect.ignore),
-    { discard: true }
-  )
+  state.preloads = [...next, ...yield* removePreloads(state, previous)]
+}, Effect.uninterruptible)
+
+const applyScripts = Effect.fnUntraced(function*(state: State) {
+  scriptLocks ??= new WeakMap()
+  let lock = scriptLocks.get(state)
+  if (lock === undefined) {
+    lock = Semaphore.makeUnsafe(1)
+    scriptLocks.set(state, lock)
+  }
+  // Snapshot the registry only after preceding native replacements have completed.
+  yield* lock.withPermits(1)(reconcileScripts(state))
 })
 
 /**
