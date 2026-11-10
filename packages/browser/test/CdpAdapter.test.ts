@@ -1772,6 +1772,65 @@ describe("Chromium empty screenshot errors", () => {
   }
 })
 
+describe("Chromium screenshot viewport containment", () => {
+  for (
+    const [name, clip, beyond] of [
+      ["scrolled viewport edges", { x: 10, y: 20, width: 800, height: 600 }, false],
+      ["fractional inset", { x: 10.25, y: 20.25, width: 799.5, height: 599.5 }, false],
+      ["fractional left overflow", { x: 9.75, y: 20, width: 100, height: 100 }, true],
+      ["fractional top overflow", { x: 10, y: 19.75, width: 100, height: 100 }, true],
+      ["fractional right overflow", { x: 10.25, y: 20, width: 800, height: 100 }, true],
+      ["fractional bottom overflow", { x: 10, y: 20.25, width: 100, height: 600 }, true]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage: false,
+          scale: "device",
+          omitBackground: false,
+          clip: Option.some(clip)
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+
+  for (
+    const [name, fullPage, scale, clip, beyond] of [
+      ["generated full-page clip", true, "device", { x: 0, y: 0, width: 900, height: 1800, scale: 1 }, true],
+      ["generated CSS-scale viewport clip", false, "css", { x: 10, y: 20, width: 800, height: 600, scale: 0.5 }, false]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage,
+          scale,
+          omitBackground: false,
+          clip: Option.none()
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.deepStrictEqual(capture.params?.clip, clip)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+})
+
 describe("Chromium screenshot renderer readiness", () => {
   it.effect("invalidates when replacement was received before a metrics error reply", () =>
     Effect.gen(function*() {
