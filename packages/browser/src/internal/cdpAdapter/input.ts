@@ -15,6 +15,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
 import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
 
@@ -75,6 +76,9 @@ export const dispatchInput = Effect.fnUntraced(
             }
             return release.pipe(
               Effect.tap(() => Effect.sync(() => Gestures.settled(events))),
+              // Cleanup waits for its reply on the protocol's own timeout, not the operation's deadline, which
+              // has passed when the cleanup is what the deadline started
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
               Operation.detached,
               Effect.ignore
             )
