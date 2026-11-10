@@ -51,6 +51,11 @@ for (const [name, backend] of backends) {
               scope: { domain: "example.com", path: "/" },
               secure: true
             })
+            yield* context.cookies.set({
+              name: "uppercase",
+              value: "1",
+              scope: { domain: "EXAMPLE.COM", path: "/" }
+            })
             const { runtime } = Handles.target(context).behind
             const navigate = vi.spyOn(runtime.model.adapter, "navigate")
             yield* Effect.addFinalizer(() => Effect.sync(() => navigate.mockRestore()))
