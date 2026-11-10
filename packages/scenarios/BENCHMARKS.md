@@ -810,7 +810,6 @@ intersection from the same sample, with their uncertainty and the original first
 Strider's initial page must still evaluate to `about:blank` after trace retention.
 
 `launch-summary.md` labels the output diagnostic only. Launch availability remains the boundary; initial-page
-
 gate observation, liveness checks, trace flushing and cleanup are outside timing. Different default initial
 resources and sandbox settings remain. Native tracing and phase/protocol instrumentation perturb startup; this baseline calibration run does not
 measure their overhead or a production speedup. Do not sum overlapping spans or treat these timings as parity evidence. A failed or partial report
