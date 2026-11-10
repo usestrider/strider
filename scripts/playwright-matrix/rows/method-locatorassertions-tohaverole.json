@@ -17,7 +17,7 @@
   "decision": {
     "file": "docs/decisions.md",
     "anchor": "shared-dom-roles",
-    "quote": "Role assertions, role locators and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`.",
+    "quote": "Role assertions, role locators, and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`.",
     "revision": "b453ed06b279413d1f432f6acbd873178b38980d"
   }
 }

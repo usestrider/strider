@@ -12,7 +12,7 @@
   "decision": {
     "file": "docs/decisions.md",
     "anchor": "locator-design",
-    "quote": "Actionability checks are named, adjustable per call and reported in errors.",
+    "quote": "Actionability checks are named, adjustable per call, and reported in errors.",
     "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
   },
   "id": "option-frame-check-force",
