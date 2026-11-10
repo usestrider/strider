@@ -481,6 +481,24 @@ describe("Session's digest", () => {
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
 
+  it.effect("a failed call reports the pending digest, and the next call doesn't repeat it", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      yield* page.goto("https://example.test/pending")
+      yield* TestClock.adjust("1 millis")
+      const last = yield* session.toolkit.handle("goto", { page: "missing", url: "https://example.test/" }).pipe(
+        Effect.flatMap(Stream.runLast),
+        Effect.map(Option.getOrThrow)
+      )
+      assert.isTrue(last.isFailure)
+      const failure = last.result as { readonly error: string; readonly sinceLast?: ReadonlyArray<string> }
+      assert.strictEqual(failure.error, "PageNotFound")
+      assert.include(failure.sinceLast ?? [], "main navigated to https://example.test/pending")
+      assert.deepStrictEqual(yield* sinceLast(session), [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
   it.effect("opening a page preserves another page's pending and later navigation", () =>
     Effect.gen(function*() {
       const context = yield* Browser.newContext()
