@@ -770,6 +770,11 @@ export interface UserContextOptions {
   readonly requestTiming?: boolean | undefined
   readonly requestSizes?: boolean | undefined
   readonly reclaimable?: boolean | undefined
+  /**
+   * Focus is emulated for the context's whole life, so the backend may place its pages where only emulated focus
+   * keeps them rendering.
+   */
+  readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
 }

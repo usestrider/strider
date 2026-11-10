@@ -35,7 +35,7 @@ import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
-import { selectScenarios } from "./selection.ts"
+import { selectScenarios, supportedOn } from "./selection.ts"
 import { start } from "./site.ts"
 
 const argv = process.argv.slice(2)
@@ -210,13 +210,14 @@ if (argv.includes("--record")) {
 const unsupported: Array<string> = engine === "firefox"
   ? [
     "video and video-firefox: no equivalent Playwright video twin; Chromium screencast and Firefox native capture perform different work",
-    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
+    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics",
+    ...scenarios.flatMap((scenario) =>
+      scenario.chromiumOnly === undefined ? [] : [`${scenario.name}: excluded from Firefox, ${scenario.chromiumOnly}`]
+    )
   ]
   : []
 const paired = process.env["STRIDER_PAIRED"] === "1"
-const selected = selectScenarios(scenarios, only, paired).filter((
-  scenario
-) => (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined)))
+const selected = supportedOn(selectScenarios(scenarios, only, paired), engine)
 if (selected.length === 0) throw new Error("No supported scenarios selected")
 // Fetch what the manifest pins and the recordings directory lacks; the real-site scenarios whose recording can't be
 // had are skipped, and say why

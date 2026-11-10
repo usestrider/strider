@@ -729,6 +729,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
+            focusEmulated: options?.focus === "emulated",
             requestTiming: options?.requestTiming,
             requestSizes: options?.requestSizes
           })).pipe(

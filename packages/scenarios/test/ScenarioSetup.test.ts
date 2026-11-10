@@ -6,6 +6,7 @@ import * as vm from "node:vm"
 import { expect, it } from "vitest"
 import { recordingProblems } from "../src/replay.ts"
 import { scenarios } from "../src/scenarios.ts"
+import { selectScenarios, supportedOn } from "../src/selection.ts"
 
 it("prepares a fresh scenario working directory before constructing browser layers", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "scenario-setup-"))
@@ -46,4 +47,31 @@ it("prepares a fresh scenario working directory before constructing browser laye
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
+})
+
+it("excludes the Chromium-only emulated-focus scenario from a Firefox run", () => {
+  // The runner's own selection, without launching either browser.
+  const chosen = supportedOn(selectScenarios(scenarios, undefined, false), "firefox")
+  expect(chosen.map((scenario) => scenario.name)).toContain("many-pages")
+  expect(chosen.map((scenario) => scenario.name)).not.toContain("many-pages-emulated")
+})
+
+it("applies the Firefox exclusion in the scenario runner", () => {
+  // Execute the runner's selection before recording fetch or browser startup. Calling the helper directly would
+  // miss a runner that accidentally stopped using it.
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, "../src/bin.ts"), "utf8")
+  const start = source.indexOf("const selected =")
+  const end = source.indexOf("if (selected.length === 0)", start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const chosen = vm.runInNewContext(`${stripTypeScriptTypes(source.slice(start, end))}\nselected`, {
+    scenarios,
+    selectScenarios,
+    supportedOn,
+    only: undefined,
+    paired: false,
+    engine: "firefox"
+  }) as ReadonlyArray<{ readonly name: string }>
+  expect(chosen.map((scenario) => scenario.name)).toContain("many-pages")
+  expect(chosen.map((scenario) => scenario.name)).not.toContain("many-pages-emulated")
 })

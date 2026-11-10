@@ -83,7 +83,9 @@ export default defineConfig({
 `LaunchProfile.concurrent` and `focus: "emulated"` let several pages run at once as if each were in front. A
 browser otherwise throttles background pages' timers and rendering, so their actions can time out, and focuses one
 page only, so `toBeFocused` fails on the rest. Use them when a file's tests run concurrently, or a test drives
-several pages:
+several pages. On Chromium, `focus: "emulated"` is also the fast option for suites that don't depend on real focus:
+it opens each page you create as a tab, where the default opens a window per page, which is slower to create and to
+close:
 
 ```ts title="dashboards.test.ts"
 import { NodeServices } from "@effect/platform-node"
