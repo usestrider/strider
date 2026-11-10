@@ -169,7 +169,10 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
   // its interception and its file chooser dialog
   yield* removal.pipe(
     Effect.onError(() =>
-      applyDownloads(state, context).pipe(Effect.andThen(restoreContext(state, context)), Effect.ignore)
+      // Independent resets: one that fails doesn't skip the others
+      Effect.all([applyDownloads(state, context).pipe(Effect.ignore), restoreContext(state, context)], {
+        discard: true
+      })
     )
   )
 })
