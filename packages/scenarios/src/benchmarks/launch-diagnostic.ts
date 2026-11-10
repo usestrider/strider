@@ -17,6 +17,7 @@ export const launchDiagnostic = (options: {
       "packages/scenarios/benchmark/launch-profile.ts",
       "packages/scenarios/benchmark/native-launch-trace.ts",
       "packages/scenarios/test/NativeLaunchTrace.test.ts",
+      "packages/scenarios/test/LaunchCalibration.test.ts",
       "packages/scenarios/benchmark/launch-profile-hooks.mjs",
       "packages/scenarios/test/LaunchProfile.test.ts"
     ]
@@ -71,16 +72,17 @@ export const launchDiagnostic = (options: {
       "vitest.config.ts",
       "packages/scenarios/test/LaunchProfile.test.ts",
       "packages/scenarios/test/NativeLaunchTrace.test.ts",
+      "packages/scenarios/test/LaunchCalibration.test.ts",
       "--reporter=json",
       `--outputFile=${path.join(directory, "regression-results.json")}`
     ])
     const regressions = JSON.parse(fs.readFileSync(path.join(directory, "regression-results.json"), "utf8"))
-    assert.equal(regressions.numTotalTests, 21)
-    assert.equal(regressions.numPassedTests, 21)
+    assert.equal(regressions.numTotalTests, 32)
+    assert.equal(regressions.numPassedTests, 32)
     assert.equal(regressions.numPendingTests, 0)
     assert.equal(regressions.numFailedTests, 0)
-    // Phase-only controls bound native tracing perturbation; these sequential blocks are not a speedup comparison.
-    for (const mode of ["phase-baseline", "native-baseline", "native-control", "phase-control"]) {
+    // Baseline calibration validation only: do not repeat any argument control.
+    for (const mode of ["native-baseline"]) {
       const target = path.join(directory, mode)
       fs.mkdirSync(target, { recursive: true })
       run(mode, process.execPath, [
@@ -107,8 +109,8 @@ export const launchDiagnostic = (options: {
       [
         `Launch diagnostic status: **${manifest.status}**.`,
         "Diagnostic only: instrumented head Strider versus its pinned Playwright, after rejection and complete-report regressions.",
-        `${runs} alternating pairs per block after three warmup pairs: phase-baseline, native-baseline, native-control, phase-control. Base is provenance only.`,
-        "Control adds only --disable-extensions to Strider. Sequential phase-only/native blocks expose perturbation but do not isolate overhead from runner drift.",
+        `${runs} alternating native-baseline calibration pairs after three warmup pairs. Base is provenance only.`,
+        "No argument control. Three post-readiness root probes precede trace retention; old and tightened clock bounds come from the same samples.",
         "Launch ends at Browser availability; initial-page gate observation and cleanup are outside timing.",
         "Defaults retain different initial resources, sandbox settings and readiness. Overlapping spans must not be summed.",
         "Complete native startup traces, causal clock bounds, raw phase/protocol observations, spawn argv, liveness and partial failures are retained in launch-diagnostic/.",

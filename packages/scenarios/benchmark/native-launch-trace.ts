@@ -11,7 +11,39 @@ type NativeEvent = {
   dur?: number
   args?: { call_id?: number; method?: string }
 }
-export const retainNativeTrace = async (file: string, events: ReadonlyArray<Event>, timeoutMs = 10_000) => {
+export const calibrateRoot = async (
+  send: () => Promise<unknown>,
+  mark: (name: string, data?: unknown) => void,
+  timeoutMs = 2000
+) => {
+  mark("calibration.start", { count: 3 })
+  try {
+    for (let i = 0; i < 3; i++) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          Promise.resolve().then(send),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Root calibration command timed out")), timeoutMs)
+          })
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    mark("calibration.end")
+  } catch (error) {
+    mark("calibration.error", { error: String(error) })
+    throw error
+  }
+}
+
+export const retainNativeTrace = async (
+  file: string,
+  events: ReadonlyArray<Event>,
+  timeoutMs = 10_000,
+  options: { requireCalibration?: boolean } = {}
+) => {
   const deadline = performance.now() + timeoutMs
   let error = "Native trace not written"
   do {
@@ -27,7 +59,9 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
       assert.ok(Array.isArray(buffers) && buffers.length > 0, "Missing native buffer-loss accounting")
       for (const buffer of buffers) {
         for (const [key, value] of Object.entries(buffer)) {
-          if (/loss|discard|overwrit|dropped|^abi_violations$|^patches_failed$/.test(key)) assert.equal(value, 0, `Native trace data loss: ${key}`)
+          if (/loss|discard|overwrit|dropped|^abi_violations$|^patches_failed$/.test(key)) {
+            assert.equal(value, 0, `Native trace data loss: ${key}`)
+          }
         }
       }
       const sends = events.filter((e) => e.kind === "wire" && e.name === "send")
@@ -44,6 +78,12 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
       }
       const firstReply = reply(first!)
       assert.ok(firstReply, "Missing first command reply")
+      const start = events.find((e) => e.kind === "mark" && e.name === "calibration.start")
+      const end = events.find((e) => e.kind === "mark" && e.name === "calibration.end")
+      const isCalibration = (e: Event) => start !== undefined && end !== undefined && e.at >= start.at && e.at <= end.at
+      const calibration: Array<{ id: number; sendMs: number; replyMs: number; nativeStartUs: number }> = []
+      let beforeLower = -Infinity
+      let beforeUpper = Infinity
       let lower = -Infinity
       let upper = Infinity
       let firstNative: NativeEvent | undefined
@@ -63,10 +103,35 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
         )
         lower = Math.max(lower, sent.at - native.ts! / 1000)
         upper = Math.min(upper, received.at - native.ts! / 1000)
+        if (isCalibration(sent) && data.method === "Browser.getVersion") {
+          assert.ok(received.at <= end!.at, "Missing calibration reply before completion")
+          calibration.push({ id: data.id, sendMs: sent.at, replyMs: received.at, nativeStartUs: native.ts! })
+        } else {
+          beforeLower = Math.max(beforeLower, sent.at - native.ts! / 1000)
+          beforeUpper = Math.min(beforeUpper, received.at - native.ts! / 1000)
+        }
         matched++
         if (sent === first) firstNative = native
       }
       assert.ok(firstNative, "Missing native first command handler")
+      if (options.requireCalibration) {
+        const available = events.find((e) => e.kind === "mark" && e.name === "launch.available")
+        const ready = events.find((e) => e.kind === "mark" && e.name === "calibration.ready")
+        const gate = events.find((e) => e.kind === "mark" && e.name === "initial.gate.observed")
+        assert.ok(start && end && available && ready, "Missing calibration phase evidence")
+        assert.ok(
+          available.at <= ready.at && ready.at <= start.at && start.at <= end.at &&
+            (gate === undefined || gate.at <= ready.at),
+          "Early calibration before readiness"
+        )
+        assert.equal((start.data as { count?: number })?.count, 3, "Invalid calibration probe count")
+        assert.equal(
+          calibration.length,
+          3,
+          "Missing calibration root send/reply/native handler evidence; trace window may have expired"
+        )
+        assert.equal(new Set(calibration.map((entry) => entry.id)).size, 3, "Duplicate calibration id")
+      }
       assert.ok(lower <= upper, "Inconsistent native/host clock bounds")
       return {
         status: "complete",
@@ -76,6 +141,9 @@ export const retainNativeTrace = async (file: string, events: ReadonlyArray<Even
         events: parsed.traceEvents.length,
         buffers,
         clockDomain: parsed.metadata["clock-domain"],
+        beforeCalibrationOffsetMs: [beforeLower, beforeUpper],
+        beforeCalibrationUncertaintyMs: beforeUpper - beforeLower,
+        calibration,
         offsetMs: [lower, upper],
         uncertaintyMs: upper - lower,
         matched,

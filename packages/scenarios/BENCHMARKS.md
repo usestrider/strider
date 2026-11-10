@@ -789,26 +789,28 @@ Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=l
 `browser=chromium`, `runs=20`, and base/head pinned to the same commit. This entry profiles head only;
 base is retained for provenance, not measured as a comparison role. The driver overlays its profiler,
 hooks and regression tests onto head, retaining the exact tooling and original source/dependency provenance.
-It first runs ordinary/persistent missing-instrumentation, complete-report and native-trace regressions.
-It then collects four sequential blocks: phase-only baseline, native baseline, native control and phase-only
-control. Each block has the requested alternating Strider/Playwright pairs after three warmup pairs.
-The control adds only `--disable-extensions` to Strider, testing whether extension-system initialization
-contributes to startup. It preserves Strider's initial window, sandbox and core-limit wrapper. This private
-probe changes no supported defaults. No workflow edit is needed.
+It first runs ordinary/persistent missing-instrumentation, complete-report, calibration and native-trace
+regressions. It then collects one native baseline block with the requested alternating Strider/Playwright
+pairs after three warmup pairs. No argument control is run. This private probe changes no supported defaults
+or workflow. The initial window, sandbox and core-limit wrapper remain intact.
 
 The retained `launch-diagnostic/` directory contains each block's report, raw phases, wire messages, spawn
 arguments, resource counts, regression child output, rejected reports and logs, including on failure.
 Native blocks also retain full Chromium JSON startup traces outside temporary browser profiles. Before
 browser disposal, the profiler waits for parseable trace output, verifies the Linux monotonic clock domain,
 checks buffer-loss counters, and requires a native first-command handler plus host send/reply evidence.
-Causal send/handler/reply intervals bound the clock offset; their intersection and uncertainty are retained,
-not treated as an exact timestamp conversion. Original trace bytes survive failed validation.
+After availability and Strider's initial gate, three root `Browser.getVersion` probes run before retention,
+outside launch timing. Each command has a two-second wait bound; rejection or timeout stops further probes.
+The probes use each library's existing root command client, preserving normal reply matching and cleanup.
+Reports explicitly require all three calibration sends, replies and native handler entries inside the trace;
+an expired trace window fails rather than silently falling back to wider bounds. Causal send/handler-entry/reply
+intervals bound clock offset. Reports retain both the intersection excluding calibration and the tightened
+intersection from the same sample, with their uncertainty and the original first-command evidence. Original trace bytes survive failed validation.
 Strider's initial page must still evaluate to `about:blank` after trace retention.
 
 `launch-summary.md` labels the output diagnostic only. Launch availability remains the boundary; initial-page
 gate observation, liveness checks, trace flushing and cleanup are outside timing. Different default initial
-resources and sandbox settings remain. Phase-only blocks expose native tracing perturbation but still contain
-phase/protocol instrumentation; sequential block order and runner drift prevent a causal overhead or speedup
-claim. Do not sum overlapping spans or treat these timings as parity evidence. A failed or partial report
+resources and sandbox settings remain. Native tracing and phase/protocol instrumentation perturb startup; this baseline calibration run does not
+measure their overhead or a production speedup. Do not sum overlapping spans or treat these timings as parity evidence. A failed or partial report
 establishes no valid timing result. Uninstrumented paired lifecycle and same-source controls remain necessary
 before proposing an optimization.

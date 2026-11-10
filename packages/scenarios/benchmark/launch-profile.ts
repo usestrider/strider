@@ -15,7 +15,7 @@ import * as path from "node:path"
 import { type Browser as PlaywrightBrowser, type BrowserContext as PlaywrightContext, chromium } from "playwright-core"
 import type * as Transport from "../../browser/src/protocol/Transport.ts"
 import pins from "../../browser/test/integration/browsers.json" with { type: "json" }
-import { retainNativeTrace } from "./native-launch-trace.ts"
+import { calibrateRoot, retainNativeTrace } from "./native-launch-trace.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 assert.equal(process.env["STRIDER_ENVIRONMENT"], "nix-integration")
@@ -64,7 +64,7 @@ const diagnosticArgs = (strider: boolean) => [
 ]
 const retain = async () => {
   if (!native || active === undefined || active.native !== undefined) return
-  active.native = await retainNativeTrace(nativeFile(), active.events)
+  active.native = await retainNativeTrace(nativeFile(), active.events, 10_000, { requireCalibration: true })
   save()
 }
 const requireNative = () => {
@@ -78,6 +78,7 @@ const event = (kind: string, name: string, data?: unknown) => {
   active?.events.push({ at: performance.now() - started, kind, name, ...(data === undefined ? {} : { data }) })
 }
 const trace = {
+  rootCommand: undefined as (() => Promise<unknown>) | undefined,
   mark: (name: string, data?: unknown) => {
     event("mark", name, data)
     if (name === "target.gate.end") gateDone?.()
@@ -266,6 +267,7 @@ try {
     const right = persistent ? "playwright-persistent" : "playwright"
     const order = i % 2 === 0 ? ["strider", right] : [right, "strider"]
     for (const library of order) {
+      trace.rootCommand = undefined
       active = { library, index: i, events: [] }
       if (native) fs.mkdirSync(path.dirname(nativeFile()), { recursive: true })
       started = performance.now()
@@ -284,6 +286,11 @@ try {
           active.resources = { visiblePages: (await runtime.runPromise(browser.pages)).length }
           await trace.waitForGate()
           trace.mark("initial.gate.observed")
+          if (native) {
+            trace.mark("calibration.ready")
+            assert.ok(trace.rootCommand, "Missing calibration root command")
+            await calibrateRoot(trace.rootCommand, trace.mark)
+          }
           await retain()
           const pages = await runtime.runPromise(browser.pages)
           assert.equal(pages.length, 1)
@@ -299,6 +306,7 @@ try {
             await retain()
           } finally {
             await runtime.dispose()
+            trace.mark("diagnostic.disposed")
           }
         }
       } else {
@@ -324,12 +332,18 @@ try {
           const targets = await session.send("Target.getTargets")
           active.resources = { contexts: browser.contexts().length, targets: targets.targetInfos }
           await session.detach()
+          if (native) {
+            trace.mark("calibration.ready")
+            assert.ok(trace.rootCommand, "Missing calibration root command")
+            await calibrateRoot(trace.rootCommand, trace.mark)
+          }
         } finally {
           try {
             await retain()
           } finally {
             if (context !== undefined) await context.close()
             else await browser?.close()
+            trace.mark("diagnostic.disposed")
           }
         }
       }

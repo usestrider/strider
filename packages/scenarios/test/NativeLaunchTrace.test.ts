@@ -125,6 +125,7 @@ const calibrationEvents = [
   ...events,
   { at: 34, kind: "mark", name: "launch.available" },
   { at: 35, kind: "mark", name: "initial.gate.observed" },
+  { at: 36, kind: "mark", name: "calibration.ready" },
   { at: 40, kind: "mark", name: "calibration.start", data: { count: 3 } },
   ...[101, 102, 103].flatMap((id, i) => [
     { at: 41 + i * 2, kind: "wire", name: "send", data: { id, method: "Browser.getVersion" } },
@@ -163,7 +164,11 @@ it.each(["marks", "reply", "native", "early", "first"])(
       const trace = structuredClone(calibratedNative)
       let observed = calibrationEvents
       if (kind === "marks") observed = observed.filter((e) => !e.name.startsWith("calibration."))
-      if (kind === "reply") observed = observed.filter((e) => !(e.name === "receive" && e.data?.id === 103))
+      if (kind === "reply") {
+        observed = observed.filter((e) =>
+          !(e.name === "receive" && e.data !== undefined && "id" in e.data && e.data.id === 103)
+        )
+      }
       if (kind === "native") trace.traceEvents = trace.traceEvents.filter((e) => e.args.call_id !== 103)
       if (kind === "early") observed = observed.map((e) => e.name === "initial.gate.observed" ? { ...e, at: 48 } : e)
       if (kind === "first") trace.traceEvents = trace.traceEvents.filter((e) => e.args.call_id !== 1)
