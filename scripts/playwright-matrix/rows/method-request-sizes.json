@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/NetworkRequest#Sizes"
     }
   ],
-  "notes": "Context-creation requestSizes opt-in; immediate immutable seven-field native-byte snapshot with Option counts. Original retained instance and live owners required; no terminal wait. Chromium supplies total and decoded bytes, Firefox received headers/encoded entity/total and HTTP/1.1 transferred-body difference, stock WebKit sent request and received response metrics including decoded bytes. Firefox decoded, Chromium request/header/body split, WebKit encoded entity and ambiguous cache/redirect/worker counts remain unavailable. No estimates, body downloads or implicit collection; partial numeric coverage is deliberate.",
+  "notes": "Context-creation requestSizes opt-in; immediate immutable seven-field native-byte snapshot with Option counts. Original retained instance and live owners required; no terminal wait. Chromium returns all None if loadingFinished precedes responseReceivedExtraInfo (common for images); otherwise it supplies total and decoded bytes, Firefox received headers/encoded entity/total and HTTP/1.1 transferred-body difference, stock WebKit sent request and received response metrics including decoded bytes. Firefox decoded, Chromium request/header/body split, WebKit encoded entity and ambiguous cache/redirect/worker counts remain unavailable. No estimates, body downloads or implicit collection; partial numeric coverage is deliberate.",
   "capabilities": [
     "network.sizes"
   ],

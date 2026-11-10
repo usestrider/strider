@@ -142,10 +142,10 @@ const webSocketFrame = (
 
 /**
  * Chunk accounting belongs only to live page-attributed sessions in an opted-in context.
- * The reader may see attachment state before the fold catches up. Auto-attached targets stay debugger-paused
- * until the fold registers and resumes them, so their chunks cannot precede registration. The claims path
- * attaches without that pause, but requestSizes is refused on claimed existing contexts. Both invariants
- * must hold for this early filter to avoid dropping bytes from an enabled request.
+ * The reader may see attachment state before the fold catches up. Launched browsers pause new targets;
+ * attached browsers need not pause pages. Both send Network.enable only from the gate, after the fold registers
+ * the target, so chunk events cannot precede registration. The claims path refuses requestSizes on existing
+ * contexts. Keep these invariants so the early filter cannot drop bytes from an enabled request.
  */
 export const eventScopes = (state: State): NonNullable<ProtocolClient.Fold["eventScopes"]> =>
   new Map([
@@ -215,7 +215,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
       }
-      if (request.frame?.page.context.requestSizes !== undefined) {
+      if (
+        request.frame?.page.context.requestSizes !== undefined &&
+        !(target.page ?? target.frame?.page ?? request.frame.page).context.disposed
+      ) {
         Sizes.keep(request.frame.page.context.requestSizes, request.hop, request.frame.id)
       }
       if (request.frame?.page.context.requestTiming !== undefined) {

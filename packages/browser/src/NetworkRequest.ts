@@ -767,6 +767,8 @@ export class RequestError
  * Firefox decoded size is unavailable because the browser reports zero for nonempty bodies.
  * Sums and differences require valid counts from the same completed network hop. Cache,
  * revalidation, routed responses and uncollected worker requests can leave every field unavailable.
+ * Chromium returns `None` for every size field when `loadingFinished` arrives before
+ * `responseReceivedExtraInfo`, which is common for images.
  * No sizes are estimated from header objects, Content-Length or downloaded bodies.
  *
  * @stability unstable
@@ -792,7 +794,8 @@ export class Sizes extends Schema.Class<Sizes>("@usestrider/browser/NetworkReque
  * This setting is independent of timings and body capture. Final body and transfer totals appear
  * only after successful completion. Failure preserves earlier evidence without inventing final totals.
  * Missing counts prove neither failure nor completion. Redirect hops never share size observations;
- * Chromium and stock WebKit redirect totals are unavailable.
+ * Chromium and stock WebKit redirect totals are unavailable. On Chromium, `loadingFinished` before
+ * `responseReceivedExtraInfo` leaves all sizes `None`; this ordering is common for images.
  *
  * Reads require the original request instance in the bounded 1000-hop index and live page/context,
  * frame/worker and browser owners. Copied, decoded, evicted and foreign requests refuse with
