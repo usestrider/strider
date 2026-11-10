@@ -3223,10 +3223,10 @@ describe("BiDi response body completion", () => {
         const hop = entry.hop
         const reading = yield* Network.responseBody(state, hop).pipe(Effect.result, Effect.forkChild)
         yield* Effect.yieldNow
-        complete()
-        if (successor !== "none") Deferred.doneUnsafe(entry.finished, Effect.void)
-        assert.isTrue(Deferred.isDoneUnsafe(entry.finished), "completed responses release body reads")
         if (successor === "waiting") apply("network.beforeRequestSent", { redirectCount: 1 })
+        complete()
+        if (successor === "reading") Deferred.doneUnsafe(entry.finished, Effect.void)
+        assert.isTrue(Deferred.isDoneUnsafe(entry.finished), "completed responses release body reads")
         if (successor !== "waiting") {
           yield* Deferred.await(called)
           if (successor === "reading") apply("network.beforeRequestSent", { redirectCount: 1 })
@@ -3251,3 +3251,43 @@ describe("BiDi response body completion", () => {
       }))
   }
 })
+
+it.effect("retires terminal BiDi responses without evicting an active redirect successor", () =>
+  Effect.gen(function*() {
+    const { state } = yield* withPage({ "network.getData": { bytes: { type: "string", value: "final" } } })
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    const apply = (method: string, key: string, redirectCount = 0) =>
+      handlers.apply(method, {
+        context: "C1",
+        userContext: "default",
+        navigation: null,
+        timestamp: 1,
+        redirectCount,
+        isBlocked: false,
+        request: { request: key, url: "http://site.test/", method: "GET", headers: [], destination: "", bodySize: 0 },
+        response: { status: 302, bytesReceived: 5 }
+      }, { state })
+    apply("network.beforeRequestSent", "active")
+    apply("network.responseCompleted", "active")
+    const active = state.requests.get("active")!
+    const first = active.hop
+    apply("network.beforeRequestSent", "active", 1)
+    assert.isFalse(Deferred.isDoneUnsafe(active.finished), "each successor waits for its own completion")
+    for (let i = 0; i < 1001; i++) {
+      apply("network.beforeRequestSent", `terminal-${i}`)
+      apply("network.responseCompleted", `terminal-${i}`)
+    }
+    assert.strictEqual(state.requests.get("active"), active)
+    assert.isFalse(state.requests.has("terminal-0"))
+    assert.strictEqual(state.requests.size, 1001)
+    apply("network.responseCompleted", "active", 1)
+    assert.strictEqual(new TextDecoder().decode(yield* Network.responseBody(state, active.hop)), "final")
+    for (let i = 0; i < 1000; i++) {
+      apply("network.beforeRequestSent", `later-${i}`)
+      apply("network.responseCompleted", `later-${i}`)
+    }
+    assert.isFalse(state.requests.has("active"))
+    assert.isFalse(state.hops.has(first))
+    assert.isFalse(state.hops.has(active.hop))
+    assert.strictEqual(state.requests.size, 1000)
+  }))
