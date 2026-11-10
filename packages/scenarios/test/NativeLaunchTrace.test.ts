@@ -91,3 +91,11 @@ it.each(["clock", "loss", "handler"])("rejects unusable native evidence (%s)", a
     expect((await retainNativeTrace(file, events, 1)).status).toBe("error")
     expect(fs.existsSync(file)).toBe(true)
   }))
+
+it("bounds handler entry even when the handler ends after reply delivery", async () =>
+  fixture(async (file) => {
+    const value = structuredClone(native)
+    value.traceEvents[0]!.dur = 100000
+    fs.writeFileSync(file, JSON.stringify(value))
+    expect((await retainNativeTrace(file, events, 1)).status).toBe("complete")
+  }))
