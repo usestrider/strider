@@ -404,6 +404,17 @@ const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
     }))
   )
 
+/**
+ * Where a lookup that found no node ran. There is no binding to name its document, so it is the document the
+ * frame the lookup went to holds when the lookup ends, which a commit during realm acquisition may have replaced.
+ */
+const searched = (runtime: Runtime, page: Model.PageEntry, routed: Routed): Effect.Effect<Routed> =>
+  Effect.map(
+    runtime.model.documentOf(routed.hops.at(-1)?.frame ?? page.id),
+    (current) =>
+      Option.isSome(current) && current.value !== routed.document ? { ...routed, document: current.value } : routed
+  )
+
 /** The one match in a document, by its node binding, or the engine's answer for why there is none. */
 type Element =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
@@ -794,13 +805,23 @@ export const element = (
         return Effect.succeedSome({ _tag: "Response", response: stale.value, routed: route.routed })
       }
       return elementIn(runtime, route.routed.document, last, null, id).pipe(
-        Effect.map(Option.map((found): Found =>
-          found._tag === "Found" && found.node.document !== route.routed.document
-            // A child document can commit while the utility realm is installed: the binding then names the
-            // new document, which is the one the node lives in. The frames' parent hops still hold.
-            ? { ...found, routed: { ...route.routed, document: found.node.document } }
-            : { ...found, routed: route.routed }
-        ))
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.succeedNone,
+          onSome: (found) =>
+            found._tag === "Found"
+              // A child document can commit while the utility realm is installed: the binding then names the
+              // new document, which is the one the node lives in. The frames' parent hops still hold.
+              ? Effect.succeedSome<Found>({
+                ...found,
+                routed: found.node.document === route.routed.document
+                  ? route.routed
+                  : { ...route.routed, document: found.node.document }
+              })
+              : Effect.map(
+                searched(runtime, page, route.routed),
+                (routed): Option.Option<Found> => Option.some({ ...found, routed })
+              )
+        }))
       )
     }),
     promptBlocked(page)
@@ -867,11 +888,15 @@ export const elements = (
             nodes.push(member.node)
           }
           // As in `element`: the bindings' document is authoritative when a commit straddled the lookup.
-          const document = nodes[0]?.document ?? routed.document
+          const first = nodes[0]
           return Option.some({
             _tag: "Found" as const,
             nodes,
-            routed: document === routed.document ? routed : { ...routed, document }
+            routed: first === undefined
+              ? yield* searched(runtime, page, routed)
+              : first.document === routed.document
+              ? routed
+              : { ...routed, document: first.document }
           })
         }
       )
