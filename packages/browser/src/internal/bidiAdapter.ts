@@ -58,6 +58,14 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "supported"),
+      entry("network.sizes.responseBody", "partial"),
+      entry("network.sizes.encoded", "supported"),
+      entry("network.sizes.decoded", "unsupported"),
       entry("network.timing.redirect", "supported"),
       entry("network.timing", "partial", [
         "context-creation opt-in; bounded original-instance observations with live owners",
@@ -104,6 +112,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
       entry("network.requestBody.redirects", "unsupported", ["redirected hops cannot be addressed independently"]),

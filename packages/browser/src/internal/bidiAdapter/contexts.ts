@@ -166,6 +166,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       )
       const entry: ContextEntry = {
         ...(options.requestTiming ? { requestTiming: true } : {}),
+        ...(options.requestSizes ? { requestSizes: true } : {}),
         id: state.ids.userContext(),
         bidi: userContext,
         removing: false,
@@ -180,7 +181,8 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           _tag: "UserContextAdded",
           context: entry.id,
           isDefault: false,
-          ...(options.requestTiming ? { requestTiming: true } : {})
+          ...(options.requestTiming ? { requestTiming: true } : {}),
+          ...(options.requestSizes ? { requestSizes: true } : {})
         })
       )
       // Seed only this context; every failure, including interruption, attempts rollback under a fresh budget.

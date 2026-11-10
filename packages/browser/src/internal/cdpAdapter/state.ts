@@ -41,9 +41,11 @@ export type WorkerGate = (
 ) => Effect.Effect<ProtocolClient.Synced, Adapter.AdapterError | import("../../protocol/Protocol.ts").ProtocolError>
 
 export class ContextEntry {
+  declare requestSizes?: Map<string, import("../requestSizes.ts").Collector> | undefined
   declare requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
   declare proxy?: Adapter.ProxyOptions | undefined
   declare readonly id: UserContext.Id
+  /** CDP's id; the default context's too, once a page in it reports it. */
   declare browserContextId: string | undefined
   declare readonly isDefault: boolean
   declare removing: boolean
@@ -146,6 +148,7 @@ export interface NavigationEntry extends Kit.NavigationNode {
 
 /** A hop's headers as the network sent or received them, from an `ExtraInfo` event. */
 export interface ExtraInfo {
+  readonly statusCode?: number | undefined
   readonly phase: "request" | "response"
   readonly headers: Network.Headers
 }

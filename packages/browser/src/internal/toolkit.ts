@@ -262,7 +262,22 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const kept = new Set<string>()
   let counter = 0
   const snapshots = new Map<string, Snapshot.Snapshot<Locator.Locator>>()
-  const digest: Array<string> = []
+  const digest: Array<
+    { readonly line: string; readonly navigation?: PageNavigation.Id; readonly page?: Target.NavigableId }
+  > = []
+  const reportedNavigations = new Map<Target.NavigableId, Set<PageNavigation.Id>>()
+  // A result and its queued event can arrive in either order. Match identities, never URLs.
+  const reportNavigation = (page: Page.Page, navigation: PageNavigation.PageNavigation) => {
+    if (navigation._tag !== "Committed" && navigation._tag !== "SameDocument") return navigation
+    const index = digest.findIndex((entry) => entry.page === page.id && entry.navigation === navigation.id)
+    if (index !== -1) digest.splice(index, 1)
+    else {
+      let reported = reportedNavigations.get(page.id)
+      if (reported === undefined) reportedNavigations.set(page.id, reported = new Set())
+      reported.add(navigation.id)
+    }
+    return navigation
+  }
   // Each named page's digest lines are recorded in a scope of its own, which forgetting the page closes
   const watching = new Map<Target.NavigableId, Scope.Closeable>()
   // Key grants by identity so renaming or reusing a name cannot release another page.
@@ -289,7 +304,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       const name = nameById.get(page.id)
       if (name !== undefined) {
         const status = Handles.page(page).entry.state.getUnsafe().status
-        if (status._tag === "Closed") digest.push(`${name} closed: ${status.reason._tag}`)
+        if (status._tag === "Closed") digest.push({ line: `${name} closed: ${status.reason._tag}` })
         byName.delete(name)
         kept.delete(name)
         snapshots.delete(name)
@@ -297,6 +312,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       nameById.delete(page.id)
       const watcher = watching.get(page.id)
       const grant = controlled.get(page.id)
+      reportedNavigations.delete(page.id)
       watching.delete(page.id)
       controlled.delete(page.id)
       return (watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)).pipe(
@@ -346,7 +362,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       ))
 
   // ── The digest ──
-  const note = (line: string) => void digest.push(line)
+  const note = (line: string) => void digest.push({ line })
   const drainEffect = Effect.fnUntraced(
     function*<A>(channel: Events.Channel<A>, each: (value: A) => Effect.Effect<void>, within: Scope.Scope = scope) {
       const queue = yield* Events.recorded(channel, () => true).pipe(Scope.provide(within))
@@ -378,7 +394,13 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           navigation.frame === pageEntry.id &&
           (navigation.outcome._tag === "Committed" || navigation.outcome._tag === "SameDocument")
         ) {
-          note(`${name()} navigated to ${navigation.url}`)
+          if (!reportedNavigations.get(page.id)?.delete(navigation.navigation)) {
+            digest.push({
+              line: `${name()} navigated to ${navigation.url}`,
+              navigation: navigation.navigation,
+              page: page.id
+            })
+          }
         }
       }, within)
       yield* drainEffect(pageEntry.events.popup, (popup) =>
@@ -480,7 +502,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const run = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
     effect.pipe(
       Effect.mapError(toFailure),
-      Effect.map((outcome) => conceal({ outcome, sinceLast: digest.splice(0) })),
+      Effect.map((outcome) => conceal({ outcome, sinceLast: digest.splice(0).map((entry) => entry.line) })),
       // A failure stays a ToolFailure, so its Schema encodes it
       Effect.mapError((failure) => new Tools.ToolFailure(conceal({ ...failure })))
     )
@@ -553,7 +575,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       // A page whose navigation fails isn't the session's: the command failed, and the exported test leaves it
       // out, so the page goes with it
       if (url !== undefined) {
-        yield* page.goto(reveal(url)).pipe(Effect.mapError(toFailure), Effect.onError(() => closeAgain))
+        yield* page.goto(reveal(url)).pipe(
+          Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation))),
+          Effect.mapError(toFailure),
+          Effect.onError(() => closeAgain)
+        )
       }
       return { page, name: named }
     },
@@ -633,7 +659,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     goto: ({ page: name, url }) =>
       onPage(name, (page) =>
         Effect.gen(function*() {
-          const navigation = yield* page.goto(reveal(url))
+          const navigation = reportNavigation(page, yield* page.goto(reveal(url)))
           return navigation._tag === "Committed" && Option.isSome(navigation.response)
             ? { url: navigation.url, status: navigation.response.value.status }
             : { url: navigation.url }
@@ -644,7 +670,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         (page) =>
           Effect.map(
             page.back(),
-            Option.match({ onNone: () => ({}), onSome: (navigation) => ({ url: navigation.url }) })
+            Option.match({
+              onNone: () => ({}),
+              onSome: (navigation) => ({ url: reportNavigation(page, navigation).url })
+            })
           )
       ),
     snapshot: ({ page: name }) =>

@@ -36,6 +36,7 @@ import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -132,12 +133,13 @@ export const contents = (
   backend: Layer.Layer<Browser.Browser, unknown>
 ) =>
   describe(`${name} contents`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("releases the requesting viewport round when its fiber is interrupted", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               fixtureUrl(
                 origin,
@@ -183,7 +185,7 @@ export const contents = (
             `<style>body{margin:0}</style><div id="target" style="position:absolute;top:50px;width:100px;height:100px"></div>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<style>body{margin:0}iframe{border:0;display:block;width:200px;height:100px}</style>
@@ -204,7 +206,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
             yield* page.goto(fixtureUrl(
               origin,
@@ -223,7 +225,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
           const child = fixtureUrl(crossSite, `<p id="target">old</p><script>document.designMode="on";</script>`)
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, `<input id="other" value="other"><iframe src="${child}"></iframe>`))
           yield* page.activate
           const target = page.frame(page.locator("iframe")).locator("#target")
@@ -285,7 +287,7 @@ export const contents = (
       it.effect("setContent replaces markup repeatedly without navigating and executes parser scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.setContent("<title>Fresh</title>")
           assert.strictEqual(yield* page.title, "Fresh")
           yield* page.goto(fixtureUrl(origin, "<title>Before</title><p>Old</p>"), { waitUntil: "load" })
@@ -326,7 +328,7 @@ export const contents = (
       it.effect("setContent waits for resources by default and supports domcontentloaded", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           const child = fixtureUrl(origin, "<img src=\"/slow-image\">")
           yield* page.setContent(`<img src="/slow-image"><iframe src="${child}"></iframe>`)
@@ -358,7 +360,7 @@ export const contents = (
       it.effect("setContent deadline stops waiting and permits a subsequent replacement", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           const error = yield* page.setContent("<img src=\"/pending-image\">").pipe(
             Deadline.within("500 millis"),
@@ -385,7 +387,7 @@ export const contents = (
       it.effect("setContent commit skips readiness and interruption leaves the page reusable", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
           yield* page.setContent("<img src=\"/pending-image\">", { waitUntil: "commit" })
           assert.isFalse(
@@ -412,7 +414,7 @@ export const contents = (
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(fixtureUrl(origin, "<ul><li>One</li><li>Two</li><li>Three</li></ul>"))
           const items = page.getByRole("listitem")
           assert.strictEqual(yield* items.nth(0).readText, "One")
@@ -445,7 +447,7 @@ export const contents = (
       it.effect("reads bounding boxes without visibility checks, scrolling or input", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(
             fixtureUrl(
               origin,
@@ -498,7 +500,7 @@ export const contents = (
       it.effect("adds nested cross-site frame content origins including borders and padding", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const child = fixtureUrl(
             crossSite,
             `<body style="margin:0"><div id="target" style="position:absolute;left:11px;top:13px;width:20px;height:30px"></div></body>`
@@ -552,7 +554,7 @@ export const contents = (
       it.effect("maps frame geometry scaled by a shadow wrapper around a slotted frame", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const child = fixtureUrl(
             origin,
             `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px"></div></body>`
@@ -576,7 +578,7 @@ export const contents = (
       it.effect("maps slotted frame geometry scaled and zoomed inside a closed shadow root", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const child = fixtureUrl(
             origin,
             `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:rgb(255,0,0)"></div></body>`
@@ -622,7 +624,7 @@ export const contents = (
       it.effect("maps or refuses browser rects through a rotated closed-slot frame", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const child = fixtureUrl(
             origin,
             `<body style="margin:0"><div id="target" style="position:absolute;left:10px;top:20px;width:30px;height:40px"></div></body>`
@@ -686,7 +688,7 @@ export const contents = (
         it.effect(`composes browser rects through frame ${rule.name}`, () =>
           Effect.gen(function*() {
             const { origin, crossSite } = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const targetStyle = "position:absolute;left:10px;top:20px;width:30px;height:40px"
             const child = fixtureUrl(
               crossSite,
@@ -733,7 +735,7 @@ export const contents = (
       it.effect("composes a child browser rect through nested cross-origin counter-rotations", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const targetStyle =
             "position:absolute;left:10px;top:20px;width:30px;height:40px;transform:rotate(12deg);transform-origin:0 0"
           const child = fixtureUrl(
@@ -794,7 +796,7 @@ export const contents = (
       it.effect("maps fractional inline bounding geometry through a rotated cross-origin frame", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const text = "<span id=\"target\" style=\"font:13.3px serif\">fractional glyphs</span>"
           const child = fixtureUrl(crossSite, `<body style="margin:0">${text}</body>`)
           const style =
@@ -825,7 +827,7 @@ export const contents = (
       it.effect("composes the SVG browser rect through a transformed frame", () =>
         Effect.gen(function*() {
           const { origin, crossSite } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const svg =
             "<svg width=\"200\" height=\"150\"><rect id=\"target\" x=\"13\" y=\"17\" width=\"30\" height=\"20\" transform=\"rotate(23 13 17)\" fill=\"red\"/></svg>"
           const child = fixtureUrl(crossSite, `<body style="margin:0">${svg}</body>`)
@@ -874,7 +876,7 @@ export const contents = (
       it.effect("reads the browser rect of an auto-rotating motion-path target", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(
             fixtureUrl(
               origin,
@@ -895,7 +897,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
             if (
               yield* isolatedRefused(page.evaluate(() =>
@@ -954,11 +956,121 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("preserves Map arguments in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate((value) =>
+                value instanceof Map && value.get("suffix"), new Map([["suffix", "!"]])),
+              "!"
+            )
+          }))
+        }), timeout)
+
+      it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(
+              yield* evaluate(
+                (set, date, regexp, nested) => {
+                  const map = nested.items[0]!
+                  const key = Array.from(map.keys())[0]!
+                  const values = map.get(key)!
+                  return set instanceof Set && set.has(3) &&
+                    date instanceof Date && date.toISOString() === "2020-01-02T00:00:00.000Z" &&
+                    regexp instanceof RegExp && regexp.source === "a+" && regexp.flags === "gi" &&
+                    map instanceof Map && key.id === 1 && values instanceof Set &&
+                    values.has(undefined) && values.has(42n) && values.has(NaN) && values.has(Infinity) &&
+                    Object.is(nested.zero, -0) && nested.absent === undefined && nested.nil === null
+                },
+                new Set([3]),
+                new Date("2020-01-02"),
+                /a+/gi,
+                {
+                  items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+                  zero: -0,
+                  absent: undefined,
+                  nil: null
+                }
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
+      it.effect("leaves the callback's free identifiers to its realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const evaluate = yield* evaluator(page)
+            // Names the argument wrapper might bind must resolve as they would in the callback's own realm
+            assert.deepStrictEqual(
+              yield* evaluate((value: number) => [
+                // @ts-expect-error: undeclared on purpose
+                typeof kinds,
+                // @ts-expect-error: undeclared on purpose
+                typeof args,
+                // @ts-expect-error: undeclared on purpose
+                typeof decode,
+                value
+              ], 1),
+              ["undefined", "undefined", "undefined", 1]
+            )
+          }))
+        }), timeout)
+
+      it.effect("resolves callback globals and arrow arguments in the page realm", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                // The arrow must not inherit adapter arguments
+                return typeof arguments
+              }),
+              "undefined"
+            )
+            yield* page.evaluateInMainWorld(() => {
+              for (const name of ["kinds", "args", "decode", "helper", "fn", "arguments"]) {
+                Object.defineProperty(globalThis, name, { value: `page:${name}`, configurable: true })
+              }
+            })
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(async (value) => [
+                // @ts-expect-error: these free names refer to page globals
+                kinds,
+                // @ts-expect-error: these free names refer to page globals
+                args,
+                // @ts-expect-error: these free names refer to page globals
+                decode,
+                // @ts-expect-error: these free names refer to page globals
+                helper,
+                // @ts-expect-error: these free names refer to page globals
+                fn,
+                // The arrow reads the page global
+                arguments,
+                value
+              ], 7),
+              ["page:kinds", "page:args", "page:decode", "page:helper", "page:fn", "page:arguments", 7]
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(function(value) {
+                return [arguments.length, arguments[0], value]
+              }, 7),
+              [1, 7, 7]
+            )
+          }))
+        }), timeout)
+
       it.effect("fails with what was thrown, and with the path to what can't cross", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const evaluate = yield* evaluator(page)
             const thrown = reasonOf(
@@ -993,7 +1105,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
             if (yield* isolatedRefused(page.evaluateHandle(() => document.body))) return
             const body = yield* page.evaluateHandle(() => document.body)
@@ -1036,7 +1148,7 @@ export const contents = (
           })
           const worlds = yield* supports("isolatedWorlds")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`))
             if (
               yield* isolatedRefused(page.evaluateHandle(() =>
@@ -1070,7 +1182,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`))
             if (
               yield* isolatedRefused(
@@ -1098,7 +1210,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`))
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             assert.deepStrictEqual(
@@ -1156,7 +1268,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             const original = Runtime.elements
@@ -1197,7 +1309,7 @@ export const contents = (
           Effect.gen(function*() {
             const { origin } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
               if (
                 yield* isolatedRefused(
@@ -1247,7 +1359,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const active = () => navigator.userActivation.isActive
             assert.isFalse(yield* page.evaluateInMainWorld(active))
@@ -1261,7 +1373,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
@@ -1308,7 +1420,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const inner = fixtureUrl(origin, counter("Inner"))
             const middle = fixtureUrl(
               crossSite,
@@ -1351,7 +1463,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><div style="height:2000px"></div><div style="position:relative;width:300px;height:200px"><iframe id="far" style="width:300px;height:200px;border:0" src="${
@@ -1384,7 +1496,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               fixtureUrl(
                 origin,
@@ -1424,7 +1536,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               fixtureUrl(
                 origin,
@@ -1469,7 +1581,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const snapshot = yield* page.snapshot()
             assert.isTrue(Snapshot.isSnapshot(snapshot))
@@ -1516,7 +1628,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const snapshot = yield* page.snapshot()
             const refOf = (role: string, name: string) =>
@@ -1562,7 +1674,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const before = yield* page.snapshot()
             yield* page.getByRole("checkbox", { name: "Agree" }).uncheck()
@@ -1597,7 +1709,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<h1>Outer</h1><iframe id="cross" title="Payment" src="${
@@ -1622,7 +1734,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             // 16. Structure, matched explicitly
             yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
@@ -1685,7 +1797,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, shop))
             const failed = reasonOf(
               yield* Effect.exit(
@@ -1716,7 +1828,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const url = (color: string) =>
               fixtureUrl(
                 origin,
@@ -1756,7 +1868,7 @@ export const contents = (
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(
               origin,
               `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
@@ -1812,7 +1924,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
             yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
             const ratio = yield* page.evaluateInMainWorld(() =>
@@ -1829,7 +1941,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
             const width = yield* page.evaluateInMainWorld(() =>
               innerWidth
@@ -1872,7 +1984,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><title>Doc</title><h1>Printed</h1>`))
             const html = yield* page.readHtml
             assert.match(
@@ -1964,9 +2076,7 @@ export const contents = (
               sameSite: "strict"
             })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
@@ -2182,7 +2292,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const childUrl = fixtureUrl(crossSite, `<p>child</p>`)
             yield* page.goto(fixtureUrl(origin, `<iframe id="a" src="${childUrl}"></iframe>`))
             yield* page.frame(page.locator("#a")).locator("p").pipe(Expect.toHaveText("child"))

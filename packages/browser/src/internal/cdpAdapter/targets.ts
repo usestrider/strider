@@ -196,6 +196,12 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
 
 /** The session's model can't be trusted: a page's is rebuilt from a fresh frame tree, as at initialization. */
 export const lost = (state: State, session: ProtocolClient.Session) => {
+  // A resync cannot recover discarded chunks. Keep independent native totals, but never publish an undercount.
+  for (const request of state.requests.values()) {
+    if (request.target.session !== session) continue
+    const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+    if (sizes !== undefined) sizes.decoded = undefined
+  }
   const target = state.targets.get(session)
   if (target?.kind === "page" && target.page !== undefined) {
     state.control.sync(session, snapshot(state, target, target.page, false, Effect.void))

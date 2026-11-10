@@ -738,3 +738,23 @@ describe("Wire.decode", () => {
     )
   })
 })
+
+it.effect("publishes scoped-out events to explicit protocol subscribers without folding them", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const model = makeFold()
+    const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+      fold: (control) => ({
+        ...model.fold(control),
+        eventScopes: new Map([[Page.loadEventFired.method, () => false]])
+      })
+    })
+    const page = yield* attach(browser, client, "S1")
+    const loaded = yield* page.subscribe(Page.loadEventFired)
+    yield* load(browser, 7)
+    const event = yield* Stream.runHead(loaded)
+    assert(event._tag === "Some")
+    assert.strictEqual(event.value.timestamp, 7)
+    assert.deepStrictEqual(model.recorder.folded, [])
+    assert.deepStrictEqual(model.recorder.lost, [])
+  }).pipe(Effect.scoped))

@@ -12,8 +12,12 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
+import * as Events from "../src/internal/events.ts"
+import * as Handles from "../src/internal/handles.ts"
 import * as Snapshots from "../src/internal/snapshot.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
+import * as PageNavigation from "../src/PageNavigation.ts"
+import * as Url from "../src/Url.ts"
 
 describe("Session with explicit tab control", () => {
   it.effect("keeps shared-context pages in tabs until control names one", () =>
@@ -438,6 +442,60 @@ const sinceLast = (session: ToolkitImpl.Session) =>
   )
 
 describe("Session's digest", () => {
+  for (const command of ["goto", "back"] as const) {
+    it.effect(`${command} reports its navigation even when event delivery is late, but preserves a later visit`, () =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+        const { page } = yield* session.open({ name: "main" })
+        const navigation = {
+          _tag: "Committed" as const,
+          id: Schema.decodeUnknownSync(PageNavigation.Id)("own"),
+          frame: page.id,
+          url: Schema.decodeUnknownSync(Url.Url)("https://example.test/same"),
+          document: Schema.decodeUnknownSync(Target.DocumentId)("document"),
+          response: Option.none()
+        }
+        Object.defineProperty(page, command, {
+          value: () => Effect.succeed(command === "back" ? Option.some(navigation) : navigation)
+        })
+        yield* session.toolkit.handle(command, { page: "main", url: navigation.url }).pipe(
+          Effect.flatMap(Stream.runDrain)
+        )
+        const channel = Handles.page(page).entry.events.navigation
+        const publish = (id: string) =>
+          Effect.sync(() =>
+            Events.publish(channel, {
+              navigation: Schema.decodeUnknownSync(PageNavigation.Id)(id),
+              frame: page.id,
+              url: navigation.url,
+              outcome: { _tag: "Committed" as const, document: navigation.document, response: Option.none() }
+            })
+          )
+        yield* publish("own")
+        yield* TestClock.adjust("1 millis")
+        assert.deepStrictEqual(yield* sinceLast(session), [])
+        yield* publish("later")
+        yield* TestClock.adjust("1 millis")
+        assert.deepStrictEqual(yield* sinceLast(session), [`main navigated to ${navigation.url}`])
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("opening a page preserves another page's pending and later navigation", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      yield* page.goto("https://example.test/pending")
+      yield* TestClock.adjust("1 millis")
+      yield* session.open({ name: "other", url: "https://example.test/other" })
+      yield* TestClock.adjust("1 millis")
+      assert.include(yield* sinceLast(session), "main navigated to https://example.test/pending")
+      yield* page.goto("https://example.test/later")
+      yield* TestClock.adjust("1 millis")
+      assert.include(yield* sinceLast(session), "main navigated to https://example.test/later")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
   it.effect("names a page by its name now, after page name renamed it", () =>
     Effect.gen(function*() {
       const context = yield* Browser.newContext()

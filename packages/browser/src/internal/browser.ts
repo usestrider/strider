@@ -105,6 +105,7 @@ const objectMembers = (name: string, id: string) => ({
 interface ContextAccess {
   /** `None` for a context the connection created, controlled for its whole life. */
   readonly grant: Option.Option<Access.Grant>
+  readonly recovered?: boolean | undefined
   /** The handle of one of its pages, under this access. */
   readonly page: (entry: Model.PageEntry) => Page.Page
   /** `control`: the context itself, when it is controlled for life; otherwise a grant for the caller's scope. */
@@ -168,7 +169,9 @@ const makeContext = (
       yield* runtime.model.own(pageEntry.value, scope)
       return Option.getOrThrow(runtime.page(pageEntry.value))
     }).pipe(Operation.named("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
-    cookies: Storage.cookieJar(runtime, entry.id),
+    cookies: Storage.cookieJar(runtime, entry.id, StorageStates.cookieRecorder(entry)),
+    setStorageState: (state) =>
+      StorageStates.replaceState(runtime, context, entry, state, { recovered: access.recovered }),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
@@ -316,6 +319,14 @@ const makeDeniedContext = (
       remove: () => cookie("CookieJar.remove"),
       clear: Effect.suspend(() => cookie("CookieJar.clear"))
     },
+    setStorageState: () =>
+      Effect.fail(
+        new UserContext.UserContextError({
+          operation: "UserContext.setStorageState",
+          reason: notPermitted("UserContext.setStorageState"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
     exportStorageState: Effect.suspend(() =>
       Effect.fail(
         new UserContext.UserContextError({
@@ -547,6 +558,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      if (options?.requestSizes && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.sizes",
+            backend: adapter.info.product,
+            hint: "Request sizes must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
       if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
         return yield* Effect.fail(contextError(
           operation,
@@ -591,6 +613,19 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ))
         }
         credentialOrigin = url.origin
+      }
+      if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
+        return yield* Effect.fail(
+          contextError(
+            operation,
+            new Reason.InvalidInput({
+              input: "storageStateTracking",
+              expected: "false or omitted when reclaiming a context",
+              hint: "Tracking must be enabled when the context is first created"
+            }),
+            id
+          )
+        )
       }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
@@ -694,7 +729,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
-            requestTiming: options?.requestTiming
+            requestTiming: options?.requestTiming,
+            requestSizes: options?.requestSizes
           })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)
@@ -708,6 +744,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      if (options?.storageStateTracking === true) yield* StorageStates.track(runtime, entry, options.storageState)
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
@@ -794,6 +831,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         )
       }
       const context: UserContext.UserContext = makeContext(runtime, entry, {
+        recovered: mode !== undefined && "context" in mode,
         grant: Option.none(),
         page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
@@ -865,7 +903,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         Effect.mapError((error) =>
           Deadline.isTimeout(error) ? error : new Page.PageError({
             operation: "Browser.newPage",
-            reason: error.reason._tag === "Incompatible"
+            reason: error.reason._tag === "Incompatible" || error.reason._tag === "PartiallyApplied"
               ? new Page.InitializationFailed({ step: "create the context", hint: error.reason.message })
               : error.reason,
             diagnostics: error.diagnostics

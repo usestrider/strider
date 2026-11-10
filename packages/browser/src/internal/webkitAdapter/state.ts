@@ -36,6 +36,7 @@ import * as WebKitWire from "../webkitWire.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  readonly requestSizes?: Map<string, import("../requestSizes.ts").Collector> | undefined
   readonly requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
   readonly id: UserContext.Id
   /** WebKit's id; the default context's too, once a page in it reports it. */

@@ -14,6 +14,7 @@ import * as Network from "../../webkit-stock-protocol/Network.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
+import * as Sizes from "../requestSizes.ts"
 import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import {
@@ -134,6 +135,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.redirectResponse.timing)
         request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
         request.frame?.page.context.requestTiming?.delete(request.hop)
+        request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -182,6 +184,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
       }
+      if (request.frame?.page.context.requestSizes !== undefined) {
+        Sizes.keep(request.frame.page.context.requestSizes, request.hop, request.frame.id)
+      }
       if (request.frame?.page.context.requestTiming !== undefined) {
         const hop = request.hop
         Timing.keep(
@@ -220,6 +225,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.responseReceived, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request !== undefined) {
+        const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+        if (sizes !== undefined) {
+          sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
+        }
         request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.response.timing)
         emitResponse(state, request, params.response)
       }
@@ -227,8 +236,11 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFinished, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes?.network) state.buffer.emit({ _tag: "HopSizes", hop: request.hop, sizes: Sizes.webkit(params.metrics) })
       request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
       request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
@@ -324,6 +336,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request === undefined) return
       request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       state.buffer.emit({
         _tag: "RequestFailed",
         hop: request.hop,

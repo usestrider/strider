@@ -86,6 +86,11 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
         if (timing.owner === frame.id) frame.page.context.requestTiming.delete(hop)
       }
     }
+    if (frame.page.context.requestSizes !== undefined) {
+      for (const [hop, timing] of frame.page.context.requestSizes) {
+        if (timing.owner === frame.id) frame.page.context.requestSizes.delete(hop)
+      }
+    }
     state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
     if (frame.document !== undefined) {

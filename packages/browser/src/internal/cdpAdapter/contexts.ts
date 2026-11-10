@@ -111,6 +111,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
     }).pipe(Protocol.on(state.root()))
   )
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.requestSizes) entry.requestSizes = new Map()
   if (options.requestTiming) entry.requestTiming = new Map()
   entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
@@ -120,7 +121,8 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       _tag: "UserContextAdded",
       context: entry.id,
       isDefault: false,
-      ...(options.requestTiming ? { requestTiming: true } : {})
+      ...(options.requestTiming ? { requestTiming: true } : {}),
+      ...(options.requestSizes ? { requestSizes: true } : {})
     })
   )
   yield* Kit.protocol(applyDownloads(state, entry))
@@ -150,6 +152,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       })
     ))
     context.disposed = true
+    context.requestSizes?.clear()
     // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
     // a budget of its own (`Model.remove`); they end with the connection at the latest
     state.buffer.start(Effect.gen(function*() {
