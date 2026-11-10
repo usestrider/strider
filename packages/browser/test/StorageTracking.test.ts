@@ -140,3 +140,60 @@ it.effect("records ws and wss cookie scopes only for the owning tracked connecti
       { origins: ["https://secure.socket.test:9443"], cookieOnly: true }
     ])
   })))
+
+it.effect("drops navigable origin bookkeeping on frame and page removal without erasing observed history", () =>
+  Effect.scoped(Effect.gen(function*() {
+    const fold = yield* Fold.make({ release: () => Effect.void })
+    const page = "tracked" as Target.NavigableId
+    const context = "tracked" as UserContext.Id
+    yield* fold.sink({
+      _tag: "PageAdded",
+      page,
+      context,
+      kind: "tab",
+      origin: { _tag: "Created" },
+      url: "about:blank" as Url.Url
+    })
+    const entry = yield* fold.context(context, false)
+    const history: Array<ReadonlyArray<string>> = []
+    yield* fold.observeStorageSources(entry, (origins) => history.push(origins))
+    const commit = (navigable: Target.NavigableId) =>
+      fold.sink({
+        _tag: "DocumentCommitted",
+        document: navigable as unknown as Target.DocumentId,
+        navigable,
+        url: "https://example.com/" as Url.Url,
+        origin: "https://example.com",
+        createdBy: { _tag: "Adopted" },
+        replaced: Option.none(),
+        evidence: "test"
+      })
+    yield* commit(page)
+    for (const [id, parent] of [["frame", page], ["nested", "frame"]] as const) {
+      yield* fold.sink({
+        _tag: "FrameAdded",
+        page,
+        frame: id as Target.NavigableId,
+        parent: parent as Target.NavigableId
+      })
+      yield* commit(id as Target.NavigableId)
+    }
+    yield* fold.sink({
+      _tag: "NavigableRemoved",
+      navigable: "frame" as Target.NavigableId,
+      reason: new Target.FrameDetached({}),
+      evidence: "test"
+    })
+    const afterFrameRemoval = [...entry.storageSources!.origins.keys()]
+    yield* fold.sink({
+      _tag: "NavigableRemoved",
+      navigable: page,
+      reason: new Target.PageClosed({ by: "command" }),
+      evidence: "test"
+    })
+    assert.deepStrictEqual({ afterFrameRemoval, afterPageRemoval: [...entry.storageSources!.origins.keys()] }, {
+      afterFrameRemoval: [page],
+      afterPageRemoval: []
+    })
+    assert.lengthOf(history, 3)
+  })))
