@@ -16,6 +16,7 @@ import * as Events from "../src/internal/events.ts"
 import * as Handles from "../src/internal/handles.ts"
 import * as Snapshots from "../src/internal/snapshot.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
+import { ToolFailure } from "../src/internal/tools.ts"
 import * as PageNavigation from "../src/PageNavigation.ts"
 import * as Url from "../src/Url.ts"
 
@@ -343,7 +344,7 @@ describe("Session held-tab retirement", () => {
       yield* TestClock.adjust("1 millis")
       const first = yield* session.toolkit.handle("pages", {}).pipe(Effect.flatMap(Stream.runLast))
       const result = Option.getOrThrow(first).result
-      if (!("sinceLast" in result)) return assert.fail("pages returned no digest")
+      if (result instanceof ToolFailure || !("sinceLast" in result)) return assert.fail("pages returned no digest")
       assert.deepStrictEqual(result.sinceLast.filter((line) => line.includes("closed")).length, 1)
       assert.isTrue(result.sinceLast.some((line) => line.startsWith("renamed closed: ")))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
@@ -533,7 +534,7 @@ describe("Session's digest", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   for (const ending of ["failure", "interruption"] as const) {
-    it.effect(`an overlapping call releases delivered identities on ${ending} without draining pending events`, () =>
+    it.effect(`an overlapping call releases delivered identities on ${ending} and only a failure reports pending events`, () =>
       Effect.gen(function*() {
         const context = yield* Browser.newContext()
         const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
@@ -572,11 +573,61 @@ describe("Session's digest", () => {
           yield* Fiber.join(own)
         }
         assert.strictEqual(session.retainedNavigations, 0)
-        assert.deepStrictEqual(yield* sinceLast(session), [line])
+        // A failed call reports the pending digest itself, as main does; an interrupted one drains nothing
+        assert.deepStrictEqual(yield* sinceLast(session), ending === "failure" ? [] : [line])
         // Nothing is waiting for an event that already came
         assert.strictEqual(session.retainedNavigations, 0, "a delivered identity is still retained")
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
+
+  it.effect("a failing call that delivers a held goto's navigation leaves nothing retained", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      const url = Schema.decodeUnknownSync(Url.Url)("https://example.test/same")
+      const document = Schema.decodeUnknownSync(Target.DocumentId)("document")
+      const id = Schema.decodeUnknownSync(PageNavigation.Id)("held")
+      const release = yield* Deferred.make<void>()
+      Object.defineProperty(page, "goto", {
+        value: () =>
+          Effect.as(Deferred.await(release), {
+            _tag: "Committed" as const,
+            id,
+            frame: page.id,
+            url,
+            document,
+            response: Option.none()
+          })
+      })
+      const own = yield* Effect.forkChild(
+        Effect.map(
+          Effect.flatMap(session.toolkit.handle("goto", { page: "main", url }), Stream.runLast),
+          (last) => (Option.getOrThrow(last).result as { readonly sinceLast: ReadonlyArray<string> }).sinceLast
+        )
+      )
+      yield* TestClock.adjust("1 millis")
+      Events.publish(Handles.page(page).entry.events.navigation, {
+        navigation: id,
+        frame: page.id,
+        url,
+        outcome: { _tag: "Committed" as const, document, response: Option.none() }
+      })
+      yield* TestClock.adjust("1 millis")
+      const failed = yield* session.toolkit.handle("goto", { page: "missing", url: "https://example.test/" }).pipe(
+        Effect.flatMap(Stream.runLast),
+        Effect.map(Option.getOrThrow)
+      )
+      assert.isTrue(failed.isFailure)
+      assert.include(
+        (failed.result as { readonly sinceLast?: ReadonlyArray<string> }).sinceLast ?? [],
+        `main navigated to ${url}`
+      )
+      assert.strictEqual(session.retainedNavigations, 1)
+      yield* Deferred.succeed(release, undefined)
+      assert.deepStrictEqual(yield* Fiber.join(own), [], "reported twice")
+      assert.strictEqual(session.retainedNavigations, 0)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("a direct session open retires a navigation delivered by an overlapping tool", () =>
     Effect.gen(function*() {
@@ -614,6 +665,24 @@ describe("Session's digest", () => {
       yield* Fiber.join(opening)
       assert.deepStrictEqual(yield* sinceLast(session), [])
       assert.strictEqual(session.retainedNavigations, 0, "the open result retained an already delivered identity")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("a failed call reports the pending digest, and the next call doesn't repeat it", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      yield* page.goto("https://example.test/pending")
+      yield* TestClock.adjust("1 millis")
+      const last = yield* session.toolkit.handle("goto", { page: "missing", url: "https://example.test/" }).pipe(
+        Effect.flatMap(Stream.runLast),
+        Effect.map(Option.getOrThrow)
+      )
+      assert.isTrue(last.isFailure)
+      const failure = last.result as { readonly error: string; readonly sinceLast?: ReadonlyArray<string> }
+      assert.strictEqual(failure.error, "PageNotFound")
+      assert.include(failure.sinceLast ?? [], "main navigated to https://example.test/pending")
+      assert.deepStrictEqual(yield* sinceLast(session), [])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("opening a page preserves another page's pending and later navigation", () =>

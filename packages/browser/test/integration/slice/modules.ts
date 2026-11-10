@@ -387,6 +387,31 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }))
         }), timeout)
 
+      for (const direction of ["back", "forward"] as const) {
+        it.effect(`traverses ${direction} through a pushState entry`, () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("navigation.sameDocument")) || !(yield* supports("navigation.traverse"))) return
+            const { origin } = yield* site
+            const requested = fixtureUrl(origin, button("Next", "history.pushState({}, '', '/second')"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(requested)
+              const base = yield* page.url
+              yield* page.getByRole("button", { name: "Next" }).click()
+              yield* page.pipe(Expect.toHaveURL(`${origin}/second`))
+              if (direction === "forward") {
+                // Prepare forward history independently of the back operation under test.
+                yield* page.evaluateInMainWorld(() => history.back())
+                yield* page.pipe(Expect.toHaveURL(base))
+              }
+              const outcome = yield* page[direction]().pipe(Deadline.within("5 seconds"))
+              assert(Option.isSome(outcome))
+              assert.strictEqual(outcome.value._tag, "SameDocument")
+              yield* page.pipe(Expect.toHaveURL(direction === "back" ? base : `${origin}/second`))
+            }))
+          }), timeout)
+      }
+
       it.effect("preserves page.url through same-document fragment changes and removal", () =>
         Effect.gen(function*() {
           if (!(yield* supports("navigation.sameDocument"))) return
