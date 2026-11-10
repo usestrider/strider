@@ -3396,3 +3396,41 @@ it.effect("retires a Firefox missing realm without a handler error and reclaims 
         )
       )
   }))
+
+it.effect("removes an obsolete preload even when reinstalling its survivor fails", () =>
+  Effect.gen(function*() {
+    const native = new Map<string, string>()
+    let serial = 0
+    let failing = false
+    const root = {
+      send: (command: Protocol.Command<string, unknown, unknown>) =>
+        Effect.suspend(() => {
+          if (command.method === "script.addPreloadScript") {
+            if (failing) {
+              return Effect.fail(
+                new Protocol.ProtocolError({ reason: new Protocol.Unsupported({ method: command.method }) })
+              )
+            }
+            const script = `P${++serial}`
+            native.set(script, (command.params as { functionDeclaration: string }).functionDeclaration)
+            return Effect.succeed({ script })
+          }
+          if (command.method === "script.removePreloadScript") {
+            native.delete((command.params as { script: string }).script)
+          }
+          return Effect.succeed({})
+        })
+    } as unknown as ProtocolClient.Session
+    const { state } = yield* withPage({}, {}, root)
+    const first = yield* Scope.fork(yield* Effect.scope)
+    const survivor = yield* Scope.fork(yield* Effect.scope)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("removed")).pipe(Scope.provide(first))
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("survivor")).pipe(Scope.provide(survivor))
+    failing = true
+    yield* Scope.close(first, Exit.void)
+    assert.strictEqual(native.size, 1)
+    assert([...native.values()].every((body) => body.includes("survivor") && !body.includes("removed")))
+    failing = false
+    yield* Scope.close(survivor, Exit.void)
+    assert.strictEqual(native.size, 0)
+  }))
