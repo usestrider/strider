@@ -177,7 +177,7 @@ describe("Input handover settlement", () => {
     Input.uncertain(state, "first click", first)
     const second = Input.click(state, { x: 3, y: 4 }, "left", 1)
     Input.uncertain(state, "second click", second)
-    const later = Option.getOrThrow(state.broken).release[1]
+    const later = Option.getOrThrow(state.broken).release[0]!
     Input.settled(first)
     assert.deepStrictEqual(Option.getOrThrow(state.broken).release, [later])
     Input.settled(first)

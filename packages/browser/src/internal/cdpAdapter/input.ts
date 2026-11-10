@@ -72,15 +72,28 @@ export const dispatchInput = Effect.fnUntraced(
             Gestures.handOver(events)
             if (releaseWritten) {
               if (Cause.hasInterruptsOnly(cause)) Gestures.settled(events)
+              Gestures.finished(events)
               return Effect.void
             }
+            // The release runs apart from the failed click, which keeps its error and its input permit: the next
+            // gesture waits for it under its own deadline. It waits for its reply on the protocol's timeout,
+            // not the passed deadline.
             return release.pipe(
               Effect.tap(() => Effect.sync(() => Gestures.settled(events))),
-              // Cleanup waits for its reply on the protocol's own timeout, not the operation's deadline, which
-              // has passed when the cleanup is what the deadline started
+              // A release written whose reply never came has landed, as one whose reply was abandoned has
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  if (
+                    releaseWritten && error.reason._tag === "Protocol" && error.reason.error.reason._tag === "NoReply"
+                  ) Gestures.settled(events)
+                })
+              ),
               Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
               Operation.detached,
-              Effect.ignore
+              Effect.ignore,
+              Effect.ensuring(Effect.sync(() => Gestures.finished(events))),
+              Effect.forkDetach,
+              Effect.asVoid
             )
           })
         )
