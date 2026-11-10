@@ -136,17 +136,13 @@ export const ensure = async (
     const file = options.file(name)
     const entry = options.manifest.recordings.find((candidate) => candidate.name === name)
     if (entry === undefined) {
-      // Nothing pins it yet, so nothing can be fetched or checked: the first upload (`--record`) pins it
-      if (hashOf(file) === undefined || options.store === undefined) {
-        unavailable.set(
-          name,
-          `recording ${name} is not in recordings.json, so no recording can be fetched or checked; \`pnpm scenarios --record\` records and uploads it`
-        )
-        continue
-      }
-      throw new Error(
-        `Recording ${file} is not in recordings.json: run \`pnpm scenarios --record\` to upload and pin it`
+      // Nothing pins it, so its bytes can't be checked, whatever credentials or local file there are: never replayed,
+      // fetched over or uploaded here. `pnpm scenarios --record` uploads and pins it
+      unavailable.set(
+        name,
+        `recording ${name} is not pinned in recordings.json; run \`pnpm scenarios --record\` to record, upload and pin it`
       )
+      continue
     }
     const present = hashOf(file)
     if (present === entry.sha256) continue
