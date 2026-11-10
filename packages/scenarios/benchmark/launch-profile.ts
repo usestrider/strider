@@ -15,6 +15,7 @@ import * as path from "node:path"
 import { type Browser as PlaywrightBrowser, type BrowserContext as PlaywrightContext, chromium } from "playwright-core"
 import type * as Transport from "../../browser/src/protocol/Transport.ts"
 import pins from "../../browser/test/integration/browsers.json" with { type: "json" }
+import { calibrateRoot, retainNativeTrace } from "./native-launch-trace.ts"
 
 const executablePath = process.env["STRIDER_CHROMIUM"]
 assert.equal(process.env["STRIDER_ENVIRONMENT"], "nix-integration")
@@ -39,7 +40,36 @@ for (const directory of ["packages/browser/src", "packages/scenarios/src"]) {
 }
 source.update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
 type Event = { at: number; kind: string; name: string; data?: unknown }
-type Sample = { library: string; index: number; events: Array<Event>; ms?: number; resources?: unknown }
+type Sample = {
+  library: string
+  index: number
+  events: Array<Event>
+  ms?: number
+  resources?: unknown
+  native?: Awaited<ReturnType<typeof retainNativeTrace>>
+}
+const native = process.env["STRIDER_LAUNCH_NATIVE"] === "1"
+const control = process.env["STRIDER_LAUNCH_CONTROL"] === "1"
+const nativeFile = () => path.join(path.dirname(output), "native", `${active!.library}-${active!.index}.json`)
+const diagnosticArgs = (strider: boolean) => [
+  ...(control && strider ? ["--disable-extensions"] : []),
+  ...(native
+    ? [
+      "--trace-startup",
+      "--trace-startup-format=json",
+      "--trace-startup-duration=1",
+      `--trace-startup-file=${nativeFile()}`
+    ]
+    : [])
+]
+const retain = async () => {
+  if (!native || active === undefined || active.native !== undefined) return
+  active.native = await retainNativeTrace(nativeFile(), active.events, 10_000, { requireCalibration: true })
+  save()
+}
+const requireNative = () => {
+  if (native) assert.equal(active?.native?.status, "complete", active?.native?.error ?? "Missing native trace")
+}
 const samples: Array<Sample> = []
 let active: Sample | undefined
 let started = 0
@@ -48,6 +78,7 @@ const event = (kind: string, name: string, data?: unknown) => {
   active?.events.push({ at: performance.now() - started, kind, name, ...(data === undefined ? {} : { data }) })
 }
 const trace = {
+  rootCommand: undefined as (() => Promise<unknown>) | undefined,
   mark: (name: string, data?: unknown) => {
     event("mark", name, data)
     if (name === "target.gate.end") gateDone?.()
@@ -99,6 +130,10 @@ const report = {
   },
   runs,
   persistent,
+  native,
+  control: control
+    ? "strider adds only --disable-extensions; diagnostic hypothesis: extension-system initialization contributes to startup"
+    : null,
   warmup: 3,
   samples,
   status: "running",
@@ -106,7 +141,14 @@ const report = {
 }
 const save = () => {
   fs.mkdirSync(path.dirname(output), { recursive: true })
-  fs.writeFileSync(output, JSON.stringify(report, null, 2) + "\n")
+  fs.writeFileSync(
+    output,
+    JSON.stringify(
+      { ...report, samples: active === undefined || samples.includes(active) ? samples : [...samples, active] },
+      null,
+      2
+    ) + "\n"
+  )
 }
 const validateSample = (sample: Sample) => {
   const strider = sample.library === "strider"
@@ -216,14 +258,18 @@ const validateSample = (sample: Sample) => {
 
 const makeRuntime = () =>
   ManagedRuntime.make(
-    Chromium.layer({ executablePath, headless: true }).pipe(Layer.provideMerge(NodeServices.layer))
+    Chromium.layer({ executablePath, headless: true, args: diagnosticArgs(true) }).pipe(
+      Layer.provideMerge(NodeServices.layer)
+    )
   )
 try {
   for (let i = -3; i < runs; i++) {
     const right = persistent ? "playwright-persistent" : "playwright"
     const order = i % 2 === 0 ? ["strider", right] : [right, "strider"]
     for (const library of order) {
+      trace.rootCommand = undefined
       active = { library, index: i, events: [] }
+      if (native) fs.mkdirSync(path.dirname(nativeFile()), { recursive: true })
       started = performance.now()
       trace.mark("launch.start")
       if (library === "strider") {
@@ -240,8 +286,28 @@ try {
           active.resources = { visiblePages: (await runtime.runPromise(browser.pages)).length }
           await trace.waitForGate()
           trace.mark("initial.gate.observed")
+          if (native) {
+            trace.mark("calibration.ready")
+            assert.ok(trace.rootCommand, "Missing calibration root command")
+            await calibrateRoot(trace.rootCommand, trace.mark)
+          }
+          await retain()
+          const pages = await runtime.runPromise(browser.pages)
+          assert.equal(pages.length, 1)
+          assert.equal(
+            await runtime.runPromise(
+              Effect.scoped(pages[0]!.inspect.pipe(Effect.flatMap((page) => page.evaluate(() => document.URL))))
+            ),
+            "about:blank"
+          )
+          trace.mark("diagnostic.initialPage.alive")
         } finally {
-          await runtime.dispose()
+          try {
+            await retain()
+          } finally {
+            await runtime.dispose()
+            trace.mark("diagnostic.disposed")
+          }
         }
       } else {
         const context: PlaywrightContext | undefined = persistent
@@ -249,13 +315,14 @@ try {
             executablePath,
             headless: true,
             timeout: 30_000,
+            args: diagnosticArgs(false),
             viewport: null
           })
           : undefined
         let browser: PlaywrightBrowser | undefined
         try {
           browser = context === undefined
-            ? await chromium.launch({ executablePath, headless: true, timeout: 30_000 })
+            ? await chromium.launch({ executablePath, headless: true, timeout: 30_000, args: diagnosticArgs(false) })
             : context.browser() ?? undefined
           assert.ok(browser)
           active.ms = performance.now() - started
@@ -265,11 +332,22 @@ try {
           const targets = await session.send("Target.getTargets")
           active.resources = { contexts: browser.contexts().length, targets: targets.targetInfos }
           await session.detach()
+          if (native) {
+            trace.mark("calibration.ready")
+            assert.ok(trace.rootCommand, "Missing calibration root command")
+            await calibrateRoot(trace.rootCommand, trace.mark)
+          }
         } finally {
-          if (context !== undefined) await context.close()
-          else await browser?.close()
+          try {
+            await retain()
+          } finally {
+            if (context !== undefined) await context.close()
+            else await browser?.close()
+            trace.mark("diagnostic.disposed")
+          }
         }
       }
+      requireNative()
       validateSample(active)
       samples.push(active)
       process.stdout.write(`${i} ${library}: ${active.ms!.toFixed(2)} ms\n`)

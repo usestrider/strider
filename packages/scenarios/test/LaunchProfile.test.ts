@@ -23,7 +23,7 @@ const retainOutput = (scratch: string, result: { stdout: string; stderr: string 
 
 // Launches real browsers, so it runs only in the integration environment, holding the browser lock.
 describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch diagnostics", () => {
-  it.each(["default", "persistent"])("retains a complete successful report (%s)", (mode) => {
+  it.each(["default", "persistent", "native"])("retains a complete successful report (%s)", (mode) => {
     const scratch = scratchDirectory("launch-profile-success-")
     try {
       const output = path.join(scratch, "report.json")
@@ -34,7 +34,12 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
         output,
         "1",
         ...(mode === "persistent" ? [mode] : [])
-      ], { cwd: root, encoding: "utf8", timeout: 60_000 })
+      ], {
+        cwd: root,
+        env: { ...process.env, STRIDER_LAUNCH_NATIVE: mode === "native" ? "1" : "0" },
+        encoding: "utf8",
+        timeout: 60_000
+      })
       retainOutput(scratch, result)
       expect(result.status, result.stderr).toBe(0)
       const report = JSON.parse(fs.readFileSync(output, "utf8"))
@@ -43,6 +48,18 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
       expect(report.samples).toHaveLength(8)
       expect(report.samples.filter((sample: { index: number }) => sample.index >= 0)).toHaveLength(2)
       for (const sample of report.samples) {
+        if (mode === "native") {
+          expect(sample.native.status).toBe("complete")
+          expect(sample.native.calibration).toHaveLength(3)
+          expect(sample.native.uncertaintyMs).toBeLessThanOrEqual(sample.native.beforeCalibrationUncertaintyMs)
+          expect(sample.native.uncertaintyMs).toBeGreaterThanOrEqual(0)
+          expect(JSON.parse(fs.readFileSync(sample.native.file, "utf8")).traceEvents.length).toBeGreaterThan(0)
+          if (sample.library === "strider") {
+            expect(sample.events.some((event: { name: string }) => event.name === "diagnostic.initialPage.alive")).toBe(
+              true
+            )
+          }
+        }
         expect(sample.ms).toBeGreaterThan(0)
         expect(sample.events.some((event: { name: string }) => event.name === "launch.available")).toBe(true)
         expect(sample.events.some((event: { kind: string }) => event.kind === "wire")).toBe(true)
@@ -117,6 +134,43 @@ describe.runIf(process.env["STRIDER_ENVIRONMENT"] === "nix-integration")("launch
       expect(report.status).toBe("error")
       expect(report.error).toContain("missing protocol send Browser.getVersion")
       expect(result.status).not.toBe(0)
+    } finally {
+      cleanup(scratch)
+    }
+  }, 90_000)
+  it("retains native evidence and disposes the browser when calibration has no native handlers", () => {
+    const scratch = scratchDirectory("launch-profile-calibration-missing-")
+    try {
+      const hooks = fs.readFileSync(path.join(directory, "launch-profile-hooks.mjs"), "utf8")
+      const original = "globalThis.__launchTrace.rootCommand = () => this.rootSession.send("
+      expect(hooks).toContain(original)
+      fs.writeFileSync(
+        path.join(scratch, "hooks.mjs"),
+        hooks.replace(original, "globalThis.__launchTrace.rootCommand = () => Promise.resolve(")
+      )
+      const output = path.join(scratch, "report.json")
+      const result = spawnSync(process.execPath, [
+        "--import",
+        path.join(scratch, "hooks.mjs"),
+        path.join(directory, "launch-profile.ts"),
+        output,
+        "1"
+      ], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: { ...process.env, STRIDER_LAUNCH_NATIVE: "1" }
+      })
+      retainOutput(scratch, result)
+      expect(result.status).not.toBe(0)
+      const report = JSON.parse(fs.readFileSync(output, "utf8"))
+      expect(report.status).toBe("error")
+      expect(report.error).toContain("Missing calibration root")
+      expect(report.samples).toHaveLength(1)
+      const sample = report.samples[0]
+      expect(sample.native.status).toBe("error")
+      expect(JSON.parse(fs.readFileSync(sample.native.file, "utf8")).traceEvents.length).toBeGreaterThan(0)
+      expect(sample.events.some((e: { name: string }) => e.name === "diagnostic.disposed")).toBe(true)
     } finally {
       cleanup(scratch)
     }

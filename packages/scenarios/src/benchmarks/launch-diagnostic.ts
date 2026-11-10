@@ -15,6 +15,9 @@ export const launchDiagnostic = (options: {
   for (
     const file of [
       "packages/scenarios/benchmark/launch-profile.ts",
+      "packages/scenarios/benchmark/native-launch-trace.ts",
+      "packages/scenarios/test/NativeLaunchTrace.test.ts",
+      "packages/scenarios/test/LaunchCalibration.test.ts",
       "packages/scenarios/benchmark/launch-profile-hooks.mjs",
       "packages/scenarios/test/LaunchProfile.test.ts"
     ]
@@ -35,19 +38,21 @@ export const launchDiagnostic = (options: {
     warmup: 3,
     profiledRole: "head",
     tooling: "driver launch profiler, hooks and regression tests overlaid on head; base is provenance only",
-    files: Object.fromEntries(["launch-profile.ts", "launch-profile-hooks.mjs"].map((name) => [
-      name,
-      createHash("sha256").update(fs.readFileSync(path.join(roots.head, "packages/scenarios/benchmark", name)))
-        .digest("hex")
-    ]))
+    files: Object.fromEntries(
+      ["launch-profile.ts", "launch-profile-hooks.mjs", "native-launch-trace.ts"].map((name) => [
+        name,
+        createHash("sha256").update(fs.readFileSync(path.join(roots.head, "packages/scenarios/benchmark", name)))
+          .digest("hex")
+      ])
+    )
   }
   const save = () => fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(manifest, null, 2))
-  const run = (name: string, command: string, args: Array<string>) => {
+  const run = (name: string, command: string, args: Array<string>, env: Record<string, string> = {}) => {
     const log = fs.openSync(path.join(directory, `${name}.log`), "w")
     try {
       const result = spawnSync(command, args, {
         cwd: roots.head,
-        env: { ...process.env, STRIDER_LAUNCH_TEST_OUTPUT: path.join(directory, "regressions") },
+        env: { ...process.env, ...env, STRIDER_LAUNCH_TEST_OUTPUT: path.join(directory, "regressions") },
         stdio: ["ignore", log, log],
         timeout: 15 * 60_000
       })
@@ -66,25 +71,35 @@ export const launchDiagnostic = (options: {
       "--config",
       "vitest.config.ts",
       "packages/scenarios/test/LaunchProfile.test.ts",
+      "packages/scenarios/test/NativeLaunchTrace.test.ts",
+      "packages/scenarios/test/LaunchCalibration.test.ts",
       "--reporter=json",
       `--outputFile=${path.join(directory, "regression-results.json")}`
     ])
     const regressions = JSON.parse(fs.readFileSync(path.join(directory, "regression-results.json"), "utf8"))
-    assert.equal(regressions.numTotalTests, 10)
-    assert.equal(regressions.numPassedTests, 10)
+    assert.equal(regressions.numTotalTests, 32)
+    assert.equal(regressions.numPassedTests, 32)
     assert.equal(regressions.numPendingTests, 0)
     assert.equal(regressions.numFailedTests, 0)
-    run("profile", process.execPath, [
-      "--import",
-      path.join(roots.head, "packages/scenarios/benchmark/launch-profile-hooks.mjs"),
-      path.join(roots.head, "packages/scenarios/benchmark/launch-profile.ts"),
-      path.join(directory, "report.json"),
-      String(runs)
-    ])
-    const report = JSON.parse(fs.readFileSync(path.join(directory, "report.json"), "utf8"))
-    assert.equal(report.status, "completed")
-    assert.equal(report.error, null)
-    assert.equal(report.samples.length, 2 * (runs + 3))
+    // Baseline calibration validation only: do not repeat any argument control.
+    for (const mode of ["native-baseline"]) {
+      const target = path.join(directory, mode)
+      fs.mkdirSync(target, { recursive: true })
+      run(mode, process.execPath, [
+        "--import",
+        path.join(roots.head, "packages/scenarios/benchmark/launch-profile-hooks.mjs"),
+        path.join(roots.head, "packages/scenarios/benchmark/launch-profile.ts"),
+        path.join(target, "report.json"),
+        String(runs)
+      ], {
+        STRIDER_LAUNCH_NATIVE: mode.startsWith("native") ? "1" : "0",
+        STRIDER_LAUNCH_CONTROL: mode.endsWith("control") ? "1" : "0"
+      })
+      const report = JSON.parse(fs.readFileSync(path.join(target, "report.json"), "utf8"))
+      assert.equal(report.status, "completed")
+      assert.equal(report.error, null)
+      assert.equal(report.samples.length, 2 * (runs + 3))
+    }
     manifest.status = "complete"
   } finally {
     if (manifest.status !== "complete") manifest.status = "failed"
@@ -94,10 +109,11 @@ export const launchDiagnostic = (options: {
       [
         `Launch diagnostic status: **${manifest.status}**.`,
         "Diagnostic only: instrumented head Strider versus its pinned Playwright, after rejection and complete-report regressions.",
-        `${runs} alternating pairs after three warmup pairs. Base retained for provenance only; no base/head speed comparison.`,
+        `${runs} alternating native-baseline calibration pairs after three warmup pairs. Base is provenance only.`,
+        "No argument control. Three post-readiness root probes precede trace retention; old and tightened clock bounds come from the same samples.",
         "Launch ends at Browser availability; initial-page gate observation and cleanup are outside timing.",
         "Defaults retain different initial resources, sandbox settings and readiness. Overlapping spans must not be summed.",
-        "Raw phase marks, protocol traffic, spawn arguments, resource counts and partial failures are retained in launch-diagnostic/.",
+        "Complete native startup traces, causal clock bounds, raw phase/protocol observations, spawn argv, liveness and partial failures are retained in launch-diagnostic/.",
         "These observations establish no speedup or parity result. Failed/partial reports are not timing evidence.",
         ""
       ].join("\n")
