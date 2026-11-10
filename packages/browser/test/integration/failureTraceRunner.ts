@@ -7,6 +7,7 @@ import "./traceProcesses.ts"
 import type { Entry, Origin } from "./failureTrace.ts"
 import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
+import { summarize } from "./pointerRecipients.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
@@ -61,8 +62,20 @@ const exhausted = () => {
 }
 const save = (file: string, trace: TraceBuffer, scope: string, passing = false): string | undefined => {
   const entries = trace.entries()
+  const presses = summarize(entries)
+  if (presses.length > 0) {
+    entries.push({
+      sequence: 0,
+      timestamp: new Date().toISOString(),
+      connection: "recorder",
+      kind: "pointer-recipient-summary",
+      payload: JSON.stringify(presses)
+    })
+  }
   if (passing && file !== sharedFile) {
-    const needed = new Set(entries.filter((entry) => /^(engine-round-|host-)/.test(entry.kind)).flatMap(ownershipKeys))
+    const needed = new Set(
+      entries.filter((entry) => /^(engine-round-|host-|pointer-)/.test(entry.kind)).flatMap(ownershipKeys)
+    )
     const local = new Set(entries.filter((entry) => entry.kind === "connection").map(connectionKey))
     const replay = shared.entries().filter((entry) =>
       entry.kind === "connection" && needed.has(connectionKey(entry)) && !local.has(connectionKey(entry))
@@ -74,7 +87,7 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
     entries.unshift(...replay)
   }
   const diagnostics = passing
-    ? entries.filter((entry) => /^(engine-round-|host-|overflow$|attribution$)/.test(entry.kind))
+    ? entries.filter((entry) => /^(engine-round-|host-|pointer-|overflow$|attribution$)/.test(entry.kind))
     : entries
   // Connection creation alone is not evidence and must not consume the passing budget.
   if (passing && diagnostics.length === 0) return undefined
