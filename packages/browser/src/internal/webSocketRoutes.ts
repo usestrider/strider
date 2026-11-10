@@ -133,11 +133,19 @@ export const register = <E, R>(
     const connections = new Map<string, Connection>()
     const realms = new Set<Target.RealmId>()
     const unconfirmed = new Map<Target.RealmId, Array<Admission.Lease>>()
-    const incoming = yield* Queue.make<
-      { realm: Target.RealmId; payload?: Effect.Effect<string, Adapter.AdapterError>; origin?: WebSocketRoute.Origin }
-    >({ capacity: 4096 })
+    type Incoming = {
+      realm: Target.RealmId
+      payload: Effect.Effect<string, Adapter.AdapterError>
+      origin: WebSocketRoute.Origin
+      destroyed: boolean
+      alive: () => boolean
+      release: Effect.Effect<void>
+    }
+    const owned = new Set<Incoming>()
+    const incoming = yield* Queue.make<Incoming>({ capacity: 4096 })
     let live = true
     const blocked = new Set<Target.RealmId>()
+    const destroying = new Set<Target.RealmId>()
     const faults = yield* Queue.unbounded<{ realm: Target.RealmId; destroyed: boolean }>()
     const fault = (realm: Target.RealmId) => {
       if (blocked.has(realm)) return
@@ -274,7 +282,8 @@ export const register = <E, R>(
       )
     })
     const create = Effect.fnUntraced(
-      function*(realm: Target.RealmId, message: Envelope, origin: WebSocketRoute.Origin) {
+      function*(realm: Target.RealmId, message: Envelope, origin: WebSocketRoute.Origin, alive: () => boolean) {
+        if (!alive() || !live) return
         const owner = `${realm}:${message.id}`
         if (connections.has(owner)) return
         const lease = allocation.admit(owner, 1)
@@ -406,6 +415,11 @@ export const register = <E, R>(
               Operation.named("WebSocketRoute.connectToServer")
             )
         }
+        if (!alive() || !live) {
+          accounting.destroy(lease.owner, lease.generation)
+          yield* Scope.close(child, Exit.void)
+          return
+        }
         connections.set(owner, connection)
         realms.add(realm)
         yield* run(
@@ -418,13 +432,13 @@ export const register = <E, R>(
       }
     )
     const process = Effect.fnUntraced(
-      function*(realm: Target.RealmId, envelope: Envelope, origin: WebSocketRoute.Origin) {
-        if (envelope.token !== token || !live || blocked.has(realm)) return
+      function*(realm: Target.RealmId, envelope: Envelope, origin: WebSocketRoute.Origin, alive: () => boolean) {
+        if (envelope.token !== token || !live || !alive() || blocked.has(realm)) return
         if (envelope.type === "ready") {
           realms.add(realm)
           return
         }
-        if (envelope.type === "create") return yield* create(realm, envelope, origin)
+        if (envelope.type === "create") return yield* create(realm, envelope, origin, alive)
         const connection = connections.get(`${realm}:${envelope.id}`)
         if (connection === undefined) return
         if (envelope.type === "error") {
@@ -516,40 +530,80 @@ export const register = <E, R>(
       name,
       token,
       scope: bridgeScope,
-      receive: (realm, payload, origin) => {
-        if (!live || blocked.has(realm)) return false
-        if (Queue.offerUnsafe(incoming, { realm, payload, origin })) return true
+      receive: (realm, payload, origin, ownership) => {
+        if (!live || blocked.has(realm) || destroying.has(realm) || !ownership.isAlive()) return false
+        // Include objects already pulled into a Stream chunk in the admission bound.
+        if (owned.size >= 4096) {
+          fault(realm)
+          return false
+        }
+        let released = false
+        const item: Incoming = {
+          realm,
+          payload,
+          origin,
+          destroyed: false,
+          alive: () => !item.destroyed && ownership.isAlive(),
+          release: Effect.suspend(() => {
+            if (released) return Effect.void
+            released = true
+            owned.delete(item)
+            return (ownership.release ?? Effect.void).pipe(
+              Effect.interruptible,
+              BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
+              Effect.flatMap((result) =>
+                Option.isSome(result) ?
+                  Effect.void :
+                  Handlers.report("WebSocket payload release deadline", Cause.die("release did not complete"))
+              ),
+              Effect.catchCause((cause) => Handlers.report("WebSocket payload release failed", cause))
+            )
+          }).pipe(Effect.uninterruptible)
+        }
+        if (Queue.offerUnsafe(incoming, item)) {
+          owned.add(item)
+          return true
+        }
         fault(realm)
         return false
       },
       failed: fault,
       ended: (realm) => {
+        if (destroying.has(realm)) return
+        let known = realms.has(realm) || unconfirmed.has(realm)
+        for (const item of owned) {
+          if (item.realm !== realm || item.destroyed) continue
+          item.destroyed = true
+          known = true
+        }
+        if (!known) return
+        destroying.add(realm)
         realms.delete(realm)
         Queue.offerUnsafe(faults, { realm, destroyed: true })
       }
     }
     yield* Stream.fromQueue(incoming).pipe(
       Stream.runForEach((incoming) =>
-        incoming.payload === undefined
-          ? Effect.forEach(
-            [...connections.values()].filter((connection) => connection.realm === incoming.realm),
-            (connection) => forget(connection, true),
-            { discard: true }
-          )
-          : incoming.payload.pipe(
-            Effect.flatMap((payload) =>
-              Admission.textBytes(payload, 7 * MiB) > 7 * MiB
-                ? Effect.sync(() => fault(incoming.realm))
-                : Schema.decodeUnknownEffect(Envelope)(JSON.parse(payload)).pipe(
-                  Effect.flatMap((message) => process(incoming.realm, message, incoming.origin!))
+        incoming.payload.pipe(
+          Effect.flatMap((payload) => {
+            if (!incoming.alive() || !live) return Effect.void
+            return Admission.textBytes(payload, 7 * MiB) > 7 * MiB
+              ? Effect.sync(() => fault(incoming.realm))
+              : Schema.decodeUnknownEffect(Envelope)(JSON.parse(payload)).pipe(
+                Effect.flatMap((message) =>
+                  incoming.alive()
+                    ? process(incoming.realm, message, incoming.origin, incoming.alive)
+                    : Effect.void
                 )
-            ),
-            Effect.catchCause((cause) =>
-              Handlers.report("WebSocket bridge failed", cause).pipe(
-                Effect.andThen(Effect.sync(() => fault(incoming.realm)))
               )
+          }),
+          Effect.catchCause((cause) =>
+            !incoming.alive() || !live ? Effect.void : Handlers.report("WebSocket bridge failed", cause).pipe(
+              Effect.andThen(Effect.sync(() => fault(incoming.realm)))
             )
-          )
+          ),
+          Effect.ensuring(incoming.release)
+        )
       ),
       Operation.detached,
       Effect.provideContext(environment),
@@ -572,6 +626,7 @@ export const register = <E, R>(
             }
             unconfirmed.delete(event.realm)
             blocked.delete(event.realm)
+            destroying.delete(event.realm)
             realms.delete(event.realm)
           }
         })
@@ -597,10 +652,11 @@ export const register = <E, R>(
         if (acknowledged.has(connection.realm)) yield* forget(connection, false)
         else yield* forget(connection, false, true)
       }
-      const pending = yield* Queue.clear(incoming)
-      for (const item of pending) if (item.payload !== undefined) yield* item.payload.pipe(Effect.ignore)
+      yield* Queue.clear(incoming)
       yield* Scope.close(bridgeScope, Exit.void)
       yield* Scope.close(scope, Exit.void)
+      // Intake bounds this set; start every discard even if another release stalls.
+      yield* Effect.forEach([...owned], (item) => item.release, { concurrency: "unbounded", discard: true })
     }).pipe(Operation.detached)
     let removing: Fiber.Fiber<void, never> | undefined
     const remove: Effect.Effect<void> = Effect.suspend(() =>

@@ -55,7 +55,7 @@ export const flush = (state: State, target: TargetEntry): void => {
       const realm = state.realmsByContext.get(contextKey(target, event.executionContextId))
       if (realm !== undefined && !realm.ended && !realm.pending) {
         holder.known.set(realm.uniqueId, realm.id)
-        holder.bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm))
+        holder.bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm), { isAlive: () => !realm.ended })
       } else holder.events.push(event)
     }
   }
@@ -119,7 +119,7 @@ export const prepare = Effect.fnUntraced(
               return
             }
             known.set(realm.uniqueId, realm.id)
-            bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm))
+            bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm), { isAlive: () => !realm.ended })
           })
         ),
         Effect.onExit((exit) =>

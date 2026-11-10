@@ -229,7 +229,8 @@ it.effect("rejects late dead-realm payloads and duplicate destruction without re
           alive
       }))
       assert.isTrue(bridge.receive(next, payload("replacement"), { _tag: "Worker", realm: next }, {
-        isAlive: () => true
+        isAlive: () =>
+          true
       }))
       const current = yield* Deferred.await(replacement)
       bridge.ended(old)

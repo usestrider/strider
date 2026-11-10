@@ -31,7 +31,8 @@ export const prepare = Effect.fnUntraced(
             Effect.succeed(event.data.value),
             realm.navigable === undefined
               ? { _tag: "Worker", realm: realm.id }
-              : { _tag: "Frame", page: realm.navigable.page.id, frame: realm.navigable.id }
+              : { _tag: "Frame", page: realm.navigable.page.id, frame: realm.navigable.id },
+            { isAlive: () => !realm.ended }
           )
         })
       ),

@@ -78,12 +78,12 @@ export const prepare: (
         }).pipe(
           Protocol.on(session),
           Effect.map((result) => typeof result.result.value === "string" ? result.result.value : ""),
-          Effect.mapError(Adapter.protocolError),
-          Effect.ensuring(release)
+          Effect.mapError(Adapter.protocolError)
         ),
         worker === undefined
           ? { _tag: "Frame", page: realm.document!.frame.page.id, frame: realm.document!.frame.id }
-          : { _tag: "Worker", realm: realm.id }
+          : { _tag: "Worker", realm: realm.id },
+        { isAlive: () => !realm.ended, release }
       )
       if (!accepted) base.buffer.later(release)
       return true
