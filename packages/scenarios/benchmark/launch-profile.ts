@@ -150,8 +150,16 @@ const save = () => {
     ) + "\n"
   )
 }
+// A launch with `--no-startup-window` has no initial page, so no target gate runs.
+const withoutInitialPage = (events: ReadonlyArray<{ readonly name: string; readonly data?: unknown }>) => {
+  const spawned = events.find((entry) => entry.name === "spawn.args")?.data as
+    | { args?: ReadonlyArray<string> }
+    | undefined
+  return spawned?.args?.includes("--no-startup-window") === true
+}
 const validateSample = (sample: Sample) => {
   const strider = sample.library === "strider"
+  const noInitial = strider && withoutInitialPage(sample.events)
   const phases = strider
     ? [
       "model.start",
@@ -180,9 +188,7 @@ const validateSample = (sample: Sample) => {
       "model.attach.end",
       "browser.make.start",
       "browser.make.end",
-      "target.snapshot.start",
-      "target.snapshot.end",
-      "target.gate.end",
+      ...(noInitial ? [] : ["target.snapshot.start", "target.snapshot.end", "target.gate.end"]),
       "initial.gate.observed"
     ]
     : [
@@ -227,9 +233,9 @@ const validateSample = (sample: Sample) => {
     for (const method of ["Target.getBrowserContexts", "Browser.setDownloadBehavior"]) {
       roundTrip(method, true, available)
     }
-    const gate = phase("target.gate.end")
+    const gate = noInitial ? available : phase("target.gate.end")
     for (
-      const method of [
+      const method of noInitial ? [] : [
         "Page.enable",
         "Page.setLifecycleEventsEnabled",
         "Network.enable",
@@ -284,7 +290,8 @@ try {
           trace.mark("launch.available")
           assert.ok(browser.info.product.includes(pins.chromium.version))
           active.resources = { visiblePages: (await runtime.runPromise(browser.pages)).length }
-          await trace.waitForGate()
+          const noInitial = withoutInitialPage(active.events)
+          if (!noInitial) await trace.waitForGate()
           trace.mark("initial.gate.observed")
           if (native) {
             trace.mark("calibration.ready")
@@ -293,13 +300,15 @@ try {
           }
           await retain()
           const pages = await runtime.runPromise(browser.pages)
-          assert.equal(pages.length, 1)
-          assert.equal(
-            await runtime.runPromise(
-              Effect.scoped(pages[0]!.inspect.pipe(Effect.flatMap((page) => page.evaluate(() => document.URL))))
-            ),
-            "about:blank"
-          )
+          assert.equal(pages.length, noInitial ? 0 : 1)
+          if (!noInitial) {
+            assert.equal(
+              await runtime.runPromise(
+                Effect.scoped(pages[0]!.inspect.pipe(Effect.flatMap((page) => page.evaluate(() => document.URL))))
+              ),
+              "about:blank"
+            )
+          }
           trace.mark("diagnostic.initialPage.alive")
         } finally {
           try {
