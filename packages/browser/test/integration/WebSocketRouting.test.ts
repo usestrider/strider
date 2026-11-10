@@ -293,6 +293,7 @@ for (const [name, backend] of backends) {
             const html = `<pre id="out">pending</pre><script>
             const exchange = path => new Promise(resolve => {
               const seen = []; const socket = new WebSocket(${JSON.stringify(target)} + path);
+              socket.onopen = () => socket.send('ready');
               socket.onmessage = event => seen.push('message:' + event.data);
               socket.onerror = () => seen.push('error');
               socket.onclose = event => { seen.push('close'); resolve({seen, code:event.code, reason:event.reason, wasClean:event.wasClean}); };
@@ -316,8 +317,14 @@ for (const [name, backend] of backends) {
               wasClean: true
             })
             assert.deepStrictEqual(result.proxy, result.native)
-            assert.deepStrictEqual(result.nativeError, {
-              seen: ["message:bye", "error", "close"],
+            // TCP EOF does not produce an error event on every browser; preserve what this native peer reports.
+            assert.strictEqual(result.nativeError.seen[0], "message:bye")
+            assert.strictEqual(result.nativeError.seen.at(-1), "close")
+            assert.deepStrictEqual({
+              code: result.nativeError.code,
+              reason: result.nativeError.reason,
+              wasClean: result.nativeError.wasClean
+            }, {
               code: 1006,
               reason: "",
               wasClean: false
@@ -371,6 +378,8 @@ for (const [name, backend] of backends) {
                 const seen: Array<string> = []
                 ;(globalThis as any).seen = seen
                 const socket = new WebSocket(location.origin.replace("http:", "ws:") + "/ws-final-delayed")
+                socket.onopen = () =>
+                  socket.send("ready")
                 socket.onmessage = (event) =>
                   seen.push("message:" + event.data)
                 socket.onerror = () =>
@@ -383,8 +392,7 @@ for (const [name, backend] of backends) {
               yield* Deferred.await(started)
               yield* Expect.that(
                 page.locator("#native").readText,
-                Condition.make("native peer ended", (value: string) =>
-                  value === "closed")
+                Condition.make("native peer ended", (value: string) => value === "closed")
               )
               assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (globalThis as any).seen), [])
               assert.isFalse(completed)

@@ -15,7 +15,7 @@ class Closed extends Event {
 }
 
 describe("WebSocket shim proxy lifecycle", () => {
-  const exercise = async (error: boolean, drop: boolean, remove: boolean) => {
+  const exercise = async (error: boolean, drop: boolean, remove: boolean, multiple = false) => {
     // A native socket dispatches every message it received before its close event. In proxy mode the shim sends
     // server messages through the host, which forwards them back with a "send" command; the page must still see
     // them before the close the native socket reported after them.
@@ -61,7 +61,7 @@ describe("WebSocket shim proxy lifecycle", () => {
     )
     const dispatch = (command: object): Promise<void> =>
       vm.runInContext(
-        `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")].dispatch("token", ${
+        `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")]?.dispatch("token", ${
           JSON.stringify({ id: "1", ...command })
         })`,
         context
@@ -77,10 +77,11 @@ describe("WebSocket shim proxy lifecycle", () => {
     native.protocol = ""
     native.onopen()
     native.onmessage({ data: "bye" })
+    if (multiple) native.onmessage({ data: "deliberately dropped" })
     if (error) native.onerror()
     native.onclose({ code: error ? 1006 : 1000, reason: error ? "" : "done", wasClean: !error })
     // The host owns delivery until it explicitly acknowledges handler completion, even for a deliberate drop.
-    await until(() => host.some((envelope) => envelope.type === "message"))
+    await until(() => host.filter((envelope) => envelope.type === "message").length === (multiple ? 2 : 1))
     assert.deepStrictEqual(vm.runInContext("seen", context), [])
     if (remove) {
       await dispatch({ type: "remove" })
@@ -90,6 +91,11 @@ describe("WebSocket shim proxy lifecycle", () => {
     }
     if (!drop) await dispatch({ type: "send", direction: "page", message: { _tag: "Text", data: "bye" } })
     assert.deepStrictEqual(vm.runInContext("seen", context), drop ? [] : ["message:bye"])
+    if (multiple) {
+      await dispatch({ type: "ack", direction: "server", sequence: 2 })
+      await dispatch({ type: "ack", direction: "server", sequence: 2 })
+      assert.deepStrictEqual(vm.runInContext("seen", context), ["message:bye"])
+    }
     await dispatch({ type: "ack", direction: "server", sequence: 1 })
     await until(() => host.some((envelope) => envelope.type === "closed"))
     if (!error && !drop) {
@@ -112,4 +118,6 @@ describe("WebSocket shim proxy lifecycle", () => {
   it("waits for a deliberately dropped server message before error and close", () => exercise(true, true, false))
   it("cancels pending native notifications when removal drains without a host acknowledgement", () =>
     exercise(true, false, true))
+  it("waits for every preceding completion, including drops acknowledged out of order", () =>
+    exercise(false, false, false, true))
 })
