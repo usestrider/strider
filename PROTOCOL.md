@@ -373,6 +373,11 @@ Adapter responsibilities:
   WebSocket fields or a bridge WeakMap. Last release restores the shared dispatch. No polling supplies the bridge. Required context timing is refused
   before installation on stock WebKit and attached Chromium. Firefox refuses dedicated-worker preloads; shared
   and service workers are outside this feature. None of these protocols offers native message interception.
+  Native proxy error and close notifications wait on the existing server-message completion acknowledgements,
+  not only on local encoding. A captured sequence watermark covers every earlier pending message, including
+  deliberate drops; only one native error and close may wait, in native order. Removal/drain cancels those waits
+  independently of conversion chains. Native close metadata is copied unchanged and emitted once with native
+  provenance; the page close does not add a duplicate synthetic observation.
 - **The adapter kit** (`src/internal/adapterKit.ts`, 2026-10-30) holds what every adapter does alike, so an adapter keeps its state in one object its per-domain modules take, rather than one closure over every table:
   - ids that remember what the connection minted, as ranges of each kind's counter, and lookups that fail an ended one as `Gone` and another connection's as `Foreign`;
   - a fact buffer: facts delivered at the fold's flush, in order, a realm reported ahead of its document held with what it logs until it is announced; waits on the model (a document's main realm) checked after every flush; and commands the fold can't wait for, run after the flush in a `FiberSet` in the connection's scope, so they end with it;

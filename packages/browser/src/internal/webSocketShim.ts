@@ -131,6 +131,11 @@ export const install = (name: string, token: string, pattern: string, transport:
     onclose: any = null
     pending = true
     closeNotified = false
+    nativeTerminals = Promise.resolve()
+    nativeError = false
+    nativeClosed = false
+    terminalEnded = false
+    terminalWait: (() => void) | undefined
     constructor(input: string | URL, protocols?: string | Array<string>) {
       super()
       const url = new global.URL(String(input), global.location.href)
@@ -194,7 +199,43 @@ export const install = (name: string, token: string, pattern: string, transport:
       }
       this.fire("open", new global.Event("open"))
     }
+    endTerminals() {
+      this.terminalEnded = true
+      this.terminalWait?.()
+    }
+    terminal(notification: { type: "error" } | { type: "closed"; code: number; reason: string; wasClean: boolean }) {
+      if (this.terminalEnded || (notification.type === "error" ? this.nativeError : this.nativeClosed)) return
+      if (notification.type === "error") this.nativeError = true
+      else this.nativeClosed = true
+      const queue = this.queues.server
+      const watermark = queue.sequence
+      const encoded = queue.chain
+      // Encoding is not delivery: the host acknowledges only after forwarding or deliberately dropping.
+      // At most one native error and one close wait here; removal cancels independently of conversion chains.
+      this.nativeTerminals = this.nativeTerminals.then(async () => {
+        await encoded
+        if (this.terminalEnded) return
+        await new Promise<void>((resolve) => {
+          this.terminalWait = () => {
+            if (this.terminalEnded || ![...queue.pending.keys()].some((sequence) => sequence <= watermark)) {
+              this.terminalWait = undefined
+              resolve()
+            }
+          }
+          this.terminalWait()
+        })
+        if (this.terminalEnded || this.closeNotified) return
+        if (notification.type === "error") {
+          emit(this.route, { type: "error", id: this.id })
+          this.fire("error", new global.Event("error"))
+        } else {
+          emit(this.route, { ...notification, id: this.id, direction: "server", provenance: "native" })
+          this.closed(notification.code, notification.reason, notification.wasClean, false)
+        }
+      }).catch(() => this.fail("native completion failed"))
+    }
     closed(code: number, reason: string, clean: boolean, notify = true) {
+      this.endTerminals()
       if (this.pending) {
         pendingConstructors--
         this.pending = false
@@ -279,6 +320,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       ) delete global[removed.name]
       const owned = [...sockets.values()].filter((socket) => socket.route.token === token)
       for (const socket of owned) {
+        socket.endTerminals()
         socket.readyState = 2
         socket.native?.close(1000, "route removed")
         await Promise.all([socket.queues.page.chain, socket.queues.server.chain])
@@ -321,24 +363,14 @@ export const install = (name: string, token: string, pattern: string, transport:
         socket.opened(socket.native.protocol)
       }
       socket.native.onmessage = (event: any) => socket.enqueue("server", event.data)
-      socket.native.onerror = () => {
-        emit(socket.route, { type: "error", id: socket.id })
-        socket.fire("error", new global.Event("error"))
-      }
-      socket.native.onclose = (event: any) => {
-        socket.queues.server.chain = socket.queues.server.chain.then(() => {
-          emit(socket.route, {
-            type: "closed",
-            id: socket.id,
-            direction: "server",
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean,
-            provenance: "native"
-          })
-          socket.closed(event.code, event.reason, event.wasClean)
+      socket.native.onerror = () => socket.terminal({ type: "error" })
+      socket.native.onclose = (event: any) =>
+        socket.terminal({
+          type: "closed",
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
         })
-      }
     } else if (command.type === "send") {
       const value = decode(command.message, command.direction === "page" ? socket.binaryType : "arraybuffer")
       if (command.direction === "page") {
@@ -357,6 +389,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       queue.bytes -= bytes
       queue.count--
       queue.credit += bytes
+      if (command.direction === "server") socket.terminalWait?.()
     } else if (command.type === "close") {
       validateClose(command.code, command.reason ?? "")
       if (command.direction === "server") {
@@ -367,6 +400,7 @@ export const install = (name: string, token: string, pattern: string, transport:
       } else socket.closed(command.code ?? 1000, command.reason ?? "", true)
     } else if (command.type === "fail") socket.fail(command.reason)
     else if (command.type === "drain") {
+      socket.endTerminals()
       if (socket.readyState !== 3) socket.readyState = 2
       socket.native?.close(1000, "route removed")
       await Promise.all([socket.queues.page.chain, socket.queues.server.chain])

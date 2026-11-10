@@ -63,7 +63,9 @@ const redactChat = Effect.fn("redactChat")(function*(page: Page.Page) {
 
 The handlers are fixed before opening. The connection's passive event stream reports messages and closes without
 changing forwarding. A failing handler closes the socket and reports the failure; it never falls back to a live
-server. Stream overflow fails that observer; transport overflow closes the affected connection.
+server. Stream overflow fails that observer; transport overflow closes the affected connection. Native proxy error
+and close events wait until the host has forwarded or deliberately dropped every preceding server message,
+including completion of a delayed `fromServer` handler. Removal cancels that wait and closes the owned sockets.
 
 ## Admission and cleanup
 
