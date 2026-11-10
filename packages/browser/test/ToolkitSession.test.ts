@@ -532,6 +532,90 @@ describe("Session's digest", () => {
       assert.strictEqual(session.retainedNavigations, 0, "a delivered identity is still retained")
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
+  for (const ending of ["failure", "interruption"] as const) {
+    it.effect(`an overlapping call releases delivered identities on ${ending} without draining pending events`, () =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+        const { page } = yield* session.open({ name: "main" })
+        const url = Schema.decodeUnknownSync(Url.Url)("https://example.test/same")
+        const document = Schema.decodeUnknownSync(Target.DocumentId)("document")
+        const id = (value: string) => Schema.decodeUnknownSync(PageNavigation.Id)(value)
+        const channel = Handles.page(page).entry.events.navigation
+        const publish = (value: string) =>
+          Effect.sync(() =>
+            Events.publish(channel, {
+              navigation: id(value),
+              frame: page.id,
+              url,
+              outcome: { _tag: "Committed" as const, document, response: Option.none() }
+            })
+          )
+        const line = `main navigated to ${url}`
+        const release = yield* Deferred.make<void>()
+        Object.defineProperty(page, "goto", {
+          value: () => Deferred.await(release).pipe(Effect.andThen(Effect.fail("navigation failed")))
+        })
+        const own = yield* Effect.forkChild(
+          session.toolkit.handle("goto", { page: "main", url }).pipe(Effect.flatMap(Stream.runDrain), Effect.exit)
+        )
+        yield* TestClock.adjust("1 millis")
+        yield* publish("delivered")
+        yield* TestClock.adjust("1 millis")
+        assert.deepStrictEqual(yield* sinceLast(session), [line])
+        assert.strictEqual(session.retainedNavigations, 1)
+        yield* publish("pending")
+        yield* TestClock.adjust("1 millis")
+        if (ending === "interruption") yield* Fiber.interrupt(own)
+        else {
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(own)
+        }
+        assert.strictEqual(session.retainedNavigations, 0)
+        assert.deepStrictEqual(yield* sinceLast(session), [line])
+        // Nothing is waiting for an event that already came
+        assert.strictEqual(session.retainedNavigations, 0, "a delivered identity is still retained")
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("a direct session open retires a navigation delivered by an overlapping tool", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const release = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      const url = Schema.decodeUnknownSync(Url.Url)("https://example.test/same")
+      const document = Schema.decodeUnknownSync(Target.DocumentId)("document")
+      const id = Schema.decodeUnknownSync(PageNavigation.Id)("opened")
+      Object.defineProperty(context, "newPage", {
+        value: Effect.map(context.newPage, (page) => {
+          Object.defineProperty(page, "goto", {
+            value: Effect.fnUntraced(function*() {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+              return { _tag: "Committed" as const, id, frame: page.id, url, document, response: Option.none() }
+            })
+          })
+          return page
+        })
+      })
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const opening = yield* Effect.forkChild(session.open({ name: "main", url }))
+      yield* Deferred.await(started)
+      const page = Option.getOrThrow(session.named("main"))
+      Events.publish(Handles.page(page).entry.events.navigation, {
+        navigation: id,
+        frame: page.id,
+        url,
+        outcome: { _tag: "Committed", document, response: Option.none() }
+      })
+      yield* TestClock.adjust("1 millis")
+      assert.deepStrictEqual(yield* sinceLast(session), [`main navigated to ${url}`])
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(opening)
+      assert.deepStrictEqual(yield* sinceLast(session), [])
+      assert.strictEqual(session.retainedNavigations, 0, "the open result retained an already delivered identity")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
   it.effect("opening a page preserves another page's pending and later navigation", () =>
     Effect.gen(function*() {
       const context = yield* Browser.newContext()
