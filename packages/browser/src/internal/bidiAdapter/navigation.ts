@@ -43,7 +43,14 @@ const sameDocument = (
   // startNavigation consumes an exact reply binding itself. Only claim by URL when neither
   // live nor reply identity owns this event, so one observation cannot take two reservations.
   if (known === undefined && bound === undefined) {
-    const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    let index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    // Traversal reservations have no destination URL. Only the surviving, unambiguous
+    // traversal owner can claim them; never fall back to an arbitrary older command.
+    if (index < 0 && !navigable.restorationAmbiguous && navigable.restoring !== undefined) {
+      index = navigable.expected.list.findIndex((expected) =>
+        expected.id === navigable.restoring!.navigation && expected.initiatedAs === "traversal"
+      )
+    }
     if (index >= 0) expected = navigable.expected.list.splice(index, 1)[0]!
   }
   const navigation = known ??
