@@ -126,6 +126,84 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  for (
+    const boundary of [
+      "event-before-reply",
+      "reply-before-event",
+      "interrupted",
+      "overlap",
+      "newer",
+      "url",
+      "identity"
+    ] as const
+  ) {
+    it.effect(`correlates same-document traversal with ${boundary} ownership`, () =>
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const url = "about:blank#destination"
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.traverseHistory": Effect.andThen(
+            Deferred.succeed(entered, undefined),
+            Deferred.await(release)
+          ),
+          "browsingContext.navigate": { navigation: "exact", url }
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const fiber = yield* Effect.forkChild(Navigation.traverse(state, page.id, -1))
+        yield* Deferred.await(entered)
+        const traversal = page.expected.list[0]!.id
+        let other: PageNavigation.Id | undefined
+        let overlapping: Fiber.Fiber<Option.Option<PageNavigation.Id>, Adapter.AdapterError> | undefined
+        if (boundary === "interrupted") yield* Fiber.interrupt(fiber)
+        if (boundary === "overlap") {
+          overlapping = yield* Effect.forkChild(Navigation.traverse(state, page.id, 1))
+          yield* Effect.yieldNow
+        }
+        if (boundary === "newer" || boundary === "identity") {
+          other = yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+        }
+        if (boundary === "url") other = Kit.expect(state.ids, page.expected, url)
+        if (boundary === "reply-before-event") {
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(fiber)
+        }
+        handlers.apply(
+          boundary === "identity" ? "browsingContext.fragmentNavigated" : "browsingContext.historyUpdated",
+          {
+            context: page.bidi,
+            navigation: "exact",
+            url,
+            timestamp: 1
+          },
+          { state }
+        )
+        yield* Deferred.succeed(release, undefined)
+        if (boundary !== "interrupted") yield* Fiber.join(fiber)
+        if (overlapping !== undefined) yield* Fiber.join(overlapping)
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+        assert.lengthOf(ends, 1)
+        const end = ends[0]!
+        assert(end._tag === "NavigationEnded")
+        if (boundary === "event-before-reply" || boundary === "reply-before-event") {
+          assert.strictEqual(end.navigation, traversal)
+        } else {
+          assert.notStrictEqual(end.navigation, traversal)
+          if (boundary === "url" || boundary === "identity") assert.strictEqual(end.navigation, other)
+        }
+        assert.deepStrictEqual(end.outcome, {
+          _tag: "SameDocument",
+          document: page.document!.id,
+          via: boundary === "identity" ? "fragment" : "historyApi"
+        })
+        assert.strictEqual(page.document!.url, url)
+        assert.isEmpty(page.expected.list)
+        assert.isUndefined(page.restoring)
+        assert.isEmpty(page.traversalCommands)
+      }))
+  }
+
   for (const arrival of ["before", "after"] as const) {
     it.effect(`ends an unannounced traversal when its realm arrives ${arrival} the reply`, () =>
       Effect.gen(function*() {
