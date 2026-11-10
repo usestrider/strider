@@ -520,18 +520,23 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     }
     return entries.map((entry) => entry.line)
   }
-  const run = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+  // A call that reports a navigation is counted while it runs, so a drain by another call records what it delivers
+  const counted = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.suspend(() => {
       running++
       return effect
     }).pipe(
-      Effect.mapError(toFailure),
-      Effect.map((outcome) => conceal({ outcome, sinceLast: drainDigest() })),
-      // A failure stays a ToolFailure, so its Schema encodes it
-      Effect.mapError((failure) => new Tools.ToolFailure(conceal({ ...failure }))),
       Effect.ensuring(Effect.sync(() => {
         if (--running === 0) deliveredNavigations.clear()
       }))
+    )
+  const run = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+    counted(effect.pipe(
+      Effect.mapError(toFailure),
+      Effect.map((outcome) => conceal({ outcome, sinceLast: drainDigest() }))
+    )).pipe(
+      // A failure stays a ToolFailure, so its Schema encodes it
+      Effect.mapError((failure) => new Tools.ToolFailure(conceal({ ...failure })))
     )
   const onPage = <A, R>(name: string, f: (page: Page.Page) => Effect.Effect<A, unknown, R>) =>
     run(Effect.flatMap(pageNamed(name), f))
@@ -602,8 +607,11 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       // A page whose navigation fails isn't the session's: the command failed, and the exported test leaves it
       // out, so the page goes with it
       if (url !== undefined) {
-        yield* page.goto(reveal(url)).pipe(
-          Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation))),
+        yield* counted(
+          page.goto(reveal(url)).pipe(
+            Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation)))
+          )
+        ).pipe(
           Effect.mapError(toFailure),
           Effect.onError(() => closeAgain)
         )
