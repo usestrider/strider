@@ -798,3 +798,24 @@ resource counts, regression child output, rejected regression reports and logs, 
 gate observation and cleanup are outside timing. Different default initial resources and sandbox settings remain.
 Do not sum overlapping spans or treat instrumented timings as speedup or parity evidence. A failed or partial
 report establishes no valid timing result.
+
+### Hosted navigation phase diagnostic
+
+Dispatch `benchmarks.yml` from the diagnostic tooling branch with `workload=bench`,
+`only=navigation-diagnostic`, `browser=chromium`, `runs=40`, and identical pinned base/head library commits.
+Head alone is profiled; base is retained for provenance. Run the unchanged `only=navigate` control separately
+with the same pins. This diagnostic does not replace its parity result.
+
+Each fresh isolated page loads the ordinary benchmark fixture outside timing, then records goto through load,
+first title read and second title read on the same destination. Both titles must be `Shop`. Viewport/DPR,
+30-second deadlines and scoped/context cleanup retain the ordinary benchmark's boundaries. Three warmup pairs
+precede balanced alternating measured pairs. Four additional pairs capture protocol sends/replies and Strider
+realm-acquisition/engine-installation marks; their timings are excluded from phase distributions.
+
+`navigation-diagnostic/` retains phase samples, bounded protocol traces, tooling hashes and failures. Long wire
+strings retain length, SHA-256 and prefix instead of full engine source. Source hooks assert pinned replacement
+counts and alter only instrumentation; they still add overhead even with capture disabled. Trace validation
+requires realm creation, engine installation and title execution, matching successful replies and ordered phase
+marks. Missing instrumentation fails the run. Setup and cleanup are outside phase timing; separate browser
+processes remain resident. These observations isolate dependencies, not browser CPU versus IPC versus host
+scheduling. A faster repeated read alone does not attribute the first-read excess to engine installation.
