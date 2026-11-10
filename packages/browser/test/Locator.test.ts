@@ -1235,3 +1235,50 @@ it.effect("a synthetic dragTo refuses nodes of different documents when only one
       const error = yield* syntheticDrag(page.locator("#a"), page.locator("#b"))
       assert.strictEqual(Option.isSome(error) ? (error.value as any).reason?._tag : undefined, "InvalidInput")
     })))
+
+it.effect("evaluateAll uses the committed document for an empty match set after realm acquisition crosses a commit", () =>
+  Effect.gen(function*() {
+    let acquire = Effect.void
+    let acquired = false
+    const requested: Array<Target.DocumentId> = []
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" ? { ...entry, status: "supported", limitations: [] } : entry
+          )
+        })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: Effect.fnUntraced(function*(document) {
+          requested.push(document)
+          if (!acquired) {
+            acquired = true
+            yield* acquire
+          }
+          return "committed-realm" as Target.RealmId
+        }),
+        evaluate: (_realm, call) =>
+          Effect.succeed({
+            _tag: "Value",
+            value: call.functionDeclaration === Engine.install
+              ? { type: "string", value: "installed" }
+              : call.functionDeclaration === Engine.element
+              ? { type: "array", value: [] }
+              : { type: "number", value: 0 }
+          })
+      })))
+    )
+    yield* Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const { entry, runtime } = Handles.page(page)
+      const previous = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      acquire = runtime.model.adapter.navigate(entry.id, "https://example.test/committed", { referrer: Option.none() })
+        .pipe(Effect.asVoid, Effect.orDie)
+      assert.strictEqual(yield* page.locator(".absent").evaluateAll((elements) => elements.length), 0)
+      const committed = Option.getOrThrow(yield* runtime.model.documentOf(entry.id))
+      assert.notStrictEqual(committed, previous)
+      assert.strictEqual(requested.at(-1), committed, "the empty snapshot's callback must use the document searched")
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  }))
