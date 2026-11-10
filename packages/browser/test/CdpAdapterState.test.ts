@@ -1862,6 +1862,80 @@ describe("CdpAdapter navigation-interrupted evaluation", () => {
   }
 })
 
+describe("CdpAdapter evaluation in a context destroyed by a frame swap", () => {
+  // Chromium answers a command in a context it destroys as the frame moves to its own target with
+  // "Execution context was destroyed." (-32000) as often as with "Inspected target navigated or closed": the
+  // reply reached the client before the destroy event was folded, so the realm hadn't ended yet.
+  it.effect("waits for the context's destruction to be folded and reports the realm Gone", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<void>()
+      const rejected = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: Effect.fnUntraced(function*() {
+          yield* Deferred.await(reply)
+          yield* Deferred.succeed(rejected, undefined)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Runtime.callFunctionOn",
+                reason: "Unrecognized",
+                code: -32000,
+                description: "Execution context was destroyed."
+              })
+            })
+          )
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const realm = Tree.addRealm(state, {
+        uniqueId: "swapped",
+        contextId: 4,
+        target,
+        frame,
+        world: { _tag: "Main" },
+        origin: "://"
+      })
+      document.realms.add(realm)
+      const at = yield* BrowserClock.after(100)
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => 1",
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      }).pipe(
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* TestClock.adjust("40 millis")
+      yield* Deferred.succeed(reply, undefined)
+      yield* Deferred.await(rejected)
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(waiting.pollUnsafe(), "the rejection alone must wait for the destroy event")
+      Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+      yield* state.buffer.flush
+      const result = yield* Fiber.join(waiting)
+      assert.strictEqual(result.reason._tag, "Gone")
+    }).pipe(
+      Effect.scoped,
+      Effect.provideServiceEffect(
+        BrowserClock.CurrentClock,
+        Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+      )
+    ))
+})
+
 describe("CdpAdapter transient evaluation results", () => {
   for (const releaseResult of [false, true]) {
     for (const thrown of [false, true]) {
