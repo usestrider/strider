@@ -1530,6 +1530,36 @@ for (const parent of [true, false]) {
   })
 }
 
+it.effect("does not record a malformed URL's span event on a span that has already ended", () => {
+  // The ingestion worker keeps the context it was forked in, so a span around connecting is its parent for the
+  // connection's lifetime, though it ends as soon as connecting does. An event added to an ended span is dropped by
+  // OpenTelemetry's SDK, so the diagnostic would be lost.
+  const late: Array<string> = []
+  const tracer = Tracer.make({
+    span(options) {
+      const span = new Tracer.NativeSpan(options)
+      const event = span.event.bind(span)
+      span.event = (name, startTime, attributes) => {
+        if (span.status._tag === "Ended") late.push(`${name} on ended span ${span.name}`)
+        event(name, startTime, attributes)
+      }
+      return span
+    }
+  })
+  return withProtocolScheduler((drain) =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders().pipe(Effect.withSpan("connecting"))
+      const page = yield* h.page.control
+      const event = replacementEvent()
+      yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
+      yield* drain
+      yield* page.activate
+      assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
+      assert.deepStrictEqual(late, [])
+    })
+  ).pipe(Effect.withTracer(tracer), onTestClock)
+})
+
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
 
