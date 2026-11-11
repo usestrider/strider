@@ -8,11 +8,6 @@ A program written against `Browser` runs on Chromium unchanged, but Chromium's p
 tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
 works around each, and can send CDP itself for what Strider doesn't wrap.
 
-When a successfully connected layer closes, Strider asks Chromium to close and waits up to five seconds for its
-process to exit before the existing signal termination fallback. This best-effort shutdown helps preserve recent
-storage in a supplied profile; crashes and forced termination can still lose writes. The extra five seconds means
-a hung Chromium can take roughly ten seconds to stop, plus process-group cleanup.
-
 ## Protocol and versions
 
 Strider drives Chromium, Chrome and Edge over the Chrome DevTools Protocol: through a pipe to a browser it launches,
@@ -54,6 +49,14 @@ const LikeAUser = Chromium.layer({
   [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-a-contexts-life) to change it.
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
+
+Once `Chromium.layer` connects to the browser it launched, closing the layer's scope asks that browser to close
+and waits up to five seconds for process exit. If it is still running, Strider sends SIGTERM, then SIGKILL five
+seconds later if it has not exited. A hung browser can take roughly ten seconds to stop, plus process-group
+cleanup. If startup fails after spawning the browser, cleanup skips the graceful-close wait and uses signals.
+
+This best-effort shutdown helps preserve recent storage in a supplied `userDataDir`; crashes and forced
+termination can still lose writes.
 
 On the tested Chromium build, capturing a minimized window temporarily produced visible/hidden visibility events
 and animation-frame callbacks while the native window stayed minimized. Both the old and new capture paths did

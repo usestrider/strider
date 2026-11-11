@@ -33,11 +33,15 @@ import type * as Url from "../Url.ts"
  * **Details**
  *
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
- * `userDataDir` names one you own. When a successfully connected layer's scope closes, it asks Chromium to close and waits
- * up to five seconds by default for process exit before the existing signal termination fallback. This best-effort shutdown
- * helps preserve recent storage in a supplied profile; crashes and forced termination can still lose writes.
- * A hung process can take roughly ten seconds to stop, plus process-group cleanup. The layer starts it with the platform's
- * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides.
+ * `userDataDir` names one you own. Once `Chromium.layer` connects to the browser it launched, closing the
+ * layer's scope asks that browser to close and waits up to five seconds for process exit. If it is still
+ * running, Strider sends SIGTERM, then SIGKILL five seconds later if it has not exited. A hung browser can take
+ * roughly ten seconds to stop, plus process-group cleanup. If startup fails after spawning the browser, cleanup
+ * skips the graceful-close wait and uses signals.
+ *
+ * This best-effort shutdown helps preserve recent storage in a supplied profile; crashes and forced termination
+ * can still lose writes. The layer starts the browser with the platform's `ChildProcessSpawner` and `FileSystem`,
+ * which `NodeServices.layer` from `@effect/platform-node` provides.
  *
  * The browser starts with core dumps off, so a renderer that crashes exits at once and the page is reported as
  * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
