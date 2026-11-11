@@ -1,6 +1,8 @@
 /**
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
- * its scripts run and again to every target in scope when a registration comes or goes.
+ * its scripts run and again to every target in scope when a registration comes or goes. A context that is about
+ * to be removed skips the release of its own file chooser, challenge and credential declarations; if the removal
+ * is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -506,6 +508,27 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
     }).pipe(Protocol.on(state.root()))
   }))
 
+/**
+ * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
+ * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
+ * and file chooser are reset on their own: a reset that fails is logged and the others still run.
+ */
+export const restoreContext = (state: State, context: ContextEntry) =>
+  Effect.forEach(
+    targetsInScope(state, { _tag: "UserContext", context: context.id }),
+    (target) =>
+      // Each reset stands alone: one that fails is logged and leaves the others to run
+      Effect.all([
+        applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+        target.kind === "page"
+          ? Page.setInterceptFileChooserDialog({
+            enabled: state.registry.fileChooser(placement(target.page!))
+          }).pipe(Protocol.on(target.session), releaseErrors)
+          : Effect.void
+      ], { discard: true }),
+    { concurrency: "unbounded", discard: true }
+  )
+
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
     Effect.catchIf(
@@ -541,8 +564,8 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = declaration._tag === "Downloads" && declaration.retiring?.() === true
-        // The context is removed right after: restoring its download behavior would only add a round trip
+      const release = "retiring" in declaration && declaration.retiring?.() === true
+        // The context is removed right after: undoing the declaration would only add a round trip
         ? Effect.void
         : declaration._tag === "Downloads"
         ? Effect.forEach(

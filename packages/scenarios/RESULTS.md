@@ -204,7 +204,7 @@ See [the scenario instructions](README.md) for the executable regeneration comma
 
 ### Scenarios
 
-Each scenario is written with each library as its own documentation would write it, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed.
+Each scenario is written once with each library, doing the same work, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed.
 
 | Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright | p50 gap | p90 gap |
 |---|---|---|---|---|---|---|---|
@@ -917,7 +917,7 @@ const videoFirefoxStrider = Effect.fn("video-firefox")(function*() {
 
 ### Scenarios
 
-Each scenario is written with each library as its own documentation would write it, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed.
+Each scenario is written once with each library, doing the same work, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed.
 
 | Scenario | Strider | Playwright | Strider read | Playwright read | Lines, Strider / Playwright | p50 gap | p90 gap |
 |---|---|---|---|---|---|---|---|

@@ -1,5 +1,30 @@
 # @usestrider/browser
 
+## 0.8.4
+
+### Fixed
+
+- On Chromium builds that report a popup's first frame with the URL `":"`, opening a popup or following a `target="_blank"` link no longer ends the connection to the browser (#290).
+
+## 0.8.3
+
+### Performance
+
+- On Chromium, a context created with `focus: "emulated"` now opens its pages as tabs instead of windows of their own. Creating twenty pages in one context, using them, and closing the context takes 44% less time. The default, `focus: "system"`, still opens a window per page (#281).
+- Closing a context on Chromium is about 27 ms faster. When a scope that created a context ends, Strider removes the context in one protocol command, which closes its pages, instead of closing each page first. A page closed on its own, or in a context that stays open, closes as before, and a context the browser refuses to remove still has its pages closed one by one (#271, #285).
+
+### Fixed
+
+- `Locator.evaluate`, `Locator.evaluateAll`, a synthetic `dragTo`, and `storageState` no longer use the previous document's realm when a frame commits a new document while an element is being found. They use the document the element belongs to (#280).
+- A design-mode fill interrupted while a navigation destroys its page's script context no longer leaves the page's input blocked (#269).
+- Closing a page now ends its frames' documents as well as its own, so a wait on a frame's document finishes at once instead of running to its deadline (#269).
+- Response body subscriptions (`NetworkResponse.next` and `stream` with `body`) now end, and cancel any body read in progress, when borrowed inspect access is released. A subscription started with an expired grant fails with `TargetGone` (#272).
+- Launching stock WebKit no longer fails intermittently with `PermissionDenied` reading `/proc/<pid>/fd`: the child's descriptors are read only once a listener exists on the inspector port (#283).
+
+### Changed
+
+- Documentation comments, error messages, hints, and the `strider` CLI's help and output use the serial comma. A test that matches one of these messages word for word needs the comma too, and a test exported with `strider export test` lists three or more names as "a, b, and c" (#277).
+
 ## 0.8.2
 
 ### Added

@@ -59,7 +59,10 @@ it.effect("adds no intercept for default contexts and releases the credential ow
         assert.strictEqual(intercepts, 1)
         const [scope, declaration] = [...active][0]!
         assert.deepStrictEqual(scope, { _tag: "UserContext", context: context.id })
-        assert.deepStrictEqual(declaration, { _tag: "Intercept", patterns: ["*"], phases: ["auth"] })
+        assert.deepStrictEqual(
+          { ...declaration, retiring: undefined },
+          { _tag: "Intercept", patterns: ["*"], phases: ["auth"], retiring: undefined }
+        )
         yield* Browser.newContext()
         assert.strictEqual(intercepts, 1)
       }))

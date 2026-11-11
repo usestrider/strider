@@ -217,11 +217,9 @@ strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
         <p class="mt-5 max-w-lg text-[1.2rem] leading-relaxed">
           Drive Chromium, Firefox, and WebKit from Effect.
         </p>
-        <p class="mt-8 flex flex-wrap gap-4">
-          <a class="btn border-white bg-white text-band" href="/docs">Read the guide</a>
-          <button class="btn border-white font-mono text-[0.8rem] text-white" type="button" data-copy-text={install}>
-            {install}
-          </button>
+        <p class="mt-8 flex flex-wrap items-center gap-4">
+          <a class="btn border-white bg-white text-band transition-colors hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" href="/docs">Read the guide</a>
+          <code class="install">{install}</code>
         </p>
         <div class="mt-12 flex justify-between border-t border-white/60 pt-4">
           <span class="label !text-white">Pre-release · {version}</span>
@@ -357,7 +355,7 @@ strider -s demo -p alerts expect 'text="You clicked: Ok"' visible
             A Playwright program translates almost line by line. These are the habits that change.
           </p>
         </div>
-        <a class="btn border-white bg-white text-band" href="/docs/playwright">Strider for Playwright users</a>
+        <a class="btn border-white bg-white text-band transition-colors hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" href="/docs/playwright">Strider for Playwright users</a>
       </div>
       <div class="mt-10 border-b border-white/60">
         <div class="hidden grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-10 border-t border-white/60 pt-3 pb-2 md:grid">

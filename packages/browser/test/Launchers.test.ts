@@ -778,7 +778,8 @@ describe("WebKit launcher", () => {
           | "foreign"
           | "collision"
           | "unreadable-after"
-          | "unreadable-collision",
+          | "unreadable-collision"
+          | "descriptors-denied-once",
         around: (
           start: Effect.Effect<Launch.LaunchError, WebKitAutomation.Group>,
           progress: OwnershipProgress
@@ -800,6 +801,8 @@ describe("WebKit launcher", () => {
         let connected = 0
         let closed = 0
         let writes = 0
+        let listening = true
+        let descriptorsReadBeforeListener = 0
         let inspected = yield* Deferred.make<void>()
         const spawner = ChildProcessSpawner.make((command) =>
           Effect.gen(function*() {
@@ -856,6 +859,13 @@ describe("WebKit launcher", () => {
                     pathOrDescriptor: path
                   }))
                 }
+                // The first poll finds no listener on the port.
+                listening = mode !== "descriptors-denied-once" || reads > 1
+                if (!listening) {
+                  return Effect.succeed(
+                    "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+                  )
+                }
                 Deferred.doneUnsafe(inspected, Effect.void)
                 return Effect.succeed(
                   `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n 0: 0100007F:${
@@ -864,8 +874,22 @@ describe("WebKit launcher", () => {
                 )
               })
               : fs.readFileString(path, options),
-          readDirectory: (path, options) =>
-            path === "/proc/9000001/fd" ? Effect.succeed(["7"]) : fs.readDirectory(path, options),
+          readDirectory: (path, options) => {
+            if (path !== "/proc/9000001/fd") return fs.readDirectory(path, options)
+            // Simulates the first read after spawn being denied, which was never seen later.
+            if (mode === "descriptors-denied-once" && !listening) {
+              descriptorsReadBeforeListener++
+              return Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "readDirectory",
+                  pathOrDescriptor: path
+                })
+              )
+            }
+            return Effect.succeed(["7"])
+          },
           readLink: (path) =>
             path === "/proc/9000001/fd/7"
               ? Effect.succeed(`socket:[${mode === "foreign" || mode === "collision" ? "99999" : inode}]`)
@@ -898,7 +922,11 @@ describe("WebKit launcher", () => {
             return { pull: Effect.never, upgrade: () => Effect.void, write, writeAll: write, close }
           })
         }
-        const start = WebKitAutomation.start({ executablePath, timeout: "50 millis" }).pipe(onPlatform("linux"))
+        const start = WebKitAutomation.start({
+          executablePath,
+          // The listener shows on the second poll, which the 100 ms polling interval puts after a short deadline.
+          timeout: mode === "descriptors-denied-once" ? "2 seconds" : "50 millis"
+        }).pipe(onPlatform("linux"))
           .pipe(
             Effect.scoped,
             Effect.provideService(FileSystem.FileSystem, procfs),
@@ -913,7 +941,7 @@ describe("WebKit launcher", () => {
           reads: () => reads,
           stops: () => stopped
         })
-        return { error, spawned, stopped, connected, closed, writes }
+        return { error, spawned, stopped, connected, closed, writes, descriptorsReadBeforeListener }
       }
     )
 
@@ -951,6 +979,15 @@ describe("WebKit launcher", () => {
         assert.strictEqual(result.writes, 1)
         assert.strictEqual(result.connected, 1)
         assert.strictEqual(result.closed, 1)
+        assert.strictEqual(result.stopped, 1)
+      }))
+
+    it.effect("doesn't read the spawned process's descriptors until a listener exists", () =>
+      Effect.gen(function*() {
+        const result = yield* ownershipAttempt("descriptors-denied-once")
+        assert.strictEqual(result.descriptorsReadBeforeListener, 0)
+        assert.strictEqual(result.writes, 1)
+        assert.strictEqual(result.connected, 1)
         assert.strictEqual(result.stopped, 1)
       }))
 
@@ -1634,7 +1671,7 @@ describe("WebKit launcher", () => {
 
     it.effect("keeps a child's exit when its descriptors are denied before Node reports the exit", () =>
       Effect.gen(function*() {
-        const result = yield* scriptedLaunch(() => ({ held: false, fdDeniedBeforeExitEvent: true }))
+        const result = yield* scriptedLaunch(() => ({ held: true, fdDeniedBeforeExitEvent: true }))
         assert(result.exit._tag === "Failure")
         const error = Option.getOrThrow(Exit.findErrorOption(result.exit))
         assert.strictEqual(error.reason._tag, "ProcessExited", "the child was exiting: procfs isn't what's wrong")

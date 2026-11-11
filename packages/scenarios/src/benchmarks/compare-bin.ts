@@ -163,7 +163,7 @@ try {
             "report.ts",
             "scenarios.ts",
             "site.ts",
-            "replay.ts",
+            "recordings.ts",
             "selection.ts"
           ]
         for (const file of files) {
