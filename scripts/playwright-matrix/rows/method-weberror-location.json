@@ -1,0 +1,11 @@
+{
+  "id": "method-weberror-location",
+  "upstream": [
+    "method:WebError.location"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

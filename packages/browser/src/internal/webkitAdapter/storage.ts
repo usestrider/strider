@@ -7,12 +7,13 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Protocol from "../../protocol/Protocol.ts"
+import type * as Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Page from "../../webkit-stock-protocol/Page.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
-import { automationOf, processOfContext } from "./automation.ts"
+import { automationOf, pageHandleOf, processOfContext } from "./automation.ts"
 import { answered, contextOf, type PageEntry, type State, type TargetEntry } from "./state.ts"
 
 // ── Through pages ─────────────────────────────────────────────────────────────────────────────────────────
@@ -140,8 +141,22 @@ export const setCookiesLaunched = Effect.fnUntraced(function*(
 })
 
 /** What the list shows, removed through a page: a context with none open lists none (QUIRKS.md, Q225). */
-export const clearCookiesLaunched = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
-  const page = pagesIn(state, id)[0]
-  if (page === undefined) return
-  yield* deleteThrough(page.target!, yield* cookiesLaunched(state, id))
-})
+export const clearCookiesLaunched = Effect.fnUntraced(
+  function*(state: State, id: UserContext.Id, options?: { readonly page: Target.NavigableId }) {
+    const page = pagesIn(state, id)[0]
+    if (page === undefined) return
+    if (options !== undefined) {
+      const seed = state.pages.get(options.page)
+      if (seed === undefined || seed.context.id !== id) {
+        return yield* Effect.fail(Kit.unsupported("cookies.clear", "A page of this context is required"))
+      }
+      const process = yield* processOfContext(state, seed.context)
+      const handle = yield* pageHandleOf(state, seed)
+      yield* automationOf(process, Automation.deleteAllCookies({ browsingContextHandle: handle }))
+      // Read through Automation after the deletion command, rather than returning while its IPC is queued.
+      yield* automationOf(process, Automation.getAllCookies({ browsingContextHandle: handle }))
+      return
+    }
+    yield* deleteThrough(page.target!, yield* cookiesLaunched(state, id))
+  }
+)

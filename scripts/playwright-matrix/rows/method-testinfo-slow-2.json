@@ -1,0 +1,11 @@
+{
+  "id": "method-testinfo-slow-2",
+  "upstream": [
+    "method:TestInfo.slow#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Strider Playwright Test runner/reporter integration for this member. The Vitest integration does not implement this contract.",
+  "capabilities": [],
+  "requirements": []
+}

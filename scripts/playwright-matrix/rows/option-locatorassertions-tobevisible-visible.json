@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tobevisible-visible",
+  "upstream": [
+    "method:LocatorAssertions.toBeVisible"
+  ],
+  "option": "visible",
+  "requirements": []
+}

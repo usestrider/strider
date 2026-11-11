@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsercontext-grantpermissions-origin",
+  "upstream": [
+    "method:BrowserContext.grantPermissions"
+  ],
+  "option": "origin",
+  "requirements": []
+}

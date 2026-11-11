@@ -10,10 +10,12 @@ import * as NetworkRequest from "../../NetworkRequest.ts"
 import * as NetworkResponse from "../../NetworkResponse.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Sizes from "../requestSizes.ts"
+import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
 import { pause, requestSnapshot } from "./obligations.ts"
-import { type Event, navigableOf, type RequestEntry, type State } from "./state.ts"
+import { type Event, navigableOf, placement, type RequestEntry, type State } from "./state.ts"
 import { endNavigation } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -25,10 +27,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       let request = state.requests.get(data.request)
       if (request !== undefined && params.redirectCount > request.redirects) {
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
+        const previous = request.finished
+        request.finished = Deferred.makeUnsafe()
+        request.terminalRedirect = false
         request.redirects = params.redirectCount
         request.hop = state.ids.hop(request.id, request.redirects)
         request.bodySizes[request.redirects] = data.bodySize
         state.hops.set(request.hop, request)
+        Deferred.doneUnsafe(previous, Effect.void)
       } else if (request === undefined) {
         const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
         const id = state.ids.request()
@@ -40,6 +46,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           navigable: navigableOf(state, params.context),
           navigation: navigation !== undefined && resourceType(data) === "document" ? navigation : undefined,
           finished: Deferred.makeUnsafe(),
+          terminalRedirect: false,
           fulfilled: false,
           bodySizes: []
         }
@@ -61,6 +68,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         at: Adapter.now()
       })
       state.buffer.emit({ _tag: "RequestSent", request: snapshot })
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(data.timings, false) })
+      }
       // The headers the request event gives are the ones sent, cookies included
       state.buffer.emit({ _tag: "HopHeaders", hop: snapshot.hop, phase: "request", headers: snapshot.headers })
       if (params.isBlocked) pause(state, params, "request", snapshot, Option.none())
@@ -68,6 +78,18 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.responseStarted, (params, { state }) => {
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestSizes && !request.fulfilled) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: state.ids.hop(request.id, params.redirectCount),
+          sizes: Sizes.bidi(params.response, false)
+        })
+      }
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, false) })
+      }
+      request.terminalRedirect = [301, 302, 303, 307, 308].includes(params.response.status) &&
+        headersOf(params.response.headers)["location"] === undefined
       if (request.navigation !== undefined) request.navigation.status = params.response.status
       const response = new NetworkResponse.NetworkResponse({
         hop: request.hop,
@@ -87,21 +109,33 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
     .on(Network.responseCompleted, (params, { state }) => {
+      ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
+        ?.proxyAttempts?.delete(params.request.request)
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
+      if (request.navigable?.context.requestSizes && !request.fulfilled) {
+        state.buffer.emit({
+          _tag: "HopSizes",
+          hop: state.ids.hop(request.id, params.redirectCount),
+          sizes: Sizes.bidi(params.response, true)
+        })
+      }
+      if (request.navigable?.context.requestTiming) {
+        state.buffer.emit({ _tag: "HopTiming", hop: request.hop, timing: Timing.bidi(params.request.timings, true) })
+      }
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
         encodedBytes: params.response.bytesReceived,
         at: Adapter.now()
       })
-      // A redirect's response completes its hop; the request goes on
-      if (params.response.status < 300 || params.response.status >= 400) {
-        Deferred.doneUnsafe(request.finished, Effect.void)
-        state.retire(params.request.request)
-      }
+      // Completion belongs to this hop, including a terminal 3xx without a followed redirect.
+      Deferred.doneUnsafe(request.finished, Effect.void)
+      state.retire(params.request.request)
     })
     .on(Network.fetchError, (params, { state }) => {
+      ;(state.contextsByBidi.get(params.userContext ?? "") ?? navigableOf(state, params.context)?.context)
+        ?.proxyAttempts?.delete(params.request.request)
       const request = state.requests.get(params.request.request)
       if (request === undefined) return
       state.buffer.emit({
@@ -150,18 +184,35 @@ const notCollected = (error: Parameters<typeof Kit.protocolError>[0]) =>
     )
     : Kit.protocolError(error)
 
+const terminalRedirect = () =>
+  Kit.unsupported(
+    "network.responseBody.terminalRedirect",
+    "Firefox does not answer network.getData for a terminal response with status 301, 302, 303, 307, or 308 without a Location header"
+  )
+
 export const responseBody = Effect.fnUntraced(function*(state: State, hop: NetworkRequest.HopId) {
   const request = yield* hopOf(state, hop)
   if (request.hop !== hop) {
     return yield* Effect.fail(Kit.unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
   }
+  if (request.terminalRedirect) return yield* Effect.fail(terminalRedirect())
   yield* Deferred.await(request.finished).pipe(
     Effect.mapError((error) => Kit.unsupported("body.failed", `The request failed (${error}), so it has no body`))
   )
-  const { bytes } = yield* state.send(Network.getData({ dataType: "response", request: request.bidi })).pipe(
-    Effect.mapError(notCollected)
+  if (request.hop !== hop) {
+    return yield* Effect.fail(Kit.unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
+  }
+  if (request.terminalRedirect) return yield* Effect.fail(terminalRedirect())
+  const result = yield* state.send(Network.getData({ dataType: "response", request: request.bidi })).pipe(
+    Effect.mapError(notCollected),
+    Effect.result
   )
-  return yield* bytesOf(bytes, "network.getData")
+  // The native request id is reused: a successor can arrive while getData is in flight.
+  if (request.hop !== hop) {
+    return yield* Effect.fail(Kit.unsupported("body.redirect", "A redirect's body isn't kept; only the last hop's is"))
+  }
+  if (result._tag === "Failure") return yield* Effect.fail(result.failure)
+  return yield* bytesOf(result.success.bytes, "network.getData")
 })
 
 export const requestBody = Effect.fnUntraced(function*(state: State, hop: NetworkRequest.HopId) {
@@ -173,3 +224,41 @@ export const requestBody = Effect.fnUntraced(function*(state: State, hop: Networ
   )
   return Option.some(yield* bytesOf(bytes, "network.getData"))
 })
+
+/** BiDi's native data belongs to a request id, not an independently addressable redirect hop. */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    if (
+      request.navigable === undefined ||
+      Option.isNone(state.registry.bodyLimit(placement(request.navigable), "request"))
+    ) return { _tag: "Unavailable", why: "notCollected" }
+    const size = request.bodySizes[state.ids.redirectsOf(snapshot.hop)]
+    if (size === 0) return { _tag: "Absent" }
+    // Firefox reports the base64 representation length for binary bodies, not their decoded byte count.
+    if (size !== null && size !== undefined && size > Math.ceil(limit / 3) * 4) return { _tag: "OverLimit" }
+    // Firefox can retain the first body's data even after a later hop changes it (Q183).
+    if (request.hop !== snapshot.hop || request.redirects !== 0) return { _tag: "Unavailable", why: "redirect" }
+    const result = yield* state.send(Network.getData({ dataType: "request", request: request.bidi })).pipe(
+      Effect.mapError(Kit.protocolError),
+      Effect.result
+    )
+    if (request.hop !== snapshot.hop) return { _tag: "Unavailable", why: "redirect" }
+    if (result._tag === "Failure") {
+      if (result.failure.reason._tag === "Protocol" && result.failure.reason.error.reason._tag === "Rejected") {
+        return {
+          _tag: "Unavailable",
+          why: "unavailable"
+        }
+      }
+      return yield* Effect.fail(result.failure)
+    }
+    const bytes = yield* bytesOf(result.success.bytes, "network.getData")
+    if (bytes.length > limit) return { _tag: "OverLimit" }
+    return { _tag: "Bytes", bytes }
+  }
+)

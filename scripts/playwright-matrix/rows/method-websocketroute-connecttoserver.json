@@ -1,0 +1,11 @@
+{
+  "id": "method-websocketroute-connecttoserver",
+  "upstream": [
+    "method:WebSocketRoute.connectToServer"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public WebSocket interception, mocking or forwarding API.",
+  "capabilities": [],
+  "requirements": []
+}

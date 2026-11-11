@@ -7,7 +7,7 @@
  *
  * **Gotchas**
  *
- * - This is the raw protocol. Nothing here subscribes to events, tracks contexts or waits for anything to be
+ * - This is the raw protocol. Nothing here subscribes to events, tracks contexts, or waits for anything to be
  *   ready; `@usestrider/browser/firefox` and `@usestrider/browser/bidi` do that.
  * - Every event belongs to the session: the wire carries no context to route by.
  * - Error replies are classified by a table of the spec's error codes. A code it doesn't know is `Rejected`

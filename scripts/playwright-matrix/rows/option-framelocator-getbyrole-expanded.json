@@ -1,0 +1,18 @@
+{
+  "id": "option-framelocator-getbyrole-expanded",
+  "upstream": [
+    "method:FrameLocator.getByRole"
+  ],
+  "option": "expanded",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

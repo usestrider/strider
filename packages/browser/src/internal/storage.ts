@@ -100,7 +100,7 @@ const fromInput = (input: CookieJar.Input): Adapter.Cookie | Reason.InvalidInput
   const invalid = (field: string, expected: string, hint: string) =>
     new Reason.InvalidInput({ input: field, expected, hint })
   if (input.name === "" || /[\s;=,]/.test(input.name)) {
-    return invalid("name", "a cookie name, without whitespace, ;, = or ,", `${JSON.stringify(input.name)} isn't one`)
+    return invalid("name", "a cookie name, without whitespace, ;, =, or ,", `${JSON.stringify(input.name)} isn't one`)
   }
   const value = Redacted.isRedacted(input.value) ? input.value : Redacted.make(input.value)
   if (/[;\r\n]/.test(Redacted.value(value))) {
@@ -108,7 +108,7 @@ const fromInput = (input: CookieJar.Input): Adapter.Cookie | Reason.InvalidInput
   }
   let domain: string
   let path: string
-  if (input.scope._tag === "Url") {
+  if (input.scope.url !== undefined) {
     const parsed = HttpUrl.fromString(input.scope.url)
     if (Result.isFailure(parsed)) {
       return invalid("scope", "an absolute URL", `${JSON.stringify(input.scope.url)} doesn't parse`)
@@ -171,8 +171,16 @@ const sends = (url: URL, cookie: CookieJar.Cookie, now: number) => {
 }
 
 /** A context's cookies. */
-export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): CookieJar.CookieJar => {
+export const cookieJar = (
+  runtime: Runtime.Runtime,
+  context: UserContext.Id,
+  recordCookie?: ((cookie: Adapter.Cookie) => void) | undefined
+): CookieJar.CookieJar => {
   const adapter = runtime.model.adapter
+  const setCookies = recordCookie === undefined ?
+    adapter.setCookies :
+    (context: UserContext.Id, cookies: ReadonlyArray<Adapter.Cookie>) =>
+      Effect.sync(() => cookies.forEach(recordCookie)).pipe(Effect.andThen(adapter.setCookies(context, cookies)))
   const list = (operation: string, id: Diagnostics.OperationId) =>
     adapter.cookies(context).pipe(
       Effect.map((cookies) => cookies.map(fromAdapter)),
@@ -208,7 +216,7 @@ export const cookieJar = (runtime: Runtime.Runtime, context: UserContext.Id): Co
       const cookie = fromInput(input)
       if (cookie instanceof Reason.InvalidInput) return yield* Effect.fail(cookieError("CookieJar.set", cookie, id))
       if (Option.isSome(cookie.partitionKey)) yield* requirePartitions(runtime, "CookieJar.set", id)
-      yield* adapter.setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
+      yield* setCookies(context, [cookie]).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.set", id)))
     }),
     remove: Operation.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
       const { id } = yield* Operation.record
@@ -322,8 +330,8 @@ export const originStorage = (
           id,
           budget.at
         )
-        record.markSent()
         const value = yield* Evaluation.call(runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn,
           arguments: [area, ...args].map((arg) => ({ _tag: "Value", value: { type: "string", value: arg } })),

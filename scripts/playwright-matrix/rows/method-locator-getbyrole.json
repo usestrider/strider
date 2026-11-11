@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-getbyrole",
+  "upstream": [
+    "method:Locator.getByRole"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.getByRole",
+      "url": "/docs/api/browser/Locator#Locator.getByRole"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

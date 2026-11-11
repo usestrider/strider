@@ -61,6 +61,13 @@ const snapshot = () =>
     label: input.getAttribute("aria-label")
   }))
 
+const presentationHeadings = () => {
+  document.body.innerHTML = Array.from(
+    { length: 100 },
+    (_, index) => `<h3 role="none" tabindex="0.5">Item ${index}</h3>`
+  ).join("")
+}
+
 const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
   name: `read-snapshot-${size}`,
   description:
@@ -91,6 +98,19 @@ export const cases: ReadonlyArray<Case> = [
       return page.title()
     },
     verify: equals("Shop")
+  },
+  {
+    name: "navigate-title-locator",
+    description: "Navigate through load, read the title, then resolve and read a heading",
+    strider: Effect.fnUntraced(function*(page, origin) {
+      yield* page.goto(`${origin}/`, { waitUntil: "load" })
+      return [yield* page.title, yield* page.getByRole("heading").readText]
+    }),
+    playwright: async (page, origin) => {
+      await page.goto(`${origin}/`, { waitUntil: "load" })
+      return [await page.title(), await page.getByRole("heading").textContent()]
+    },
+    verify: equals(["Shop", "Shop"])
   },
   {
     name: "resources",
@@ -127,6 +147,19 @@ export const cases: ReadonlyArray<Case> = [
       return values
     },
     verify: equals(Array.from({ length: 20 }, () => "Benchmark"))
+  },
+  {
+    name: "role-presentation",
+    description: "20 role counts over 100 presentational headings with focusable decimal tabindex (ms per batch)",
+    prepareStrider: (page) => page.evaluateInMainWorld(presentationHeadings),
+    preparePlaywright: (page) => page.evaluate(presentationHeadings),
+    strider: (page) => Effect.forEach(Array.from({ length: 20 }), () => page.getByRole("heading").count),
+    playwright: async (page) => {
+      const counts = []
+      for (let i = 0; i < 20; i++) counts.push(await page.getByRole("heading").count())
+      return counts
+    },
+    verify: equals(Array.from({ length: 20 }, () => 100))
   },
   {
     name: "locator-values",
@@ -381,7 +414,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a seeded dense 1280 by 2880 canvas full page as PNG; setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareDenseCapture),
     preparePlaywright: (page) => page.evaluate(prepareDenseCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyDensePng
   },
@@ -407,7 +440,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared 1280 by 2880 full page as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyPng(1280, 2880, [12, 34, 56])
   },
@@ -416,7 +449,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared visible 320 by 180 element as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "Element", locator: page.locator("#capture") } }),
+    strider: (page) => page.screenshot({ area: { element: page.locator("#capture") } }),
     playwright: (page) => page.locator("#capture").screenshot({ type: "png" }),
     verify: verifyPng(320, 180, [200, 100, 50])
   }

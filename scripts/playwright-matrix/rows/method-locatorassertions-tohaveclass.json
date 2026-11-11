@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohaveclass",
+  "upstream": [
+    "method:LocatorAssertions.toHaveClass"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveClass",
+      "url": "/docs/api/browser/Expect#toHaveClass"
+    }
+  ],
+  "notes": "Full class strings or regular expressions; ordered arrays require equal counts. Scalar zero/multiple matches retry with typed expectation evidence.",
+  "capabilities": [],
+  "requirements": []
+}

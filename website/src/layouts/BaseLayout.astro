@@ -38,6 +38,17 @@ const previewImage = new URL("/og.png", Astro.site)
     />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/heron.svg" type="image/svg+xml" />
+    <!-- Page views, counted without cookies through the site's own Worker (website/worker.ts) -->
+    <script is:inline async src="/a/script.js"></script>
+    <script is:inline>
+      window.plausible = window.plausible || function() {
+        ;(plausible.q = plausible.q || []).push(arguments)
+      }
+      plausible.init = plausible.init || function(i) {
+        plausible.o = i || {}
+      }
+      plausible.init()
+    </script>
     <Font cssVariable="--font-garamond" preload />
     <Font cssVariable="--font-source-serif" preload />
     <Font cssVariable="--font-plex-sans" preload />
@@ -75,10 +86,16 @@ const previewImage = new URL("/og.png", Astro.site)
     <SiteFooter />
     <BackToTop />
     <script>
+      const counter = window as { plausible?: (event: string, options: { props: Record<string, string> }) => void }
       document.addEventListener("click", (event) => {
         const target = event.target instanceof Element ? event.target : null
-        const copy = target?.closest<HTMLElement>("[data-copy-text]")
-        if (copy?.dataset["copyText"] !== undefined) void navigator.clipboard.writeText(copy.dataset["copyText"])
+        // Copying an install command with a code block's Copy is one of the counter's goals: the CLI's install, or the
+        // library's
+        const command = target?.closest<HTMLElement>(".expressive-code .copy button")?.dataset["code"]
+        if (command?.startsWith("pnpm add")) {
+          const goal = command.includes("@usestrider/cli") ? "Copy CLI install command" : "Copy install command"
+          counter.plausible?.(goal, { props: { command } })
+        }
       })
     </script>
   </body>

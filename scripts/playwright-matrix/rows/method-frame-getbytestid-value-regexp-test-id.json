@@ -1,0 +1,13 @@
+{
+  "id": "method-frame-getbytestid-value-regexp-test-id",
+  "upstream": [
+    "method:Frame.getByTestId"
+  ],
+  "parent": "method-frame-getbytestid",
+  "value": "RegExp test id",
+  "status": "missing",
+  "api": [],
+  "notes": "Strider getByTestId takes a string, not a RegExp.",
+  "capabilities": [],
+  "requirements": []
+}

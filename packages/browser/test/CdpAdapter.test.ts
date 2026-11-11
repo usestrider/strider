@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Deadline, NetworkRequest } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -20,9 +20,12 @@ import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as CdpAdapter from "../src/internal/cdpAdapter.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Fold from "../src/internal/fold.ts"
+import * as Handles from "../src/internal/handles.ts"
 import * as Har from "../src/internal/har.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Readable from "../src/internal/readable.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 
@@ -49,6 +52,165 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
       makeDispatcher: () => dispatcher
     })
   )
+})
+
+describe("CDP paused page initialization", () => {
+  for (const rejected of [false, true]) {
+    it.effect(`writes declarations before resume and handles the first request before renderer replies${rejected ? " when a declaration fails" : ""}`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const paused = yield* Deferred.make<void>()
+        const facts: Array<Adapter.Fact> = []
+        const commands: Array<Sent> = []
+        const held: Array<Sent> = []
+        let resumed = false
+        const reply = (command: Sent) =>
+          browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            ...(rejected && command.method === "Page.addScriptToEvaluateOnNewDocument" &&
+                command.params?.worldName === "isolated"
+              ? { error: { code: -32000, message: "script installation rejected" } }
+              : {
+                result: command.method === "Browser.getVersion"
+                  ? {
+                    protocolVersion: "1.3",
+                    product: "Chrome/155.0.8059.79",
+                    revision: "test",
+                    userAgent: "HeadlessChrome",
+                    jsVersion: "test"
+                  }
+                  : command.method === "Target.getBrowserContexts" ?
+                  { browserContextIds: [] }
+                  : command.method === "Page.getFrameTree" ?
+                  {
+                    frameTree: {
+                      frame: {
+                        id: "T1",
+                        loaderId: "initial",
+                        url: "about:blank",
+                        securityOrigin: "://",
+                        mimeType: "text/html"
+                      }
+                    }
+                  }
+                  : command.method === "Page.addScriptToEvaluateOnNewDocument" ?
+                  { identifier: `script-${command.id}` }
+                  : command.method === "Page.getLayoutMetrics"
+                  ? metrics
+                  : {}
+              })
+          })
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+              held.push(command)
+              continue
+            }
+            if (command.method === "Runtime.runIfWaitingForDebugger") {
+              yield* browser.receive({
+                sessionId: "S1",
+                method: "Fetch.requestPaused",
+                params: {
+                  requestId: "fetch-1",
+                  frameId: "T1",
+                  resourceType: "Document",
+                  request: {
+                    url: "https://target.test/",
+                    method: "GET",
+                    headers: {},
+                    initialPriority: "High",
+                    referrerPolicy: "strict-origin-when-cross-origin"
+                  }
+                }
+              })
+              // The browser cannot create the renderer to answer these commands until its route can run.
+              yield* Deferred.await(paused)
+              resumed = true
+              for (const pending of held.splice(0).reverse()) yield* reply(pending)
+            }
+            yield* reply(command)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "launched",
+          sink: Effect.fnUntraced(function*(fact) {
+            facts.push(fact)
+            if (fact._tag === "ObligationOpened") yield* Deferred.succeed(paused, undefined)
+            if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+              yield* Deferred.succeed(ready, undefined)
+            }
+          })
+        })
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        const scripts = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+        for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
+          yield* adapter.declare(context, {
+            _tag: "InitScript",
+            source: "self.initialized = true",
+            world,
+            phase: "user",
+            workers: false,
+            timing: "beforeAuthorScript",
+            after: []
+          }).pipe(Scope.provide(scripts))
+        }
+        yield* adapter.declare(context, {
+          _tag: "Intercept",
+          patterns: ["https://target.test/**"],
+          phases: ["request"]
+        })
+        yield* adapter.declare(context, { _tag: "Override", override: { _tag: "Locale", locale: "fr-FR" } })
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: {
+            _tag: "Viewport",
+            width: 400,
+            height: 300,
+            deviceScaleFactor: 1,
+            mobile: false
+          }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+            waitingForDebugger: true
+          }
+        })
+        yield* Deferred.await(ready)
+        const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+        assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
+        assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
+        for (
+          const method of [
+            "Page.addScriptToEvaluateOnNewDocument",
+            "Fetch.enable",
+            "Emulation.setLocaleOverride",
+            "Emulation.setUserAgentOverride",
+            "Emulation.setDeviceMetricsOverride"
+          ]
+        ) {
+          assert.include(sent, method)
+        }
+        assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
+        assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
+        assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
+        const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
+        yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+        assert.isTrue(commands.some((command) =>
+          command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+          command.params?.identifier === `script-${firstScript.id}`
+        ))
+        // Tear down the connection before declarations release, so no renderer replies are needed by cleanup.
+        yield* browser.lose("test complete")
+      }).pipe(Effect.scoped))
+  }
 })
 
 describe("CDP combined locale and user-agent declarations", () => {
@@ -966,6 +1128,7 @@ const sentHeaders = Effect.fnUntraced(
     const screenshotWork = yield* Queue.unbounded<Sent>()
     const stops = yield* Queue.unbounded<Sent>()
     const stopDeadlines: Array<Option.Option<number>> = []
+    const ackDeadlines: Array<Option.Option<number>> = []
     const stopWrites = yield* Queue.unbounded<void>()
     const stopWriteGate = yield* Deferred.make<void>()
     const startWrites = yield* Queue.unbounded<void>()
@@ -1030,6 +1193,7 @@ const sentHeaders = Effect.fnUntraced(
         yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
       }
     }).pipe(Effect.forkScoped)
+    let connection!: Adapter.AdapterConnection
     const services = yield* Layer.build(BrowserImpl.layer((sink) =>
       CdpAdapter.connect({
         ...browser.transport,
@@ -1037,6 +1201,9 @@ const sentHeaders = Effect.fnUntraced(
           if (JSON.parse(message).method === "Page.startScreencast" && blockStart) {
             yield* Queue.offer(startWrites, undefined)
             yield* Deferred.await(startWriteGate)
+          }
+          if (JSON.parse(message).method === "Page.screencastFrameAck") {
+            ackDeadlines.push(yield* ProtocolClient.CommandDeadline)
           }
           if (JSON.parse(message).method === "Page.stopScreencast") {
             stopDeadlines.push(yield* ProtocolClient.CommandDeadline)
@@ -1053,7 +1220,11 @@ const sentHeaders = Effect.fnUntraced(
           if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
           if (fact._tag === "ConnectionOpened") yield* Queue.offer(settled, undefined)
         })
-      })
+      }).pipe(Effect.tap((adapter) =>
+        Effect.sync(() => {
+          connection = adapter
+        })
+      ))
     ))
     yield* browser.receive({
       method: "Target.attachedToTarget",
@@ -1090,6 +1261,7 @@ const sentHeaders = Effect.fnUntraced(
     const request = yield* next
     return {
       browser,
+      connection,
       page,
       request,
       send,
@@ -1097,6 +1269,7 @@ const sentHeaders = Effect.fnUntraced(
       captures,
       stops,
       stopDeadlines,
+      ackDeadlines,
       stopWrites,
       stopWriteGate,
       startWrites,
@@ -1123,6 +1296,103 @@ const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
   )
 
 describe("Chromium public sent-header waiting", () => {
+  it.effect("returns the snapshot for a new lookup after eviction while releasing an existing waiter", () =>
+    Effect.gen(function*() {
+      const { browser, page, request, barrier } = yield* sentHeaders()
+      const waiting = yield* Effect.forkScoped(NetworkRequest.headersSent(page, request))
+      yield* TestClock.adjust("0 millis")
+      assert.isUndefined(waiting.pollUnsafe())
+      for (let i = 0; i < Fold.maxHops; i++) {
+        yield* browser.receive({
+          ...captured[0]!,
+          sessionId: "S1",
+          params: { ...captured[0]!.params, requestId: `evict-${i}` }
+        })
+      }
+      yield* barrier
+      assert.deepStrictEqual(yield* NetworkRequest.headersSent(page, request), request.headers)
+      yield* TestClock.adjust("0 millis")
+      assert.isDefined(waiting.pollUnsafe(), "existing waiter must settle as well as the new snapshot lookup")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+    }).pipe(onTestClock))
+
+  it.effect("publishes late request ExtraInfo after loadingFailed without reopening settled waits", () =>
+    Effect.gen(function*() {
+      const { browser, page, request, send, barrier, facts } = yield* sentHeaders()
+      const waiting = yield* Effect.forkScoped(NetworkRequest.headersSent(page, request))
+      yield* TestClock.adjust("0 millis")
+      yield* browser.receive({
+        method: "Network.loadingFailed",
+        sessionId: "S1",
+        params: {
+          requestId: captured[0]!.params.requestId,
+          timestamp: 772297,
+          type: "Fetch",
+          errorText: "net::ERR_FAILED"
+        }
+      })
+      yield* barrier
+      yield* TestClock.adjust("0 millis")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+      yield* send(captured[1]!)
+      yield* barrier
+      // HopHeaders is the adapter feed shared by the model and recording consumers.
+      const late = facts.filter((fact) =>
+        fact._tag === "HopHeaders" && fact.phase === "request" && fact.hop === request.hop
+      )
+      const hop = Handles.target(page).behind.runtime.model.hop(request.hop)
+      const { entry } = Har.entryOf(
+        {
+          request,
+          hop,
+          end: Option.none(),
+          body: Option.none(),
+          requestBody: Option.none(),
+          frames: [],
+          done: Deferred.makeUnsafe()
+        },
+        { wall: 0, monotonic: request.at },
+        { detail: "full", include: new Set(), bodies: { _tag: "Embed" } }
+      )
+      const retained = Option.getOrThrow(hop)
+      assert.strictEqual(Option.getOrThrow(retained.state.getUnsafe().sent).cookie, "flavor=oat")
+      assert.deepStrictEqual(yield* Fiber.join(waiting), request.headers)
+      const recorded = entry.request
+      assert.deepStrictEqual({
+        published: late.length,
+        recordedCookie: recorded.headers.find((header) => header.name.toLowerCase() === "cookie")?.value
+      }, { published: 1, recordedCookie: "flavor=REDACTED" })
+    }).pipe(onTestClock))
+
+  it.effect("gives late failure headers to earlier redirect obligations first", () =>
+    Effect.gen(function*() {
+      const { browser, request, send, barrier, facts } = yield* sentHeaders()
+      yield* send(captured[3]!)
+      yield* barrier
+      const requests = facts.filter((fact) => fact._tag === "RequestSent")
+      const last = requests[requests.length - 1]!.request
+      yield* browser.receive({
+        method: "Network.loadingFailed",
+        sessionId: "S1",
+        params: {
+          requestId: captured[0]!.params.requestId,
+          timestamp: 772297,
+          type: "Fetch",
+          errorText: "net::ERR_FAILED"
+        }
+      })
+      yield* send(captured[1]!)
+      yield* barrier
+      const headers = () =>
+        facts.filter((fact): fact is Extract<Adapter.Fact, { _tag: "HopHeaders" }> =>
+          fact._tag === "HopHeaders" && fact.phase === "request"
+        )
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop])
+      yield* send(captured[4]!)
+      yield* barrier
+      assert.deepStrictEqual(headers().map((fact) => fact.hop), [request.hop, last.hop])
+    }).pipe(onTestClock))
+
   it.effect("waits for attribution, then returns the network headers", () =>
     Effect.gen(function*() {
       const { page, request, send, barrier } = yield* sentHeaders()
@@ -1158,7 +1428,7 @@ describe("Chromium public sent-header waiting", () => {
       assert.strictEqual(timeout.phase, "waitingForEvent")
     }).pipe(onTestClock))
 
-  for (const terminal of ["fails", "is canceled", "loses its page"] as const) {
+  for (const terminal of ["fails", "is canceled", "loses its page", "disconnects"] as const) {
     it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
       Effect.gen(function*() {
         const { browser, page, request, send, barrier } = yield* sentHeaders()
@@ -1170,7 +1440,10 @@ describe("Chromium public sent-header waiting", () => {
         )
         yield* TestClock.adjust("0 millis")
         assert.isUndefined(waiting.pollUnsafe())
-        if (terminal === "loses its page") {
+        if (terminal === "disconnects") {
+          yield* browser.lose("test disconnect")
+          yield* page.closed
+        } else if (terminal === "loses its page") {
           yield* browser.receive({
             method: "Target.detachedFromTarget",
             params: { sessionId: "S1", targetId: "76F3487A52CF4F79FE4AD28961E44D32" }
@@ -1225,9 +1498,9 @@ describe("Chromium capture document replacement", () => {
         const pending = yield* Effect.forkScoped(
           reader.screenshot(
             preparation === "layout"
-              ? { area: { _tag: "FullPage" } }
+              ? { area: "fullPage" }
               : preparation === "element"
-              ? { area: { _tag: "Element", locator: reader.locator("main") } }
+              ? { area: { element: reader.locator("main") } }
               : undefined
           ).pipe(Effect.flip)
         )
@@ -1446,6 +1719,118 @@ describe("Chromium capture document replacement", () => {
     }).pipe(onTestClock))
 })
 
+describe("Chromium empty screenshot errors", () => {
+  for (
+    const variant of ["empty", "otherCode", "otherMessage", "metrics", "replacementBefore", "replacementAfter"] as const
+  ) {
+    it.effect(`preserves native cause and ordering for ${variant}`, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders(variant === "metrics")
+        const page = yield* h.page.control
+        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const command = yield* Queue.take(variant === "metrics" ? h.preparation : h.captures)
+        const code = variant === "otherCode" ? -32001 : -32000
+        const description = variant === "otherMessage" ? "capture failed" : "Unable to capture screenshot"
+        if (variant === "replacementBefore") yield* h.browser.receive(replacementEvent())
+        yield* h.browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          error: { code, message: description }
+        })
+        if (variant === "replacementAfter") yield* h.browser.receive(replacementEvent())
+        const error = yield* Fiber.join(pending)
+        assert.strictEqual(error._tag, "PageError")
+        if (error._tag !== "PageError") return
+        if (variant === "replacementBefore") {
+          assert.strictEqual(error.reason._tag, "CaptureInvalidated")
+          return
+        }
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+        if (error.reason._tag !== "BackendFailure") return
+        assert.strictEqual(error.operation, "Page.screenshot")
+        assert.strictEqual(error.reason.kind, "Rejected")
+        assert.strictEqual(error.reason.method, command.method)
+        const nativeMessage = `${command.method} rejected: Unrecognized (${description})`
+        const expected = variant === "empty" || variant === "replacementAfter"
+          ? "Chromium returned an empty image"
+          : nativeMessage
+        assert.strictEqual(error.reason.hint, expected)
+        assert.include(error.message, expected)
+        assert.instanceOf(error.reason.cause, Protocol.ProtocolError)
+        if (error.reason.cause instanceof Protocol.ProtocolError) {
+          assert.deepStrictEqual(
+            error.reason.cause.reason,
+            new Protocol.Rejected({
+              method: command.method,
+              reason: "Unrecognized",
+              code,
+              description
+            })
+          )
+        }
+      }).pipe(onTestClock))
+  }
+})
+
+describe("Chromium screenshot viewport containment", () => {
+  for (
+    const [name, clip, beyond] of [
+      ["scrolled viewport edges", { x: 10, y: 20, width: 800, height: 600 }, false],
+      ["fractional inset", { x: 10.25, y: 20.25, width: 799.5, height: 599.5 }, false],
+      ["fractional left overflow", { x: 9.75, y: 20, width: 100, height: 100 }, true],
+      ["fractional top overflow", { x: 10, y: 19.75, width: 100, height: 100 }, true],
+      ["fractional right overflow", { x: 10.25, y: 20, width: 800, height: 100 }, true],
+      ["fractional bottom overflow", { x: 10, y: 20.25, width: 100, height: 600 }, true]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage: false,
+          scale: "device",
+          omitBackground: false,
+          clip: Option.some(clip)
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+
+  for (
+    const [name, fullPage, scale, clip, beyond] of [
+      ["generated full-page clip", true, "device", { x: 0, y: 0, width: 900, height: 1800, scale: 1 }, true],
+      ["generated CSS-scale viewport clip", false, "css", { x: 10, y: 20, width: 800, height: 600, scale: 0.5 }, false]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage,
+          scale,
+          omitBackground: false,
+          clip: Option.none()
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.deepStrictEqual(capture.params?.clip, clip)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+})
+
 describe("Chromium screenshot renderer readiness", () => {
   it.effect("invalidates when replacement was received before a metrics error reply", () =>
     Effect.gen(function*() {
@@ -1492,7 +1877,7 @@ describe("Chromium screenshot renderer readiness", () => {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(page.screenshot({
-          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: { _tag: "FullPage" as const } } : {}),
+          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: "fullPage" as const } : {}),
           scale: sizing === "css" || sizing === "fullPageCss" ? "css" : "device"
         }))
         const first = yield* Queue.take(h.screenshotWork)
@@ -1576,7 +1961,448 @@ describe("Chromium screenshot renderer readiness", () => {
   }
 })
 
+describe("Chromium video writer lifetime", () => {
+  const frame = (
+    h: { readonly browser: { readonly receive: (message: object) => Effect.Effect<unknown> } },
+    sessionId: number,
+    timestamp?: number
+  ) =>
+    h.browser.receive({
+      method: "Page.screencastFrame",
+      sessionId: "S1",
+      params: {
+        data: "/9j/2Q==",
+        sessionId,
+        metadata: {
+          ...(timestamp === undefined ? {} : { timestamp }),
+          offsetTop: 0,
+          pageScaleFactor: 1,
+          deviceWidth: 800,
+          deviceHeight: 600,
+          scrollOffsetX: 0,
+          scrollOffsetY: 0
+        }
+      }
+    })
+
+  it.effect("does not retain the acquisition protocol deadline in recording work", () =>
+    Effect.gen(function*() {
+      const deadline = yield* Deferred.make<Option.Option<number>>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(_frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(deadline, yield* ProtocolClient.CommandDeadline)
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video).pipe(Deadline.within("1 second"))
+      yield* frame(h, 70)
+      const recordedDeadline = yield* Deferred.await(deadline)
+      yield* video.file
+      assert.isTrue(Option.isNone(recordedDeadline), "recording and preparation outlive the acquisition deadline")
+      assert.strictEqual(h.ackDeadlines.length, 1)
+      assert.isTrue(
+        h.ackDeadlines.every(Option.isNone),
+        "releasing a pending frame must also clear the acquisition deadline"
+      )
+    }).pipe(onTestClock))
+
+  it.effect("keeps idle images until the recording scope closes", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const destination = yield* Deferred.make<VideoWriter.Destination>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: Effect.fnUntraced(function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+          yield* Deferred.succeed(destination, target)
+          yield* frames.pipe(Stream.runForEach((image) => Queue.offer(written, image)))
+          return target.path
+        })
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 51, 1000)
+      assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
+      const first = yield* Queue.take(written)
+      yield* TestClock.adjust("120 millis")
+      assert.strictEqual(yield* Queue.size(written), 0, "idle periods do not generate copies")
+      yield* TestClock.adjust("380 millis")
+      // The paint happened at 237ms; receiving it at 500ms must not change its timestamp.
+      yield* frame(h, 52, 1000.237)
+      const painted = yield* Queue.take(written)
+      assert.closeTo(painted.at, 237e6, 1000)
+      yield* TestClock.adjust("100 millis")
+      yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 600e6)
+      assert.deepStrictEqual(tail.data, first.data)
+      assert.match(yield* video.file, /\.webm$/)
+    }).pipe(onTestClock))
+
+  it.effect("keeps the stop-time tail local after a forward browser clock jump", () =>
+    Effect.gen(function*() {
+      const written = yield* Queue.unbounded<VideoWriter.Frame>()
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: (frames, target) =>
+          frames.pipe(
+            Stream.runForEach((image) => Queue.offer(written, image)),
+            Effect.as(target.path)
+          )
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const scope = yield* Scope.make()
+      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      yield* frame(h, 81, 1000)
+      assert.strictEqual((yield* Queue.take(written)).at, 0)
+      yield* TestClock.adjust("40 millis")
+      yield* frame(h, 82, 4600)
+      const jumped = yield* Queue.take(written)
+      yield* TestClock.adjust("60 millis")
+      yield* Scope.close(scope, Exit.void)
+      const tail = yield* Queue.take(written)
+      assert.strictEqual(tail.at, 100e6, "the wall-clock jump must not extend the recording past stop")
+      assert.strictEqual(jumped.at, 40e6)
+      yield* video.file
+    }).pipe(onTestClock))
+
+  for (const epoch of [1000, 4000000000, "local"] as const) {
+    for (const missing of [false, true]) {
+      it.effect(`maps browser epoch ${epoch} with ${missing ? "missing timestamp transitions" : "backward source times"}`, () =>
+        Effect.gen(function*() {
+          const written = yield* Queue.unbounded<VideoWriter.Frame>()
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: (frames, target) =>
+              frames.pipe(
+                Stream.runForEach((image) => Queue.offer(written, image)),
+                Effect.as(target.path)
+              )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          // Reusing the page after a complete stop must establish a new clock mapping.
+          for (const shift of [0, 3600]) {
+            const scope = yield* Scope.make()
+            const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+            const clock = yield* BrowserClock.CurrentClock
+            const base = typeof epoch === "number"
+              ? epoch + shift
+              : (performance.timeOrigin + clock.now() / 1e6) / 1000
+            const samples = missing
+              ? epoch === "local"
+                ? [[0, base, 0], [100, undefined, 100], [110, base + 0.005, 100], [4100, base + 4, 4000]] as const
+                : [
+                  [0, undefined, 0],
+                  [10, base, 10],
+                  [20, base + 0.005, 15],
+                  [30, undefined, 30],
+                  [40, base + 0.020, 30],
+                  [4100, base + 4, 4010]
+                ] as const
+              : [[0, base, 0], [10, base + 0.005, 5], [20, base + 0.003, 5], [4100, base + 4, 4000]] as const
+            let previous = 0
+            for (const [receipt, timestamp, expected] of samples) {
+              yield* TestClock.adjust(receipt - previous)
+              previous = receipt
+              yield* frame(h, receipt + 1, timestamp)
+              assert.closeTo((yield* Queue.take(written)).at, expected * 1e6, 1000)
+            }
+            yield* Scope.close(scope, Exit.void)
+            assert.closeTo((yield* Queue.take(written)).at, 4100e6, 1000)
+            yield* video.file
+          }
+        }).pipe(onTestClock))
+    }
+  }
+
+  it.effect("propagates a writer failure before the recording scope closes", () =>
+    Effect.gen(function*() {
+      const failed = new VideoWriter.VideoWriterError({
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "fake writer", hint: "encoder failed" })
+      })
+      const h = yield* sentHeaders().pipe(
+        Effect.provideService(VideoWriter.VideoWriter, { write: () => Effect.fail(failed) })
+      )
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      const video = yield* page.capability(Capability.Video)
+      yield* frame(h, 52)
+      const error = yield* Effect.flip(video.file)
+      assert(Capability.isCapabilityError(error))
+      assert.strictEqual(error.reason._tag, "BackendFailure")
+    }).pipe(onTestClock))
+
+  it.effect("shares video ownership and holds acknowledgements behind a blocked writer", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const unblock = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: Effect.fnUntraced(
+            function*(frames: Stream.Stream<VideoWriter.Frame>, target: VideoWriter.Destination) {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(unblock)
+              yield* Stream.runDrain(frames)
+              return target.path
+            }
+          )
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const castScope = yield* Scope.make()
+        const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
+        yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
+        const videoScope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+        yield* frame(h, 61)
+        yield* Deferred.await(started)
+        yield* drain
+        yield* frame(h, 62)
+        yield* drain
+        yield* frame(h, 63)
+        yield* TestClock.adjust("80 millis")
+        yield* drain
+        const acks = () =>
+          h.commands.filter((c) => c.method === "Page.screencastFrameAck").map((c) => c.params?.sessionId)
+        assert.deepStrictEqual(acks(), [], "the fast screencast cannot acknowledge the writer's waiting frame")
+        yield* Deferred.succeed(unblock, undefined)
+        yield* TestClock.adjust("120 millis")
+        yield* drain
+        assert.deepStrictEqual(acks(), [61, 62, 63])
+        yield* Scope.close(castScope, Exit.void)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
+        yield* Scope.close(videoScope, Exit.void)
+        yield* video.file
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 1)
+        assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 1)
+      })
+    ).pipe(onTestClock))
+
+  it.effect("closes a recording that never received a frame without waiting for the finish budget", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        let writes = 0
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: (_frames, target) => Effect.sync(() => writes++).pipe(Effect.as(target.path))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* drain
+        // No Page.screencastFrame arrives before the scope closes, as when the page never paints.
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("1 second")
+        yield* drain
+        const closedPromptly = closing.pollUnsafe() !== undefined
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert.strictEqual(writes, 0)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.notMatch(error.message, /did not finish within 5 seconds/)
+      })
+    ).pipe(onTestClock))
+
+  for (const mode of ["empty", "started", "blocked", "failure", "blockedFailure", "connection"] as const) {
+    it.effect(`settles video on ${mode.endsWith("Failure") || mode === "failure" ? `source failure (${mode})` : `session end (${mode})`} while its scope stays open`, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          let writes = 0
+          let released = false
+          const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+            write: Effect.fnUntraced(
+              function*(frames: Stream.Stream<VideoWriter.Frame>, destination: VideoWriter.Destination) {
+                writes++
+                yield* Deferred.succeed(started, undefined)
+                return yield* (mode === "blocked"
+                  ? Effect.never
+                  : Stream.runDrain(frames).pipe(Effect.as(destination.path)))
+                  .pipe(Effect.ensuring(Effect.sync(() => {
+                    released = true
+                  })))
+              }
+            )
+          }))
+          yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Allow", directory: "/tmp" }
+          })
+          const page = yield* h.page.control
+          const recordingScope = yield* Scope.make()
+          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(recordingScope))
+          const file = yield* Effect.forkScoped(Effect.exit(video.file))
+          if (mode !== "empty") {
+            yield* frame(h, 71)
+            yield* Deferred.await(started)
+          }
+          if (mode === "failure" || mode === "blockedFailure") {
+            yield* h.browser.receive({
+              method: "Page.screencastFrame",
+              sessionId: "S1",
+              params: {
+                data: "!",
+                sessionId: 72,
+                metadata: {
+                  offsetTop: 0,
+                  pageScaleFactor: 1,
+                  deviceWidth: 800,
+                  deviceHeight: 600,
+                  scrollOffsetX: 0,
+                  scrollOffsetY: 0
+                }
+              }
+            })
+          } else if (mode === "connection") {
+            yield* h.browser.lose("video transport lost")
+          } else {
+            yield* h.browser.receive({
+              method: "Target.detachedFromTarget",
+              params: {
+                sessionId: "S1",
+                targetId: "76F3487A52CF4F79FE4AD28961E44D32"
+              }
+            })
+          }
+          yield* drain
+          if (mode === "blocked") {
+            yield* TestClock.adjust("5 seconds")
+            yield* drain
+          }
+          const settled = file.pollUnsafe() !== undefined
+          if (!settled) {
+            // Ensure even the pre-fix regression releases its fibers before asserting.
+            yield* Fiber.interrupt(file)
+          }
+          const releasedAtFile = released
+          const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
+          yield* drain
+          yield* TestClock.adjust("5 seconds")
+          yield* Fiber.join(closing)
+          assert.isTrue(settled, "source termination must settle file without closing the caller scope")
+          const outcome = yield* Fiber.join(file)
+          if (mode === "started") {
+            assert.isTrue(Exit.isSuccess(outcome))
+          } else {
+            const error = yield* Effect.flip(outcome)
+            assert(Capability.isCapabilityError(error))
+            assert.strictEqual(error.reason._tag, "BackendFailure")
+            if ((mode === "failure" || mode === "blockedFailure") && error.reason._tag === "BackendFailure") {
+              assert.strictEqual(error.reason.method, "Page.screencastFrame")
+            }
+            if (mode === "connection" && error.reason._tag === "BackendFailure") {
+              assert.notStrictEqual(error.reason.method, "VideoWriter.write")
+            }
+            if (mode === "empty") {
+              assert.strictEqual(writes, 0)
+              assert.match(error.message, /no frame|before.*frame/i)
+            }
+          }
+          if (mode !== "empty") {
+            assert.isTrue(releasedAtFile, "the writer must release before file settles")
+          }
+        })
+      ).pipe(onTestClock))
+  }
+
+  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const started = yield* Deferred.make<void>()
+        const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+          write: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+        }))
+        yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp" }
+        })
+        const page = yield* h.page.control
+        const scope = yield* Scope.make()
+        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        yield* frame(h, 53)
+        yield* Deferred.await(started)
+        const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
+        yield* drain
+        yield* TestClock.adjust("5 seconds")
+        yield* Fiber.join(closing)
+        const error = yield* Effect.flip(video.file)
+        assert(Capability.isCapabilityError(error))
+        assert.strictEqual(error.reason._tag, "BackendFailure")
+      })
+    ).pipe(onTestClock))
+})
+
 describe("Chromium screencast renderer readiness", () => {
+  it.effect("acknowledges each shared frame once after every consumer takes it and replays it to an idle join", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const fast = yield* page.capability(Capability.Screencast)
+      const slow = yield* page.capability(Capability.Screencast)
+      const reading = yield* Effect.forkScoped(fast.frames.pipe(Stream.take(1), Stream.runCollect))
+      yield* h.browser.receive({
+        method: "Page.screencastFrame",
+        sessionId: "S1",
+        params: {
+          data: "/9j/2Q==",
+          sessionId: 37,
+          metadata: {
+            offsetTop: 0,
+            pageScaleFactor: 1,
+            deviceWidth: 800,
+            deviceHeight: 600,
+            scrollOffsetX: 0,
+            scrollOffsetY: 0
+          }
+        }
+      })
+      yield* Fiber.join(reading)
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        0,
+        "a fast consumer must not acknowledge the slow consumer's frame"
+      )
+      yield* slow.frames.pipe(Stream.take(1), Stream.runDrain)
+      yield* h.barrier
+      assert.strictEqual(h.commands.filter((c) => c.method === "Page.screencastFrameAck").length, 1)
+      const idle = yield* page.capability(Capability.Screencast)
+      const cached = yield* idle.frames.pipe(Stream.take(1), Stream.runCollect)
+      assert.strictEqual(cached.length, 1, "joining an idle session delivers its last image without a repaint")
+      yield* h.barrier
+      assert.strictEqual(
+        h.commands.filter((c) => c.method === "Page.screencastFrameAck").length,
+        1,
+        "replaying a cached frame must not acknowledge it twice"
+      )
+    }).pipe(onTestClock))
+
   it.effect("holds start until one valid metrics reply, then acknowledges frames and stops normally", () =>
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)

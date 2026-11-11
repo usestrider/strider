@@ -1,0 +1,28 @@
+{
+  "id": "method-page-waitfortimeout",
+  "upstream": [
+    "method:Page.waitForTimeout"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "package": "effect",
+      "module": "Effect",
+      "symbol": "sleep",
+      "url": "https://unpkg.com/effect@4.1.2/src/Effect.ts",
+      "source": {
+        "file": "node_modules/effect/src/Effect.ts",
+        "quote": "Returns an effect that suspends the current fiber for the specified duration\n * without blocking a JavaScript thread."
+      }
+    }
+  ],
+  "notes": "Use Effect.sleep(duration) for a caller-chosen delay. It sleeps on the fiber clock, so TestClock can advance it; it does not use the live browser clock used by browser waits and operation deadlines. It is interruptible and does not wait for browser readiness.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

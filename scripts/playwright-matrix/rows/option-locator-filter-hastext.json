@@ -1,0 +1,18 @@
+{
+  "id": "option-locator-filter-hastext",
+  "upstream": [
+    "method:Locator.filter"
+  ],
+  "option": "hasText",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "FilterOptions",
+      "url": "/docs/api/browser/Locator#FilterOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

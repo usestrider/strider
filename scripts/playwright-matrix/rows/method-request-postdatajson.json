@@ -1,0 +1,36 @@
+{
+  "id": "method-request-postdatajson",
+  "upstream": [
+    "method:Request.postDataJSON"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "next",
+      "url": "/docs/api/browser/NetworkRequest#next"
+    },
+    {
+      "module": "NetworkRequest",
+      "symbol": "stream",
+      "url": "/docs/api/browser/NetworkRequest#stream"
+    }
+  ],
+  "notes": "Opt-in scoped request subscription with an Effect HTTP body decoder; owned Option result distinguishes absent from typed unavailable/incomplete errors. Plain snapshots and history retain no bodies. Use message.json or schemaBodyJson, or message.urlParamsBody for URL-encoded forms with repeated keys; select decoding explicitly rather than guessing from media type. Stock WebKit refuses empty or missing reports whose completeness is unknown.",
+  "capabilities": [
+    "network.requestBody.text"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "pay-for-what-you-use",
+    "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+    "revision": "1355f0fc36330c95e7aae4b012f55db079543b8c"
+  }
+}

@@ -58,7 +58,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.DownloadEntry): Down
           new Download.DownloadCanceled({
             hint: Option.isSome(gone)
               ? "Its context closed before it completed, which cancels it"
-              : "The page, the browser or Download.cancel canceled it"
+              : "The page, the browser, or Download.cancel canceled it"
           })
         ))
       }

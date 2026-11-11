@@ -1,0 +1,11 @@
+{
+  "id": "method-consolemessage-args",
+  "upstream": [
+    "method:ConsoleMessage.args"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

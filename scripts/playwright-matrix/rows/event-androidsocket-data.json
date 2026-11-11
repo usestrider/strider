@@ -1,0 +1,11 @@
+{
+  "id": "event-androidsocket-data",
+  "upstream": [
+    "event:AndroidSocket.data"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,54 +1,38 @@
-# The browser integration tests: nightly when `main` has changed since the last run, and
-# on demand. They run in `devShells.integration`, a file at a time, as on a maintainer's machine, with the browsers
-# the flake pins, from the Nix binary cache.
+# The browser integration tests: every night and on demand. They run in `devShells.integration`,
+# a file at a time, as on a maintainer's machine, with the browsers the flake pins, from the Nix binary cache. On Linux,
+# a job per browser, and one for the other files (`vitest.integration.config.ts`).
 name: Integration
 
 on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      retain_diagnostics:
+        description: Run macOS only and keep bounded diagnostic traces even on success
+        type: boolean
+        default: false
+      macos:
+        description: Run the macOS job too; a change that doesn't touch what differs on macOS can skip it
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One run at a time per branch, so branches validate side by side
 concurrency:
-  group: integration
+  group: integration-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  changed:
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-    outputs:
-      run: ${{ steps.changed.outputs.run }}
-    steps:
-      # A scheduled run is skipped where the last run of this workflow, whatever its outcome, tested the same commit
-      - id: changed
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          RUN_ID: ${{ github.run_id }}
-          SHA: ${{ github.sha }}
-        run: |
-          if [ "$EVENT" != "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow integration.yml --branch main --limit 20 \
-            --json databaseId,headSha,status \
-            --jq "[.[] | select(.databaseId != $RUN_ID and .status == \"completed\")][0].headSha // \"\"")
-          if [ "$last" = "$SHA" ]; then
-            echo "main is at $SHA, which the last run tested"
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-
   integration:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
+    if: ${{ !inputs.retain_diagnostics }}
+    name: integration (${{ matrix.job }})
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [chromium, firefox, webkit, other]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -69,16 +53,89 @@ jobs:
         run: |
           sudo sysctl -w "kernel.core_pattern=$(sed 's/ 9223372036854775808 / %c /' /proc/sys/kernel/core_pattern)"
           cat /proc/sys/kernel/core_pattern
+      # The layout tests' file names no browser, so they run with the other files
+      - name: Build the documentation for layout tests
+        if: matrix.job == 'other'
+        run: nix develop --command pnpm website:dist
       - name: Integration tests
-        run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # Failure-only protocol and owned browser process traces accompany the log.
-      - name: Keep the log
-        if: failure()
+        env:
+          STRIDER_INTEGRATION_JOB: ${{ matrix.job }}
+        run: nix develop --command pnpm test:integration:full --no-file-parallelism 2>&1 | tee integration.log
+      # Retain timings on green runs too; failure-only traces still accompany failed runs.
+      - name: Keep the log and timings
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: integration-log
+          name: integration-log-${{ matrix.job }}
           path: |
             integration.log
+            .data/integration-timings/
+            .data/integration-failures/
+          include-hidden-files: true
+          retention-days: 14
+
+  integration-budget:
+    name: Linux integration budget summary
+    needs: integration
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Report Linux operating goals (informational)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/integration-budget.ts
+
+  integration-macos:
+    # Run independently of Linux; respect workflow cancellation. Every scheduled run includes macOS.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics) }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Without this, setup-node caches the packageManager's store, which needs pnpm before it's installed
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install pnpm
+        run: npm install --global pnpm@12.9.0
+      - name: Install TLS fixture tool
+        run: brew install openssl@3
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # No AppArmor, /proc core handler or Xvfb on macOS. Headed cases use WindowServer.
+      # The entry point verifies pinned browser, ffmpeg and ffprobe downloads before running real video tests.
+      - name: Record investigation metadata
+        if: inputs.retain_diagnostics
+        run: |
+          git rev-parse HEAD > integration-macos-metadata.txt
+          sw_vers >> integration-macos-metadata.txt
+          uname -a >> integration-macos-metadata.txt
+          node --version >> integration-macos-metadata.txt
+          cat packages/browser/test/integration/browsers.macos.json >> integration-macos-metadata.txt
+      - name: Install verified macOS browsers and video tools, then run integration tests
+        env:
+          STRIDER_TRACE_RETAIN_PASSES: ${{ inputs.retain_diagnostics && '1' || '0' }}
+        run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
+      - name: Keep the macOS log
+        if: always() && (failure() || cancelled() || inputs.retain_diagnostics)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-macos-log
+          path: |
+            integration-macos.log
+            integration-macos-metadata.txt
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14

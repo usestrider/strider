@@ -41,11 +41,13 @@ export type EvaluationReason =
   | Reason.BackendFailure
   | Reason.PromptBlocking
 
-/** Why an evaluation didn't produce a value. */
+/** Why an evaluation didn't produce a value. An adapter deadline retains its original timeout;
+ * a local evaluation timer has no adapter timeout, so the consuming operation supplies its own.
+ */
 export type Failure =
   | { readonly _tag: "Gone"; readonly error: Target.TargetGone }
   | { readonly _tag: "Reason"; readonly reason: EvaluationReason }
-  | { readonly _tag: "Deadline" }
+  | { readonly _tag: "Deadline"; readonly error?: Deadline.Timeout | undefined }
 
 /** An adapter's failure, as an evaluation's: a call the browser didn't answer before the deadline is `Deadline`. */
 const fromAdapter = (
@@ -54,7 +56,7 @@ const fromAdapter = (
   backend: string
 ): Failure => {
   const mapped = Operation.fromAdapter(error, id, backend)
-  return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
+  return mapped._tag === "Timeout" ? { _tag: "Deadline", error: mapped.error } : mapped
 }
 
 /** An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). */
@@ -130,6 +132,9 @@ export const fromRemote = (value: Adapter.RemoteValue): Effect.Effect<unknown, F
   })
 
 export interface Call {
+  readonly releaseResult?: boolean | undefined
+  /** The operation sending a write; absent for read-only queries. */
+  readonly dispatch?: Operation.Record | undefined
   readonly realm: Target.RealmId
   readonly functionDeclaration: string
   readonly arguments: ReadonlyArray<Adapter.LocalValue>
@@ -146,14 +151,17 @@ export interface Call {
 /** Calls a function in a realm, until the deadline: its result, or why there is none. */
 export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Adapter.RemoteValue, Failure> =>
   Effect.gen(function*() {
-    const evaluated = runtime.model.adapter.evaluate(options.realm, {
+    if (options.dispatch !== undefined) options.dispatch.markSent()
+    const call = runtime.model.adapter.evaluate(options.realm, {
       functionDeclaration: options.functionDeclaration,
       arguments: options.arguments,
       awaitPromise: true,
       result: options.result,
+      ...(options.releaseResult === true ? { releaseResult: true } : {}),
       ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
-    }).pipe(
+    })
+    const evaluated = (options.dispatch === undefined ? call : Operation.answered(options.dispatch, call)).pipe(
       Effect.mapError((error) => fromAdapter(error, options.id, runtime.backend)),
       BrowserClock.until(options.at),
       Effect.flatMap(Option.match({
@@ -296,8 +304,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
       return yield* Effect.gen({ self: this }, function*() {
         const rest = yield* toLocal(args, this.realm, 1)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const value = yield* call(this.runtime, {
+          dispatch: record,
           realm: this.realm,
           functionDeclaration: fn.toString(),
           arguments: [localOf(this as HandleImpl<unknown>), ...rest],

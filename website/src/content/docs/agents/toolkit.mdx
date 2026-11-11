@@ -1,12 +1,11 @@
 ---
 title: Agent toolkit
-description: Browser tools for a model through effect/ai, what each tool does and returns, the capture policy for its results, and access to the browser's other tabs.
+description: Letting an AI agent use a browser.
 order: 2
 ---
 
-A model drives a browser only through tools, and every result a tool returns goes to the model's provider. The
-toolkit gives it Strider's tools over one context, with secrets it names but never sees, and a policy for what
-results may carry.
+The toolkit turns Strider's operations, such as `click` and `snapshot`, into tools a model can call. The model names
+secrets without seeing them, and a capture policy decides what page content its results may carry.
 
 ## Running an agent
 
@@ -55,11 +54,11 @@ const signIn = Effect.fn("signIn")(function*() {
 
 ## Tools
 
-`pages`, `newPage`, `tabs`, `control` and `release` manage the model's pages (`release` gives back a page `control`
-took, its routes and handlers ended), and `goto` and `back` navigate. `snapshot`, `find` and `screenshot` read a
-page, and `click`, `fill`, `press`, `select` and `scroll` act as [actions](/docs/pages/actions) do. `next`, `await`
+`pages`, `newPage`, `tabs`, `control`, and `release` manage the model's pages (`release` gives back a page `control`
+took, its routes and handlers ended), and `goto` and `back` navigate. `snapshot`, `find`, and `screenshot` read a
+page, and `click`, `fill`, `press`, `select`, and `scroll` act as [actions](/docs/pages/actions) do. `next`, `await`,
 and `history` are the [event verbs](/docs/events/events#next-stream-and-history), `expect` an
-[expectation](/docs/pages/expectations), `route` a [route](/docs/events/routes) and `dialog` a
+[expectation](/docs/pages/expectations), `route` a [route](/docs/events/routes), and `dialog` a
 [dialog handler](/docs/events/kinds#dialogs-and-file-choosers). A result reads
 [as the CLI prints it](/docs/agents/cli#commands).
 
@@ -67,10 +66,10 @@ A click's digest reports `validation observed during click` once per affected co
 event occurs during that click operation. This is temporal evidence only: page handlers can call
 `checkValidity()` or `reportValidity()` on unrelated controls, so it does not prove a submission was attempted
 or blocked. Repeated clicks can each report validation even when snapshot invalidity is unchanged. Observation
-does not call validity methods, change focus, cancel events or wait for later timers.
+does not call validity methods, change focus, cancel events, or wait for later timers.
 
 Observation covers the top document and open shadow roots present when observation starts. It excludes child
-frames, closed shadow roots and roots created later. Navigation, document loss or an open dialog can discard observations;
+frames, closed shadow roots, and roots created later. Navigation, document loss, or an open dialog can discard observations;
 the original click error is preserved. Strict capture shows the control's role and a masked message, without
 its name; local capture includes the name and validation message. Snapshot invalidity continues to describe
 current validity independently of clicks. Feedback collection shares the click's deadline and interruption.
@@ -82,14 +81,23 @@ A busy document may retain listeners until it executes the queued release or end
   name) or when first seen, as a popup is.
 - **A target is a ref or a locator:** `e12` from the page's latest snapshot, or `role=button[name="Save"]`,
   `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
-- **No tool waits after it acts.** `next` subscribes and `await` collects; `expect` waits for a condition.
+- **Waits for later events are explicit.** `next` subscribes and `await` collects; `expect` waits for a condition.
+  Action tools do not add a wait for later page events, but they await browser/protocol completion, which can
+  include navigation or a busy page responding. Input completion is not guaranteed to be immediate.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
   decided them, file choosers the policy canceled, closed pages, downloads, uncaught exceptions, failed requests,
   validation observed during clicks, and console errors where the [capture policy](#capture-policy) allows them.
 - **Failures go back to the model** as data, hint included.
 - **Secrets are named.** The model writes `%password%`; the value is substituted as the tool runs, and results show
   `%password%`. Only the names in `secrets` are substituted: any other text between `%` signs, such as `%C3%` in a
-  URL, is sent as written, and so is a mistyped name.
+  URL, is sent as written, and so is a mistyped name. Successful results warn about unknown placeholder names in
+  `sinceLast`; typed failures append the hints to their message while keeping the original error and reason. A
+  configured name is suggested when exactly one is within one insertion, deletion, or substitution. Hints describe
+  the input, without claiming that it reached the browser. Diagnostic names start with an ASCII letter and continue
+  with ASCII letters, digits, underscores, or hyphens. Two hexadecimal digits are always URL escapes. A longer
+  candidate starting with a hex pair, whose closing `%` starts another hex escape, is exempt unless any configured
+  name is within one edit. The syntax is ambiguous: `%ACtext%20` normally stays quiet, but `%adminpas%2024` warns
+  when `adminpass` is configured. Escaped URL text close to a configured name can therefore warn too.
 
 ## Capture policy
 

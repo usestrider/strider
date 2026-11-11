@@ -20,7 +20,7 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. Actions without a stability check still await a rendering update.
+ *   the action point. The rendered check independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -77,6 +77,7 @@ export type Step =
 
 /** Which actionability checks an action runs. */
 export interface Checks {
+  readonly rendered: boolean
   readonly visible: boolean
   readonly enabled: boolean
   readonly editable: boolean
@@ -87,7 +88,7 @@ export interface Checks {
   readonly receivesPointer: boolean
 }
 
-/** Why an element isn't ready, as CONCEPTS.md §8 names it. */
+/** Why a target or its action preparation isn't ready. */
 export const NotReady = Schema.Union([
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("NotVisible", {}),
@@ -101,7 +102,9 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("Covered", { by: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
-  Schema.TaggedStruct("NoSuchOption", { option: Schema.String })
+  Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A different text control held focus before preparing the target for insertion. */
+  Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
 ])
 export type NotReady = typeof NotReady.Type
 
@@ -123,6 +126,8 @@ export type Action =
     readonly checked?: boolean | undefined
   }
   | { readonly _tag: "Focus" }
+  | { readonly _tag: "SelectText" }
+  | { readonly _tag: "Blur" }
   | { readonly _tag: "Scroll" }
   | { readonly _tag: "Fill"; readonly value: string }
   | { readonly _tag: "Select"; readonly choices: ReadonlyArray<Choice> }
@@ -130,17 +135,33 @@ export type Action =
   | { readonly _tag: "FileInput" }
   | { readonly _tag: "None" }
 
+/** Whether the action can change the element in its applying round, before native input dispatch. */
+export const appliesInRound = (action: Action): boolean =>
+  action._tag === "Focus" || action._tag === "Scroll" || action._tag === "Fill" ||
+  action._tag === "Select" || action._tag === "SelectText" || action._tag === "Blur"
+
 /** A one-shot read of the one match. */
 export type Read =
   | { readonly _tag: "Text" }
   | { readonly _tag: "Value" }
   | { readonly _tag: "Html" }
   | { readonly _tag: "Attribute"; readonly name: string }
+  | { readonly _tag: "Editable" }
   | { readonly _tag: "Enabled" }
-  | { readonly _tag: "Checked"; readonly followLabel?: boolean }
+  | { readonly _tag: "Checked"; readonly followLabel?: boolean; readonly uncheck?: boolean }
 
 /** What an expectation waits for. */
 export type Expectation =
+  | { readonly _tag: "Attached" }
+  | { readonly _tag: "Detached" }
+  | { readonly _tag: "Viewport"; readonly ratio: number; readonly inViewport: boolean }
+  | {
+    readonly _tag: "CSS"
+    readonly name: string
+    readonly expected: TextMatcher
+    readonly not: boolean
+    readonly pseudo: "before" | "after" | null
+  }
   | { readonly _tag: "Visible" }
   | { readonly _tag: "Hidden" }
   | { readonly _tag: "Enabled" }
@@ -148,10 +169,16 @@ export type Expectation =
   | { readonly _tag: "Checked" }
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
+  | { readonly _tag: "Empty" }
   /** The whole text of the one match, or with `list`, of each match in order. */
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  | { readonly _tag: "Role"; readonly expected: string }
+  | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The raw class string of one match, or each match in order. */
+  | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
+  | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
@@ -236,7 +263,11 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
 
 /** A failure no waiting can mend: the one match isn't the kind of element the operation needs. */
 export const Final = Schema.Union([
-  Schema.TaggedStruct("WrongElement", { expected: Schema.String, element: Schema.String }),
+  Schema.TaggedStruct("WrongElement", {
+    expected: Schema.String,
+    element: Schema.String,
+    hint: Schema.optional(Schema.String)
+  }),
   Schema.TaggedStruct("NotEditable", { element: Schema.String }),
   Schema.TaggedStruct("Refused", { element: Schema.String, value: Schema.String })
 ])
@@ -270,14 +301,18 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
+  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
+  | { readonly op: "fillDisarm" }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
     readonly steps: ReadonlyArray<Step>
+    readonly token?: string | undefined
     readonly expectation: Expectation
     /** Milliseconds this round may wait in the page for the expectation to hold. */
     readonly cap: number
   }
+  | { readonly op: "expectStop"; readonly token: string }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -338,7 +373,7 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -347,12 +382,18 @@ export const Response = Schema.Union([
     scrolled: Schema.Boolean,
     /**
      * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included.
+     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
+     * wait is reported even without a frame, since no rendering hint will replace it.
      */
     checked: Schema.Boolean
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("FillGuard", {
+    blocked: Schema.NullOr(Schema.String),
+    unsafe: Schema.Boolean,
+    accepted: Schema.Boolean
+  }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
   Schema.TaggedStruct("Expected", {
@@ -441,6 +482,7 @@ export function engine(render: (root: SnapNode) => string) {
     | {
       readonly setTimeout: (callback: () => void, delay: number) => number
       readonly clearTimeout: (id: number) => void
+      readonly cancelAnimationFrame: (id: number) => void
       readonly requestAnimationFrame: (callback: () => void) => number
       readonly now: () => number
     }
@@ -628,6 +670,26 @@ export function engine(render: (root: SnapNode) => string) {
     "treeitem"
   ])
 
+  /** Roles that prohibit a name for the element itself (accname 1.2, step 1). */
+  const NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "mark",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "suggestion",
+    "superscript",
+    "term",
+    "time"
+  ])
+
   /** Roles whose name comes from their content (accname 1.2, step 2F). */
   const NAME_FROM_CONTENT = new Set([
     "button",
@@ -654,11 +716,84 @@ export function engine(render: (root: SnapNode) => string) {
     (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
     (element.getAttribute("title") ?? "").trim() !== ""
 
-  const focusable = (element: Element): boolean =>
-    element.hasAttribute("tabindex") ||
-    (element instanceof HTMLAnchorElement && element.hasAttribute("href")) ||
-    ((element instanceof HTMLButtonElement || element instanceof HTMLInputElement ||
-      element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) && !element.disabled)
+  // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
+  // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
+  const HTML_INTEGER_PREFIX = /^[\t\n\f\r ]*[+-]?[0-9]/
+  const DISABLABLE_TAGS = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
+  const NATIVE_FOCUSABLE_TAGS = new Set(["button", "details", "select", "textarea"])
+  const focusable = (element: Element): boolean => {
+    const tag = element.localName
+    // Custom-element definitions live in the main world. A hyphen conservatively includes form-associated hosts.
+    // Keep the native selector for these and built-in controls: it includes disabled fieldsets and legend exceptions.
+    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && element.matches(":disabled")) return false
+    const tabindex = element.getAttribute("tabindex")
+    return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
+      ((tag === "a" || tag === "area") && element.hasAttribute("href")) ||
+      NATIVE_FOCUSABLE_TAGS.has(tag) ||
+      (element instanceof HTMLInputElement && element.type !== "hidden") ||
+      (element instanceof HTMLElement && element.isContentEditable)
+  }
+
+  // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
+  const GLOBAL_ARIA = new Set([
+    "aria-atomic",
+    "aria-busy",
+    "aria-controls",
+    "aria-current",
+    "aria-describedby",
+    "aria-details",
+    "aria-dropeffect",
+    "aria-flowto",
+    "aria-grabbed",
+    "aria-hidden",
+    "aria-keyshortcuts",
+    "aria-live",
+    "aria-owns",
+    "aria-relevant"
+  ])
+  // Presentation conflicts retain the pinned role-query naming exceptions, distinct from accname root rules.
+  const PRESENTATION_NAME_PROHIBITED = new Set([
+    "caption",
+    "code",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "paragraph",
+    "presentation",
+    "strong",
+    "subscript",
+    "superscript"
+  ])
+  const presentationConflict = (element: Element, implicit: string | null): boolean => {
+    if (focusable(element)) return true
+    // One attribute snapshot avoids probing every possible global property on every presentation candidate.
+    for (const attribute of element.getAttributeNames()) {
+      if (GLOBAL_ARIA.has(attribute)) return true
+      if (
+        (attribute === "aria-label" || attribute === "aria-labelledby") &&
+        !PRESENTATION_NAME_PROHIBITED.has(implicit ?? "")
+      ) return true
+      if (attribute === "aria-roledescription" && implicit !== "generic") return true
+    }
+    return false
+  }
+
+  // Only required structural children inherit presentation, never arbitrary descendants or nested lists/tables.
+  // https://www.w3.org/TR/wai-aria-1.2/#presentation
+  const PRESENTATION_PARENTS = new Map<string, ReadonlyArray<string>>([
+    ["dd", ["dl", "div"]],
+    ["div", ["dl"]],
+    ["dt", ["dl", "div"]],
+    ["li", ["ol", "ul"]],
+    ["caption", ["table"]],
+    ["tbody", ["table"]],
+    ["tfoot", ["table"]],
+    ["thead", ["table"]],
+    ["td", ["tr"]],
+    ["th", ["tr"]],
+    ["tr", ["thead", "tbody", "tfoot", "table"]]
+  ])
 
   const inputRole = (input: HTMLInputElement): string | null => {
     const list = input.hasAttribute("list")
@@ -833,18 +968,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const roleCache = new Map<Element, string | null>()
-  /** An element's role: the first role token the engine knows, or its implicit role. */
+  /** Shared role computation, including ARIA presentation conflict resolution and required-child inheritance. */
   const roleOf = (element: Element): string | null => {
     if (roleCache.has(element)) return roleCache.get(element)!
-    let role: string | null = null
+    let explicit: string | null = null
     for (const token of (element.getAttribute("role") ?? "").split(/\s+/)) {
       if (!KNOWN_ROLES.has(token)) continue
-      // A focusable element can't be presentational (ARIA 1.2, presentational roles conflict resolution)
-      if ((token === "none" || token === "presentation") && focusable(element)) continue
-      role = token
+      explicit = token
       break
     }
-    if (role === null) role = implicitRole(element)
+    let role = explicit
+    if (explicit === null || explicit === "none" || explicit === "presentation") {
+      const implicit = implicitRole(element)
+      role = explicit ?? implicit
+      if (explicit !== null) {
+        // A conflict cancels the first recognized presentation token, not advances to a fallback token.
+        if (presentationConflict(element, implicit)) role = implicit
+      } else if (implicit !== null) {
+        const parents = PRESENTATION_PARENTS.get(element.localName)
+        const parent = parents === undefined ? null : composedParent(element)
+        if (parent !== null && parents!.includes(parent.localName)) {
+          const inherited = roleOf(parent)
+          if ((inherited === "none" || inherited === "presentation") && !presentationConflict(element, implicit)) {
+            role = inherited
+          }
+        }
+      }
+    }
     roleCache.set(element, role)
     return role
   }
@@ -1055,7 +1205,9 @@ export function engine(render: (root: SnapNode) => string) {
     const cached = nameCache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
-    const name = collapse(
+    const role = roleOf(element)
+    // This restriction is on the root, not on descendants or references contributing to another element's name.
+    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
       nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
     )
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
@@ -1395,11 +1547,18 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const state = element.getAttribute("aria-checked")
-    if ((role === "option" || role === "treeitem") && (state === null || state === "" || state === "undefined")) {
-      return { state: null, checked: null }
+    const token = element.getAttribute("aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    if (token === "true") return { state: true, checked: true }
+    if (token === "false") return { state: false, checked: false }
+    if (token === "mixed") {
+      return {
+        state: role === "radio" || role === "menuitemradio" || role === "switch" ? false : "mixed",
+        checked: false
+      }
     }
-    return { state: state === "mixed" ? "mixed" : state === "true", checked: state === "true" }
+    // Invalid optional state must not authorize check/uncheck input.
+    const fallback = role === "option" || role === "treeitem" ? null : false
+    return { state: fallback, checked: fallback }
   }
 
   const checkedOf = (element: Element): boolean | null => checkedState(element).checked
@@ -1435,21 +1594,21 @@ export function engine(render: (root: SnapNode) => string) {
 
   const pressedOf = (element: Element): boolean | "mixed" => {
     if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
-    const value = element.getAttribute("aria-pressed")?.toLowerCase()
+    const value = element.getAttribute("aria-pressed")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === "mixed" ? "mixed" : value === "true"
   }
 
   const expandedOf = (element: Element): boolean | undefined => {
     if (element instanceof HTMLDetailsElement) return element.open
     if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
-    const value = element.getAttribute("aria-expanded")?.toLowerCase()
+    const value = element.getAttribute("aria-expanded")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === undefined ? undefined : value === "true"
   }
 
   const selectedOf = (element: Element): boolean => {
     if (element instanceof HTMLOptionElement) return element.selected
     return SELECTED_ROLES.has(roleOf(element) ?? "") &&
-      element.getAttribute("aria-selected")?.toLowerCase() === "true"
+      element.getAttribute("aria-selected")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) === "true"
   }
 
   const LABEL_WIDGET_ROLES = new Set([
@@ -1492,11 +1651,33 @@ export function engine(render: (root: SnapNode) => string) {
     ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
   }
 
-  /** Association stays in the DOM; slots can add refusals without choosing another label. */
-  const checkedSource = (element: Element): Element | null => {
-    if (checkedOf(element) !== null) return element
+  const enclosingLabel = (element: Element): HTMLLabelElement | null => {
     let label: Element | null = element
     while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    return label
+  }
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = element
+    if (!target.matches("input, textarea, select") && !contentEditable(target)) {
+      target = target.closest("button, [role=button], [role=checkbox], [role=radio]") ?? target
+    }
+    if (
+      !target.matches(
+        "a, input, textarea, button, select, [role=link], [role=button], [role=checkbox], [role=radio]"
+      ) &&
+      !contentEditable(target)
+    ) {
+      target = enclosingLabel(target)?.control ?? target
+    }
+    return target
+  }
+
+  /** Association stays in the DOM; slots can add refusals without choosing another label. */
+  const checkableForAction = (element: Element): Element | null => {
+    const own = checkedOf(element)
+    if (own !== null) return element
+    const label = enclosingLabel(element)
     if (label === null || label.control === null) return null
     for (
       let ancestor: Element | null = element;
@@ -1513,11 +1694,6 @@ export function engine(render: (root: SnapNode) => string) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
     return checkedOf(label.control) === null ? null : label.control
-  }
-
-  const checkedForAction = (element: Element): boolean | null => {
-    const source = checkedSource(element)
-    return source === null ? null : checkedOf(source)
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1731,6 +1907,104 @@ export function engine(render: (root: SnapNode) => string) {
     guard = current
   }
 
+  // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
+  // form control after selection, so validate at the cancellable native event, before its default mutation.
+  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
+  const fillDisarm = () => {
+    const current = fillGuard
+    fillGuard = null
+    current?.remove()
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current?.blocked ?? null,
+      unsafe: current?.unsafe ?? false,
+      accepted: current?.accepted ?? false
+    }
+  }
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
+    fillDisarm()
+    const matches = resolve(steps)
+    const element = matches.length === 1 ? matches[0]! : null
+    const types = ["keydown", "keypress", "keyup", "beforeinput"]
+    const current = {
+      remove: () => {
+        for (const type of types) removeEventListener(type, handler, true)
+      },
+      blocked: null as string | null,
+      unsafe: false,
+      accepted: false,
+      inserting: false
+    }
+    const blocker = (): string | null => {
+      // Ancestors should receive no insertion event: correct input reaches the target document instead.
+      if (ancestor) return null
+      const active = deepActive()
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return describe(active)
+      const selection = getSelection()
+      if (element === null || !element.isConnected || selection?.rangeCount !== 1) {
+        return "the selection left the target"
+      }
+      const selected = selection.getRangeAt(0)
+      if (current.inserting && element.contains(selected.startContainer) && element.contains(selected.endContainer)) {
+        return null
+      }
+      // WebKit canonicalizes element-edge ranges to text-node edges. Ascend equivalent edges rather
+      // than treating those native representations as different selections.
+      const atEdge = (node: Node, offset: number, end: boolean): boolean => {
+        while (node !== element) {
+          const length = node instanceof CharacterData ? node.length : node.childNodes.length
+          if (offset !== (end ? length : 0) || node.parentNode === null) return false
+          const parent = node.parentNode
+          offset = Array.prototype.indexOf.call(parent.childNodes, node) + (end ? 1 : 0)
+          node = parent
+        }
+        return offset === (end ? element.childNodes.length : 0)
+      }
+      return atEdge(selected.startContainer, selected.startOffset, false) &&
+          atEdge(selected.endContainer, selected.endOffset, true)
+        ? null :
+        "the selection left the target"
+    }
+    const handler = (event: Event) => {
+      if (!event.isTrusted || (event.type === "keyup" && current.blocked === null)) return
+      const recipient = event.composedPath()[0]
+      const elsewhere = ancestor ?
+        (recipient instanceof Element ? describe(recipient) : "another document")
+        : recipient instanceof Element && element !== null &&
+            !composedContains(recipient, element) && !composedContains(element, recipient)
+        ? describe(recipient) :
+        null
+      const blocked = current.blocked ?? elsewhere ?? blocker()
+      if (blocked === null) {
+        current.accepted = true
+        if (event.type === "beforeinput") current.inserting = true
+        return
+      }
+      // Cancellation must be confirmed locally; the host also combines accepted input across documents.
+      if (current.blocked === null && !event.cancelable) current.unsafe = true
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.defaultPrevented) current.blocked = blocked
+    }
+    if (ancestor) {
+      if (!(element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement)) {
+        current.blocked = "the frame no longer matches"
+      } else {
+        const active = deepActive()
+        if (active !== element) {
+          current.blocked = active === null ? "another document" : describe(active)
+          element.focus()
+        }
+      }
+    }
+    current.blocked ??= blocker()
+    // A preparation blocker sends no native input. Recheck through the ordinary action loop after focusing the frame,
+    // whose handlers may replace the target or change readiness, before installing an insertion guard.
+    if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
+    fillGuard = current
+    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+  }
+
   // ── Actions ──
 
   let stabilitySequence = 0
@@ -1766,15 +2040,30 @@ export function engine(render: (root: SnapNode) => string) {
     const action = request.action
     while (true) {
       const left = end - now()
-      if (left <= 0) return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+      if (left <= 0) {
+        return {
+          _tag: "NotReady",
+          reason: last,
+          history,
+          scrolled,
+          checked: history.length > 0 || (!request.checks.rendered && sampled)
+        }
+      }
       // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
       // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
-      // input permit. With stability disabled, retain the rendering opportunity before any action can pass.
-      if (sampled || !(request.checks.stable > 0)) {
+      // input permit. Without stability, only the rendered check waits before checking current layout.
+      // Retry waits remain frame-based even when rendered is disabled.
+      if (sampled || (request.checks.rendered && !(request.checks.stable > 0))) {
         if (!(await nextFrame(left))) {
           // A round the deadline cut too short for any page to render says nothing about rendering
-          if (frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-          return { _tag: "NotReady", reason: last, history, scrolled, checked: history.length > 0 }
+          if (request.checks.rendered && frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
+          return {
+            _tag: "NotReady",
+            reason: last,
+            history,
+            scrolled,
+            checked: history.length > 0 || (!request.checks.rendered && sampled)
+          }
         }
         frames++
       }
@@ -1794,13 +2083,13 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (
           (action._tag === "Checked" && checkedOf(element) === null) ||
-          (action._tag === "Point" && action.checked === true && checkedSource(element) === null)
+          (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
         ) {
           return {
             _tag: "Final",
             final: {
               _tag: "WrongElement",
-              expected: "a checkbox, a radio or an ARIA checkable",
+              expected: "a checkbox, a radio, or an ARIA checkable",
               element: describe(element)
             }
           }
@@ -1824,7 +2113,7 @@ export function engine(render: (root: SnapNode) => string) {
       else if (
         checks.enabled && (
           !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkedSource(element) ?? element))
+            !enabled(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -1867,28 +2156,46 @@ export function engine(render: (root: SnapNode) => string) {
         if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
       }
       if (reason === null && element !== undefined) {
-        let response = ready(element, action, request.apply, scrolled, point)
         if (
-          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-          checks.receivesPointer && request.clip !== undefined && points.length > 1
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         ) {
-          response = { ...response, candidates: points }
-        }
-        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-          const captured = {
-            token: `${generation}:${++stabilitySequence}`,
-            element,
-            rect: rects[rects.length - 1]!,
-            frames: checks.stable
+          const active = deepActive()
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            note({ _tag: "PreparingFocus", from: describe(active) })
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            rects = []
+            continue
           }
-          stability = captured
-          const token = captured.token
-          onFrame(() => {
-            if (stability?.token === token) stability = null
-          })
-          return { ...response, stability: captured.token }
         }
-        return response
+        let response = ready(element, action, request.apply, scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
+          }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: rects[rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
+        }
       }
       if (reason!._tag !== "NotStable") rects = []
       // A rect still settling within its first frames is the check working, not a reason to report
@@ -1903,8 +2210,9 @@ export function engine(render: (root: SnapNode) => string) {
     action: Action,
     apply: boolean,
     scrolled: boolean,
-    point: { x: number; y: number } | null
-  ): Response => {
+    point: { x: number; y: number } | null,
+    checks: Checks
+  ): Response | { readonly _tag: "Retry"; readonly reason: NotReady } => {
     const answer = {
       _tag: "Ready" as const,
       element: describe(element),
@@ -1912,7 +2220,7 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | null
+      fill: null as "type" | "set" | "guarded" | null
     }
     switch (action._tag) {
       case "Point": {
@@ -1925,11 +2233,37 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
+      case "Blur":
+        if (!("blur" in element) || typeof element.blur !== "function") {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "an element with a blur method", element: describe(element) }
+          }
+        }
+        if (apply) element.blur()
+        return answer
       default:
         break
     }
     if (!apply) return answer
     switch (action._tag) {
+      case "SelectText": {
+        const target = textSelectionTarget(element)
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          target.select()
+          target.focus()
+        } else {
+          if (target instanceof HTMLElement || target instanceof SVGElement) target.focus()
+          const range = document.createRange()
+          range.selectNodeContents(target)
+          const selection = getSelection()
+          if (selection !== null) {
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+        }
+        return answer
+      }
       case "Focus":
         if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
         return answer
@@ -1940,18 +2274,28 @@ export function engine(render: (root: SnapNode) => string) {
         if (invalidNumberFill(element, action.value)) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
+        const recheckFill = (): Response | { readonly _tag: "Retry"; readonly reason: NotReady } | undefined => {
+          let reason: NotReady | null = null
+          if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
+          else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
+          else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
+          else if (checks.notInert) reason = inertReason(element)
+          return reason === null ? undefined : { _tag: "Retry", reason }
+        }
         if (settable(element)) {
           if (fillCandidate(element, action.value) === undefined) {
             return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
           }
           element.focus()
+          const focused = recheckFill()
+          if (focused !== undefined) return focused
           // Focus handlers can change the type or its constraints. Use the current state before writing.
           if (TYPED.has(element.type)) {
             if (invalidNumberFill(element, action.value)) {
               return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
             }
             selectContents(element)
-            return { ...answer, fill: "type" }
+            return recheckFill() ?? { ...answer, fill: "type" }
           }
           const candidate = fillCandidate(element, action.value)
           if (candidate === undefined) {
@@ -1963,7 +2307,17 @@ export function engine(render: (root: SnapNode) => string) {
           return { ...answer, fill: "set" }
         }
         selectContents(element as HTMLElement)
-        return { ...answer, fill: "type" }
+        // Focus and selection handlers can remove readiness before insertion.
+        if (checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
+        }
+        return recheckFill() ?? {
+          ...answer,
+          fill: document.designMode === "on" &&
+              !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) ?
+            "guarded" :
+            "type"
+        }
       }
       case "Select": {
         const select = element as HTMLSelectElement
@@ -1996,17 +2350,33 @@ export function engine(render: (root: SnapNode) => string) {
         return { _tag: "Read", value: textOf(element) }
       case "Value": {
         const value = valueOf(element)
-        return value === null ? wrong("an input, a textarea or a select") : { _tag: "Read", value }
+        return value === null ? wrong("an input, a textarea, or a select") : { _tag: "Read", value }
       }
       case "Html":
         return { _tag: "Read", value: element.outerHTML }
       case "Attribute":
         return { _tag: "Read", value: element.getAttribute(request.read.name) }
+      case "Editable":
+        return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
         return { _tag: "Read", value: enabled(element) }
       case "Checked": {
-        const checked = request.read.followLabel ? checkedForAction(element) : checkedOf(element)
-        return checked === null ? wrong("a checkbox, a radio or an ARIA checkable") : { _tag: "Read", value: checked }
+        const control = request.read.followLabel ? checkableForAction(element) : element
+        const checked = control === null ? null : checkedOf(control)
+        if (
+          request.read.uncheck && checked === true && control instanceof HTMLInputElement && control.type === "radio"
+        ) {
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox or a page-managed ARIA checkable to uncheck",
+              element: describe(control),
+              hint: "Check another radio in the group instead"
+            }
+          }
+        }
+        return checked === null ? wrong("a checkbox, a radio, or an ARIA checkable") : { _tag: "Read", value: checked }
       }
     }
   }
@@ -2015,6 +2385,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+
+  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
@@ -2025,6 +2398,10 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const found = resolve(steps)
     switch (expectation._tag) {
+      case "Attached":
+        return { passed: found.length === 1, observed: { matches: found.length } }
+      case "Detached":
+        return { passed: found.length === 0, observed: { matches: found.length } }
       case "Visible": {
         const visibleCount = found.filter(visible).length
         return {
@@ -2050,6 +2427,18 @@ export function engine(render: (root: SnapNode) => string) {
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
+      case "Class": {
+        const texts = found.map((element) => element.classList.toString())
+        if (expectation.list) {
+          return {
+            passed: texts.length === expectation.expected.length &&
+              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+            observed: texts
+          }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
       default:
         break
     }
@@ -2071,9 +2460,34 @@ export function engine(render: (root: SnapNode) => string) {
         const active = deepActive()
         return { passed: active === element, observed: active === null ? "nothing focused" : describe(active) }
       }
+      case "Empty": {
+        const empty = element.nodeName === "INPUT" || element.nodeName === "TEXTAREA"
+          ? !(element as HTMLInputElement | HTMLTextAreaElement).value
+          : !element.textContent?.trim()
+        return { passed: empty, observed: empty ? "empty" : "not empty" }
+      }
       case "Editable": {
         const editable = editableKind(element) && enabled(element) && !readOnly(element)
         return { passed: editable, observed: editable ? "editable" : "not editable" }
+      }
+      case "Role": {
+        const role = roleOf(element) ?? ""
+        return { passed: role === expectation.expected, observed: role }
+      }
+      case "AccessibleName": {
+        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
+        nameCache.delete(element)
+        const name = accessibleName(element, false)
+        const matcher = expectation.expected
+        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
+        return {
+          passed: matcher._tag === "RegExp"
+            ? new RegExp(matcher.source, matcher.flags).test(name)
+            : expectation.ignoreCase
+            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+            : normalize(name) === normalize(matcher.value),
+          observed: name
+        }
       }
       case "ContainsText": {
         const text = textOf(element)
@@ -2083,6 +2497,18 @@ export function engine(render: (root: SnapNode) => string) {
             ? new RegExp(matcher.source, matcher.flags).test(text)
             : text.includes(collapse(matcher.value)),
           observed: text
+        }
+      }
+      case "Values": {
+        const control = textSelectionTarget(element)
+        if (!(control instanceof HTMLSelectElement) || !control.multiple) {
+          return { passed: false, observed: "not a select element with a multiple attribute" }
+        }
+        const values = Array.from(control.selectedOptions, (option) => option.value)
+        return {
+          passed: values.length === expectation.expected.length &&
+            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+          observed: values
         }
       }
       case "Value": {
@@ -2095,6 +2521,15 @@ export function engine(render: (root: SnapNode) => string) {
               : value === matcher.value),
           observed: value === null ? "not a form control" : value
         }
+      }
+      case "CSS": {
+        const value = getComputedStyle(element, expectation.pseudo === null ? undefined : `::${expectation.pseudo}`)
+          .getPropertyValue(expectation.name)
+        const matcher = expectation.expected
+        const matches = matcher._tag === "RegExp"
+          ? new RegExp(matcher.source, matcher.flags).test(value)
+          : value === matcher.value
+        return { passed: expectation.not ? !matches : matches, observed: value }
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })
@@ -2117,11 +2552,102 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
+  // Allocated only while a viewport expectation owns observations in this document.
+  let viewportRounds: Map<string, () => void> | undefined
+
+  const expectViewport = (request: Extract<Request, { op: "expect" }>): Promise<Response> =>
+    new Promise((resume, reject) => {
+      const expectation = request.expectation
+      if (expectation._tag !== "Viewport") return
+      let done = false
+      let observer: IntersectionObserver | undefined
+      let frame: number | undefined
+      const next = (callback: () => void) => {
+        frame = onFrame(callback)
+      }
+      let last: { passed: boolean; observed: unknown } = { passed: false, observed: null }
+      let changed = false
+      let samples = 0
+      const finish = (error?: unknown) => {
+        if (done) return
+        done = true
+        observer?.disconnect()
+        if (frame !== undefined) {
+          ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+        }
+        clearTimer(timer)
+        if (request.token !== undefined) {
+          viewportRounds?.delete(request.token)
+          if (viewportRounds?.size === 0) viewportRounds = undefined
+        }
+        if (error !== undefined) reject(error)
+        else resume({ _tag: "Expected", ...last, changed })
+      }
+      const sample = () => {
+        if (done) return
+        changed = samples++ > 0
+        observer?.disconnect()
+        clearTreeCaches()
+        let found: ReadonlyArray<Element>
+        try {
+          found = resolve(request.steps)
+        } catch (error) {
+          finish(error)
+          return
+        }
+        if (found.length !== 1) {
+          last = {
+            passed: found.length === 0 && !expectation.inViewport,
+            observed: { matches: found.length }
+          }
+          if (last.passed) finish()
+          else next(sample)
+          return
+        }
+        if (last.observed === null) last = { passed: false, observed: { matches: 1 } }
+        const element = found[0]!
+        observer = new IntersectionObserver((entries) => {
+          if (done) return
+          observer?.disconnect()
+          // Re-resolve after the asynchronous observation: a detached or replaced match is not evidence.
+          clearTreeCaches()
+          try {
+            const current = resolve(request.steps)
+            if (current.length !== 1 || current[0] !== element) {
+              next(sample)
+              return
+            }
+          } catch (error) {
+            finish(error)
+            return
+          }
+          const ratio = entries[0]!.intersectionRatio
+          const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
+          last = { passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } }
+          if (last.passed) finish()
+          else {
+            changed = true
+            next(sample)
+          }
+        })
+        observer.observe(element)
+        // Firefox needs a rendering opportunity to deliver intersection observations.
+        next(() => {})
+      }
+      const timer = setTimer(finish, Math.max(0, request.cap))
+      if (request.token !== undefined) (viewportRounds ??= new Map()).set(request.token, finish)
+      sample()
+    })
+
   /**
    * One round of an expectation: a check now, then again on each change the page makes (a mutation, an `input`,
    * `change` or focus event, an animation frame) until it holds or the round's cap runs out.
    */
   const expect = (request: Extract<Request, { op: "expect" }>): Promise<Response> => {
+    if (request.expectation._tag === "Viewport") {
+      resolve(request.steps)
+      return expectViewport(request)
+    }
     const first = evaluate(request.steps, request.expectation)
     if (first.passed || request.cap <= 0) {
       return Promise.resolve({ _tag: "Expected", passed: first.passed, observed: first.observed, changed: false })
@@ -2190,14 +2716,11 @@ export function engine(render: (root: SnapNode) => string) {
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
     if (checkedOf(element) === true) states.push("checked")
-    if (element.getAttribute("aria-expanded") === "true") states.push("expanded")
-    if (
-      element.getAttribute("aria-selected") === "true" ||
-      (element instanceof HTMLOptionElement && element.selected)
-    ) states.push("selected")
+    if (expandedOf(element) === true) states.push("expanded")
+    if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (element.getAttribute("aria-pressed") === "true") states.push("pressed")
+    if (pressedOf(element) === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
@@ -2593,11 +3116,12 @@ export function engine(render: (root: SnapNode) => string) {
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | string => {
+  const element = (text: string): Element | Array<Element> | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
       readonly validationSteps?: ReadonlyArray<Step>
+      readonly all?: boolean
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
@@ -2621,6 +3145,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
       throw error
     }
+    if (request.all === true) return found
     if (found.length === 0) return JSON.stringify({ _tag: "NoMatch" } satisfies Response)
     if (found.length > 1) return JSON.stringify(strict(found))
     const one = found[0]!
@@ -2737,10 +3262,17 @@ export function engine(render: (root: SnapNode) => string) {
         }
         case "act":
           return JSON.stringify(await act(request))
+        case "fillGuard":
+          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
+        case "fillDisarm":
+          return JSON.stringify(fillDisarm() satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
           return JSON.stringify(read(request))
+        case "expectStop":
+          viewportRounds?.get(request.token)?.()
+          return JSON.stringify({ _tag: "Expected", passed: false, observed: null, changed: false } satisfies Response)
         case "expect":
           return JSON.stringify(await expect(request))
         case "title":

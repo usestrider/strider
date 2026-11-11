@@ -1,0 +1,14 @@
+{
+  "id": "option-browser-newpage-proxy-value-socks-or-https-proxy-endpoint",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "status": "missing",
+  "api": [],
+  "capabilities": [],
+  "requirements": [],
+  "parent": "option-browser-newpage-proxy",
+  "value": "SOCKS or HTTPS proxy endpoint",
+  "notes": "Only HTTP proxy endpoints are accepted; SOCKS and HTTPS-to-proxy configuration are unsupported.",
+  "option": "proxy"
+}

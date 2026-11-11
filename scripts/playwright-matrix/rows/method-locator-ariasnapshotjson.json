@@ -1,0 +1,29 @@
+{
+  "id": "method-locator-ariasnapshotjson",
+  "upstream": [
+    "method:Locator.ariaSnapshotJSON"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.snapshot",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.snapshot"
+    }
+  ],
+  "notes": "Structured snapshots and text use Strider snapshot schemas, rather than Playwright YAML.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Snapshot text with refs: one rendering of a structured, evidence-tagged tree.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

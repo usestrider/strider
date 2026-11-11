@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-pageerrors-filter",
+  "upstream": [
+    "method:Page.pageErrors"
+  ],
+  "option": "filter",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "all",
+      "status": "missing"
+    },
+    {
+      "value": "since-navigation",
+      "status": "missing"
+    }
+  ]
+}

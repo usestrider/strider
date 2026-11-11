@@ -5,7 +5,7 @@
  * - **Steps.** Each library operation on the target is a step, through the span helper: its name, its
  *   attributes as params, its duration and its error. A span of the caller's that encloses one is a step too, so
  *   the trace nests as the program did; it spans the operations recorded inside it.
- * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action, and
+ * - **Events.** Console messages, uncaught exceptions as `pageError`s, a screenshot after each action and page expectation, and
  *   screencast frames, native or polled, or on Firefox its video of each page.
  * - **DOM snapshots** (`capture.ts`): every frame of the action's page captured before and after each
  *   action, the target, resolved by the action's locator, marked in the one after. A snapshot's secret values
@@ -20,6 +20,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
+import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
@@ -30,15 +31,18 @@ import type * as Tracer from "effect/Tracer"
 import * as Capability from "../Capability.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as Diagnostics from "../Diagnostics.ts"
+import * as Expect from "../Expect.ts"
 import type * as FilePath from "../FilePath.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import type * as Target from "../Target.ts"
+import * as TestRun from "../test/TestRun.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Capture from "./capture.ts"
 import * as Events from "./events.ts"
+import * as ExpectImpl from "./expect.ts"
 import * as Filters from "./filters.ts"
 import * as HarImpl from "./har.ts"
 import * as HarLog from "./harLog.ts"
@@ -62,14 +66,18 @@ export type Recorded =
   | { readonly _tag: "Page"; readonly entry: Model.PageEntry }
   | { readonly _tag: "UserContext"; readonly entry: Model.ContextEntry }
 
+/** Ordinary errors are already text; expectations retain evidence until the export chooses its preset. */
+type RecordedError = { readonly name: string; readonly message: string } | Expect.ExpectationFailed
+
 interface Step {
+  readonly stack: ReadonlyArray<Recorders.Location>
   readonly callId: string
   readonly parentId: Option.Option<string>
   readonly name: string
   readonly params: Readonly<Record<string, unknown>>
   readonly start: MonotonicInstant.MonotonicInstant
   end: Option.Option<MonotonicInstant.MonotonicInstant>
-  error: Option.Option<{ readonly name: string; readonly message: string }>
+  error: Option.Option<RecordedError>
   /** A span of the caller's, which spans the operations recorded inside it. */
   readonly group: boolean
 }
@@ -90,14 +98,57 @@ interface Snapshot {
   readonly captures: ReadonlyArray<Capture.FrameCapture>
 }
 
-/** Firefox's video of a page: recording until the first export, which reads its file. */
+/** A video of a page: recording until the first export, which reads its file. */
 interface Video {
   readonly page: Target.NavigableId
   readonly at: MonotonicInstant.MonotonicInstant
   readonly scope: Scope.Closeable
   readonly recording: Capability.VideoRecording
+  finished: boolean
   read: Option.Option<{ readonly bytes: Uint8Array; readonly width: number; readonly height: number }>
 }
+
+/** Kept as a cause until export, so each export applies its own diagnostics preset. */
+interface VideoFailure {
+  readonly page: Target.NavigableId
+  readonly at: MonotonicInstant.MonotonicInstant
+  readonly stage: "acquisition" | "stop" | "file-read"
+  readonly cause: Cause.Cause<unknown>
+}
+
+/** Console errors are displayed by the reader, including their page and the complete underlying cause. */
+const videoFailureEvent = (failure: VideoFailure, preset: Diagnostics.Preset): Record<string, unknown> => {
+  let detail: string
+  try {
+    detail = Cause.pretty(failure.cause)
+  } catch {
+    detail = "[Unprintable video failure]"
+  }
+  if (preset === "strict") {
+    detail = detail.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/g, (url) => Spans.redactUrl(url, preset))
+  }
+  return {
+    type: "console",
+    time: Recordings.millis(failure.at),
+    pageId: failure.page,
+    messageType: "error",
+    text: `Native video for page ${failure.page} failed during ${failure.stage}:\n${detail}`,
+    location: { url: "", lineNumber: 0, columnNumber: 0 }
+  }
+}
+
+/** A snapshot of incomplete acquisition, not a terminal recording failure. */
+const pendingVideoEvent = (
+  page: Target.NavigableId,
+  at: MonotonicInstant.MonotonicInstant
+): Record<string, unknown> => ({
+  type: "console",
+  time: Recordings.millis(at),
+  pageId: page,
+  messageType: "error",
+  text: `Native video for page ${page}: acquisition is still pending at export; no video is available in this export.`,
+  location: { url: "", lineNumber: 0, columnNumber: 0 }
+})
 
 interface Frame {
   readonly page: Target.NavigableId
@@ -110,12 +161,8 @@ interface Frame {
 }
 
 /** A PNG's size, from its header. */
-const pngSize = (bytes: Uint8Array): { readonly width: number; readonly height: number } => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  return bytes.length < 24 ? { width: 0, height: 0 } : { width: view.getUint32(16), height: view.getUint32(20) }
-}
 
-/** The operations an action screenshot follows: the ones that change the page. */
+/** The operations whose DOM snapshots surround changes to the page. */
 const actions = new Set([
   "Locator.click",
   "Locator.dblclick",
@@ -124,25 +171,87 @@ const actions = new Set([
   "Locator.check",
   "Locator.uncheck",
   "Locator.focus",
+  "Locator.blur",
   "Locator.clear",
   "Locator.fill",
   "Locator.press",
   "Locator.pressSequentially",
   "Locator.selectOption",
+  "Locator.dispatchEvent",
   "Locator.setInputFiles",
   "Locator.dragTo",
   "Locator.scrollIntoView",
   "Page.goto",
+  "Page.setContent",
   "Page.reload",
   "Page.back",
   "Page.forward"
 ])
 
-const errorOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<{ name: string; message: string }> => {
+/** Observations may contain cycles, bigints or user-defined inspection that throws. */
+const observedText = (value: unknown): string => {
+  try {
+    return Inspectable.toStringUnknown(value)
+  } catch {
+    return "[Unprintable observed value]"
+  }
+}
+
+/** Keep the evidence in the message: existing trace viewers display only name and message. */
+const expectationMessage = (error: Expect.ExpectationFailed, preset: Diagnostics.Preset): string => {
+  const kind = ExpectImpl.evidenceKind(error)
+  const url = kind === "URL" || kind === "SourceURL"
+  // Form values are classified typed text in both presets; titles are hidden only under strict.
+  const hidden = kind === "Value" || (kind === "Title" || kind === "SourceTitle") && preset === "strict"
+  const valueText = (value: unknown) =>
+    hidden
+      ? "REDACTED"
+      : observedText(url && typeof value === "string" ? Spans.redactUrl(value, preset) : value)
+  let condition = error.condition
+  if (hidden && kind !== "SourceTitle") {
+    condition = kind === "Value"
+      ? "to have the value REDACTED"
+      : "to have the title REDACTED"
+  } else if (kind === "URL" && preset === "strict") {
+    // String matchers are JSON-quoted by the expectation. A regexp isn't a URL and can't be safely parsed.
+    let expected = "REDACTED"
+    try {
+      const raw: unknown = JSON.parse(condition.slice("to have the URL ".length))
+      if (typeof raw === "string") expected = JSON.stringify(Spans.redactUrl(raw, preset))
+    } catch {
+      // Keep the URL redactor's refusal for input that isn't a whole URL.
+    }
+    condition = `to have the URL ${expected}`
+  }
+  const lines = [`Expected ${error.subject} ${condition}`]
+  if (Option.isSome(error.last)) lines.push(`Last observed: ${valueText(error.last.value.value)}`)
+  if (error.history.length > 0) {
+    lines.push("History:", ...error.history.map((entry) => `  ${valueText(entry.value)}`))
+  }
+  lines.push(
+    `Checks: ${error.checks.count}${
+      error.checks.triggeredBy.length > 0 ? ` (${error.checks.triggeredBy.join(", ")})` : ""
+    }`,
+    `Elapsed: ${Math.round(Duration.toMillis(error.elapsed))} ms`
+  )
+  if (Option.isSome(error.nearest)) lines.push(`Nearest match:\n${error.nearest.value}`)
+  if (error.suggestions.length > 0) lines.push(`Suggestions:\n${error.suggestions.join("\n")}`)
+  return lines.join("\n")
+}
+
+const errorOf = (exit: Exit.Exit<unknown, unknown>, name: string): Option.Option<RecordedError> => {
   if (Exit.isSuccess(exit)) return Option.none()
   const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
   if (failure !== undefined) {
     const error = failure.error as { readonly _tag?: unknown; readonly name?: unknown; readonly message?: unknown }
+    if (Expect.isExpectationFailed(error)) {
+      // Library failures are classified at creation, even without a recording. A manually constructed failure
+      // can acquire metadata from its first recorded canonical expectation; later steps never override it.
+      if (ExpectImpl.evidenceKind(error) === undefined && name.startsWith("Expect.")) {
+        ExpectImpl.classifyFailure(error, name.slice("Expect.".length))
+      }
+      return Option.some(error)
+    }
     return Option.some({
       name: typeof error._tag === "string" ? error._tag : typeof error.name === "string" ? error.name : "Error",
       message: typeof error.message === "string" ? error.message : String(failure.error)
@@ -247,6 +356,16 @@ export const start = Effect.fnUntraced(function*(
   settings: Settings,
   scope: Scope.Scope
 ) {
+  const run = yield* Effect.serviceOption(TestRun.TestRun)
+  const info = Option.isSome(run) ? run.value.info : undefined
+  // Copy scalar fields now: export may run in another test or after its retry count changes.
+  const test = info === undefined || info.id === "" ? undefined : {
+    project: info.project,
+    file: info.file,
+    id: info.id,
+    attempt: info.attempt,
+    repeat: info.repeat ?? 0
+  }
   const own = yield* Scope.fork(scope)
   const clock = Recordings.anchor()
   const steps: Array<Step> = []
@@ -257,6 +376,23 @@ export const start = Effect.fnUntraced(function*(
   const exceptions: Array<UncaughtException.UncaughtException> = []
   const snapshots: Array<Snapshot> = []
   const videos: Array<Video> = []
+  const pendingVideos = new Set<Target.NavigableId>()
+  const videoFailures: Array<VideoFailure> = []
+  const retainVideoFailure = (failure: VideoFailure) => Effect.sync(() => void videoFailures.push(failure))
+  const observeVideo = <A, E, R>(
+    page: Target.NavigableId,
+    stage: VideoFailure["stage"],
+    effect: Effect.Effect<A, E, R>
+  ) =>
+    effect.pipe(
+      Effect.map(Option.some),
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause)
+          // Preserve cancellation rather than turning an interrupted export into a successful archive.
+          ? Effect.failCause(cause as Cause.Cause<never>)
+          : retainVideoFailure({ page, stage, at: Adapter.now(), cause }).pipe(Effect.as(Option.none<A>()))
+      )
+    )
   // The recording's captures in each document are one stream, numbered apart from any other recording's
   const stream = `trace-${crypto.randomUUID()}`
   const failedCaptures = new Set<Target.DocumentId>()
@@ -273,15 +409,19 @@ export const start = Effect.fnUntraced(function*(
   }
 
   // A span the step runs in: a recorded operation's, or one of the caller's, which becomes a step of its own
-  const stepOf = (span: Tracer.AnySpan): Option.Option<string> => {
+  const stepOf = (span: Tracer.AnySpan, stack: ReadonlyArray<Recorders.Location>): Option.Option<string> => {
     const known = bySpan.get(span.spanId)
     if (known !== undefined) return Option.some(known)
     if (span._tag === "ExternalSpan") return Option.none()
     const callId = `g${++calls}`
+    const frame = stack.findIndex((frame) => frame.function === span.name)
+    const ownStack = frame < 0 ? [] : stack.slice(frame)
+    const parentStack = frame < 0 ? stack : stack.slice(frame + 1)
     bySpan.set(span.spanId, callId)
     steps.push({
       callId,
-      parentId: Option.flatMap(span.parent, stepOf),
+      stack: ownStack,
+      parentId: Option.flatMap(span.parent, (parent) => stepOf(parent, parentStack)),
       name: span.name,
       params: Object.fromEntries(span.attributes),
       start: Adapter.now(),
@@ -325,13 +465,14 @@ export const start = Effect.fnUntraced(function*(
       if (started.own && Option.isSome(started.span)) {
         bySpan.set(started.span.value.spanId, callId)
         parentId = started.span.value._tag === "Span"
-          ? Option.flatMap(started.span.value.parent, stepOf)
+          ? Option.flatMap(started.span.value.parent, (parent) => stepOf(parent, started.enclosingStack))
           : Option.none()
       } else {
-        parentId = Option.flatMap(started.span, stepOf)
+        parentId = Option.flatMap(started.span, (span) => stepOf(span, started.enclosingStack))
       }
       const step: Step = {
         callId,
+        stack: started.stack,
         parentId,
         name: started.name,
         params: started.attributes,
@@ -341,13 +482,12 @@ export const start = Effect.fnUntraced(function*(
         group: false
       }
       steps.push(step)
-      const page = Option.flatMap(
-        pageOf(started.attributes["browser.page.id"]),
-        (page) => actions.has(started.name) ? Option.some(page) : Option.none()
-      )
+      const page = pageOf(started.attributes["browser.page.id"])
+      const action = actions.has(started.name)
+      const screenshot = action || started.name.startsWith("Expect.")
       // The target is resolved as the action starts, where it is now, and again after it, if it wasn't there yet
       let target = Option.none<Capture.CaptureTarget>()
-      if (settings.domSnapshots && Option.isSome(page)) {
+      if (settings.domSnapshots && action && Option.isSome(page)) {
         yield* snapshot(callId, "before", page.value, Option.none())
         if (Option.isSome(started.subject)) {
           target = yield* targetOf(page.value, started.subject.value)
@@ -356,20 +496,24 @@ export const start = Effect.fnUntraced(function*(
       return (exit) =>
         Effect.gen(function*() {
           step.end = Option.some(Adapter.now())
-          step.error = errorOf(exit)
+          step.error = errorOf(exit, started.name)
           if (Option.isNone(page)) {
             return
           }
-          if (settings.domSnapshots) {
+          if (settings.domSnapshots && action) {
             if (Option.isNone(target) && Option.isSome(started.subject)) {
               target = yield* targetOf(page.value, started.subject.value)
             }
             yield* snapshot(callId, "after", page.value, target)
           }
-          if (settings.screenshots !== "perAction") {
+          if (settings.screenshots !== "perAction" || !screenshot) {
             return
           }
-          const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(Effect.option)
+          // Completion can follow the enclosing deadline; capture has a bounded budget of its own.
+          const shot = yield* runtime.model.adapter.screenshot(page.value.id, png).pipe(
+            Operation.apart("Trace.screenshot", Duration.millis(1000)),
+            Effect.option
+          )
           if (Option.isSome(shot)) {
             shots.push({ callId, page: page.value.id, at: Adapter.now(), png: shot.value })
           }
@@ -390,21 +534,35 @@ export const start = Effect.fnUntraced(function*(
 
   // Screencast frames, from each page of the target as it appears
   const screencast = settings.screencast
-  // Firefox has a video of its own where the other backends stream frames
+  // Prefer video when the browser can write it; otherwise use native frames
   const video = screencast === "native" && (yield* Filters.supported(runtime, "capability.video"))
   if (screencast !== "off") {
     const seen = new Set<Target.NavigableId>()
     const record = Effect.fnUntraced(function*(page: Model.PageEntry) {
       const scope = yield* Scope.fork(own)
-      const recording = yield* Capabilities.acquire(runtime, page, Capability.Video).pipe(
-        Scope.provide(scope),
-        Effect.onError(() => Scope.close(scope, Exit.void))
+      const recording = yield* observeVideo(
+        page.id,
+        "acquisition",
+        Capabilities.acquire(runtime, page, Capability.Video).pipe(
+          Scope.provide(scope),
+          Effect.onError(() => Scope.close(scope, Exit.void))
+        )
       )
-      videos.push({ page: page.id, at: Adapter.now(), scope, recording, read: Option.none() })
+      if (Option.isSome(recording)) {
+        videos.push({
+          page: page.id,
+          at: Adapter.now(),
+          scope,
+          recording: recording.value,
+          finished: false,
+          read: Option.none()
+        })
+        pendingVideos.delete(page.id)
+      }
     })
     const cast = (page: Model.PageEntry) =>
       video
-        ? record(page)
+        ? record(page).pipe(Effect.ensuring(Effect.sync(() => void pendingVideos.delete(page.id))))
         : screencast === "native"
         ? Capabilities.acquire(runtime, page, Capability.Screencast).pipe(
           Effect.flatMap((control) =>
@@ -434,7 +592,7 @@ export const start = Effect.fnUntraced(function*(
           while (true) {
             yield* BrowserClock.sleep(Duration.toMillis(Duration.fromInputUnsafe(screencast.polled)))
             const shot = yield* runtime.model.adapter.screenshot(page.id, options)
-            const size = format === "jpeg" ? Adapter.jpegSize(shot) : pngSize(shot)
+            const size = format === "jpeg" ? Adapter.jpegSize(shot) : Adapter.pngSize(shot)
             frames.push({ page: page.id, at: Adapter.now(), ...size, image: shot, format })
           }
         })
@@ -442,6 +600,7 @@ export const start = Effect.fnUntraced(function*(
       Effect.suspend(() => {
         if (seen.has(page.id)) return Effect.void
         seen.add(page.id)
+        if (video) pendingVideos.add(page.id)
         return cast(page).pipe(Effect.ignore, Operation.detached, Effect.forkIn(own), Effect.asVoid)
       })
     if (target._tag === "Page") yield* follow(target.entry)
@@ -470,6 +629,9 @@ export const start = Effect.fnUntraced(function*(
   const exportTrace = Effect.fnUntraced(function*(path: FilePath.Local | string) {
     const preset = yield* Diagnostics.CurrentPreset
     const exported = Adapter.now()
+    // Snapshot acquisition before yielding: an acquisition settling during export belongs to the next export.
+    const pendingAtExport = new Set(pendingVideos)
+    const videosAtExport = videos.slice()
     const info = runtime.model.adapter.info
     const events: Array<{ readonly time: number; readonly event: Record<string, unknown> }> = []
     // A caller's span spans the operations recorded inside it
@@ -516,6 +678,7 @@ export const start = Effect.fnUntraced(function*(
           class: step.group ? "Effect" : dot > 0 ? step.name.slice(0, dot) : "Strider",
           method: step.group ? "span" : dot > 0 ? step.name.slice(dot + 1) : step.name,
           params: params(step.params),
+          ...(step.stack.length > 0 ? { stack: step.stack } : {}),
           ...(Option.isSome(step.parentId) ? { parentId: step.parentId.value } : {})
         }
       })
@@ -525,11 +688,29 @@ export const start = Effect.fnUntraced(function*(
           type: "after",
           callId: step.callId,
           endTime: Recordings.millis(end as MonotonicInstant.MonotonicInstant),
-          ...(Option.isSome(step.error) ? { error: step.error.value } : {})
+          ...(Option.isSome(step.error)
+            ? {
+              error: Expect.isExpectationFailed(step.error.value)
+                ? { name: step.error.value._tag, message: expectationMessage(step.error.value, preset) }
+                : step.error.value
+            }
+            : {})
         }
       })
     }
     const files: Array<{ path: string; content: string | Uint8Array }> = []
+    if (Option.isSome(runtime.fileSystem)) {
+      const fs = runtime.fileSystem.value
+      for (const file of new Set(steps.flatMap((step) => step.stack.map((frame) => frame.file)))) {
+        // Only typed file-system failures are optional. Defects and interruption still fail the export.
+        const content = yield* fs.readFile(file).pipe(Effect.option)
+        if (Option.isNone(content)) continue
+        const basename = file.slice(Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\")) + 1)
+        const dot = basename.lastIndexOf(".")
+        const extension = dot <= 0 ? "" : basename.slice(dot)
+        files.push({ path: `src/${yield* digest(file)}${extension}`, content: content.value })
+      }
+    }
     for (const shot of shots) {
       const file = `screenshots/${shot.callId}-after.png`
       files.push({ path: file, content: shot.png })
@@ -637,15 +818,28 @@ export const start = Effect.fnUntraced(function*(
         })
       }
     }
-    // Firefox's videos end here, the first time, and their files are read
-    for (const video of videos) {
-      if (Option.isNone(video.read)) {
-        yield* Scope.close(video.scope, Exit.void)
-        const file = yield* video.recording.file.pipe(Effect.option)
-        const bytes = Option.isSome(file) && Option.isSome(runtime.fileSystem)
-          ? yield* runtime.fileSystem.value.readFile(file.value).pipe(Effect.option)
-          : Option.none<Uint8Array>()
-        if (Option.isSome(bytes)) video.read = Option.some({ bytes: bytes.value, ...webmSize(bytes.value) })
+    // Videos end here, the first time, and their files are read
+    for (const video of videosAtExport) {
+      if (!video.finished) {
+        const file = yield* observeVideo(
+          video.page,
+          "stop",
+          Scope.close(video.scope, Exit.void).pipe(
+            Effect.andThen(video.recording.file)
+          )
+        )
+        if (Option.isSome(file)) {
+          const bytes = yield* observeVideo(
+            video.page,
+            "file-read",
+            Option.match(runtime.fileSystem, {
+              onNone: () => Effect.die(new Error("The browser's layer was built without Effect's FileSystem")),
+              onSome: (fs) => fs.readFile(file.value)
+            })
+          )
+          if (Option.isSome(bytes)) video.read = Option.some({ bytes: bytes.value, ...webmSize(bytes.value) })
+        }
+        video.finished = true
       }
       if (Option.isNone(video.read)) continue
       const read = video.read.value
@@ -663,6 +857,14 @@ export const start = Effect.fnUntraced(function*(
         }
       })
     }
+    for (const page of pendingAtExport) {
+      const pendingEvent = pendingVideoEvent(page, exported)
+      events.push({ time: exported, event: pendingEvent })
+    }
+    for (const failure of videoFailures) {
+      if (failure.stage === "acquisition" && pendingAtExport.has(failure.page)) continue
+      events.push({ time: failure.at, event: videoFailureEvent(failure, preset) })
+    }
     events.sort((a, b) => a.time - b.time)
     const header = {
       version: 9,
@@ -679,7 +881,8 @@ export const start = Effect.fnUntraced(function*(
         "unknown",
       wallTime: clock.wall,
       monotonicTime: Recordings.millis(clock.monotonic),
-      options: {}
+      options: {},
+      ...(test === undefined ? {} : { title: test.id, striderTest: test })
     }
     const lines = [header, ...events.map((each) => each.event)].map((line) => JSON.stringify(line)).join("\n")
     files.unshift({ path: "trace.trace", content: `${lines}\n` })

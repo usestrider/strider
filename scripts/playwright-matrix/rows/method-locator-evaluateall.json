@@ -1,0 +1,25 @@
+{
+  "id": "method-locator-evaluateall",
+  "upstream": [
+    "method:Locator.evaluateAll"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.evaluateAll",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.evaluateAll"
+    }
+  ],
+  "notes": "Resolves one membership snapshot without waiting, including no matches. Runs in the isolated world; DOM may change before dispatch or across awaits. Arguments and results use by-value serialization.",
+  "capabilities": [
+    "isolatedWorlds"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

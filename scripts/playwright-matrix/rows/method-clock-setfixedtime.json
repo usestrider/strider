@@ -1,0 +1,29 @@
+{
+  "id": "method-clock-setfixedtime",
+  "upstream": [
+    "method:Clock.setFixedTime"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "PageClock.install",
+      "url": "/docs/api/browser/PageClock#PageClock.install"
+    }
+  ],
+  "notes": "Install fixed mode; duplicate clock setters are represented by mode data.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "typed-patterns-and-clock-modes",
+    "quote": "Where Playwright's surface is a string DSL, or overlaps itself, ours isn't and doesn't.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

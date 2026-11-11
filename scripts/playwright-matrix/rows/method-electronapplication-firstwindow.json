@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-firstwindow",
+  "upstream": [
+    "method:ElectronApplication.firstWindow"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

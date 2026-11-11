@@ -1,0 +1,20 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-acceptdownloads",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "acceptDownloads",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "downloads is temporary, deny, or an explicit directory.",
+  "capabilities": [
+    "downloads"
+  ],
+  "requirements": []
+}

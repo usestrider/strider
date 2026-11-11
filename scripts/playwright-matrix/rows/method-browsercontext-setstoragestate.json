@@ -1,0 +1,36 @@
+{
+  "id": "method-browsercontext-setstoragestate",
+  "upstream": [
+    "method:BrowserContext.setStorageState"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.setStorageState",
+      "url": "/docs/api/browser/UserContext#UserContext.setStorageState"
+    }
+  ],
+  "notes": "Requires storageStateTracking: true at context creation and owned context access; untracked contexts and held virtual authenticators refuse before mutation. Preserves pages and URLs, replaces cookies/localStorage/IndexedDB and clears available OPFS across historical origins and partitions. Runtime failures have reason StorageState.PartiallyApplied; deadlines/interruption may also leave partial changes and pending database deletions may complete later. HTTP cache, existing-page sessionStorage and service-worker registrations remain unchanged; no credential or OPFS import. Incoming partitions explicitly marked crossSiteAncestor: false refuse. Not full Playwright equivalence. Non-HTTP(S) storage and opaque ancestor histories refuse before mutation because their partitions cannot be replayed. Incoming same-site partitions requiring an ancestor chain and mismatched top-level-origin/site metadata also refuse before mutation. File history refuses for the context lifetime on all backends because file storage persists after page closure; opaque history also conservatively refuses for the context lifetime because complete descendant/worker reachability is not established.",
+  "capabilities": [
+    "storageState.partitioned",
+    "cookies"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts",
+      "packages/browser/src/StorageState.ts",
+      "packages/browser/src/internal/storageState.ts",
+      "packages/browser/src/internal/fold.ts",
+      "packages/browser/src/internal/webkitAdapter/storage.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "existing-context-storage-replacement",
+    "quote": "Running writers and open storage handles can cause typed partial failure;",
+    "revision": "a333d8e50c0137eb54fd9425713105cbe3ce1c27"
+  }
+}

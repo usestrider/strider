@@ -1,0 +1,11 @@
+{
+  "id": "method-selectors-settestidattribute",
+  "upstream": [
+    "method:Selectors.setTestIdAttribute"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No custom selector-engine registry or global test-id-attribute setting.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,24 @@
+{
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Checks",
+      "url": "/docs/api/browser/Locator#Checks"
+    }
+  ],
+  "notes": "No blanket force flag. Locator.selectText({ checks: { visible: false } }) bypasses its visibility check; strict matching and input-kind validation remain.",
+  "capabilities": [],
+  "id": "option-locator-selecttext-force",
+  "upstream": [
+    "method:Locator.selectText"
+  ],
+  "option": "force",
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Actionability checks are named, adjustable per call, and reported in errors.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  }
+}

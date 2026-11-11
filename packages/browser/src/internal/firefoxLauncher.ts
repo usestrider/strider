@@ -108,8 +108,9 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   )
   const launched = yield* Launch.spawn(path, argsFor(options, profile), profile, { coreDumps: options.coreDumps })
   const timeout = options.timeout ?? "30 seconds"
+  const deadline = Launch.readinessDeadline(timeout)
   const listening = yield* launched.stderrLine(/WebDriver BiDi listening on (ws:\/\/\S+)/).pipe(
-    Effect.timeoutOption(timeout),
+    BrowserClock.timeoutOn(BrowserClock.live, BrowserClock.millisLeft(BrowserClock.live, deadline)),
     Effect.map(Option.flatten),
     // The browser starts in real time, whatever clock the program's fiber has (QUIRKS.md, Q235)
     BrowserClock.onLive
@@ -117,7 +118,8 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   if (Option.isNone(listening)) {
     return yield* Launch.notReady(
       launched,
-      `It didn't report a WebDriver BiDi endpoint within ${Duration.format(Duration.fromInputUnsafe(timeout))}`
+      `It didn't report a WebDriver BiDi endpoint within ${Duration.format(Duration.fromInputUnsafe(timeout))}`,
+      deadline
     )
   }
   const transport = yield* Transport.webSocket(`${listening.value[1]}/session`).pipe(

@@ -1,12 +1,11 @@
 ---
 title: Browser support
-description: The three backends, what each can do, running one program on every browser, and checking a capability.
+description: Choosing a browser, and running on all three.
 order: 1
 ---
 
-Each browser's protocol lets Strider do a different set of things, so a step that passes on Chromium can fail with
-`Unsupported` on Firefox or WebKit. Knowing what each backend can do lets you pick the one a program needs, and run
-one program on all three, skipping only what a browser lacks.
+Strider drives Chromium, Firefox, and WebKit, each through its own protocol, which decides what Strider can do
+there.
 
 ## Three backends
 
@@ -19,7 +18,7 @@ one program on all three, skipping only what a browser lacks.
 The rest of the guide works on all three, except where a browser lacks a capability. That fails with
 `Unsupported`, naming it, before anything is sent.
 
-- **[Chromium](/docs/browsers/chromium)** supports the most: start here, and use it for throttling, media emulation
+- **[Chromium](/docs/browsers/chromium)** supports the most: start here, and use it for throttling, media emulation,
   or PDFs.
 - **[Firefox](/docs/browsers/firefox)** runs over WebDriver BiDi, the W3C standard, which covers less emulation and
   interception than CDP.
@@ -130,3 +129,11 @@ const steadyScreenshot = Effect.fn("steadyScreenshot")(function*(page: Page.Page
 })
 ```
 
+
+## Platform coverage
+
+Linux integration tests cover Chromium 155.0.8059.79, Firefox 158.0, and WebKitGTK 2.54.1 in a pinned Nix
+environment. The macOS entry point covers the Chromium and Firefox adapter and public API slice suites with
+Chrome for Testing 155.0.8059.79 and Firefox 158.0 on Apple Silicon; its first CI run is pending. Browser
+versions are checked exactly on both platforms. macOS uses the runner's fonts and native display, so its
+rendering can differ from Linux. Safari, Intel macOS, and Windows are not covered by this macOS entry point.

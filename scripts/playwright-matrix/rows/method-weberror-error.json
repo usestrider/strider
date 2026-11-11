@@ -1,0 +1,17 @@
+{
+  "id": "method-weberror-error",
+  "upstream": [
+    "method:WebError.error"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UncaughtException",
+      "symbol": "UncaughtException",
+      "url": "/docs/api/browser/UncaughtException#UncaughtException"
+    }
+  ],
+  "notes": "Structured event data; not a remote Playwright object.",
+  "capabilities": [],
+  "requirements": []
+}

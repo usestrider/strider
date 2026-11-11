@@ -20,6 +20,7 @@ import * as Scope from "effect/Scope"
 import { execFile, spawn } from "node:child_process"
 import * as fs from "node:fs"
 import * as http from "node:http"
+import * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Daemon from "../../src/internal/cli/daemon.ts"
@@ -69,13 +70,19 @@ const strider = (env: Record<string, string>, ...args: ReadonlyArray<string>) =>
     )
   })
 
-/** `strider mcp` as a client runs it: messages written to its standard input, answers read until the last id. */
+/**
+ * `strider mcp` as a client runs it: messages written to its standard input, answers read until every request up to
+ * the last id has one, in whatever order the server answers them.
+ */
 const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages: ReadonlyArray<object>, last: number) =>
   Effect.callback<ReadonlyArray<any>>((resume) => {
     const child = spawn(process.execPath, [bin, ...args], {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     })
+    const pending = new Set(
+      messages.flatMap((message: any) => typeof message.id === "number" && message.id <= last ? [message.id] : [])
+    )
     const answers: Array<any> = []
     let buffered = ""
     let errors = ""
@@ -93,7 +100,8 @@ const mcp = (env: Record<string, string>, args: ReadonlyArray<string>, messages:
         if (line.trim() === "") continue
         const answer = JSON.parse(line)
         answers.push(answer)
-        if (answer.id === last) {
+        pending.delete(answer.id)
+        if (pending.size === 0) {
           clearTimeout(timer)
           child.stdin.end()
           child.kill()
@@ -114,6 +122,19 @@ const handshake = [
   },
   { jsonrpc: "2.0", method: "notifications/initialized" }
 ]
+
+/** Tool calls through one `strider mcp`, which may run them at once: each call's answer, in the calls' order. */
+const mcpTools = (
+  env: Record<string, string>,
+  args: ReadonlyArray<string>,
+  calls: ReadonlyArray<{ readonly name: string; readonly arguments: object }>
+) =>
+  mcp(env, args, [
+    ...handshake,
+    ...calls.map((params, index) => ({ jsonrpc: "2.0", id: index + 2, method: "tools/call", params }))
+  ], calls.length + 1).pipe(
+    Effect.map((answers) => calls.map((_, index) => answers.find((answer) => answer.id === index + 2)))
+  )
 
 /** The page names `strider pages` lists, one a line before its URL. */
 const names = (listing: { readonly out: string }) =>
@@ -146,6 +167,218 @@ const app = `<title>shop</title>
 </script>`
 
 describe("strider", () => {
+  it.live(
+    "reports a failed call's digest through MCP and only once with JSON",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "failure-digest", ...args)
+        const started = yield* strider(env, "start", "--name", "failure-digest", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+          const emit = () => run("-p", "main", "eval", "console.error('pending failure event')")
+          assert.strictEqual((yield* emit()).code, 0)
+          const [answer] = yield* mcpTools(env, ["-s", "failure-digest", "mcp"], [{
+            name: "goto",
+            arguments: { page: "missing", url: "https://example.test/%typo%" }
+          }])
+          assert.isTrue(answer.result.isError)
+          const failure = JSON.parse(answer.result.content[0].text)
+          assert.strictEqual(failure.error, "PageNotFound")
+          assert.include(failure.message, "%typo% names no secret")
+          assert.deepStrictEqual(failure.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.strictEqual((yield* emit()).code, 0)
+          const json = yield* run("-p", "missing", "--json", "goto", "https://example.test/%typo%")
+          assert.strictEqual(json.code, 16, json.err)
+          const outcome = JSON.parse(json.out).outcome
+          assert.strictEqual(outcome.error, "PageNotFound")
+          assert.include(outcome.message, "%typo% names no secret")
+          assert.deepStrictEqual(outcome.sinceLast, ["console error on main: pending failure event"])
+          assert.notInclude((yield* run("pages")).out, "pending failure event")
+          assert.notInclude(json.err, "pending failure event")
+        } finally {
+          yield* run("stop")
+        }
+      })),
+    timeout
+  )
+
+  it.live("evaluates browser expressions and function files", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const env = environment()
+      const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "evaluation", ...args)
+      const started = yield* strider(env, "start", "--name", "evaluation", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      try {
+        assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+        const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+        const result = yield* evaluate("Promise.resolve({answer: 42})")
+        assert.strictEqual(result.code, 0, result.err)
+        assert.deepStrictEqual(JSON.parse(result.out).value, { answer: 42 })
+        assert.notInclude(result.out, "Promise.resolve")
+        for (const args of [[], ["--file", "/missing-eval.js"], ["1", "--file", "/missing-eval.js"]]) {
+          assert.notStrictEqual((yield* evaluate(...args)).code, 0)
+        }
+        const file = path.join(env.XDG_RUNTIME_DIR, "fn.js")
+        fs.writeFileSync(file, "async () => { document.title = 'changed'; return 7n }")
+        const fromFile = yield* evaluate("--file", file)
+        assert.strictEqual(fromFile.code, 0, fromFile.err)
+        assert.deepStrictEqual(JSON.parse(fromFile.out).value, { type: "bigint", value: "7" })
+        assert.strictEqual(JSON.parse((yield* evaluate("document.title")).out).value, "changed")
+        fs.writeFileSync(file, "() => typeof process")
+        const relative = yield* evaluate("--file", path.relative(process.cwd(), file))
+        assert.strictEqual(relative.code, 0, relative.err)
+        assert.strictEqual(JSON.parse(relative.out).value, "undefined")
+        for (
+          const [source, expected] of [
+            ["undefined", { type: "undefined" }],
+            ["NaN", { type: "number", value: "NaN" }],
+            ["[true, null, 'value']", [true, null, "value"]]
+          ] as const
+        ) {
+          const value = yield* evaluate(source)
+          assert.strictEqual(value.code, 0, value.err)
+          assert.deepStrictEqual(JSON.parse(value.out).value, expected)
+        }
+        for (const source of ["import x from 'node:fs'", "export default () => 1", "not valid javascript", "42"]) {
+          fs.writeFileSync(file, source)
+          assert.notStrictEqual((yield* evaluate("--file", file)).code, 0)
+        }
+        assert.notStrictEqual((yield* run("-p", "missing", "eval", "1")).code, 0)
+        assert.notStrictEqual((yield* run("--json", "eval", "1")).code, 0)
+        assert.notStrictEqual((yield* evaluate("(() => { throw Error('broken') })()")).code, 0)
+        assert.strictEqual((yield* evaluate("--main-world", "globalThis.onlyMain = 9")).code, 0)
+        assert.deepStrictEqual(JSON.parse((yield* evaluate("typeof globalThis.onlyMain")).out).value, "undefined")
+        const exported = path.join(env.XDG_RUNTIME_DIR, "export.ts")
+        assert.strictEqual((yield* run("export", "test", exported)).code, 0)
+        assert.include(fs.readFileSync(exported, "utf8"), "TODO strider eval")
+        assert.notInclude(fs.readFileSync(exported, "utf8"), "onlyMain")
+      } finally {
+        yield* run("stop")
+      }
+    })), timeout)
+
+  it.live(
+    "eval accepts function files ending in a semicolon, after load-phase input errors",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "eval-phases", ...args)
+        const started = yield* strider(env, "start", "--name", "eval-phases", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("page", "new", "--name", "main", "about:blank")).code, 0)
+          const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+          const missing = yield* evaluate("--file", path.join(env.XDG_RUNTIME_DIR, "missing.js"))
+          assert.notStrictEqual(missing.code, 0)
+          const inputError = JSON.parse(missing.err)
+          assert.deepStrictEqual(Object.keys(inputError).sort(), ["durationMs", "error", "file", "message", "phase"])
+          assert.strictEqual(inputError.file, "eval")
+          assert.strictEqual(inputError.error, "InvalidInput")
+          assert.strictEqual(inputError.phase, "load")
+          assert.isString(inputError.message)
+          assert.isAtLeast(inputError.durationMs, 0)
+          const neither = yield* evaluate()
+          assert.notStrictEqual(neither.code, 0)
+          assert.strictEqual(JSON.parse(neither.err).error, "InvalidInput")
+          assert.strictEqual(JSON.parse(neither.err).phase, "load")
+          const both = yield* evaluate("1", "--file", "unused.js")
+          assert.strictEqual(JSON.parse(both.err).error, "InvalidInput")
+          assert.strictEqual(JSON.parse(both.err).phase, "load")
+          const file = path.join(env.XDG_RUNTIME_DIR, "formatted.js")
+          // A formatter ends a function expression statement with a semicolon.
+          fs.writeFileSync(file, "async () => {\n  return document.title\n};\n")
+          const formatted = yield* evaluate("--file", file)
+          assert.strictEqual(formatted.code, 0, formatted.err)
+          const result = JSON.parse(formatted.out)
+          assert.deepStrictEqual(Object.keys(result).sort(), ["durationMs", "file", "handles", "value"])
+          assert.strictEqual(result.file, "eval")
+          assert.strictEqual(result.value, "")
+          assert.deepStrictEqual(result.handles, {})
+          assert.isAtLeast(result.durationMs, 0)
+          for (
+            const [source, expected] of [
+              ["Promise.resolve(42);  \n", 42],
+              ["'inside;string';", "inside;string"],
+              ["(() => { /* preserve; comment */ return 'value;' })();", "value;"],
+              ["(() => { // preserve; line comment\n return 'line;' })();", "line;"],
+              [
+                "(() => { /* preserve; comment */ return 'value;' }).toString();",
+                "() => { /* preserve; comment */ return 'value;' }"
+              ],
+              ["globalThis.evalCount = (globalThis.evalCount ?? 0) + 1;", 1],
+              ["globalThis.evalCount", 1]
+            ] as const
+          ) {
+            const evaluated = yield* evaluate(source)
+            assert.strictEqual(evaluated.code, 0, evaluated.err)
+            assert.strictEqual(JSON.parse(evaluated.out).value, expected)
+          }
+          fs.writeFileSync(file, "() => { /* preserve; comment */ return 'file;string' };\n")
+          const strings = yield* evaluate("--file", file)
+          assert.strictEqual(strings.code, 0, strings.err)
+          assert.strictEqual(JSON.parse(strings.out).value, "file;string")
+          assert.notStrictEqual((yield* evaluate("globalThis.evalCount = 99; 42;")).code, 0)
+          assert.strictEqual(JSON.parse((yield* evaluate("globalThis.evalCount")).out).value, 1)
+          assert.notStrictEqual((yield* evaluate("42;;")).code, 0)
+        } finally {
+          yield* run("stop")
+        }
+      })),
+    timeout
+  )
+
+  for (const capture of ["local", "strict"]) {
+    it.live(`captures eval successes and failures with ${capture} capture`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = { ...environment(), EVAL_SECRET: "eval-private" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "eval-capture", ...args)
+        const started = yield* strider(
+          env,
+          "start",
+          "--name",
+          "eval-capture",
+          "--chromium",
+          chromium.executable,
+          "--capture",
+          capture,
+          "--secret",
+          "token=EVAL_SECRET"
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          yield* run("page", "new", "--name", "main", "about:blank")
+          const evaluate = (...args: ReadonlyArray<string>) => run("-p", "main", "--json", "eval", ...args)
+          const value = yield* evaluate("'eval-private'")
+          assert.strictEqual(value.code, 0, value.err)
+          assert.strictEqual(JSON.parse(value.out).value, capture === "local" ? "%token%" : "•••")
+          const failure = yield* evaluate("(() => { document.title = 'acted'; throw Error('eval-private') })()")
+          assert.notStrictEqual(failure.code, 0)
+          assert.notInclude(failure.err, "eval-private")
+          const detail = JSON.parse(failure.err)
+          assert.strictEqual(detail.file, "eval")
+          assert.strictEqual(detail.phase, "execute")
+          if (capture === "strict") assert.include(detail.message, "masked")
+          const cycle = yield* evaluate("(() => { const x = {}; x.x = x; return x })()")
+          assert.notStrictEqual(cycle.code, 0)
+          assert.notInclude(cycle.err, "const x")
+          const cycleError = JSON.parse(cycle.err)
+          assert.strictEqual(cycleError.error, "PageError")
+          assert.strictEqual(cycleError.reason, "NotSerializable")
+          assert.strictEqual(cycleError.phase, "execute")
+          const exported = path.join(env.XDG_RUNTIME_DIR, "eval-export.ts")
+          yield* run("export", "test", exported)
+          const text = fs.readFileSync(exported, "utf8")
+          assert.strictEqual(text.split("TODO strider eval").length - 1, 3)
+          assert.notInclude(text, "eval-private")
+          assert.notInclude(text, "document.title")
+        } finally {
+          yield* run("stop")
+        }
+      })), timeout)
+  }
   for (const capture of ["local", "strict"]) {
     it.live(
       `prints segment values and validates typed arguments with ${capture} capture`,
@@ -581,6 +814,12 @@ describe("strider", () => {
           }`
           const opened = yield* session("page", "new", "--name", "home", url)
           assert.strictEqual(opened.code, 0, opened.err)
+          const isolated = yield* session("-p", "home", "--json", "eval", "1")
+          assert.notStrictEqual(isolated.code, 0)
+          assert.strictEqual(JSON.parse(isolated.err).reason, "Unsupported")
+          const evaluated = yield* session("-p", "home", "--json", "eval", "--main-world", "Promise.resolve(42)")
+          assert.strictEqual(evaluated.code, 0, evaluated.err)
+          assert.strictEqual(JSON.parse(evaluated.out).value, 42)
           const clicked = yield* session("-p", "home", "click", "role=button[name=\"Go\"]")
           assert.strictEqual(clicked.code, 0, clicked.err)
           const checked = yield* session("-p", "home", "expect", "css=button", "visible", "--text", "Done")
@@ -720,6 +959,42 @@ describe("strider", () => {
       assert.strictEqual(result.err, "InvalidInput: --idle 15m isn't a duration, such as \"30 minutes\"\n")
     }), timeout)
 
+  for (const navigation of ["page new", "goto"] as const) {
+    it.live(
+      `does not repeat ${navigation}'s own navigation in the next snapshot`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const served = yield* site
+          const url = `${served.origin}/fixture?html=${
+            encodeURIComponent("<title>digest boundary</title><p>ready</p>")
+          }`
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "digest", "-p", "main", ...args)
+          const started = yield* strider(env, "start", "--name", "digest", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            if (navigation === "goto") {
+              const opened = yield* run("page", "new", "--name", "main", "about:blank")
+              assert.strictEqual(opened.code, 0, opened.err)
+              assert.strictEqual((yield* run("snapshot")).code, 0)
+            }
+            const navigated = navigation === "page new"
+              ? yield* run("page", "new", "--name", "main", url)
+              : yield* run("goto", url)
+            assert.strictEqual(navigated.code, 0, navigated.err)
+            assert.include(navigated.out, `at ${url}`)
+            const snapshot = yield* run("snapshot")
+            assert.strictEqual(snapshot.code, 0, snapshot.err)
+            assert.include(snapshot.out, "document \"digest boundary\"")
+            assert.notInclude(snapshot.out, `main navigated to ${url}`)
+          } finally {
+            yield* run("stop")
+          }
+        })),
+      timeout
+    )
+  }
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site
@@ -805,6 +1080,7 @@ describe("strider", () => {
         const checked = yield* shop("expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(checked.code, 0, checked.err)
         assert.notInclude(checked.out, "hunter2")
+        assert.notInclude(checked.out, "names no secret")
         // page new puts a secret into its URL as goto does, and prints the URL with its name
         const vault = yield* run("-s", "shop", "page", "new", "--name", "vault", html(`<p id="pw">`, "</p>"))
         assert.strictEqual(vault.code, 0, vault.err)
@@ -813,30 +1089,99 @@ describe("strider", () => {
         const unlocked = yield* run("-s", "shop", "-p", "vault", "expect", "css=#pw", "visible", "--text", "%password%")
         assert.strictEqual(unlocked.code, 0, unlocked.err)
         // A navigation that fails doesn't print the secret either
-        const unsafe = "http://127.0.0.1:9/?pw=%password%"
+        const unsafe = "http://127.0.0.1:9/?pw=%password%&typo=%pasword%"
         const refused = yield* run("-s", "shop", "page", "new", "--name", "refused", unsafe)
         assert.strictEqual(refused.code, 11, refused.err)
         assert.notInclude(refused.err, "hunter2")
+        assert.include(refused.err, "%pasword% names no secret")
+        assert.include(refused.err, "Did you mean %password%?")
+        assert.notInclude(refused.err, "was sent")
+        const plainFailure = yield* shop("--json", "goto", "http://127.0.0.1:9/?pw=%password%")
+        const typoFailure = yield* shop("--json", "goto", unsafe)
+        assert.strictEqual(plainFailure.code, 11, plainFailure.err)
+        assert.strictEqual(typoFailure.code, plainFailure.code, typoFailure.err)
+        const originalError = JSON.parse(plainFailure.out).outcome
+        const hintedError = JSON.parse(typoFailure.out).outcome
+        assert.strictEqual(hintedError._tag, "Failed")
+        assert.strictEqual(hintedError.error, originalError.error)
+        assert.strictEqual(hintedError.reason, originalError.reason)
+        assert.isString(hintedError.reason)
+        assert.include(hintedError.message, "%pasword% names no secret")
+        assert.include(typoFailure.err, "%pasword% names no secret")
+        assert.notInclude(typoFailure.out + typoFailure.err, "hunter2")
+        assert.notInclude(hintedError.message, "was sent")
         // It names the URL it was going to, with the secret's name back in
-        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password% failed")
+        assert.include(refused.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
         // Its page is closed again, so the session holds no page the exported test leaves out
         const held = names(yield* run("-s", "shop", "pages"))
         assert.notInclude(held, "refused")
         // A name that's taken fails before a page opens
-        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", url)
+        const twice = yield* run("-s", "shop", "page", "new", "--name", "shop", `${url}&typo=%pasword%`)
         assert.strictEqual(twice.code, 15, twice.err)
+        assert.include(twice.err, "A page is already named shop")
+        assert.include(twice.err, "%pasword% names no secret")
+        assert.notInclude(twice.err, "was sent")
         assert.deepStrictEqual(names(yield* run("-s", "shop", "pages")), held)
         // A URL's percent-escapes name no secret, so the URL is sent as written
         const cafe = `${served.origin}/fixture?html=${encodeURIComponent(`<p id="word">café</p>`)}`
         assert.include(cafe, "caf%C3%A9")
         const visited = yield* shop("goto", cafe)
         assert.strictEqual(visited.code, 0, visited.err)
+        assert.notInclude(visited.out, "names no secret")
+        const escaped = yield* shop("goto", `${cafe}&escaped=%ACtext%20`)
+        assert.strictEqual(escaped.code, 0, escaped.err)
+        assert.notInclude(escaped.out, "names no secret")
+        const warned = yield* shop("goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warned.code, 0, warned.err)
+        assert.include(warned.out, "%pasword% names no secret")
+        assert.include(warned.out, "Did you mean %password%?")
+        assert.notInclude(warned.out, "hunter2")
+        const warnedJson = yield* shop("--json", "goto", `${cafe}&typo=%pasword%`)
+        assert.strictEqual(warnedJson.code, 0, warnedJson.err)
+        assert.include(JSON.parse(warnedJson.out).sinceLast.join("\n"), "%pasword% names no secret")
         assert.strictEqual((yield* shop("expect", "css=#word", "visible", "--text", "café")).code, 0)
-        // State for a program, and a test of what ran
-        const state = path.join(env.XDG_RUNTIME_DIR, "shop.state")
+        // A failed command reports the events since the last one, and the next command doesn't repeat them
+        const noisy = `<button onclick="setTimeout(() => console.error('late boom'), 200)">Go</button>`
+        assert.strictEqual((yield* shop("goto", `${served.origin}/fixture?html=${encodeURIComponent(noisy)}`)).code, 0)
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missed = yield* shop("expect", "css=#absent", "visible")
+        assert.strictEqual(missed.code, 14, missed.err)
+        assert.include(missed.err, "ExpectationFailed")
+        assert.include(missed.err, "since last: console error on shop: late boom")
+        const after = yield* shop("find", "Go", "--role", "button")
+        assert.strictEqual(after.code, 0, after.err)
+        assert.notInclude(after.out, "late boom")
+        assert.strictEqual((yield* shop("click", "css=button")).code, 0)
+        const missedJson = yield* shop("--json", "expect", "css=#absent", "visible")
+        assert.strictEqual(missedJson.code, 14, missedJson.err)
+        const failed = JSON.parse(missedJson.out)
+        assert.strictEqual(failed.outcome._tag, "Failed")
+        assert.include(failed.outcome.sinceLast.join("\n"), "console error on shop: late boom")
+        // State for a program, and a test of what ran, into directories that don't exist yet
+        const state = path.join(env.XDG_RUNTIME_DIR, "auth", "shop.state")
         assert.strictEqual((yield* run("-s", "shop", "state", "save", state)).code, 0)
         assert.strictEqual(fs.statSync(state).mode & 0o777, 0o600)
-        const test = path.join(env.XDG_RUNTIME_DIR, "shop.test.ts")
+        // The client resolves relative paths from its cwd, independently of the daemon's startup cwd.
+        const repo = path.join(env.XDG_RUNTIME_DIR, "repo")
+        fs.mkdirSync(repo)
+        yield* Effect.promise(() =>
+          new Promise<void>((resolve, reject) => {
+            execFile("git", ["init", repo], (error) => error ? reject(error) : resolve())
+          })
+        )
+        const saved = yield* Effect.promise(() =>
+          new Promise<{ out: string; err: string }>((resolve, reject) => {
+            execFile(process.execPath, [bin, "-s", "shop", "state", "save", "new/auth.state"], {
+              cwd: repo,
+              env: { ...process.env, ...env }
+            }, (error, out, err) => error ? reject(error) : resolve({ out, err }))
+          })
+        )
+        assert.include(saved.out, `to ${path.join(repo, "new/auth.state")}, readable by you alone`)
+        assert.include(saved.err, "plaintext credentials")
+        assert.include(saved.err, "Git")
+
+        const test = path.join(env.XDG_RUNTIME_DIR, "tests", "shop.test.ts")
         assert.strictEqual((yield* run("-s", "shop", "export", "test", test)).code, 0)
         const exported = fs.readFileSync(test, "utf8")
         // The test's context is made as the session's was, with every page rendering
@@ -897,6 +1242,8 @@ describe("strider", () => {
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // A percent-escaped URL is the text the session sent
         assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
+        assert.include(exported, "// %pasword% names no secret")
+        assert.notInclude(exported, "%C3% names no secret")
         // The page's own script holds the password it checks, so the statement is what is checked
         assert.notInclude(exported, `.fill("hunter2")`)
         assert.match((yield* run("sessions")).out, /^shop  chromium · pages shop, child, help, p\d+/)
@@ -908,6 +1255,297 @@ describe("strider", () => {
       assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "shop")))
       assert.strictEqual((yield* run("-s", "shop", "pages")).code, 20)
     })), timeout)
+
+  it.live(
+    "keeps existing redaction when adding a page creation failure hint",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = { ...environment(), SECRET_PW: "password" }
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run(
+          "start",
+          "--name",
+          "once",
+          "--chromium",
+          chromium.executable,
+          "--secret",
+          "password=SECRET_PW"
+        )
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          const failure = yield* run("-s", "once", "page", "new", "http://127.0.0.1:9/?pw=%password%&typo=%pasword%")
+          assert.strictEqual(failure.code, 11, failure.err)
+          assert.include(failure.err, "Navigation to http://127.0.0.1:9/?pw=%password%&typo=%pasword% failed")
+          assert.include(failure.err, "%pasword% names no secret")
+          assert.notInclude(failure.err, "pw=password")
+          assert.notInclude(failure.err, "was sent")
+        } finally {
+          yield* run("-s", "once", "stop")
+          fs.rmSync(env.XDG_RUNTIME_DIR, { recursive: true, force: true })
+        }
+      })),
+    timeout
+  )
+
+  it.live("finishes stop cleanup while keeping the session directory", () =>
+    Effect.gen(function*() {
+      const env = environment()
+      const started = yield* strider(env, "start", "--name", "kept", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "kept")
+      fs.writeFileSync(path.join(directory, "artifacts", "wanted.txt"), "kept")
+      const stopped = yield* strider(env, "-s", "kept", "stop", "--keep")
+      assert.strictEqual(stopped.code, 0, stopped.err)
+      assert.strictEqual(fs.readFileSync(path.join(directory, "artifacts", "wanted.txt"), "utf8"), "kept")
+      assert.isFalse(fs.existsSync(path.join(directory, "sock")))
+      assert.isFalse(fs.existsSync(path.join(directory, "lock")))
+      assert.deepStrictEqual(fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")), [])
+    }), timeout)
+
+  it.live(
+    "keeps a same-name replacement's socket when the stopped daemon closes its server",
+    () =>
+      Effect.promise(async () => {
+        const env = environment()
+        const barrier = path.join(env.XDG_RUNTIME_DIR, "close")
+        const directory = path.join(env.XDG_RUNTIME_DIR, "strider", "restart")
+        const socket = path.join(directory, "sock")
+        const lock = path.join(directory, "lock")
+        const appears = (file: string) =>
+          new Promise<void>((resolve, reject) => {
+            const signal = AbortSignal.timeout(30_000)
+            const watcher = fs.watch(env.XDG_RUNTIME_DIR, check)
+            function check() {
+              if (fs.existsSync(file)) {
+                watcher.close()
+                signal.removeEventListener("abort", expired)
+                resolve()
+              }
+            }
+            function expired() {
+              watcher.close()
+              reject(new Error(`${file} did not appear`))
+            }
+            signal.addEventListener("abort", expired, { once: true })
+            check()
+          })
+        const held = {
+          ...env,
+          STRIDER_CLOSE_BARRIER: barrier,
+          NODE_OPTIONS: `--import=${path.join(fixtures, "stop-close-barrier.mjs")}`
+        }
+        const run = (environment: Record<string, string>, ...args: ReadonlyArray<string>) =>
+          Effect.runPromise(strider(environment, ...args))
+        let original: number | undefined
+        let replacement: number | undefined
+        let stopped: ReturnType<typeof run> | undefined
+        try {
+          const started = await run(held, "start", "--name", "restart", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          original = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          stopped = run(held, "-s", "restart", "stop")
+          await appears(`${barrier}.closing`)
+          // The listener must give up its unlink action before the session name is released.
+          assert.isTrue(fs.existsSync(directory))
+          fs.writeFileSync(`${barrier}.release`, "")
+          const result = await stopped
+          assert.strictEqual(result.code, 0, result.err)
+          await appears(`${barrier}.closed`)
+          await appears(`${barrier}.finalizing`)
+          const restarted = await run(env, "start", "--name", "restart", "--chromium", chromium.executable)
+          if (fs.existsSync(lock)) replacement = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+          assert.strictEqual(restarted.code, 0, restarted.err)
+          assert.isTrue(fs.existsSync(socket))
+          fs.writeFileSync(`${barrier}.finish`, "")
+          await appears(`${barrier}.finished`)
+          // The old server's eventual finalizer must leave the replacement reachable.
+          assert.isTrue(fs.existsSync(socket))
+          const pages = await run(env, "-s", "restart", "pages")
+          assert.strictEqual(pages.code, 0, pages.err)
+          assert.strictEqual((await run(env, "-s", "restart", "stop")).code, 0)
+        } finally {
+          // Release both synchronous holds even when an earlier assertion fails.
+          fs.writeFileSync(`${barrier}.release`, "")
+          fs.writeFileSync(`${barrier}.finish`, "")
+          if (stopped) await stopped.catch(() => {})
+          // A broken socket makes graceful stop impossible. Both daemons and their ledger resources
+          // still belong to this fixture, including when starting the replacement failed.
+          if (replacement === undefined && fs.existsSync(lock)) {
+            const owner = JSON.parse(fs.readFileSync(lock, "utf8")).pid
+            if (owner !== original) replacement = owner
+          }
+          for (const pid of [original, replacement]) {
+            if (pid === undefined) continue
+            try {
+              process.kill(pid, "SIGKILL")
+            } catch {}
+          }
+          await run(env, "prune", "--yes")
+        }
+      }),
+    timeout
+  )
+
+  it.live("reports failed ledger cleanup instead of stop success", () =>
+    Effect.gen(function*() {
+      const env = {
+        ...environment(),
+        STRIDER_STOP_FAILURE: "1",
+        NODE_OPTIONS: `--import=${path.join(fixtures, "stop-cleanup-barrier.mjs")}`
+      }
+      const started = yield* strider(env, "start", "--name", "failure", "--chromium", chromium.executable)
+      assert.strictEqual(started.code, 0, started.err)
+      const stopped = yield* strider(env, "-s", "failure", "stop")
+      assert.notStrictEqual(stopped.code, 0)
+      assert.include(stopped.err, "ledger record could not be removed")
+    }), timeout)
+
+  for (const concurrent of [false, true]) {
+    it.live(
+      `returns stop success only after the ledger finalizer finishes${
+        concurrent ? " with concurrent and disconnected callers" : ""
+      }`,
+      () =>
+        Effect.promise(async () => {
+          const env = environment()
+          const barrierPath = path.join(env.XDG_RUNTIME_DIR, "cleanup.sock")
+          const events = path.join(env.XDG_RUNTIME_DIR, "cleanup.ndjson")
+          const observed: Array<string> = []
+          const sockets = new Set<net.Socket>()
+          let another: Promise<{ code: number; err: string; out: string }> | undefined
+          let abandoned: net.Socket | undefined
+          let callers = 0
+          let released!: () => void
+          const removed = new Promise<void>((resolve, reject) => {
+            const signal = AbortSignal.timeout(30_000)
+            const expired = () => reject(new Error("Ledger finalizer did not finish"))
+            signal.addEventListener("abort", expired, { once: true })
+            released = () => {
+              signal.removeEventListener("abort", expired)
+              resolve()
+            }
+          })
+          void removed.catch(() => {})
+          const server = net.createServer((socket) => {
+            sockets.add(socket)
+            socket.once("close", () => sockets.delete(socket))
+            socket.once("end", released)
+            let pending = ""
+            socket.on("data", (chunk) => {
+              const lines = (pending + chunk.toString()).split("\n")
+              pending = lines.pop()!
+              for (const line of lines) {
+                observed.push(line)
+                // The finalizer cannot remove the ledger until the test explicitly releases it.
+                if (line === "entered") {
+                  if (!concurrent) socket.write("release\n")
+                  else {
+                    another = run("-s", "barrier", "stop", "--keep")
+                    abandoned = net.connect(path.join(env.XDG_RUNTIME_DIR, "strider", "barrier", "sock"))
+                    abandoned.on("error", () => {})
+                    abandoned.once("connect", () =>
+                      abandoned!.write(
+                        JSON.stringify({
+                          _tag: "Request",
+                          id: "999",
+                          tag: "Command",
+                          payload: { argv: ["stop"], cwd: process.cwd() },
+                          headers: []
+                        }) + "\n"
+                      ))
+                  }
+                }
+                if (line === "caller" && ++callers === 2) {
+                  abandoned!.destroy()
+                  socket.write("release\n")
+                }
+                if (line === "removed") socket.write("observed\n")
+              }
+            })
+          })
+          await new Promise<void>((resolve) => server.listen(barrierPath, resolve))
+          const run = (...args: ReadonlyArray<string>) =>
+            Effect.runPromise(strider({
+              ...env,
+              STRIDER_STOP_BARRIER: barrierPath,
+              STRIDER_STOP_EVENTS: events,
+              NODE_OPTIONS: `--import=${path.join(fixtures, "stop-cleanup-barrier.mjs")}`
+            }, ...args))
+          try {
+            const started = await run("start", "--name", "barrier", "--chromium", chromium.executable)
+            assert.strictEqual(started.code, 0, started.err)
+            const stopped = await run("-s", "barrier", "stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+            if (another) {
+              const result = await another
+              assert.strictEqual(result.code, 0, result.err)
+              assert.notInclude(result.out, "directory stays")
+            }
+            const pruned = await run("prune")
+            await removed
+            assert.deepStrictEqual(observed.filter((line) => line !== "caller"), ["entered", "removed"])
+            const order = fs.readFileSync(events, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+            assert.deepStrictEqual(
+              order.map((entry) => entry.event).filter((event, index, all) =>
+                event !== "stop-response" || all.indexOf(event) === index
+              ),
+              [
+                "ledger-finalizer-entered",
+                "ledger-removed",
+                "stop-response"
+              ]
+            )
+            assert.isTrue(order[0].exists)
+            assert.isFalse(order[1].exists)
+            assert.strictEqual(order[2].exit._tag, "Success")
+            assert.deepStrictEqual(fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")), [])
+            assert.isFalse(fs.existsSync(path.join(env.XDG_RUNTIME_DIR, "strider", "barrier")))
+            assert.isFalse(order[2].sessionExists)
+            assert.strictEqual(pruned.code, 0, pruned.err)
+            assert.strictEqual(pruned.out.trim(), "Nothing is left behind by a program that ended")
+          } finally {
+            for (const socket of sockets) socket.destroy()
+            await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+          }
+        }),
+      timeout
+    )
+  }
+
+  it.live(
+    "refuses fork snapshot export for profiles and sessions loaded from a state file",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const state = path.join(env.XDG_RUNTIME_DIR, "initial.json")
+        fs.writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }))
+        for (const mode of ["profile", "state"] as const) {
+          const flags = mode === "profile"
+            ? ["--user-data-dir", path.join(env.XDG_RUNTIME_DIR, "profile")]
+            : ["--state", state]
+          const started = yield* run("start", "--name", mode, "--chromium", chromium.executable, ...flags)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const test = path.join(env.XDG_RUNTIME_DIR, mode + ".test.ts")
+            const destination = path.join(env.XDG_RUNTIME_DIR, mode + ".json")
+            const refused = yield* run("-s", mode, "export", "test", test, "--state", destination)
+            assert.strictEqual(refused.code, 15, refused.err)
+            assert.include(refused.err, "--fork")
+            assert.isFalse(fs.existsSync(destination))
+            assert.isFalse(fs.existsSync(test))
+            const normal = yield* run("-s", mode, "export", "test", test)
+            assert.strictEqual(normal.code, 0, normal.err)
+            const text = fs.readFileSync(test, "utf8")
+            if (mode === "profile") assert.include(text, "profile replay is unsupported")
+            else assert.include(text, JSON.stringify(state))
+          } finally {
+            yield* run("-s", mode, "stop")
+          }
+        }
+      })),
+    timeout
+  )
 
   it.live(
     "forks a session's state, lists and prunes one a crash left behind",
@@ -952,8 +1590,84 @@ describe("strider", () => {
               fs.readFileSync(test, "utf8"),
               `// The session started from session first's state (start --fork), which no file holds: this test's context starts empty\n        const context = yield* Browser.newContext({ focus: "emulated" })\n`
             )
+            const repo = path.join(env.XDG_RUNTIME_DIR, "export-repo")
+            fs.mkdirSync(repo)
+            yield* Effect.promise(() =>
+              new Promise<void>((resolve, reject) => {
+                execFile("git", ["init", repo], (error) => error ? reject(error) : resolve())
+              })
+            )
+            const saved = path.join(repo, "fork-state.json")
+            fs.writeFileSync(saved, "old", { mode: 0o644 })
+            const changed = yield* run(
+              "-s",
+              "second",
+              "-p",
+              "home",
+              "eval",
+              "document.cookie = 'flavor=changed; path=/'"
+            )
+            assert.strictEqual(changed.code, 0, changed.err)
+            const live = path.join(env.XDG_RUNTIME_DIR, "live-state.json")
+            assert.strictEqual((yield* run("-s", "second", "state", "save", live)).code, 0)
+            assert.strictEqual(
+              JSON.parse(fs.readFileSync(live, "utf8")).cookies.find((cookie: { name: string }) =>
+                cookie.name === "flavor"
+              ).value,
+              "changed"
+            )
+            const result = yield* run("-s", "second", "export", "test", test, "--state", saved)
+            assert.strictEqual(result.code, 0, result.err)
+            assert.include(result.err, "plaintext credentials")
+            assert.notInclude(result.out, "plaintext credentials")
+            assert.strictEqual(fs.statSync(saved).mode & 0o777, 0o600)
+            const snapshot = JSON.parse(fs.readFileSync(saved, "utf8"))
+            assert.strictEqual(
+              snapshot.cookies.find((cookie: { name: string }) => cookie.name === "flavor").value,
+              "oat"
+            )
+            assert.include(fs.readFileSync(test, "utf8"), JSON.stringify(saved))
+            assert.notInclude(fs.readFileSync(test, "utf8"), "context starts empty")
+            const collision = yield* run("-s", "second", "export", "test", saved, "--state", saved)
+            assert.notStrictEqual(collision.code, 0)
+            assert.include(collision.err, "different")
+            assert.strictEqual(JSON.parse(fs.readFileSync(saved, "utf8")).cookies[0].value, "oat")
+            for (const kind of ["symlink", "hardlink"] as const) {
+              const alias = path.join(repo, kind)
+              if (kind === "symlink") fs.symlinkSync(saved, alias)
+              else fs.linkSync(saved, alias)
+              const aliased = yield* run("-s", "second", "export", "test", alias, "--state", saved)
+              assert.notStrictEqual(aliased.code, 0)
+              assert.include(aliased.err, "different")
+            }
+            const missing = path.join(repo, "missing")
+            const dangling = path.join(repo, "dangling")
+            fs.symlinkSync(missing, dangling)
+            const aliased = yield* run("-s", "second", "export", "test", missing, "--state", dangling)
+            assert.notStrictEqual(aliased.code, 0)
+            assert.include(aliased.err, "different")
+            assert.isFalse(fs.existsSync(missing))
+            fs.writeFileSync(path.join(repo, ".gitignore"), "private/")
+            const privateState = path.join(repo, "private", "initial.json")
+            const ignored = yield* run("-s", "second", "export", "test", test, "--state", privateState)
+            assert.strictEqual(ignored.code, 0, ignored.err)
+            assert.notInclude(ignored.err, "plaintext credentials")
+            assert.strictEqual(fs.statSync(privateState).mode & 0o777, 0o600)
+            const unsupported = yield* run("-s", "first", "export", "test", test, "--state", saved)
+            assert.notStrictEqual(unsupported.code, 0)
+            assert.include(unsupported.err, "--fork")
           } finally {
-            yield* run("-s", "second", "stop")
+            const stopped = yield* run("-s", "second", "stop")
+            assert.strictEqual(stopped.code, 0, stopped.err)
+            const records = fs.readdirSync(path.join(env.XDG_STATE_HOME, "strider", "ledger")).map((file) =>
+              JSON.parse(fs.readFileSync(path.join(env.XDG_STATE_HOME, "strider", "ledger", file), "utf8"))
+            )
+            const first = JSON.parse(fs.readFileSync(lock, "utf8"))
+            assert.deepStrictEqual(records.map((record) => record.owner.pid), [first.pid])
+            assert.strictEqual(
+              (yield* run("prune", "--yes")).out.trim(),
+              "Nothing is left behind by a program that ended"
+            )
           }
         } finally {
           // A daemon killed outright leaves its directory, listed until pruned
@@ -969,6 +1683,9 @@ describe("strider", () => {
         const listed = yield* run("prune")
         assert.include(listed.out, "which has ended:")
         assert.include(listed.out, firefox.executable)
+        assert.include(listed.out, path.join(env.XDG_RUNTIME_DIR, "strider", "first", "profile"))
+        assert.notInclude(listed.out, chromium.executable)
+        assert.notInclude(listed.out, path.join(env.XDG_RUNTIME_DIR, "strider", "second", "profile"))
         assert.include(listed.out, "strider prune --yes reclaims it")
         assert.include((yield* run("prune", "--yes")).out, "reclaimed what 1 ended program left")
         assert.include((yield* run("prune")).out, "Nothing is left behind by a program that ended")
@@ -1203,7 +1920,7 @@ describe("strider", () => {
             const server = http.createServer((_, response) => {
               response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
               response.end(
-                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
+                `<div role="textbox" aria-label="Rich" contenteditable="true"><h1>rich-heading<a href="#x">rich-link</a></h1><button onclick="document.getElementById('status').textContent = 'clicked'">rich-button</button><img alt="rich-image" src="data:,"></div><div contenteditable="true">roleless-field</div><div role="textbox" contenteditable="true" aria-label="Labeled">labeled-private</div><article contenteditable="true" aria-label="Article">article-private</article><h2 contenteditable="true">heading-private</h2><p contenteditable="plaintext-only">paragraph-private</p><input aria-label="Native" value="native-private"><button onclick="const error = new Error('exception-private'); error.name = 'exception-name-private'; error.stack = 'exception-stack-private'; throw error">Throw</button><p id="status">ready</p>`
               )
             })
             yield* Effect.acquireRelease(
@@ -1265,19 +1982,20 @@ describe("strider", () => {
               }
               check(snapshot.out)
               check(found.out, true)
-              for (const query of ["rich-heading", "article-private", "paragraph-private", "heading-private"]) {
+              const guesses = ["rich-heading", "article-private", "paragraph-private", "heading-private"]
+              for (const query of guesses) {
                 const guessed = yield* page("--json", "find", query)
                 assert.strictEqual(guessed.code, 0, guessed.err)
                 assert.strictEqual(JSON.parse(guessed.out).outcome.value.length > 0, capture === "local", guessed.out)
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [...handshake, {
-                  jsonrpc: "2.0",
-                  id: 2,
-                  method: "tools/call",
-                  params: { name: "find", arguments: { page: "form", query } }
-                }], 2)
-                const result = answers.find((answer) => answer.id === 2)?.result
-                assert.isNotTrue(result?.isError, JSON.stringify(answers))
-                assert.strictEqual(result.structuredContent.outcome.length > 0, capture === "local")
+              }
+              const guessAnswers = yield* mcpTools(
+                env,
+                ["-s", capture, "mcp"],
+                guesses.map((query) => ({ name: "find", arguments: { page: "form", query } }))
+              )
+              for (const answer of guessAnswers) {
+                assert.isNotTrue(answer?.result?.isError, JSON.stringify(answer))
+                assert.strictEqual(answer.result.structuredContent.outcome.length > 0, capture === "local")
               }
               const labeled = yield* page("--json", "find", "Article", "--role", "article")
               assert.strictEqual(JSON.parse(labeled.out).outcome.value.length, 1, labeled.out)
@@ -1331,22 +2049,16 @@ describe("strider", () => {
               const checked = yield* page("expect", "css=#status", "visible", "--text", "clicked")
               assert.strictEqual(checked.code, 0, checked.err)
 
-              for (const name of ["snapshot", "find"] as const) {
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
-                  ...handshake,
-                  {
-                    jsonrpc: "2.0",
-                    id: 2,
-                    method: "tools/call",
-                    params: {
-                      name,
-                      arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) }
-                    }
-                  }
-                ], 2)
-                const answer = answers.find((answer) => answer.id === 2)
+              const reads = ["snapshot", "find"] as const
+              const readAnswers = yield* mcpTools(
+                env,
+                ["-s", capture, "mcp"],
+                reads.map((name) => ({ name, arguments: { page: "form", ...(name === "find" ? { query: "" } : {}) } }))
+              )
+              for (const [index, name] of reads.entries()) {
+                const answer = readAnswers[index]
                 assert.isUndefined(answer?.error, JSON.stringify(answer))
-                assert.isDefined(answer?.result, JSON.stringify(answers))
+                assert.isDefined(answer?.result, JSON.stringify(answer))
                 assert.isNotTrue(answer.result.isError, JSON.stringify(answer))
                 const output = JSON.stringify(answer.result)
                 check(output, name === "find")
@@ -1454,33 +2166,18 @@ describe("strider", () => {
                 ? ["public-field-label", "public-heading", "public-nearby"]
                 : [...contents, "public-field-label", "public-heading", "public-nearby"]
               const queries = [...contents, "public-field-label", "public-heading", "public-nearby"]
-              const snapshotAnswers = yield* mcp(env, ["-s", capture, "mcp"], [
-                ...handshake,
-                {
-                  jsonrpc: "2.0",
-                  id: 2,
-                  method: "tools/call",
-                  params: { name: "snapshot", arguments: { page: "form" } }
-                }
-              ], 2)
-              const mcpSnapshot = snapshotAnswers.find((answer) => answer.id === 2)?.result
-              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswers))
+              const [snapshotAnswer, ...findAnswers] = yield* mcpTools(env, ["-s", capture, "mcp"], [
+                { name: "snapshot", arguments: { page: "form" } },
+                ...queries.map((query) => ({ name: "find", arguments: { page: "form", query } }))
+              ])
+              const mcpSnapshot = snapshotAnswer?.result
+              assert.isNotTrue(mcpSnapshot?.isError, JSON.stringify(snapshotAnswer))
               const mcpShown = queries.filter((query) => JSON.stringify(mcpSnapshot).includes(query))
-              const mcpMatched: Array<string> = []
-              for (const query of queries) {
-                const answers = yield* mcp(env, ["-s", capture, "mcp"], [
-                  ...handshake,
-                  {
-                    jsonrpc: "2.0",
-                    id: 2,
-                    method: "tools/call",
-                    params: { name: "find", arguments: { page: "form", query } }
-                  }
-                ], 2)
-                const result = answers.find((answer) => answer.id === 2)?.result
-                assert.isNotTrue(result?.isError, JSON.stringify(answers))
-                if (result.structuredContent.outcome.length > 0) mcpMatched.push(query)
-              }
+              const mcpMatched = queries.filter((_, index) => {
+                const result = findAnswers[index]?.result
+                assert.isNotTrue(result?.isError, JSON.stringify(findAnswers[index]))
+                return result.structuredContent.outcome.length > 0
+              })
               assert.deepStrictEqual(
                 { shown, matched, mcpShown, mcpMatched },
                 { shown: expected, matched: expected, mcpShown: expected, mcpMatched: expected },
@@ -1787,7 +2484,7 @@ describe("strider", () => {
       assert.include(unnamed.err, "Every command names its session")
       const two = yield* run("start", "--name", "x", "--chromium", chromium.executable, "--firefox", firefox.executable)
       assert.strictEqual(two.code, 15)
-      assert.include(two.err, "exactly one of --chromium, --firefox or --webkit")
+      assert.include(two.err, "exactly one of --chromium, --firefox, or --webkit")
       const badName = yield* run("start", "--name", "Bad Name", "--chromium", chromium.executable)
       assert.strictEqual(badName.code, 15)
       assert.strictEqual(

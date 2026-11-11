@@ -66,7 +66,7 @@ describe("Chromium capture invalidation", () => {
             const page = yield* Browser.newPage({ emulation: { viewport: { width: 1100, height: 1000 } } })
             yield* page.goto(url("rgb(255,0,0)"), { waitUntil: "load" })
             force = true
-            const error = yield* page.screenshot({ area: { _tag: "Element", locator: page.locator("main") } }).pipe(
+            const error = yield* page.screenshot({ area: { element: page.locator("main") } }).pipe(
               Effect.flip
             )
             assert(Page.isPageError(error))

@@ -5,15 +5,19 @@
  *   session auto-attaches its out-of-process frames and its workers. A launched browser pauses every new page
  *   before its scripts run; an attached one pauses only frames and workers of pages it attached to, so a user's
  *   tab is never paused (probe 22).
- * - **The gate** runs while a target is paused: enable `Page`, `Network` and lifecycle events, take the frame tree
- *   (the snapshot the session is synced with), enable `Runtime`, auto-attach the target's own frames and workers,
- *   apply the declarations in force, and resume, in a finalizer. It never waits on another target: a paused popup
- *   blocks its opener.
+ * - **The gate** writes domain enablement, the frame tree snapshot, Runtime's replay, auto-attachment and the
+ *   declarations before resuming a paused target, then collects their replies. Waiting for renderer replies
+ *   before resume deadlocks a popup in a new browsing context group. Resume also runs on failure. The gate
+ *   never waits on another target: a paused popup blocks its opener.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
+import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -21,35 +25,58 @@ import * as Runtime from "../../cdp/Runtime.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
-import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { configureTarget } from "./declare.ts"
-import { targetKind } from "./mapping.ts"
-import { type Event, type FrameEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import { configureTarget, type Setup } from "./declare.ts"
+import * as Evaluation from "./evaluation.ts"
+import { frameUrl, targetKind } from "./mapping.ts"
+import {
+  ContextEntry,
+  dispatchContext,
+  type Event,
+  type FrameEntry,
+  type PageEntry,
+  placement,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
 
+// A new browsing context group's renderer may not exist until the first response is answered. These
+// decisions and their network/navigation attribution are independent of the frame snapshot and must run
+// even while its renderer replies are pending. Network history must retain the first request too.
+const initialProgress = (method: string) =>
+  method.startsWith("Network.") || method === Page.frameStartedNavigating.method ||
+  method === Fetch.requestPaused.method || method === Fetch.authRequired.method
+
 const newTarget = (
+  state: State,
   kind: TargetEntry["kind"],
   info: Target.TargetInfo,
   session: ProtocolClient.Session,
   page: PageEntry | undefined,
   frame: FrameEntry | undefined
-): TargetEntry => ({
-  kind,
-  targetId: info.targetId,
-  session,
-  page,
-  frame,
-  url: info.url,
-  realm: undefined,
-  intercepts: "",
-  scripts: new Map(),
-  ended: false
-})
+): TargetEntry => {
+  const target: TargetEntry = {
+    event: undefined as unknown as import("./state.ts").DispatchContext,
+    kind,
+    targetId: info.targetId,
+    session,
+    page,
+    frame,
+    url: info.url,
+    realm: undefined,
+    intercepts: "",
+    scripts: new Map(),
+    ended: false
+  }
+  target.event = dispatchContext(state, target)
+  return target
+}
 
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
@@ -61,7 +88,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "page": {
       const context = contextFor(state, info.browserContextId)
       const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
-      const target = newTarget(kind, info, session, undefined, undefined)
+      const target = newTarget(state, kind, info, session, undefined, undefined)
       const page: PageEntry = {
         id: state.ids.navigable(),
         targetId: info.targetId,
@@ -72,6 +99,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         ended: false
       }
       const entry = { ...target, page }
+      entry.event.target = entry
       state.targets.set(session, entry)
       state.targetsById.set(info.targetId, entry)
       state.pages.set(page.id, page)
@@ -92,12 +120,16 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
           : { _tag: "Opened", opener: openerId },
         url: Urls.reported(info.url)
       })
-      state.control.sync(session, gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect))
+      state.control.sync(
+        session,
+        context.gate(state, entry, page, params.waitingForDebugger, state.attachedAtConnect),
+        params.waitingForDebugger ? initialProgress : undefined
+      )
       return
     }
     case "iframe": {
       const frame = state.frames.get(info.targetId)
-      const target = newTarget(kind, info, session, frame?.page ?? parentPage, frame)
+      const target = newTarget(state, kind, info, session, frame?.page ?? parentPage, frame)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
       if (frame !== undefined) frame.owner = target
@@ -107,18 +139,20 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "worker":
     case "service_worker":
     case "shared_worker": {
-      const target = newTarget(kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
+      const target = newTarget(state, kind, info, session, kind === "worker" ? parentPage : undefined, undefined)
       state.targets.set(session, target)
       state.targetsById.set(info.targetId, target)
-      const context = info.browserContextId === undefined
+      const context = target.page?.context ?? (info.browserContextId === undefined
         ? undefined
-        : state.contextsByCdp.get(info.browserContextId)
-      if (context !== undefined) state.workerContexts.set(target, context)
-      state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
+        : state.contextsByCdp.get(info.browserContextId))
+      if (context !== undefined) {
+        state.workerContexts.set(target, context)
+        state.control.sync(session, context.workerGate(state, target, params.waitingForDebugger))
+      } else state.control.sync(session, workerGate(state, target, params.waitingForDebugger))
       return
     }
     case "other": {
-      state.targets.set(session, newTarget(kind, info, session, undefined, undefined))
+      state.targets.set(session, newTarget(state, kind, info, session, undefined, undefined))
       state.control.sync(
         session,
         resume(session, params.waitingForDebugger).pipe(
@@ -135,6 +169,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const target = state.targets.get(session)
   if (target === undefined || target.ended) return
   target.ended = true
+  target.proxyAuth?.clear()
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target === target) state.pendingAttribution.delete(key)
   }
@@ -172,9 +207,15 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
 
 /** The session's model can't be trusted: a page's is rebuilt from a fresh frame tree, as at initialization. */
 export const lost = (state: State, session: ProtocolClient.Session) => {
+  // A resync cannot recover discarded chunks. Keep independent native totals, but never publish an undercount.
+  for (const request of state.requests.values()) {
+    if (request.target.session !== session) continue
+    const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+    if (sizes !== undefined) sizes.decoded = undefined
+  }
   const target = state.targets.get(session)
   if (target?.kind === "page" && target.page !== undefined) {
-    state.control.sync(session, snapshot(state, target, target.page, false, Effect.void))
+    state.control.sync(session, snapshot(state, target, target.page, false, false).pipe(Effect.scoped))
   } else {
     state.control.sync(session, Effect.succeed({ through: 0, apply: Effect.void }))
   }
@@ -199,7 +240,7 @@ const installTree = (state: State, target: TargetEntry, tree: Page.FrameTree, ad
       const document = commit(
         state,
         frame,
-        { loaderId: node.frame.loaderId, url: node.frame.url, origin: node.frame.securityOrigin },
+        { loaderId: node.frame.loaderId, url: frameUrl(node.frame), origin: node.frame.securityOrigin },
         (navigation) =>
           navigation !== undefined
             ? { _tag: "Navigation", navigation: navigation.id }
@@ -223,31 +264,77 @@ const installTree = (state: State, target: TargetEntry, tree: Page.FrameTree, ad
   visit(tree, target.frame?.parent)
 }
 
+interface InitialSnapshot {
+  readonly result: Page.GetFrameTreeResult
+  readonly received: number
+  readonly failure: Option.Option<Protocol.ProtocolError>
+}
+
 const snapshot = Effect.fnUntraced(function*(
   state: State,
   target: TargetEntry,
   page: PageEntry | undefined,
   adopted: boolean,
-  configure: Effect.Effect<void, Adapter.AdapterError | Protocol.ProtocolError>
-) {
+  configure: boolean,
+  waiting = false,
+  release = Effect.void
+): Effect.fn.Return<ProtocolClient.Synced, Protocol.ProtocolError, Scope.Scope> {
   const on = Protocol.on(target.session)
-  yield* Effect.all([
-    Page.enable().pipe(on),
-    Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
-    Network.enable({}).pipe(on)
-  ], { concurrency: "unbounded", discard: true })
-  const { result, received } = yield* target.session.sendSequenced(Page.getFrameTree())
-  // Contexts it replays arrive after the snapshot, so they are folded on top of it
-  yield* Runtime.enable().pipe(on)
-  // Service and shared workers belong to the browser, whose session attaches them; attached here too, a service
-  // worker would wait for two sessions
-  yield* Target.setAutoAttach({
+  const autoAttach = Target.setAutoAttach({
     autoAttach: true,
     waitForDebuggerOnStart: true,
     flatten: true,
     filter: [{ type: "service_worker", exclude: true }, { type: "shared_worker", exclude: true }, {}]
-  }).pipe(on)
-  const failure = yield* configure.pipe(Effect.flip, Effect.option)
+  })
+  const initialized = waiting
+    ? Effect.gen(function*(): Effect.fn.Return<InitialSnapshot, Protocol.ProtocolError, Scope.Scope> {
+      const scope = yield* Effect.scope
+      const replies: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const declarations: Array<Effect.Effect<void, Protocol.ProtocolError>> = []
+      const setup: Setup = {
+        send: Effect.fnUntraced(function*(command, receive) {
+          const reply = yield* target.session.start(command, scope)
+          declarations.push(reply.pipe(Effect.tap(({ result }) => Effect.sync(() => receive?.(result))), Effect.asVoid))
+        })
+      }
+      const enable: Setup["send"] = Effect.fnUntraced(function*(command) {
+        replies.push((yield* target.session.start(command, scope)).pipe(Effect.asVoid))
+      })
+      yield* enable(Page.enable())
+      yield* enable(Page.setLifecycleEventsEnabled({ enabled: true }))
+      yield* enable(Network.enable({}))
+      const tree = yield* target.session.start(Page.getFrameTree(), scope)
+      // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
+      replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
+      // Browser-owned workers must not wait on a second session here.
+      replies.push((yield* target.session.start(autoAttach, scope)).pipe(Effect.asVoid))
+      const written = page === undefined ? Effect.void : configureTarget(state, target, page, setup)
+      const writeFailure = yield* written.pipe(Effect.flip, Effect.option)
+      yield* release
+      const [snapshot, , declarationFailure] = yield* Effect.all([
+        tree,
+        Effect.all(replies, { concurrency: "unbounded", discard: true }),
+        Effect.all(declarations.map((reply) => reply.pipe(Effect.flip, Effect.option)), { concurrency: "unbounded" })
+          .pipe(
+            Effect.map((failures) => failures.find(Option.isSome) ?? Option.none())
+          )
+      ], { concurrency: "unbounded" })
+      return { ...snapshot, failure: Option.orElse(writeFailure, () => declarationFailure) }
+    })
+    : Effect.gen(function*(): Effect.fn.Return<InitialSnapshot, Protocol.ProtocolError, Scope.Scope> {
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
+        Network.enable({}).pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      const tree = yield* target.session.sendSequenced(Page.getFrameTree())
+      yield* Runtime.enable().pipe(on)
+      yield* autoAttach.pipe(on)
+      const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)
+        .pipe(Effect.flip, Effect.option)
+      return { ...tree, failure }
+    })
+  const { result, received, failure } = yield* initialized
   return {
     through: received,
     apply: Effect.suspend(() => {
@@ -257,7 +344,7 @@ const snapshot = Effect.fnUntraced(function*(
           state.buffer.emit({ _tag: "PageInitializationFailed", page: page.id, description: failure.value.message })
           Deferred.doneUnsafe(
             page.ready,
-            Effect.fail(failure.value._tag === "AdapterError" ? failure.value : Kit.protocolError(failure.value))
+            Effect.fail(Kit.protocolError(failure.value))
           )
         } else {
           state.buffer.emit({ _tag: "PageReady", page: page.id })
@@ -269,10 +356,29 @@ const snapshot = Effect.fnUntraced(function*(
   } satisfies ProtocolClient.Synced
 })
 
-const gate = (state: State, target: TargetEntry, page: PageEntry | undefined, waiting: boolean, adopted: boolean) =>
-  snapshot(state, target, page, adopted, page === undefined ? Effect.void : configureTarget(state, target, page)).pipe(
-    Effect.ensuring(resume(target.session, waiting))
-  )
+const gate = Effect.fnUntraced(
+  function*(state: State, target: TargetEntry, page: PageEntry | undefined, waiting: boolean, adopted: boolean) {
+    let resumed = false
+    const release = resume(target.session, waiting).pipe(Effect.tap(() =>
+      Effect.sync(() => {
+        resumed = true
+      })
+    ))
+    const staged = waiting && target.kind === "page"
+    return yield* snapshot(
+      state,
+      target,
+      page,
+      adopted,
+      true,
+      staged,
+      release
+    ).pipe(
+      staged ? Effect.onError(() => resumed ? Effect.void : release) : Effect.ensuring(release),
+      Effect.scoped
+    )
+  }
+)
 
 // A service worker waiting for the debugger hasn't started, and answers `Runtime.enable` only once it has
 // (recorded): the domains are enabled and the worker resumed in one go, in that order, before any reply.
@@ -294,6 +400,117 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   }).pipe(Effect.ignore)
   return { through: 0, apply: Effect.void } satisfies ProtocolClient.Synced
 })
+
+// Ordinary contexts share the original gates. Only an opted-in context gets own gate properties.
+ContextEntry.prototype.gate = gate
+ContextEntry.prototype.workerGate = workerGate
+
+export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced(
+  function*(state, target, page, waiting, adopted) {
+    if (target.kind !== "page" || target.url !== "" || page === undefined) {
+      return yield* gate(state, target, page, waiting, adopted)
+    }
+    const bundles = state.registry.bundles(placement(page))
+    const bridges = bundles.get("")?.webSockets
+    if (bridges === undefined) return yield* gate(state, target, page, waiting, adopted)
+    const scope = yield* Scope.fork(state.cleanupScope)
+    const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
+    const main = yield* Deferred.make<void>()
+    const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
+    yield* events.pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          contexts.push(event)
+          if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
+            Deferred.doneUnsafe(main, Effect.void)
+          }
+        })
+      ),
+      Effect.forkIn(scope)
+    )
+    return yield* Effect.gen(function*() {
+      const on = Protocol.on(target.session)
+      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
+      yield* Effect.all([
+        Page.enable().pipe(on),
+        Runtime.enable().pipe(on),
+        ...bindings.map((binding) => binding.pipe(on)),
+        ...[...bundles].map(([key, bundle]) =>
+          Page.addScriptToEvaluateOnNewDocument({
+            source: bundle.source,
+            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
+          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
+        ),
+        Runtime.runIfWaitingForDebugger().pipe(on)
+      ], { concurrency: "unbounded", discard: true })
+      yield* Deferred.await(main)
+      const synced = yield* gate(state, target, page, waiting, adopted)
+      const live: Array<Runtime.ExecutionContextCreatedParams> = []
+      for (const event of contexts) {
+        if (
+          Exit.isSuccess(
+            yield* Runtime.evaluate({ expression: "0", uniqueContextId: event.context.uniqueId }).pipe(on, Effect.exit)
+          )
+        ) live.push(event)
+      }
+      return {
+        through: synced.through,
+        apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
+          for (const event of live) {
+            if (event.context.uniqueId === undefined || !state.realmsByUnique.has(event.context.uniqueId)) {
+              Evaluation.contextCreated(event, { state, target })
+            }
+          }
+          WebSocketBridge.flush(state, target)
+          return state.buffer.flush
+        })))
+      }
+    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+  }
+)
+
+export const webSocketWorkerGate: import("./state.ts").WorkerGate = Effect.fnUntraced(
+  function*(state, target, waiting) {
+    const bindings = yield* WebSocketBridge.prepare(state, target, undefined, false)
+    const results = yield* Effect.all([
+      Effect.forEach(bindings, (binding) => binding.pipe(Protocol.on(target.session)), { discard: true }),
+      workerGate(state, target, waiting)
+    ], { concurrency: "unbounded" })
+    return results[1]
+  }
+)
+
+let gateUsers: WeakMap<ContextEntry, { total: number; workers: number }> | undefined
+export const installWebSocketGates = Effect.fnUntraced(
+  function*(context: ContextEntry, scope: Scope.Scope, workers: boolean) {
+    gateUsers ??= new WeakMap()
+    let users = gateUsers.get(context)
+    if (users === undefined) {
+      users = { total: 0, workers: 0 }
+      gateUsers.set(context, users)
+    }
+    users.total++
+    context.gate = webSocketGate
+    if (workers) {
+      users.workers++
+      context.workerGate = webSocketWorkerGate
+    }
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => {
+        users.total--
+        if (workers) users.workers--
+        if (users.workers === 0 && Object.hasOwn(context, "workerGate")) {
+          delete (context as Partial<ContextEntry>).workerGate
+        }
+        if (users.total === 0) {
+          delete (context as Partial<ContextEntry>).gate
+          gateUsers!.delete(context)
+        }
+      })
+    )
+  }
+)
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 

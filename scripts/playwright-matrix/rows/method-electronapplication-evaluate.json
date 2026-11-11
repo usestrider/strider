@@ -1,0 +1,11 @@
+{
+  "id": "method-electronapplication-evaluate",
+  "upstream": [
+    "method:ElectronApplication.evaluate"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

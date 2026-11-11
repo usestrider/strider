@@ -1,0 +1,25 @@
+{
+  "id": "method-response-json",
+  "upstream": [
+    "method:Response.json"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "Filter",
+      "url": "/docs/api/browser/NetworkResponse#Filter"
+    }
+  ],
+  "notes": "Declare a body decoder before the request; bodies are delivered on matching response events.",
+  "capabilities": [
+    "bodies"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkResponse.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

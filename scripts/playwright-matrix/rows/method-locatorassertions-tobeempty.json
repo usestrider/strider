@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobeempty",
+  "upstream": [
+    "method:LocatorAssertions.toBeEmpty"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeEmpty",
+      "url": "/docs/api/browser/Expect#toBeEmpty"
+    }
+  ],
+  "notes": "Input and textarea values are untrimmed; other elements use trimmed textContent. Missing or multiple matches retry until the deadline.",
+  "capabilities": [],
+  "requirements": []
+}

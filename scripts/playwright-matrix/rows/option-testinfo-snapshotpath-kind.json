@@ -1,0 +1,26 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-testinfo-snapshotpath-kind",
+  "upstream": [
+    "method:TestInfo.snapshotPath"
+  ],
+  "option": "kind",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "aria",
+      "status": "missing"
+    },
+    {
+      "value": "screenshot",
+      "status": "missing"
+    },
+    {
+      "value": "snapshot",
+      "status": "missing"
+    }
+  ]
+}

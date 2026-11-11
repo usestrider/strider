@@ -7,7 +7,7 @@
  *
  * A download's bytes can be read only once it completes. Progress is reported only on CDP (`downloads.progress`),
  * and `cancel` fails with `Unsupported` on BiDi (`downloads.cancel`). On a backend without the `downloads`
- * capability, such as WebKit, `next`, `stream` and `history` fail with `Unsupported`.
+ * capability, such as WebKit, `next`, `stream`, and `history` fail with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -77,7 +77,7 @@ export type Status = typeof Status.Type
 const TypeId = "~@usestrider/browser/Download"
 
 /**
- * A file a page downloads: where it came from, its progress and the ways to read, save or cancel it.
+ * A file a page downloads: where it came from, its progress, and the ways to read, save, or cancel it.
  *
  * **Example** (Exporting a CSV)
  *
@@ -332,7 +332,7 @@ export const history = (
   DownloadEventsImpl.history(target, filter)
 
 /**
- * Reason for a download that was canceled: by `cancel`, the page or the browser, or by its context closing before
+ * Reason for a download that was canceled: by `cancel`, the page, or the browser, or by its context closing before
  * it completed.
  *
  * @stability unstable

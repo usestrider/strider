@@ -1,0 +1,12 @@
+{
+  "id": "option-page-getbyrole-description",
+  "upstream": [
+    "method:Page.getByRole"
+  ],
+  "option": "description",
+  "status": "missing",
+  "api": [],
+  "notes": "No accessible-description role filter; name and supported state filters remain separate.",
+  "capabilities": [],
+  "requirements": []
+}

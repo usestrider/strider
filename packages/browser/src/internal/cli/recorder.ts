@@ -70,7 +70,7 @@ export const make = (): Recorder => {
 
   /** Adds a popup to the step that opened it, or to a segment's pages, and returns the step as it is now. */
   const attach = (step: ExportTest.Step, popup: ExportTest.Opened): ExportTest.Step => {
-    const updated: ExportTest.Step = step._tag === "Segment"
+    const updated: ExportTest.Step = (step._tag === "Segment" || step._tag === "Eval")
       ? { ...step, pages: [...(step.pages ?? []), popup.page] }
       : step._tag === "NewPage" || step._tag === "Tool"
       ? { ...step, popups: [...(step.popups ?? []), popup] }

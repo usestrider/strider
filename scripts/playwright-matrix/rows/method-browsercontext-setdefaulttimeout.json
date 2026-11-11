@@ -1,0 +1,29 @@
+{
+  "id": "method-browsercontext-setdefaulttimeout",
+  "upstream": [
+    "method:BrowserContext.setDefaultTimeout"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Deadline",
+      "symbol": "withDefaultBudget",
+      "url": "/docs/api/browser/Deadline#withDefaultBudget"
+    }
+  ],
+  "notes": "Deadline budgets compose over effects rather than mutating context defaults.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "composable-operation-deadlines",
+    "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

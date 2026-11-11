@@ -6,7 +6,7 @@
  * `snapshot({ sources: "aria" })` is the accessibility tree alone. While a document lives, the same node keeps the
  * same ref.
  *
- * The tree is data, so it can be encoded for the CLI, an MCP result or a trace. `ref(id)` returns a locator for a
+ * The tree is data, so it can be encoded for the CLI, an MCP result, or a trace. `ref(id)` returns a locator for a
  * node, bound to the page the snapshot came from and with that page's access.
  *
  * @stability unstable
@@ -160,6 +160,15 @@ export type Name = typeof Name.Type
 /**
  * Schema for a state a node can be in.
  *
+ * **Details**
+ *
+ * Pressed, expanded, and selected appear only when their role-filter reader returns true.
+ * ARIA keywords are ASCII case-insensitive without trimming; unsupported roles contribute no marker.
+ * Native option selection and details open state take precedence over ARIA attributes.
+ * Open details carries expanded even with its ordinary group role; group expanded filters remain invalid.
+ * Summary expansion is not inferred. These markers describe Strider's query policy rather than browser
+ * accessibility-tree state, which can differ for conflicting native and ARIA values.
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
@@ -243,7 +252,7 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
 })
 
 /**
- * The data of a snapshot: which document it describes, its generation, its tree and its text rendering.
+ * The data of a snapshot: which document it describes, its generation, its tree, and its text rendering.
  *
  * **Example** (Encoding a snapshot as JSON)
  *

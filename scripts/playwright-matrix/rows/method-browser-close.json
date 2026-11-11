@@ -1,0 +1,23 @@
+{
+  "id": "method-browser-close",
+  "upstream": [
+    "method:Browser.close"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "Browser",
+      "url": "/docs/api/browser/Browser#Browser"
+    }
+  ],
+  "notes": "The browser layer owns the launched process; its scope releases it.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

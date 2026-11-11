@@ -1,0 +1,31 @@
+{
+  "id": "method-browser-newcontext",
+  "upstream": [
+    "method:Browser.newContext"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "newContext",
+      "url": "/docs/api/browser/Browser#newContext"
+    }
+  ],
+  "notes": "Creation requires a scope.",
+  "capabilities": [
+    "userContexts"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

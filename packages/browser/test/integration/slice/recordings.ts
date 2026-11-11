@@ -9,24 +9,34 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   Browser,
   Capability,
+  Condition,
+  Deadline,
   Diagnostics,
+  Expect,
   Har,
   NetworkRequest,
   NetworkResponse,
+  Operation,
   Page,
   Route,
   Trace
 } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import { navigationFailure } from "./navigationFailure.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -133,7 +143,319 @@ interface HarEntry {
 
 export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} recordings`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+      it.effect("reads a protocol request failure with honest cancellation evidence", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const failedSite = yield* navigationFailure
+          const sent = yield* NetworkRequest.next(page, { url: `${failedSite.origin}/failure` })
+          yield* page.goto(`${failedSite.origin}/failure`).pipe(Effect.exit)
+          const request = yield* sent
+          const failure = Option.getOrThrow(yield* NetworkRequest.failure(page, request))
+          assert.isAbove(failure.errorText.length, 0)
+          assert.deepStrictEqual(
+            failure.canceled,
+            (yield* fullySupports("network.failure")) ? Option.some(false) : Option.none()
+          )
+          assert.deepStrictEqual(yield* NetworkRequest.failure(page.context, request), Option.some(failure))
+        })))
+
+      it.effect("keeps HTTP errors successful and refuses failure lookup after owner closure", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { page, request } = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const served = yield* site
+            const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/missing` })
+            yield* page.goto(`${served.origin}/missing`)
+            const request = yield* sent
+            assert.isTrue(Option.isNone(yield* NetworkRequest.failure(page, request)))
+            return { page, request }
+          }))
+          const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
+          assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
+        })))
+
+      it.effect("associates an observed request with its response before and after arrival", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/hello`)
+          const release = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+          yield* page.route(`${origin}/json`, () => Deferred.await(release).pipe(Effect.andThen(Route.continue)))
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/json")
+            return true
+          })
+          const request = yield* next
+          const response = yield* NetworkRequest.response(page, request)
+          const waiting = yield* response.pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          assert.isUndefined(waiting.pollUnsafe())
+          yield* Deferred.succeed(release, undefined)
+          const arrived = Option.getOrThrow(yield* Fiber.join(waiting))
+          assert.strictEqual(arrived.status, 200)
+          assert.strictEqual(arrived.hop, request.hop)
+          assert.deepStrictEqual(yield* (yield* NetworkRequest.response(page.context, request)), Option.some(arrived))
+          const foreign = yield* Browser.newContext()
+          const error = yield* NetworkRequest.response(foreign, request).pipe(Effect.asVoid, Effect.flip)
+          assert.deepInclude(error.reason, { _tag: "ResponseUnavailable", why: "foreignTarget" })
+        })))
+
+      it.effect("returns no response for a request aborted before receiving headers", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(`${origin}/hello`)
+          yield* page.route(`${origin}/json`, () => Route.abort())
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(async () => {
+            await fetch("/json").catch(() => {})
+            return true
+          })
+          const wait = yield* NetworkRequest.response(page, yield* next)
+          assert.deepStrictEqual(yield* wait, Option.none())
+        })))
+
+      it.effect("associates each redirect hop with its own response", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const redirect = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
+          const landed = yield* NetworkRequest.next(page, { url: `${origin}/landed` })
+          yield* page.goto(`${origin}/redirect`, { waitUntil: "load" })
+          const first = yield* redirect
+          const last = yield* landed
+          const firstResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, first)))
+          const lastResponse = Option.getOrThrow(yield* (yield* NetworkRequest.response(page, last)))
+          assert.notStrictEqual(first.hop, last.hop)
+          assert.strictEqual(firstResponse.hop, first.hop)
+          assert.strictEqual(firstResponse.status, 302)
+          assert.strictEqual(lastResponse.hop, last.hop)
+          assert.strictEqual(lastResponse.status, 200)
+        })))
+
+      it.effect(
+        "records URL expectation evidence with export-time redaction",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const served = yield* site
+            const requested = `${served.origin}/json?token=observed-token-secret#observed-fragment-secret`
+            const expected = `${served.origin}/done?token=expected-token-secret#expected-fragment-secret`
+            yield* page.goto(requested)
+            const actual = yield* page.url
+            assert.include(actual, "observed-token-secret")
+            const trace = yield* Trace.record(page)
+            const error = yield* page.pipe(
+              Expect.toHaveURL(expected),
+              Deadline.within("300 millis"),
+              Operation.named("checkout", { attributes: { "browser.page.id": page.id } }),
+              Effect.flip
+            )
+            assert(Expect.isExpectationFailed(error), String(error))
+            assert.isAbove(error.history.length, 0)
+            const rethrown = yield* Effect.fail(error).pipe(
+              Operation.named("retry checkout", { attributes: { "browser.page.id": page.id } }),
+              Effect.flip
+            )
+            assert.strictEqual(rethrown, error)
+            for (const preset of ["strict", "local", "strict"] as const) {
+              const out = path.join(directory(), `${preset}.zip`)
+              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+              const content = text((yield* unzip(out)).get("trace.trace"))
+              const failures = lines(new TextEncoder().encode(content)).filter((event) =>
+                event.type === "after" && event.error
+              )
+                .map((event) => event.error)
+              assert.strictEqual(failures.length, 3)
+              assert.isTrue(failures.every((failure) => failure.message === failures[0].message))
+              const failure = failures[0]
+              assert.strictEqual(failure.name, "ExpectationFailed")
+              assert.include(failure.message, "Last observed:")
+              if (preset === "local") {
+                assert.include(failure.message, actual)
+                assert.include(failure.message, expected)
+              } else {
+                assert.include(failure.message, `${served.origin}/json?token=REDACTED`)
+                assert.include(failure.message, `${served.origin}/done?token=REDACTED`)
+                for (
+                  const secret of [
+                    "observed-token-secret",
+                    "observed-fragment-secret",
+                    "expected-token-secret",
+                    "expected-fragment-secret"
+                  ]
+                ) {
+                  assert.notInclude(content, secret)
+                }
+              }
+            }
+            assert.include(error.message, expected)
+            assert.include(JSON.stringify(error.history), actual)
+          })),
+        timeout
+      )
+
+      for (
+        const [source, boundary] of [
+          ["url", "direct"],
+          ["title", "direct"],
+          ["title", "guarded"],
+          ["url", "watchable map"],
+          ["url", "effect map"],
+          ["title", "effect map"],
+          ["url", "reconstruction"],
+          ["title", "reconstruction"],
+          ["url", "live"],
+          ["title", "live"]
+        ] as const
+      ) {
+        it.effect(
+          `redacts generic ${source} expectation evidence with ${boundary} boundary`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              const title = "generic-title-secret"
+              const requested = `${yield* fixture(
+                `<title>${title}</title>`
+              )}&token=generic-url-secret#generic-fragment-secret`
+              yield* page.goto(requested)
+              const actual = yield* page[source]
+              assert.include(actual, source === "url" ? "generic-url-secret" : title)
+              assert.notStrictEqual(page.title, page.title)
+              const live = boundary === "live" ? yield* Trace.record(page) : undefined
+              const direct = boundary === "guarded" ? (yield* page.inspect)[source] : page[source]
+              const subject = boundary === "watchable map" ?
+                page.url.map((value) => value)
+                : boundary === "effect map" ?
+                Effect.map(page[source], (value: string) => value)
+                : direct
+              const error = yield* Expect.that(
+                subject,
+                Condition.make<string>("to satisfy an always-false condition", () => false)
+              ).pipe(
+                Deadline.within("300 millis"),
+                Operation.named(`generic ${source} check`, { attributes: { "browser.page.id": page.id } }),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.include(JSON.stringify(error.history), actual)
+              const trace = live ?? (yield* Trace.record(page))
+              const exported = boundary === "reconstruction" ? new Expect.ExpectationFailed({ ...error }) : error
+              const rethrown = yield* Effect.fail(exported).pipe(
+                Operation.named(`rethrow generic ${source}`, { attributes: { "browser.page.id": page.id } }),
+                Effect.flip
+              )
+              assert.strictEqual(rethrown, exported)
+              const evidence = path.resolve(".data/expect-source-evidence")
+              fs.mkdirSync(evidence, { recursive: true })
+              for (const preset of ["strict", "local", "strict"] as const) {
+                const out = path.join(evidence, `${name}-${source}-${boundary}-${preset}.zip`)
+                yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+                const content = text((yield* unzip(out)).get("trace.trace"))
+                fs.writeFileSync(out.replace(/\.zip$/, ".trace"), content)
+                const failures = lines(new TextEncoder().encode(content)).filter((event) =>
+                  event.type === "after" && event.error?.name === "ExpectationFailed"
+                )
+                if (live === undefined) assert.strictEqual(failures.length, 1)
+                else assert.isAtLeast(failures.length, 2)
+                for (const event of failures) {
+                  assert.include(event.error.message, "to satisfy an always-false condition")
+                  assert.notInclude(event.error.message, "to have the URL")
+                  assert.notInclude(event.error.message, "to have the title")
+                  assert.include(event.error.message, "Last observed:")
+                  assert.include(event.error.message, "History:")
+                  for (const secret of source === "url" ? ["generic-url-secret", "generic-fragment-secret"] : [title]) {
+                    if (
+                      (boundary === "direct" || boundary === "guarded" || boundary === "live") && preset === "strict"
+                    ) {
+                      assert.notInclude(event.error.message, secret)
+                    } else assert.include(event.error.message, secret)
+                  }
+                }
+              }
+            })),
+          timeout
+        )
+      }
+
+      it.effect(
+        "keeps password expectation values out of trace errors under both presets",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(yield* fixture("<input type=\"password\" aria-label=\"Password\">"))
+            yield* page.getByLabel("Password").fill(Redacted.make("typed-password-secret"))
+            const trace = yield* Trace.record(page)
+            const error = yield* page.getByLabel("Password").pipe(
+              Expect.toHaveValue("expected-password-secret"),
+              Deadline.within("300 millis"),
+              Effect.flip
+            )
+            assert(Expect.isExpectationFailed(error), String(error))
+            for (const preset of ["strict", "local"] as const) {
+              const out = path.join(directory(), `${preset}.zip`)
+              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+              const content = text((yield* unzip(out)).get("trace.trace"))
+              const failure = lines(new TextEncoder().encode(content)).find((event) =>
+                event.type === "after" && event.error
+              )?.error
+              assert.strictEqual(failure.name, "ExpectationFailed")
+              if (error.history.length === 0) assert.notInclude(failure.message, "Last observed:")
+              else assert.include(failure.message, "Last observed: REDACTED")
+              assert.notInclude(content, "typed-password-secret")
+              assert.notInclude(content, "expected-password-secret")
+            }
+            assert.include(error.message, "expected-password-secret")
+            assert.isTrue(error.history.every((entry) => entry.value === "typed-password-secret"))
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps real title failures classified through enclosing operations and rethrows",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(yield* fixture("<title>observed-title-secret</title>"))
+            const trace = yield* Trace.record(page)
+            const error = yield* page.pipe(
+              Expect.toHaveTitle("expected-title-secret"),
+              Deadline.within("300 millis"),
+              Operation.named("checkout", { attributes: { "browser.page.id": page.id } }),
+              Effect.flip
+            )
+            assert(Expect.isExpectationFailed(error), String(error))
+            const rethrown = yield* Effect.fail(error).pipe(
+              Operation.named("retry checkout", { attributes: { "browser.page.id": page.id } }),
+              Effect.flip
+            )
+            assert.strictEqual(rethrown, error)
+            for (const preset of ["strict", "local", "strict"] as const) {
+              const out = path.join(directory(), `${preset}.zip`)
+              yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+              const content = text((yield* unzip(out)).get("trace.trace"))
+              const failures = lines(new TextEncoder().encode(content)).filter((event) =>
+                event.type === "after" && event.error
+              )
+                .map((event) => event.error)
+              assert.strictEqual(failures.length, 3)
+              assert.isTrue(failures.every((failure) => failure.message === failures[0].message))
+              for (const secret of ["observed-title-secret", "expected-title-secret"]) {
+                if (preset === "strict") assert.notInclude(content, secret)
+                else if (secret === "expected-title-secret" || error.history.length > 0) {
+                  assert.include(failures[0].message, secret)
+                }
+              }
+            }
+            assert.include(error.message, "expected-title-secret")
+          })),
+        timeout
+      )
+
       it.effect(
         "records a HAR with statuses, protocols, bodies and the library's timings, redacted",
         () =>
@@ -205,7 +527,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const served = yield* site
             const out = path.join(directory(), "json.zip")
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const har = yield* Har.record(page, {
                 content: "attach",
                 url: "**/json",
@@ -357,6 +679,74 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         timeout
       )
 
+      it.effect("replays a form navigation through a 303 HAR redirect", () =>
+        Effect.gen(function*() {
+          if (!(yield* fullySupports("interception.redirects"))) return
+          const origin = "https://login.example.test"
+          const body = "username=tomsmith&password=SuperSecretPassword%21"
+          const entry = (
+            method: string,
+            pathname: string,
+            status: number,
+            text: string,
+            headers: Array<{ name: string; value: string }> = []
+          ) => ({
+            startedDateTime: "2026-11-08T00:00:00.000Z",
+            time: 0,
+            request: {
+              method,
+              url: origin + pathname,
+              httpVersion: "HTTP/1.1",
+              cookies: [],
+              headers: [],
+              queryString: [],
+              headersSize: -1,
+              bodySize: method === "POST" ? body.length : 0,
+              ...(method === "POST" ? { postData: { mimeType: "application/x-www-form-urlencoded", text: body } } : {})
+            },
+            response: {
+              status,
+              statusText: "",
+              httpVersion: "HTTP/1.1",
+              cookies: [],
+              headers: [{ name: "content-type", value: "text/html;charset=utf-8" }, ...headers],
+              content: { size: text.length, mimeType: "text/html", text },
+              redirectURL: status === 303 ? origin + "/secure" : "",
+              headersSize: -1,
+              bodySize: text.length
+            },
+            cache: {},
+            timings: { send: 0, wait: 0, receive: 0 }
+          })
+          const file = path.join(directory(), "form-redirect.har")
+          fs.writeFileSync(
+            file,
+            JSON.stringify({
+              log: {
+                version: "1.2",
+                creator: { name: "local regression", version: "1" },
+                entries: [
+                  entry(
+                    "GET",
+                    "/login",
+                    200,
+                    "<form action=\"/authenticate\" method=\"post\"><label>Username<input name=\"username\"></label><label>Password<input name=\"password\" type=\"password\"></label><button>Login</button></form>"
+                  ),
+                  entry("POST", "/authenticate", 303, "", [{ name: "location", value: origin + "/secure" }]),
+                  entry("GET", "/secure", 200, "<p>You logged into a secure area!</p>")
+                ]
+              }
+            })
+          )
+          const page = yield* SharedContext.newPage
+          yield* page.route("**/*", yield* Route.fromHar(file).pipe(Effect.provide(NodeFileSystem.layer)))
+          yield* page.goto(origin + "/login")
+          yield* page.getByLabel("Username").fill("tomsmith")
+          yield* page.getByLabel("Password").fill("SuperSecretPassword!")
+          yield* page.getByRole("button", { name: "Login" }).click()
+          yield* page.getByText("You logged into a secure area!").pipe(Expect.toBeVisible)
+        }), timeout)
+
       it.effect(
         "records a trace that nests in the program's spans, with screenshots, console, errors and network",
         () =>
@@ -368,9 +758,10 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const buy = Effect.fn("buy")(function*(page: Page.Page) {
               yield* page.goto(url)
               yield* page.getByRole("button", { name: "Buy" }).click()
+              yield* page.title
             })
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const trace = yield* Trace.record(page, { screenshots: "perAction", network: true })
               yield* buy(page)
               yield* Effect.sleep("300 millis")
@@ -383,6 +774,23 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const click = events.find((event) => event.type === "before" && event.title === "Locator.click")
             assert.isDefined(group)
             assert.deepInclude(click, { class: "Locator", method: "click", parentId: group.callId })
+            const source = new URL(import.meta.url).pathname
+            const sourceLines = fs.readFileSync(source, "utf8").split("\n")
+            for (
+              const [step, expression] of [[click, "page.getByRole(\"button\", { name: \"Buy\" }).click()"], [
+                events.find((event) => event.type === "before" && event.title === "Page.title"),
+                "page.title"
+              ]] as const
+            ) {
+              const line = sourceLines.findIndex((line) => line.trim() === `yield* ${expression}`)
+              const column = expression === "page.title"
+                ? sourceLines[line]!.indexOf("title") + 1
+                : sourceLines[line]!.indexOf(".click()") + 2
+              assert.deepInclude(step.stack[0], { file: source, line: line + 1, column })
+            }
+            assert.strictEqual(group.stack[0].file, source)
+            const archivedSource = `src/${createHash("sha1").update(source).digest("hex")}.ts`
+            assert.strictEqual(text(files.get(archivedSource)), fs.readFileSync(source, "utf8"))
             const shot = events.find((event) => event.type === "screenshot" && event.callId === click.callId)
             assert.isDefined(shot)
             assert.deepStrictEqual(Array.from(files.get(shot.file)!.slice(1, 4)), [0x50, 0x4e, 0x47])
@@ -396,6 +804,157 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               line.snapshot.response.status === 200
             ))
           }),
+        timeout
+      )
+
+      it.effect(
+        "captures completed locator expectations, including their final state after failure",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(yield* fixture("<p>initial</p>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction", domSnapshots: true, network: true })
+            yield* page.locator("p").pipe(Expect.toHaveText("initial"))
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                document.querySelector("p")!.textContent = "final"
+              }, 50)
+            })
+            const failure = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Operation.named("check final state"),
+              Deadline.within("300 millis"),
+              Effect.flip
+            )
+            assert.isTrue(Expect.isExpectationFailed(failure))
+            const final = yield* page.screenshot()
+            const out = path.join(directory(), "expectations.zip")
+            yield* trace.exportTrace(out)
+            const files = yield* unzip(out)
+            const events = lines(files.get("trace.trace"))
+            const checks = events.filter((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.lengthOf(checks, 2)
+            const shots = checks.map((check) => {
+              const matching = events.filter((event) => event.type === "screenshot" && event.callId === check.callId)
+              assert.lengthOf(matching, 1)
+              assert.isFalse(
+                events.some((event) => event.type === "frame-snapshot" && event.snapshot.callId === check.callId)
+              )
+              return files.get(matching[0].file)!
+            })
+            assert.deepStrictEqual(shots[1], final)
+            assert.notDeepEqual(shots[0], final)
+            const failed = events.find((event) => event.type === "after" && event.callId === checks[1].callId)
+            assert.include(JSON.stringify(failed.error), "ExpectationFailed")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired expectation when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<p>busy</p>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the check nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("p").pipe(
+              Expect.toHaveText("missing"),
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the expectation did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) assert.isTrue(Expect.isExpectationFailed(settled.value))
+            const out = path.join(directory(), "hung-expectation.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Expect.toHaveText")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "ExpectationFailed"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "returns an expired action when its completion screenshot cannot finish",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(yield* fixture("<button>busy</button>"))
+            const trace = yield* Trace.record(page, { screenshots: "perAction" })
+            // The page's main thread never yields again, so neither the action nor a screenshot can finish
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() => {
+                while (true) {
+                  // busy
+                }
+              }, 0)
+            })
+            const settled = yield* page.locator("button").click().pipe(
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.asSome,
+              Effect.raceFirst(
+                Effect.promise(() =>
+                  new Promise<Option.Option<unknown>>((resolve) => setTimeout(() => resolve(Option.none()), 10_000))
+                )
+              )
+            )
+            assert.isTrue(Option.isSome(settled), "the action did not return within 10 s of its 300 ms deadline")
+            if (Option.isSome(settled)) {
+              assert.isTrue(Deadline.isTimeout(settled.value))
+              if (Deadline.isTimeout(settled.value)) assert.strictEqual(settled.value.operation, "Locator.click")
+            }
+            const out = path.join(directory(), "hung-action.zip")
+            yield* trace.exportTrace(out)
+            const events = lines((yield* unzip(out)).get("trace.trace"))
+            assert.isFalse(events.some((event) => event.type === "screenshot"))
+            const check = events.find((event) => event.type === "before" && event.title === "Locator.click")
+            assert.include(
+              JSON.stringify(events.find((event) => event.type === "after" && event.callId === check.callId).error),
+              "Timeout"
+            )
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps expectation screenshots off by default and when explicitly disabled",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(yield* fixture("<p>ready</p>"))
+            for (const options of [undefined, { screenshots: "off" as const }]) {
+              const trace = yield* Trace.record(page, options)
+              yield* page.locator("p").pipe(Expect.toHaveText("ready"))
+              const failure = yield* page.locator("p").pipe(
+                Expect.toHaveText("missing"),
+                Deadline.within("100 millis"),
+                Effect.flip
+              )
+              assert.isTrue(Expect.isExpectationFailed(failure))
+              const out = path.join(directory(), "off.zip")
+              yield* trace.exportTrace(out)
+              const events = lines((yield* unzip(out)).get("trace.trace"))
+              assert.isFalse(events.some((event) => event.type === "screenshot"))
+            }
+          })),
         timeout
       )
 
@@ -416,17 +975,30 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             const strict = path.join(directory(), "strict.zip")
             const local = path.join(directory(), "local.zip")
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const trace = yield* Trace.record(page, { domSnapshots: true, network: true })
               yield* page.goto(url, { waitUntil: "load" })
               yield* page.locator("#name").fill("Ada")
               yield* page.locator("#secret").fill(Redacted.make("hunter2"))
               yield* page.getByRole("button", { name: "Go" }).click()
+              yield* page.setContent("<h1>Replacement fixture</h1>")
               yield* trace.exportTrace(strict)
               yield* trace.exportTrace(local).pipe(Diagnostics.withPreset("local"))
             }))
             const events = lines((yield* unzip(strict)).get("trace.trace"))
             const snapshots = events.filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+            const replacement = events.find((event) => event.type === "before" && event.title === "Page.setContent")!
+            assert.isDefined(replacement)
+            const replaced = snapshots.filter((each) => each.callId === replacement.callId && each.isMainFrame)
+            assert.isDefined(replaced.find((each) => each.phase === "before"))
+            const replacedAfter = replaced.find((each) => each.phase === "after")
+            assert.isDefined(replacedAfter)
+            assert.isDefined(
+              find(
+                expand(snapshots, replacedAfter),
+                (node) => node[0] === "H1" && textOf(node) === "Replacement fixture"
+              )
+            )
             const click = events.find((event) => event.type === "before" && event.title === "Locator.click")!
             const main = (phase: string) =>
               snapshots.find((each) => each.callId === click.callId && each.phase === phase && each.isMainFrame)
@@ -449,10 +1021,14 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.strictEqual(input("secret")[1]["__playwright_value_"], "REDACTED")
             assert.notInclude(JSON.stringify(snapshots), "__strider_secret__")
             assert.notInclude(JSON.stringify(snapshots), "hunter2")
-            assert.isDefined(find(tree(after), (node) =>
-              node[0] === "template" && node[1]["__playwright_shadow_root_"] === "open" && textOf(node) === "shadow"))
-            assert.isDefined(find(tree(after), (node) =>
-              node[0] === "template" && String(node[1]["__playwright_style_sheet_"]).includes("font-weight")))
+            assert.isDefined(
+              find(tree(after), (node) =>
+                node[0] === "template" && node[1]["__playwright_shadow_root_"] === "open" && textOf(node) === "shadow")
+            )
+            assert.isDefined(
+              find(tree(after), (node) =>
+                node[0] === "template" && String(node[1]["__playwright_style_sheet_"]).includes("font-weight"))
+            )
             assert.include(
               textOf(
                 find(tree(after), (node) =>
@@ -474,7 +1050,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             assert.include(JSON.stringify(after.html), "[[")
             // A local export keeps the secret
             const kept = lines((yield* unzip(local)).get("trace.trace"))
-              .filter((event) => event.type === "frame-snapshot").map((event) => event.snapshot)
+              .filter((event) =>
+                event.type === "frame-snapshot"
+              ).map((event) => event.snapshot)
             assert.include(JSON.stringify(kept), "hunter2")
           }),
         timeout
@@ -484,14 +1062,13 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
         "records screencast frames, the browser's own where it has them, or polled",
         () =>
           Effect.gen(function*() {
-            const { info } = yield* Browser.Browser
             const url = yield* fixture(
               `<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`
             )
             for (const screencast of ["native", { polled: "100 millis" }] as const) {
               const out = path.join(directory(), "frames.zip")
               const recorded = yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* Browser.newPage()
+                const page = yield* SharedContext.newPage
                 const trace = yield* Trace.record(page, { screencast })
                 yield* page.goto(url)
                 yield* Effect.sleep("1 second")
@@ -507,7 +1084,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               }
               assert(recorded._tag === "Success", String(recorded))
               const files = yield* unzip(out)
-              if (screencast === "native" && info.protocol === "bidi") {
+              if (screencast === "native" && (yield* supports("capability.video"))) {
                 // Firefox's own video of the page, WebM, with its size read from the file
                 const videos = lines(files.get("trace.trace")).filter((event) => event.type === "video")
                 assert.strictEqual(videos.length, 1)

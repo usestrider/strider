@@ -1,0 +1,28 @@
+{
+  "id": "event-websocket-framesent",
+  "upstream": [
+    "event:WebSocket.frameSent"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkConnection",
+      "symbol": "NetworkConnection.frames",
+      "url": "/docs/api/browser/NetworkConnection#NetworkConnection.frames"
+    }
+  ],
+  "notes": "Observe connections and frames; no frame interception.",
+  "capabilities": [
+    "webSocketFrames"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkConnection.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "patches": [
+    "firefox-websocket"
+  ]
+}

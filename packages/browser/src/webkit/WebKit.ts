@@ -11,21 +11,80 @@
  * @stability unstable
  * @since 0.1.0
  */
-import type * as Config from "effect/Config"
+import * as Config from "effect/Config"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
-import type * as Layer from "effect/Layer"
+import * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as Connect from "../internal/connect.ts"
-import * as LaunchOptions from "../internal/launchOptions.ts"
+import * as LaunchSettings from "../internal/launchOptions.ts"
 import * as WebKitAdapter from "../internal/webkitAdapter.ts"
 import * as WebKitAutomation from "../internal/webkitAutomation.ts"
+import * as WebKitVideo from "../internal/webkitVideo.ts"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import type * as Url from "../Url.ts"
+
+/**
+ * WebKit launch settings, including explicitly enabled PNG-polled video.
+ *
+ * **Example** (Choosing video sampling and its output directory)
+ *
+ * ```ts import.meta.vitest
+ * import { WebKit } from "@usestrider/browser/webkit"
+ *
+ * const options: WebKit.LaunchOptions = {
+ *   executablePath: "/opt/MiniBrowser",
+ *   video: { polled: "100 millis", directory: "/tmp/videos" }
+ * }
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface LaunchOptions extends Browser.LaunchOptions {
+  /**
+   * Enables serial PNG polling for video with a supplied `VideoWriter`. The initial capture is immediate;
+   * subsequent captures wait at least `polled` after capture completes, with backpressure from the writer. The interval must be finite and positive.
+   * The directory must already exist and be writable, and its files remain caller-owned. This does not enable downloads.
+   * No audio is recorded; each sample keeps its time in a variable-rate file. States between captures can be missed.
+   *
+   * @default undefined — video is disabled
+   */
+  readonly video?: { readonly polled: Duration.Input; readonly directory: string } | undefined
+}
+
+/**
+ * WebKit inspector connection settings, including the same polled-video opt-in as `LaunchOptions`.
+ *
+ * **Example** (Choosing polling for an attached browser)
+ *
+ * ```ts import.meta.vitest
+ * import { WebKit } from "@usestrider/browser/webkit"
+ *
+ * const options: WebKit.ConnectOptions = {
+ *   video: { polled: "100 millis", directory: "/tmp/videos" }
+ * }
+ * ```
+ *
+ * @see {@link LaunchOptions}
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ConnectOptions extends Browser.ConnectOptions {
+  /**
+   * Enables PNG-polled video with a supplied `VideoWriter` and `FileSystem`, using an existing writable output directory.
+   *
+   * @default undefined — video is disabled
+   */
+  readonly video?: LaunchOptions["video"]
+}
 
 /**
  * Launches WebKitGTK's or WPE's MiniBrowser in automation mode and provides it as `Browser`.
@@ -44,7 +103,8 @@ import type * as Url from "../Url.ts"
  * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
  *
  * Launch requires Linux with readable child procfs (`/proc/<pid>/net/tcp` and `/proc/<pid>/fd`). Before and after
- * connecting, the spawned PID itself must hold the same inspector listener. A wrapper must exec MiniBrowser rather
+ * connecting, the spawned PID itself must hold the same inspector listener; its descriptors are read only once a
+ * listener on the port exists. A wrapper must exec MiniBrowser rather
  * than only fork it. Unsupported operating systems and unverifiable ownership fail with `ConnectionFailed`.
  * A procfs read failure stops ownership attempts and closes any rejected connection, then waits for the child's
  * exit event within the remaining launch deadline. If no exit is observed, refusal retains the access error.
@@ -53,6 +113,12 @@ import type * as Url from "../Url.ts"
  * explicit ownership and access refusals use `refused`. Both errors explain the applicable launch requirements
  * and the attach alternative. Use `layerAttach` with an externally managed inspector HTTP endpoint when launch
  * ownership cannot be verified.
+ *
+ * Video is disabled unless `video` and a `VideoWriter` service are both provided. `polled` is a finite positive
+ * delay after each completed PNG capture; 100 ms is a starting point, not a default or a responsiveness guarantee.
+ * Captures add work to the page and can miss short states. The variable-rate file keeps each sample until the next or recording end. The output directory
+ * must already exist, be absolute, and writable; invalid video settings fail with `InvalidInput` before launch.
+ * Files remain in that caller-owned directory. Downloads and native screencasts remain unsupported.
  *
  * **Gotchas**
  *
@@ -65,12 +131,33 @@ import type * as Url from "../Url.ts"
  * - A context's cookie list is the cookies its open pages are sent, and a host-only cookie is set as a domain
  *   cookie.
  * - Each new context starts a browser process, which takes about 0.6 seconds.
- * - History traversal, the locale, time zone and user agent, a mobile viewport, touch, keyboard layouts,
- *   permissions, downloads, file choosers (`setInputFiles` works), screencasts, PDFs and JPEG screenshots fail
+ * - History traversal, the locale, the time zone, the user agent, a mobile viewport, touch, keyboard layouts,
+ *   permissions, downloads, file choosers (`setInputFiles` works), screencasts, PDFs, and JPEG screenshots fail
  *   with `Unsupported`. `Browser.capabilities` lists what it offers.
  * - Linux only: WebKitGTK and WPE are the stock WebKit ports with an automation mode.
  * - A MiniBrowser from Nix needs `glib-networking`'s modules on `GIO_EXTRA_MODULES` for HTTPS, which otherwise
  *   fails with "TLS support is not available"; other distributions install them where GIO looks.
+ *
+ * **Example** (Enabling polled video)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices, NodeSocket } from "@effect/platform-node"
+ * import { VideoWriter } from "@usestrider/browser"
+ * import { SocketConnector } from "@usestrider/browser/protocol"
+ * import { WebKit } from "@usestrider/browser/webkit"
+ * import { Layer } from "effect"
+ *
+ * const Sockets = SocketConnector.layer((endpoint) =>
+ *   NodeSocket.makeNet({ host: endpoint.host, port: endpoint.port })
+ * )
+ * const WebKitLive = WebKit.layer({
+ *   executablePath: "/opt/MiniBrowser",
+ *   video: { polled: "100 millis", directory: "/tmp/videos" }
+ * }).pipe(
+ *   Layer.provide(VideoWriter.layerFfmpeg({ path: "/opt/ffmpeg" })),
+ *   Layer.provide([NodeServices.layer, Sockets])
+ * )
+ * ```
  *
  * **Example** (Keeping core dumps to debug a crash)
  *
@@ -118,18 +205,18 @@ import type * as Url from "../Url.ts"
  * @since 0.1.0
  */
 export const layer = (
-  options: Browser.LaunchOptions
+  options: LaunchOptions
 ): Layer.Layer<
   Browser.Browser,
   Browser.BrowserError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
 > =>
   BrowserImpl.layer((sink) =>
-    // A browser process per context
-    Effect.flatMap(
-      WebKitAutomation.start(LaunchOptions.settings(options)),
-      (group) => WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group })
-    )
+    Effect.gen(function*() {
+      const video = yield* WebKitVideo.settings(options.video)
+      const group = yield* WebKitAutomation.start(LaunchSettings.settings(options))
+      return yield* WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group, video })
+    })
   )
 
 /**
@@ -167,12 +254,12 @@ export const layer = (
  * @since 0.1.0
  */
 export const layerConfig = (
-  options: Config.Wrap<Browser.LaunchOptions>
+  options: Config.Wrap<LaunchOptions>
 ): Layer.Layer<
   Browser.Browser,
   Browser.BrowserError | Config.ConfigError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
-> => LaunchOptions.fromConfig(options, layer)
+> => Layer.unwrap(Effect.map(Config.unwrap(options), layer))
 
 /**
  * Attaches to a running WebKitGTK or WPE browser through its remote inspector and provides it as `Browser`.
@@ -186,10 +273,14 @@ export const layerConfig = (
  * stay open after the layer's scope closes. The connection needs a `WebSocketConstructor`, such as
  * `NodeSocket.layerWebSocketConstructor` from `@effect/platform-node`.
  *
+ * The optional `video` settings enable the same PNG polling as `layer`, with both `VideoWriter` and `FileSystem`
+ * provided to this layer. Without both the video options and a writer, video remains unsupported. Invalid video
+ * settings fail with `InvalidInput` before connecting; the output directory is independent of downloads.
+ *
  * **Gotchas**
  *
- * - The inspector can look but not drive: it has no input, dialogs, emulation, isolated worlds or browser session.
- *   `newContext`, `newPage`, clicks, typing, dialog handling and `evaluate` fail with `Unsupported`;
+ * - The inspector can look but not drive: it has no input, dialogs, emulation, isolated worlds, or browser session.
+ *   `newContext`, `newPage`, clicks, typing, dialog handling, and `evaluate` fail with `Unsupported`;
  *   `evaluateInMainWorld` runs in the page's world. `Browser.capabilities` lists what it offers.
  * - The locator engine and init scripts run in the page's own world, where its scripts can see them.
  * - `goto` navigates by setting `location.href`, and fails with `Unsupported` for a fragment of the current
@@ -226,11 +317,12 @@ export const layerConfig = (
  */
 export const layerAttach = (
   endpoint: Url.Url | string,
-  options?: Browser.ConnectOptions | undefined
+  options?: ConnectOptions | undefined
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
-    Effect.flatMap(
-      Connect.webkitInspector(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer)),
-      (transport) => WebKitAdapter.connect(transport, { sink, ownership: "attached" })
-    )
+    Effect.gen(function*() {
+      const video = yield* WebKitVideo.settings(options?.video)
+      const transport = yield* Connect.webkitInspector(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer))
+      return yield* WebKitAdapter.connect(transport, { sink, ownership: "attached", video })
+    })
   )

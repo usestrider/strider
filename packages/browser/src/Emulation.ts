@@ -1,5 +1,5 @@
 /**
- * Emulated settings: viewport, locale, time zone, media features, network conditions and more.
+ * Emulated settings: viewport, locale, time zone, media features, network conditions, and more.
  *
  * The same settings have two lifetimes. `UserContext.Options.emulation` holds them for a context's whole life, and
  * `emulate(settings)` on a page or context holds them until its registration is removed. Fields you leave unset are
@@ -250,10 +250,20 @@ export interface Geolocation {
  * once; JavaScript and touch handlers apply at its next document.
  *
  * - Firefox can't emulate `media`, `touch`, `javaScript`, a mobile `viewport`, network throttling, a CPU
- *   slowdown or an unavailable position.
- * - WebKit can emulate only `media`, `javaScript` and a `viewport`, which sizes the window, at a device scale of
+ *   slowdown, or an unavailable position.
+ * - WebKit can emulate only `extraHTTPHeaders`, `media`, `javaScript`, and a `viewport`, which sizes the window, at a device scale of
  *   1 and not mobile. Attached, it can emulate nothing.
  * - Chromium can emulate every field.
+ *
+ * **Example** (Sending headers for a context's life)
+ *
+ * ```ts import.meta.vitest
+ * import { Browser } from "@usestrider/browser"
+ *
+ * const tenantPage = Browser.newPage({
+ *   emulation: { extraHTTPHeaders: { "X-Tenant": "demo" } }
+ * })
+ * ```
  *
  * **Example** (Going dark and offline for one step)
  *
@@ -272,6 +282,14 @@ export interface Geolocation {
  * @since 0.1.0
  */
 export interface Emulation {
+  /**
+   * Extra headers for requests initiated by the page, including navigation and subresources.
+   * Names are case-insensitive; values must be HTTP field values. Each registration replaces the
+   * map within its scope: page headers merge over context headers, with page values winning.
+   * An empty page map retains context headers. Removing a registration restores the previous map. Route request overrides take precedence.
+   * Header order is not guaranteed. Unset, no extra headers are configured.
+   */
+  readonly extraHTTPHeaders?: Readonly<Record<string, string>> | undefined
   readonly viewport?: Viewport | undefined
   readonly userAgent?: string | undefined
   readonly locale?: Locale | string | undefined

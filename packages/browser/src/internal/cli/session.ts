@@ -50,7 +50,7 @@ export const validateName = (name: string): Effect.Effect<void, SessionError> =>
   nameRule.test(name) ? Effect.void : Effect.fail(
     new SessionError({
       reason: "InvalidName",
-      message: JSON.stringify(name) + ": a session name is lowercase letters, digits and dashes, at most 32"
+      message: JSON.stringify(name) + ": a session name is lowercase letters, digits, and dashes, at most 32"
     })
   )
 
@@ -75,7 +75,8 @@ export const validateRoot = (directory: string, create = false, required = false
       const unsafe = (at: string): never => {
         throw new SessionError({
           reason: "Unsafe",
-          message: "Unsafe session directory: " + at + "; requires trusted ownership, permissions and non-symlink roots"
+          message: "Unsafe session directory: " + at +
+            "; requires trusted ownership, permissions, and non-symlink roots"
         })
       }
       const walk = async (input: string, privateLeaf: boolean): Promise<string | undefined> => {

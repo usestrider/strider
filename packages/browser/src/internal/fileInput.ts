@@ -186,6 +186,7 @@ export const validateCount = Effect.fnUntraced(
 /** Transfer chunks in the upload scope, returning the final assignment to run before that scope closes. */
 export const prepareMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly dispatch: Operation.Record
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
@@ -200,7 +201,8 @@ export const prepareMade = Effect.fnUntraced(
       fn: Function,
       args: ReadonlyArray<Adapter.LocalValue>,
       result: "value" | "handle" = "value",
-      at = options.at
+      at = options.at,
+      dispatch?: Operation.Record
     ) {
       if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail({ _tag: "Deadline" as const })
       return yield* Evaluation.call(runtime, {
@@ -209,7 +211,9 @@ export const prepareMade = Effect.fnUntraced(
         arguments: args,
         result,
         userActivation: false,
-        ...options,
+        page: options.page,
+        id: options.id,
+        ...(dispatch === undefined ? {} : { dispatch }),
         at
       })
     })
@@ -269,7 +273,7 @@ export const prepareMade = Effect.fnUntraced(
       }))
     }
     const commit = Effect.fnUntraced(function*() {
-      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }])
+      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }], "value", options.at, options.dispatch)
       if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
     })
     return commit()
@@ -279,6 +283,7 @@ export const prepareMade = Effect.fnUntraced(
 /** Prepare and commit in one upload scope for locator actions. */
 export const setMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly dispatch: Operation.Record
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId

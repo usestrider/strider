@@ -1,0 +1,38 @@
+{
+  "id": "method-request-sizes",
+  "upstream": [
+    "method:Request.sizes"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "sizes",
+      "url": "/docs/api/browser/NetworkRequest#sizes"
+    },
+    {
+      "module": "NetworkRequest",
+      "symbol": "Sizes",
+      "url": "/docs/api/browser/NetworkRequest#Sizes"
+    }
+  ],
+  "notes": "Context-creation requestSizes opt-in; immediate immutable seven-field native-byte snapshot with Option counts. Original retained instance and live owners required; no terminal wait. Chromium returns all None if loadingFinished precedes responseReceivedExtraInfo (common for images); otherwise it supplies total and decoded bytes, Firefox received headers/encoded entity/total and HTTP/1.1 transferred-body difference, stock WebKit sent request and received response metrics including decoded bytes. Firefox decoded, Chromium request/header/body split, WebKit encoded entity and ambiguous cache/redirect/worker counts remain unavailable. No estimates, body downloads or implicit collection; partial numeric coverage is deliberate.",
+  "capabilities": [
+    "network.sizes"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts",
+      "packages/browser/src/internal/requestSizes.ts",
+      "packages/browser/test/integration/slice/requestSizes.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "pay-for-what-you-use",
+    "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+    "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+  }
+}
