@@ -332,7 +332,10 @@ export interface LaunchOptions {
   readonly profile?: LaunchProfile.LaunchProfile | undefined
   /**
    * A profile directory you own, never deleted. Chromium and Firefox lock it while they run, so two browsers can't
-   * share one. On WebKit, it's the default context's only.
+   * share one. On WebKit, it's the default context's only. A successfully connected Chromium launch asks the
+   * browser to close and waits up to five seconds for exit before signal termination, as a best effort to preserve
+   * recent storage. Crashes or forced termination can still lose writes. A hung Chromium can take roughly ten
+   * seconds to stop, plus process-group cleanup.
    *
    * @default a temporary profile, deleted after the browser exits
    */

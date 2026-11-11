@@ -33,7 +33,10 @@ import type * as Url from "../Url.ts"
  * **Details**
  *
  * The browser gets a temporary profile, created before it starts and deleted after it exits, unless
- * `userDataDir` names one you own. It exits when the layer's scope closes. The layer starts it with the platform's
+ * `userDataDir` names one you own. When a successfully connected layer's scope closes, it asks Chromium to close and waits
+ * up to five seconds by default for process exit before the existing signal termination fallback. This best-effort shutdown
+ * helps preserve recent storage in a supplied profile; crashes and forced termination can still lose writes.
+ * A hung process can take roughly ten seconds to stop, plus process-group cleanup. The layer starts it with the platform's
  * `ChildProcessSpawner` and `FileSystem`, which `NodeServices.layer` from `@effect/platform-node` provides.
  *
  * The browser starts with core dumps off, so a renderer that crashes exits at once and the page is reported as
@@ -86,7 +89,8 @@ export const layer = (
   BrowserImpl.layer((sink) =>
     Effect.flatMap(
       ChromiumLauncher.launch(LaunchOptions.settings(options)),
-      ({ transport }) => CdpAdapter.connect(transport, { sink, ownership: "launched" })
+      ({ launched, transport }) =>
+        CdpAdapter.connect(transport, { sink, ownership: "launched", exited: launched.handle.exitCode })
     )
   )
 

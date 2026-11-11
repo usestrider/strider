@@ -238,8 +238,8 @@ describe("Chromium adapter, CDP only", () => {
                     yield* page.goto(`${served.origin}/hello`)
                     if (round === 0) {
                       yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
-                      // Seed durable browser data with Chromium's graceful close. Scope shutdown is a signal,
-                      // which does not guarantee flushing newly written localStorage on either launch mode.
+                      // These raw-launcher controls seed with explicit graceful close; unlike Chromium.layer,
+                      // raw launcher scope release still terminates by signal on either launch mode.
                       yield* gracefulClose
                       yield* child!.handle.exitCode
                     } else {

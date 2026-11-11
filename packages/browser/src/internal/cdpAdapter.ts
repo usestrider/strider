@@ -13,7 +13,9 @@
  *   the first same-origin document, children of a replaced document end without a CDP event, and navigation
  *   outcomes are reported only on affirmative evidence.
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -24,6 +26,7 @@ import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Capture from "./cdpAdapter/capture.ts"
 import * as Claims from "./cdpAdapter/claims.ts"
 import * as Contexts from "./cdpAdapter/contexts.ts"
@@ -39,6 +42,7 @@ import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
 import * as CdpWire from "./cdpWire.ts"
 import * as Launch from "./launch.ts"
+import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
@@ -196,9 +200,12 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
  */
 export const connect: (
   transport: Transport.Transport,
-  options: Adapter.ConnectOptions
+  options: Adapter.ConnectOptions & { readonly exited?: Effect.Effect<unknown, unknown> | undefined }
 ) => Effect.Effect<Adapter.AdapterConnection, Browser.BrowserError, Scope.Scope> = Effect.fnUntraced(
-  function*(transport: Transport.Transport, options: Adapter.ConnectOptions) {
+  function*(
+    transport: Transport.Transport,
+    options: Adapter.ConnectOptions & { readonly exited?: Effect.Effect<unknown, unknown> | undefined }
+  ) {
     const cleanupScope = yield* Effect.scope
     const buffer = yield* Kit.makeFactBuffer(options.sink)
     let state!: State.State
@@ -218,6 +225,30 @@ export const connect: (
         return fold(state)
       }
     })
+    // Register before adapter cleanup, but enable only after the handshake succeeds.
+    // The protocol client and transport must remain alive until the owned process exits.
+    let connected = false
+    if (options.ownership === "launched" && options.exited !== undefined) {
+      const exited = options.exited
+      yield* Effect.addFinalizer(() =>
+        connected
+          ? Effect.gen(function*() {
+            const close = yield* BrowserCdp.close().pipe(
+              Protocol.on(client.root),
+              Effect.ignore,
+              Effect.interruptible,
+              Effect.forkChild
+            )
+            yield* Effect.exit(exited).pipe(Effect.ensuring(Fiber.interrupt(close)))
+          }).pipe(
+            Effect.interruptible,
+            BrowserClock.timeoutOption(5000),
+            Operation.apart("Chromium.close", Duration.seconds(5)),
+            Effect.ignore
+          )
+          : Effect.void
+      )
+    }
     root = client.root
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
@@ -260,6 +291,7 @@ export const connect: (
       capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"))
     )
 
+    connected = true
     return {
       ownership: options.ownership,
       claims: options.browserIdentity === undefined || options.claimClient === undefined

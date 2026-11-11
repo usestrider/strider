@@ -8,6 +8,11 @@ A program written against `Browser` runs on Chromium unchanged, but Chromium's p
 tabs have rules of their own, and a step that ignores them times out or misses a login. Knowing them, a program
 works around each, and can send CDP itself for what Strider doesn't wrap.
 
+When a successfully connected layer closes, Strider asks Chromium to close and waits up to five seconds for its
+process to exit before the existing signal termination fallback. This best-effort shutdown helps preserve recent
+storage in a supplied profile; crashes and forced termination can still lose writes. The extra five seconds means
+a hung Chromium can take roughly ten seconds to stop, plus process-group cleanup.
+
 ## Protocol and versions
 
 Strider drives Chromium, Chrome and Edge over the Chrome DevTools Protocol: through a pipe to a browser it launches,

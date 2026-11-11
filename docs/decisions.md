@@ -1105,7 +1105,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1115,6 +1115,17 @@ Rejected: enabling the flag in automation and concurrent for a once-per-browser 
 silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Owned Chromium attempts graceful close before termination
+
+A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
+for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
+The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
+ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
+promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
+normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
+would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
+retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
