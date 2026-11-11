@@ -81,12 +81,16 @@ export const launchWithPort = Effect.fnUntraced(function*(
 ) {
   const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
+  const previous = yield* DevToolsActivePort.snapshot(userDataDir).pipe(
+    Effect.catch((error) => Launch.refused(`Couldn't read the previous DevToolsActivePort: ${error.message}`))
+  )
   const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {
     coreDumps: options.coreDumps
   })
   const timeout = options.timeout ?? "30 seconds"
   const deadline = Launch.readinessDeadline(timeout)
   const active = yield* DevToolsActivePort.read(userDataDir, {
+    previous,
     timeout: BrowserClock.millisLeft(BrowserClock.live, deadline),
     until: () => launched.handle.isRunning.pipe(Effect.map((running) => !running), Effect.orElseSucceed(() => true))
   }).pipe(Effect.asSome, Effect.catch(() => Effect.succeedNone))
