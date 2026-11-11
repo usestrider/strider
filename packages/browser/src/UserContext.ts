@@ -262,6 +262,7 @@ export interface UserContext extends ObservedUserContext {
   ) => Effect.Effect<void, UserContextError | Target.TargetGone | Deadline.Timeout>
   /**
    * Reads the context's storage, to save and start other contexts from.
+   * A cookie or page read that exceeds the operation's deadline fails with `Deadline.Timeout`.
    *
    * **Example** (Saving a login as JSON)
    *
@@ -275,7 +276,10 @@ export interface UserContext extends ObservedUserContext {
    * })
    * ```
    */
-  readonly exportStorageState: Effect.Effect<StorageState.StorageState, UserContextError | Target.TargetGone>
+  readonly exportStorageState: Effect.Effect<
+    StorageState.StorageState,
+    UserContextError | Target.TargetGone | Deadline.Timeout
+  >
   /**
    * A clock for every page of the context, as one timeline, once installed.
    */
